@@ -88,7 +88,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/tipo_relato/base/imagen` | La imagen base (aprobada o no) de un sitio del video, o la de un estado. |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/base/usar_subida` | La imagen subida del espacio fijo pasa a ser la base, aprobada (gratis). |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/cambios` | En «un espacio que cambia», Claude escribe el cambio de cada tramo (solo texto). |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/estado/editar` | Reescribe en ESPAÑOL el cambio de un estado. {estado, es} |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/rehacer` | Rehace SOLO los planos pedidos de los que cambian con el tipo de relato (se paga). |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/traducir` | Traduce al español lo que falte (cada cambio y `inicial`). {auto?: bool} |
 
 ## Pasos: estado, params y ejecución
 
@@ -349,6 +351,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
+| `GET` | `/api/claude/consumo` | El medidor de Claude (solo lee): el cupo de cada cuenta, los avisos al |
+| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: una llamada mínima por cuenta (haiku, una palabra) para |
 | `GET` | `/api/clientes` | Los proyectos (clientes) y a cual pertenece cada estilo. |
 | `POST` | `/api/clientes` | Un proyecto nuevo: {nombre}. |
 | `PUT` | `/api/clientes/estilos/{preset_id}` | Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca). |
@@ -356,6 +360,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
 | `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
+| `GET` | `/api/cola_studio` | La cola de todo el Studio: imágenes, montaje y lo demás que trabaja. |
 | `GET` | `/api/dominios` | Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico} |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
@@ -487,4 +492,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**373 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**378 endpoints.** Escrito por `generar_api.py` desde `app.py`.

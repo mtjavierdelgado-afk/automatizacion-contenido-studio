@@ -4865,6 +4865,24 @@ def prueba_ortografia_por_tandas():
             ok("JSON" in detalle, f"y el detalle técnico va aparte ({detalle[:60]!r})")
         except RuntimeError as fallo:
             ok(False, f"si no sale ninguna tanda, el error es para la persona ({fallo})")
+        # 4) notas del dueño, 24-10: las comillas rectas del guion, copiadas sin
+        #    escapar, ya no rompen la revisión (rompían los dos intentos)
+        comillas = ('{"correcciones": {"A": {"texto": "Comenta "BAÑO" y él dijo "hola", y ya",'
+                    ' "cambios": [["el", "él"]]}}}')
+        llamadas = []
+
+        def con_comillas(instruccion, **_k):
+            llamadas.append(instruccion)
+            return comillas, {}
+        cli_claude.ejecutar = con_comillas
+        salida = ortografia.revisar({"A": 'Comenta "BAÑO" y el dijo "hola", y ya'})
+        ok(salida.get("A", {}).get("texto") == 'Comenta "BAÑO" y él dijo "hola", y ya'
+           and len(llamadas) == 1,
+           f"un texto con comillas sin escapar se lee a la primera ({len(llamadas)} llamadas, {salida})")
+        editorial = ('{"propuestas": {"B1": [{"original": "un "mueble" negro", '
+                     '"propuesta": "un mueble negro", "motivo": "sobran las comillas", "tipo": ""}]}}')
+        ok((ortografia.leer_json(editorial, "x") or {}).get("propuestas", {}).get("B1", [{}])[0].get("original")
+           == 'un "mueble" negro', "y lo mismo en la revisión editorial")
     finally:
         cli_claude.ejecutar = original
 

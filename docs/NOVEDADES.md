@@ -10,6 +10,97 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+**Tus notas de mejoras (24 de octubre)**
+- **El asistente habla en español de Latinoamérica**: tutea, nada de
+  «vosotros», «vale», «ordenador» ni «móvil».
+- **Montar el vídeo aunque queden notas sin aplicar** (también las del revisor
+  de imágenes): «Montar el vídeo» ya no se apaga. Pregunta antes, dice cuántas
+  notas quedan y cuántas son del revisor, y las notas se quedan apuntadas para
+  aplicarlas cuando quieras.
+- **«✨ Más emojis» y los textos de Publicar reparten los emojis**: en el título
+  y en el texto van también al principio y ENTRE palabras (justo después de la
+  palabra que ilustran), no solo al final. Nunca en lugar de la palabra clave.
+- **El coste del vídeo, por tipo de imagen**: planos nuevos, planos rehechos
+  (notas, revisor, regenerar), la imagen base del tipo de relato con sus
+  estados, las referencias del reparto y las portadas, cada una en su fila.
+  Antes la imagen base y los estados se sumaban a «Personajes».
+- **El corrector ya no se rompe con comillas en el guion** («comenta "BAÑO"»):
+  esa era la «respuesta rota» que no se arreglaba ni con «Revisar otra vez».
+- El botón «Cerrar» de un error ya no tapa el final del mensaje.
+
+**El medidor de Claude: cuánto te queda de la membresía (25 de octubre)**
+- **El cupo de verdad**: el Studio lee del propio Claude cuánto llevas usado de
+  la **ventana de 5 horas** y de la **semana**, y a qué hora se reinicia cada
+  una. Es el mismo número que enseña la web de Claude, no una estimación.
+- **En la barra lateral**, debajo de «Gasto del mes», un cuadro «Claude ·
+  membresía» con una barra por ventana.
+- **Avisos al 70 % y al 90 %**: te avisa una vez por ventana (y en el móvil sale
+  «⚠ Claude N %» en la barra de módulos), para que un cupo agotado no te pille
+  a mitad de un guion.
+- **Configuración → «Consumo de Claude»**: el cupo de cada cuenta con «Medir
+  ahora», y en qué se ha gastado los últimos 7 días, por día, por tarea
+  (guion, ortografía, Parrilla, asistente…), por vídeo y por cuenta. El «≈ $
+  API» es lo que costaría por API: con la membresía no se cobra, sirve para
+  comparar.
+- Se mide solo cada 15 minutos mientras se usa Claude, con una llamada mínima
+  que apenas cuenta.
+
+**Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
+está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
+cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
+
+**Portadas: los avisos se pueden cerrar (25 de octubre)**
+- En el editor de portadas, el aviso va en su fila, debajo de los botones de
+  arriba (antes tapaba la cabecera).
+- **Lo que sale bien se va solo** a los 6 segundos.
+- **Un error se queda** hasta que lo cierras con su **✕** o hasta que lo mismo
+  sale bien (entonces lo sustituye el aviso bueno).
+- El error se dice **en una línea con qué hacer** (por ejemplo, si OpenAI
+  rechaza la imagen: elegir un plano sin personas con poca ropa, marcas o
+  logos, o usar el texto en capas), y el texto técnico va plegado en «Ver
+  detalle».
+- **«Avisos (N)»** guarda los últimos 10 del editor, con su hora, mientras
+  sigas con el mismo vídeo: cerrar uno no lo borra de ahí.
+- Si cierras el editor mientras la IA o Claude trabajan, el resultado sale en
+  el aviso flotante de siempre, para que no se pierda.
+
+**Varios vídeos a la vez: la cola de montaje y la «Cola del Studio» (25 de octubre)**
+- **El montaje va de uno en uno**, como ya iban las imágenes. Puedes lanzar
+  varios vídeos seguidos: el que llega mientras otro se monta espera su turno
+  solo, y la barra dice a quién espera y en qué puesto va («esperando turno de
+  montaje: se está montando «…» (vas 2.º en la fila)»). Así cada vídeo sale
+  antes: dos montajes a la vez se repartían la máquina y terminaban los dos al
+  final. Mientras espera se puede cancelar.
+- **«Solo montar»** (volver a mezclar sobre los clips que ya hay, segundos) no
+  espera.
+- **Las imágenes y el montaje atienden por orden de llegada**: el primero que
+  pidió turno es el primero en entrar.
+- **Nuevo botón «⏳ Cola»** en la barra de módulos, con cuántos vídeos están
+  trabajando. Abre un panel con qué se está dibujando, qué se está montando,
+  quién espera y en qué orden, y todo lo demás que está en marcha (guion, voz…),
+  con «Abrir» para ir al vídeo y «Cancelar».
+
+**«Pasar al Encargo» con el formulario limpio (22 de octubre)**
+- Si tenías un vídeo abierto en Crear (por ejemplo, montándose) y pasabas otro
+  guion desde la Parrilla, la pantalla seguía enseñando el vídeo de antes y no
+  quedaba claro de quién eran los botones. Ahora «Pasar al Encargo» **suelta el
+  vídeo abierto** y te deja «Un vídeo nuevo» limpio, con el guion de la
+  Parrilla.
+- El vídeo soltado **no se toca**: lo que estuviera haciendo (montaje,
+  imágenes…) sigue en el servidor, y lo vuelves a abrir desde Tus proyectos.
+  Un aviso te lo recuerda.
+
+**Los estados del tipo de relato, en español (22 de octubre)**
+- **Cada estado se lee en español.** En «Un espacio que cambia», el cambio de
+  cada estado (y lo que la imagen base ya trae) sale en español, con el inglés
+  que se manda a dibujar plegado debajo. Lo traduce Claude solo, con tu
+  membresía, y no toca nada del vídeo: ni imágenes, ni firmas, ni precios.
+- **«Dónde se usa»**: cada estado y la imagen base dicen en qué bloques del
+  guion salen y qué planos los usan.
+- **✎ Cambiar**: reescribes el estado en español, Claude lo pasa al inglés y
+  se guarda. Antes te avisa de que ese estado pierde su aprobación y pide otra
+  imagen (y de cuántos planos suyos quedarán para rehacer); no se dibuja nada
+  solo.
 
 **Recorrido y clase con varios ambientes; los primeros planos con su cámara (25 de octubre)**
 - **«Recorrido» y «Clase» ya son varios ambientes de un mismo lugar** (la
@@ -59,6 +150,47 @@ vídeos, estilos, claves y contraseña no se tocan.
 **Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
+
+**Publicar, nuevo (22 de octubre)** — la interfaz que aprobaste en la maqueta.
+Solo cambia cómo se ve y dónde está cada cosa: nada que hacía Publicar deja de
+estar, nada nuevo se paga y las preguntas dicen lo mismo de siempre.
+- **Cuatro pestañas**: **Calendario · Por publicar · Resultados · Ajustes** (la
+  ficha de un vídeo ya no es una pestaña apagada). **⚠ Te necesitan** sale arriba
+  en todas, y dentro de un vídeo, plegada («1 fallo · 1 espera tu OK») y con
+  **Ver**; desde ahí también se da **el OK**. El aviso de Upload-Post, arriba.
+- **El calendario, forma B**: una línea por publicación (hora · red y el vídeo
+  debajo, con el color y la marca de su estado), **6 por día y «+N más»**, que
+  abre el día entero en un panel a la derecha, por horas y con sus botones. El
+  jueves de 26 publicaciones ya no es una columna de 1.800 px. En el **móvil**,
+  los siete días arriba (con cuántas lleva cada uno) y el elegido a todo lo
+  ancho. Mes con 3 por día, y una **Agenda**.
+- **Por publicar**: los vídeos listos, con miniatura, proyecto y estilo, y los
+  **filtros** (que ya no están encima del calendario, que no filtraban).
+- **Un vídeo, en seis pasos** como en Crear: Redes · Textos · SEO · Portada ·
+  Cuándo · Envíos, cada uno con su estado, y **una barra abajo** con el botón de
+  lo elegido («**Programar para jue 22/10 19:00 ›**», «Publicar ahora ›», «Ya lo
+  subí… ›») y, si falta algo, por qué. Los textos van **en pestañas por red**
+  (con ✓/⚠ y su nota SEO) y «**Así sale**» al lado, en un marco de teléfono. El
+  SEO del vídeo y la nota de cada red, juntos en el paso SEO
+  (con «Búsquedas reales» y «Cómo te encontraron en YouTube»). **‹ Publicar**
+  vuelve a donde estabas; al programar, al Calendario en la semana de ese día.
+- **Las confirmaciones**, en un panel de la casa (no la ventanita del
+  navegador), con las mismas frases y botones que dicen lo que hacen
+  («Enviar solo a TikTok», «No enviar nada»). «Ya lo subí a…» pide el enlace ahí.
+  El panel se lleva el foco (Enter es aceptar) y, mientras pregunta, el botón de
+  la barra se apaga: un Enter o un doble clic ya no abren otra pregunta encima
+  ni publican dos veces.
+- **Resultados**: periodo en **7 · 30 · 90 días**, cifras grandes y los bloques
+  en dos columnas. **Ajustes** (antes «Cuentas y ajustes»): a la izquierda
+  General y cada proyecto con su estado; a la derecha sus pestañas **Conexión ·
+  Redes · Textos · SEO** (se acabó la pared de tarjetas con tres plegables).
+- **Las claves de Analizar cuentas (YouTube, Instagram y Apify) están en
+  Configuración**, con las demás y como las de Música y efectos; «Probar todas
+  las claves» también las prueba. En Automatizar queda su estado y
+  **Configurar ›**.
+- El **editor de portadas** no se rediseña aquí: «Diseñar portada» (paso
+  Portada) abre el de «Portadas, segunda vuelta», con su «Qué portada recibe
+  cada red» debajo.
 
 **Tus proyectos y la pantalla de un proyecto, nuevas (22 de octubre)**
 - **«+ Nuevo vídeo» en Crear**, arriba en la portada y en cada proyecto: pregunta
@@ -120,7 +252,9 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   izquierda. Las cuentas ya leídas salen como tarjetas y la abierta en dos
   columnas.
 - Nada cambia de lo que hace: las mismas confirmaciones (también la de pagar
-  a Apify) y las claves de YouTube, Meta y Apify donde estaban.
+  a Apify). Las claves de YouTube, Meta y Apify pasan a Configuración con
+  «Publicar, nuevo» (arriba): en «Cuentas que te gustan» sale su estado y
+  «Configurar ›».
 
 **Publicar: SEO con tu canal y Google Trends (21 de octubre)**
 - **Conecta tu canal de YouTube** en **Configuración → YouTube: tu canal**

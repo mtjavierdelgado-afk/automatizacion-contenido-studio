@@ -7780,6 +7780,119 @@ def probar_relato_en_espanol():
             setattr(servidor, nombre, valor)
 
 
+def probar_quitar_imagen():
+    """Rama unir-planos (26-10-2026): «Quitar esta imagen» y «Deshacer».
+
+    En este proceso: el plan es un doble y la pasada que vuelve a cortar se
+    apunta en vez de lanzarse. Lo que se mira: lo que se rechaza, que lo
+    quitado va a un fichero del proyecto y NO a params (ni una firma se
+    mueve), y que deshacer lo quita del fichero. Nada se paga."""
+    seccion("QUITAR UNA IMAGEN: LA VOZ AL VECINO, Y DESHACER")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    p6 = servidor.PASOS_MODULOS.p6_assets
+    qp = servidor._quitar_planos()
+    base = tempfile.mkdtemp(prefix="estudio_quitar_")
+    servidor.fijar_raiz_proyectos(base)
+    lanzadas = []
+    real_plan, real_pasada = p6.plan_actual, servidor._pasada_sin_dibujar
+    plan = {"escenas": [
+        {"id": "S001", "narracion": "Este baño era el más feo."},
+        {"id": "S002", "narracion": "Con baldosas grises."},
+        {"id": "S003", "narracion": "Y llega el cambio.", "cartela": {"plantilla": "cifra", "fondo": "negro"}},
+        {"id": "S004", "narracion": "Así quedó."},
+        {"id": "S005", "narracion": "El más bonito."}]}
+    p6.plan_actual = lambda *_a, **_k: plan
+    servidor._pasada_sin_dibujar = lambda ctx, nombre, restaurar=None: (
+        lanzadas.append(nombre) or {"trabajo": "t1", "trabajo_id": "t1"})
+    try:
+        pid = Proyecto.crear(base, "quitar imagen").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        firma = ctx.estado.firma("assets")
+        params = json.loads(json.dumps(ctx.estado.params("assets") or {}))
+        for sid, cuerpo, esperado in (("S002", {}, 400), ("S002", {"hacia": "arriba"}, 400),
+                                      ("S099", {"hacia": "anterior"}, 404),
+                                      ("S001", {"hacia": "anterior"}, 409),
+                                      ("S003", {"hacia": "anterior"}, 409),
+                                      ("S002", {"hacia": "siguiente"}, 409),
+                                      ("S004", {"hacia": "anterior"}, 409)):
+            codigo, _m = _llamar(servidor.quitar_imagen, pid, sid, cuerpo)
+            igual(codigo, esperado, f"QUITAR: {sid} {cuerpo} da {esperado} ({_m})")
+        igual(lanzadas, [], "QUITAR: lo rechazado no lanza nada")
+        vecinos = servidor._vecinos_para_quitar(plan, "S002")
+        igual(vecinos, {"anterior": "S001", "siguiente": None},
+              "QUITAR: S002 puede ir a S001, no a una cartela")
+        igual(servidor._quitar_en_la_previa(plan, plan["escenas"][2]), {},
+              "PREVIA: una cartela no ofrece quitarse")
+        codigo, ficha = _llamar(servidor.quitar_imagen, pid, "S002", {"hacia": "anterior"})
+        igual(codigo, 200, f"QUITAR: S002 hacia la anterior, 200 ({ficha if codigo != 200 else ''})")
+        igual(lanzadas, ["quitar_imagen"], "QUITAR: lanza la pasada que no dibuja")
+        # SI LA PASADA NO SE PUEDE LANZAR, lo apuntado se deshace
+        def no_se_puede(*_a, **_k):
+            raise servidor.ErrorApi(409, "'assets' ya se está ejecutando")
+        servidor._pasada_sin_dibujar = no_se_puede
+        codigo, _m = _llamar(servidor.quitar_imagen, pid, "S005", {"hacia": "anterior"})
+        igual(codigo, 409, "QUITAR: sin poder lanzar la pasada, 409")
+        ok(all(e["id"] != "S005" for e in qp.leer(ctx.proyecto.raiz)),
+           "QUITAR: y S005 no se queda apuntado como quitado")
+        servidor._pasada_sin_dibujar = lambda ctx, nombre, restaurar=None: (
+            lanzadas.append(nombre) or {"trabajo": "t1", "trabajo_id": "t1"})
+        if codigo == 200:
+            igual((ficha.get("trabajo"), ficha.get("hacia")), ("t1", "S001"), "QUITAR: dice el trabajo y a quién va")
+        igual(qp.leer(ctx.proyecto.raiz),
+              [{"texto": p6._texto_clave(plan["escenas"][1]), "hacia": "anterior", "id": "S002", "n": 0,
+                "fresca": True}],
+              "QUITAR: va al fichero del proyecto, por su texto")
+        igual(ctx.estado.firma("assets"), firma, "QUITAR: la firma de assets NO se mueve")
+        igual(ctx.estado.params("assets") or {}, params, "QUITAR: ni un param cambia (regla 1)")
+        reales_t = servidor._trabajo_de_cadena
+        servidor._trabajo_de_cadena = lambda _ctx: {"id": "x"}
+        try:
+            codigo, _m = _llamar(servidor.quitar_imagen, pid, "S004", {"hacia": "siguiente"})
+        finally:
+            servidor._trabajo_de_cadena = reales_t
+        igual(codigo, 409, f"QUITAR: con algo en marcha, 409 ({_m})")
+        codigo, _m = _llamar(servidor.devolver_imagen, pid, {})
+        igual(codigo, 400, "DESHACER: sin la frase, 400")
+        codigo, _m = _llamar(servidor.devolver_imagen, pid, {"narracion": "otra cosa"})
+        igual(codigo, 404, "DESHACER: algo que no está quitado, 404")
+        codigo, _m = _llamar(servidor.devolver_imagen, pid, {"narracion": "Con  baldosas grises."})
+        igual(codigo, 200, f"DESHACER: con lo que decía, 200 ({_m if codigo != 200 else ''})")
+        igual((qp.leer(ctx.proyecto.raiz), lanzadas[-1]), ([], "devolver_imagen"),
+              "DESHACER: sale del fichero y vuelve a cortar")
+        igual(ctx.estado.firma("assets"), firma, "DESHACER: la firma sigue igual")
+        # UNA FRASE REPETIDA CON UNA YA QUITADA (revisión del 26-10): S002 dice
+        # lo mismo que S004 y ya está quitada (vive en S001): S004 es la
+        # SEGUNDA vez que se dice, no la primera
+        plan_rep = {"escenas": [
+            {"id": "S001", "narracion": "Este baño era el más feo. Con baldosas grises.",
+             "narracion_imagen": "Este baño era el más feo.",
+             "absorbe": [{"id": "S002", "lado": "despues", "narracion": "Con baldosas grises.", "n": 0}]},
+            {"id": "S003", "narracion": "Y llega el cambio."},
+            {"id": "S004", "narracion": "Con baldosas grises."},
+            {"id": "S005", "narracion": "El más bonito."}]}
+        p6.plan_actual = lambda *_a, **_k: plan_rep
+        qp.reponer(ctx.proyecto.raiz, [{"texto": "con baldosas grises", "hacia": "anterior",
+                                        "id": "S002", "n": 0}])
+        codigo, _m = _llamar(servidor.quitar_imagen, pid, "S004", {"hacia": "anterior"})
+        igual(codigo, 200, f"REPETIDA: quitar S004, 200 ({_m if codigo != 200 else ''})")
+        igual(sorted((e["id"], e["n"]) for e in qp.leer(ctx.proyecto.raiz)),
+              [("S002", 0), ("S004", 1)],
+              "REPETIDA: S004 se apunta como la segunda vez (n=1), sin pisar a S002")
+        qp.reponer(ctx.proyecto.raiz, [])
+        p6.plan_actual = lambda *_a, **_k: plan
+        # lo apuntado que el plan no refleja sale en la previa, con su deshacer
+        qp.quitar(ctx.proyecto.raiz, "así quedó", "anterior", "S004")
+        igual([x["id"] for x in servidor._quitados_sin_aplicar(ctx, plan)], ["S004"],
+              "PREVIA: lo quitado que el corte no refleja se enseña para deshacerlo")
+        qp.reponer(ctx.proyecto.raiz, [])
+    finally:
+        p6.plan_actual, servidor._pasada_sin_dibujar = real_plan, real_pasada
+
+
 def probar_dominios():
     """Rama dominio-negocio (21-10-2026): listar los dominios y fijar el de un estilo."""
     seccion("DOMINIOS: EL NEGOCIO DE UN ESTILO")
@@ -7870,6 +7983,34 @@ def probar_guion_visual():
            "GUION VISUAL: con las líneas de la Parrilla, generar no se para a esperar")
         igual(servidor._planos_previstos(ctx)["con_imagen"], 3,
               "GUION VISUAL: el precio cuenta una imagen por línea")
+        # LO YA DIBUJADO NO SE VUELVE A COBRAR (arreglo del 26-10): con el guion
+        # visual mandando, «Montar el vídeo» pedía dibujar las 6 imágenes de un
+        # vídeo con las 6 al día («6 imágenes que han quedado viejas»), porque
+        # `_imagenes_ya_generadas` solo contaba lo hecho con el plan cortado
+        trabajo = ctx.proyecto.ruta_trabajo("assets", crear=True)
+        os.makedirs(os.path.join(trabajo, "escenas"), exist_ok=True)
+        with open(os.path.join(trabajo, "plan.json"), "w", encoding="utf-8") as fh:
+            json.dump({"escenas": [{"id": f"S00{n}"} for n in (1, 2, 3)]}, fh)
+        for n in (1, 2, 3):
+            with open(os.path.join(trabajo, "escenas", f"S00{n}.png"), "wb") as fh:
+                fh.write(b"png")
+        coste = servidor._coste_previsto(ctx, ["video"])
+        igual((coste["imagenes_hechas"], coste["imagenes_por_generar"]), (3, 0),
+              "GUION VISUAL: con las 3 imágenes ya dibujadas, montar no pide dibujar ninguna")
+        os.remove(os.path.join(trabajo, "escenas", "S003.png"))
+        igual(servidor._coste_previsto(ctx, ["video"])["imagenes_por_generar"], 1,
+              "GUION VISUAL: y si falta una, pide esa sola")
+        # un plan cortado antes y MÁS LARGO (5 planos) con un hueco en S002: sus
+        # PNG de sobra (S004, S005) no tapan el que p6 sí dibujará
+        with open(os.path.join(trabajo, "plan.json"), "w", encoding="utf-8") as fh:
+            json.dump({"escenas": [{"id": f"S00{n}"} for n in (1, 2, 3, 4, 5)]}, fh)
+        os.remove(os.path.join(trabajo, "escenas", "S002.png"))
+        for n in (3, 4, 5):
+            with open(os.path.join(trabajo, "escenas", f"S00{n}.png"), "wb") as fh:
+                fh.write(b"png")
+        igual(servidor._coste_previsto(ctx, ["video"])["imagenes_por_generar"], 1,
+              "GUION VISUAL: un plan viejo más largo no tapa la imagen que falta")
+        shutil.rmtree(trabajo)
         codigo, _m = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": True})
         igual(codigo, 409, "GUION VISUAL: no se aprueba uno vacío")
         codigo, _m = _llamar(servidor.guardar_guion_visual, pid,
@@ -8141,6 +8282,7 @@ def main():
         probar_espacio_fijo()
         probar_tipo_relato()
         probar_relato_en_espanol()
+        probar_quitar_imagen()
         probar_dominios()
         probar_guion_visual()
     finally:

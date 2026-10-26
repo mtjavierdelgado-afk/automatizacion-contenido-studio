@@ -57,12 +57,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/ortografia/descartar` | Lo que se deja SIN marcar al aplicar: {rid, ids: [...]}. Esos textos se |
 | `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
 | `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
+| `POST` | `/api/proyectos/{pid}/planos/devolver` | Deshace «Quitar esta imagen». {narracion: lo que decía la imagen quitada} |
 | `GET` | `/api/proyectos/{pid}/planos/elementos` | {planos: {sid: [elementos]}, no_aplica, tipos, entradas, intensidades, |
 | `GET` | `/api/proyectos/{pid}/planos/montaje` | {video, planos: {sid: {movimiento?, profundidad?}}, no_aplica, niveles, profundidad} |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/elementos` | {elementos: [...]} de UN plano (vacia, los quita). Deja pendientes ese |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/nota-ia` | LA OTRA OPCION (se paga al aplicarla): una nota de imagen que pide |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/vista` | La imagen del plano con sus elementos encima, quietos (todos a la vez), |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | {movimiento?: quieto|sobrio|vivo|dinamico|null, profundidad?: true|false|null} |
+| `POST` | `/api/proyectos/{pid}/planos/{sid}/quitar` | Quita la imagen `sid`: su voz pasa a la de antes o a la de después. |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
 | `GET` | `/api/proyectos/{pid}/previsualizacion` | Las piezas para ver el video sin montarlo. -> {escenas, audio, ...} |
 | `PUT` | `/api/proyectos/{pid}/redactor` | Guarda el prompt escrito de cada plano. Un prompt vacío lo quita. |
@@ -492,4 +494,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**378 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**380 endpoints.** Escrito por `generar_api.py` desde `app.py`.

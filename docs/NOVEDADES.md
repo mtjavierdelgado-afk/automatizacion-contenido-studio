@@ -22,6 +22,27 @@ vídeos, estilos, claves y contraseña no se tocan.
   Cartesia cambian sus precios, el servidor se entera. Si las cambiaste a mano,
   no se tocan y te lo dice.
 
+**Arreglo: «Montar el vídeo» pedía dibujar imágenes que ya estaban (26 de octubre)**
+- En los vídeos con **guion visual** (aprobado, o con las líneas que trae la
+  Parrilla), «Montar el vídeo» avisaba «hay que dibujar antes N imágenes que han
+  quedado viejas» y ponía su precio, aunque todas estuvieran dibujadas y al día.
+  Era un fallo de la cuenta: no contaba lo ya dibujado. Rehacer las imágenes no
+  lo quitaba, y por eso el aviso volvía en cada versión.
+- Ahora cuenta lo que ya está dibujado: con las imágenes al día, montar dice
+  «gratis», y si falta alguna pide solo esa.
+**Quitar una imagen o igualarla con la de al lado (26 de octubre)**
+- **«Quitar esta imagen»** (en cada diapositiva de Imágenes, «Ajustar esta
+  imagen»): lo que se oye en ella pasa a la imagen de antes o a la de después,
+  la que tú elijas. Esa imagen se alarga y conserva su dibujo: no se paga nada.
+  Los números no cambian (si quitas S002, el vídeo va de S001 a S003). Después
+  hay que volver a montar el vídeo, que también es gratis.
+- **«Deshacer»**: la imagen que se lleva la voz lo dice («Lleva también la voz
+  de S002») y la devuelve con su misma imagen, sin pagar otra.
+- **«Igualar con la anterior / la siguiente»**: te deja escrita la nota para
+  rehacer esa imagen con la de al lado como referencia (mismo sitio, acabados y
+  luz). Se paga solo cuando la rehagas, como cualquier nota.
+- No se pueden quitar las cartelas ni pasar la voz a una cartela.
+
 **Tus notas de mejoras (24 de octubre)**
 - **El asistente habla en español de Latinoamérica**: tutea, nada de
   «vosotros», «vale», «ordenador» ni «móvil».

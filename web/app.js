@@ -13771,6 +13771,8 @@ function vistaPreviaLight() {
   if (e.obsoleta) caja.appendChild(avisoImagenObsoleta(e));
   const delPlano = montajeDelPlano(e); if (delPlano) caja.appendChild(delPlano);
   const elementos = elementosDelPlano(e); if (elementos) caja.appendChild(elementos);
+  const sinAplicar = quitadosSinAplicar(); if (sinAplicar) caja.appendChild(sinAplicar);
+  const ajustar = ajustarImagenDelPlano(e, escenas); if (ajustar) caja.appendChild(ajustar);
   caja.appendChild(cuadroFeedbackEscena(e));
   /* EL REVISOR: pedir que mire las imágenes y ver lo que dejó (ver
      `panelRevisor`). Sus notas salen abajo, en la lista de siempre. */
@@ -14360,6 +14362,140 @@ function esTactil() {
  * dibujando otra vez. Un segundo camino se habría quedado viejo el día que
  * alguien tocara esa elección.
  */
+/* AJUSTAR ESTA IMAGEN (rama unir-planos, 25-10): cuando dos imágenes seguidas
+   no casan. «Igualar con la anterior/siguiente» deja escrita la nota para
+   rehacerla con la de al lado como referencia (se paga al rehacerla, como
+   cualquier nota). «Quitar esta imagen» pasa lo que se oye en ella a la de al
+   lado, que conserva su dibujo: no se paga nada, y se deshace igual. */
+const NOTA_IGUALAR = (lado, id) => `Que sea el mismo sitio que la imagen ${lado} (${id}): `
+  + 'mismos acabados, misma luz, mismos muebles y objetos, mismo estilo. Solo cambia el '
+  + 'ángulo de la cámara o lo que pasa en ella.';
+
+function ajustarImagenDelPlano(e, escenas) {
+  const q = e.quitar || {};
+  const absorbe = e.absorbe || [];
+  const i = escenas.findIndex(x => x.id === e.id);
+  const ant = i > 0 ? escenas[i - 1] : null;
+  const sig = i >= 0 && i + 1 < escenas.length ? escenas[i + 1] : null;
+  const conImagen = x => x && x.imagen && !x.cartela;
+  if (!absorbe.length && !q.anterior && !q.siguiente && !conImagen(ant) && !conImagen(sig)) return null;
+  const caja = h('div', { clase: 'ajustar-imagen' },
+    h('span', { clase: 'ajustar-imagen-titulo' }, 'Ajustar esta imagen'));
+  absorbe.forEach(a => caja.appendChild(h('div', { clase: 'fila ajustar-absorbe' },
+    h('span', { clase: 'meta crece' }, `Lleva también la voz de ${a.id}, que quitaste: `
+      + `«${recortar(legible(a.narracion), 90)}»`),
+    h('button', { clase: 'mini', disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => devolverImagenQuitada(a) }, `Deshacer · volver a poner ${a.id}`))));
+  const fila = h('div', { clase: 'fila' });
+  [['anterior', ant], ['siguiente', sig]].forEach(([lado, vecino]) => {
+    if (!conImagen(vecino) || !e.imagen) return;
+    fila.appendChild(h('button', { clase: 'mini',
+      title: `Escribe la nota para rehacer ${e.id} con ${vecino.id} como referencia. `
+        + 'Se paga una imagen cuando la rehagas.',
+      onclick: () => {
+        PREVIA.borrador[e.id] = NOTA_IGUALAR(lado, vecino.id);
+        repintarVideo();
+        toast(`nota escrita abajo: revísala y guárdala para rehacer ${e.id}`);
+      } }, `Igualar con la ${lado} (${vecino.id})`));
+  });
+  if (q.anterior || q.siguiente) {
+    fila.appendChild(h('button', { clase: 'mini fantasma',
+      disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => { PREVIA.quitando = PREVIA.quitando === e.id ? null : e.id; repintarVideo(); } },
+    'Quitar esta imagen…'));
+  }
+  if (fila.childNodes.length) caja.appendChild(fila);
+  if (PREVIA.quitando === e.id) {
+    const elegir = h('div', { clase: 'ajustar-quitar' },
+      h('div', { clase: 'meta' }, `Lo que se oye en ${e.id} pasa a la imagen de al lado, que se alarga `
+        + 'y conserva su dibujo. Gratis: no se dibuja nada. Después hay que volver a montar el vídeo '
+        + '(también gratis). Se puede deshacer.'));
+    const botones = h('div', { clase: 'fila' });
+    if (q.anterior) {
+      botones.appendChild(h('button', { clase: 'mini primario', disabled: PREVIA.guardando,
+        onclick: () => quitarImagen(e, 'anterior', q.anterior) },
+        `Su voz pasa a ${q.anterior} (la anterior)`));
+    }
+    if (q.siguiente) {
+      botones.appendChild(h('button', { clase: 'mini primario', disabled: PREVIA.guardando,
+        onclick: () => quitarImagen(e, 'siguiente', q.siguiente) },
+        `Su voz pasa a ${q.siguiente} (la siguiente)`));
+    }
+    botones.appendChild(h('button', { clase: 'mini fantasma', disabled: PREVIA.guardando,
+      onclick: () => { PREVIA.quitando = null; repintarVideo(); } }, 'Cancelar'));
+    elegir.appendChild(botones);
+    caja.appendChild(elegir);
+  }
+  return caja;
+}
+
+/* LO QUITADO QUE ESTE CORTE NO REFLEJA (la pasada falló o se canceló, o se
+   volvió a una versión anterior de las imágenes): nunca se queda algo quitado
+   sin su «Deshacer». */
+function quitadosSinAplicar() {
+  const lista = (PREVIA.ficha || {}).quitados_sin_aplicar || [];
+  if (!lista.length) return null;
+  const caja = h('div', { clase: 'ajustar-imagen caja-aviso' },
+    h('span', { clase: 'ajustar-imagen-titulo' }, 'Imágenes quitadas que este corte aún no refleja'),
+    h('div', { clase: 'meta' }, 'Se aplicarán la próxima vez que se pongan al día las imágenes. '
+      + 'Si no querías quitarlas, deshazlo aquí.'));
+  lista.forEach(a => caja.appendChild(h('div', { clase: 'fila ajustar-absorbe' },
+    h('span', { clase: 'meta crece' }, `${a.id || 'Una imagen'}: «${recortar(legible(a.narracion), 90)}»`),
+    h('button', { clase: 'mini', disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => devolverImagenQuitada(a) }, 'Deshacer'))));
+  return caja;
+}
+
+/* La pasada que vuelve a cortar no dibuja nada: al acabar se vuelve a pedir la
+   previa, y se queda mirando la imagen que se lleva la voz. */
+function seguirPasadaDeCorte(pid, tid, irA, mensaje) {
+  seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
+    if (trabajo.estado === 'listo') toast(mensaje);
+    else if (trabajo.estado === 'error') toast(`no se ha podido: ${trabajo.error || 'falló'}`, true);
+    if (videoAbierto().pid === pid) {
+      // el carril y la barra: el vídeo queda por volver a montar
+      try { await refrescarFichasLight(); } catch (_e) { /* se ve al volver */ }
+      reiniciarPrevia();
+      if (irA) PREVIA.recordada = { pid, id: irA };
+      await cargarPreviaLight();
+    }
+    pintarLight();
+  }, () => refrescarVivosLight(), pid);
+}
+
+async function quitarImagen(e, hacia, a) {
+  const v = videoAbierto();
+  PREVIA.guardando = true;
+  repintarVideo();
+  try {
+    const d = await pedir(`${API.proyecto(v.pid)}/planos/${encodeURIComponent(e.id)}/quitar`,
+      { method: 'POST', cuerpo: { hacia } });
+    PREVIA.quitando = null;
+    seguirPasadaDeCorte(v.pid, d.trabajo, a,
+      `${e.id} quitada: su voz va con ${a}. Monta el vídeo para verlo (gratis)`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+  PREVIA.guardando = false;
+  repintarVideo();
+}
+
+async function devolverImagenQuitada(a) {
+  const v = videoAbierto();
+  PREVIA.guardando = true;
+  repintarVideo();
+  try {
+    const d = await pedir(`${API.proyecto(v.pid)}/planos/devolver`,
+      { method: 'POST', cuerpo: { narracion: a.narracion, n: a.n || 0 } });
+    seguirPasadaDeCorte(v.pid, d.trabajo, a.id,
+      `${a.id} vuelve a estar. Monta el vídeo para verlo (gratis)`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+  PREVIA.guardando = false;
+  repintarVideo();
+}
+
 function cuadroFeedbackEscena(escena) {
   /* LAS APLICADAS NO SE ENSEÑAN. Una nota es algo que PIDES; en cuanto está
      hecha deja de ser una petición y pasa a ser historia, y dejarla ahí hace

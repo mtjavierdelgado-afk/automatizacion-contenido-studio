@@ -2493,6 +2493,15 @@ def _nombre_de_pid(pid, cerrados):
     return {"nombre": config.get("nombre") or pid, "video": True}
 
 
+def _claude_del_video(pid):
+    """Lo de Claude de un vídeo para «Coste del vídeo» (medidor-claude-2). None
+    si no hay registro (vídeos de antes del medidor): la tabla usa el coste."""
+    try:
+        return CONSUMO_CLAUDE.del_video(pid) if CONSUMO_CLAUDE is not None else None
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
 def _consumo_de_claude(peticion):
     cc = CONSUMO_CLAUDE
     if cc is None:
@@ -3683,9 +3692,16 @@ def _desglose_de_eventos(eventos):
         elif prov == "claude_cli":
             op = str(e.get("operacion") or "claude")
             t = e.get("tokens") or {}
-            ficha = claude.setdefault(op, {"llamadas": 0, "tokens": 0})
+            ficha = claude.setdefault(op, {"llamadas": 0, "tokens": 0, "cache": 0})
             ficha["llamadas"] += 1
-            ficha["tokens"] += int(t.get("entrada") or 0) + int(t.get("salida") or 0) + int(t.get("cache") or 0)
+            # TOKENS NUEVOS Y DE CACHÉ, aparte (medidor-claude-2): la caché
+            # leída cuesta ~10 % y sumada inflaba la cifra. Los eventos viejos
+            # no traen el desglose: su caché entera cuenta como «de caché».
+            leida = (e.get("detalle") or {}).get("cache_leida")
+            cache = int(t.get("cache") or 0)
+            leida = cache if leida is None else min(cache, int(leida or 0))
+            ficha["tokens"] += int(t.get("entrada") or 0) + int(t.get("salida") or 0) + (cache - leida)
+            ficha["cache"] += leida
     return {
         "imagenes": {k: {"cuantas": v[0], "usd": round(v[1], 4)} for k, v in imagenes.items()},
         "imagenes_confirmadas": confirmadas, "imagenes_estimadas": estimadas,
@@ -3693,6 +3709,7 @@ def _desglose_de_eventos(eventos):
         "claude": sorted(({"para": k, **v} for k, v in claude.items()),
                          key=lambda x: -x["tokens"]),
         "claude_tokens": sum(v["tokens"] for v in claude.values()),
+        "claude_cache": sum(v["cache"] for v in claude.values()),
         "usd": round(sum(v[1] for v in imagenes.values()) + sum(v[1] for v in voz.values()), 4),
     }
 
@@ -3778,6 +3795,7 @@ def coste_en_detalle(pid: str):
     calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "low")
     return {
         "proyecto": ctx.id, "total_usd": detalle["usd"], **detalle,
+        "claude_consumo": _claude_del_video(ctx.id),
         "musica": {"usd": 0.0, "titulo": musica.get("titulo") or musica.get("nombre") or "",
                    "fuente": musica.get("fuente") or musica.get("origen") or (
                        "subida por ti" if musica.get("propia") else "Jamendo"),

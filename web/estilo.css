@@ -5442,3 +5442,5 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .tabla-consumo-claude table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .tabla-consumo-claude th, .tabla-consumo-claude td { padding: 4px 6px; text-align: right; border-bottom: 1px solid var(--linea-suave); white-space: nowrap; }
 .tabla-consumo-claude th:first-child, .tabla-consumo-claude td.que { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+/* medidor-claude-2: Claude de un vídeo, por tarea, en «Coste del vídeo» */
+.claude-del-video { margin: 6px 0 12px; }

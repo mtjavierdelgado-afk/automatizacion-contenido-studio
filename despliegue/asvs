@@ -262,6 +262,31 @@ _deshacer_config() {
   if nginx -t >/dev/null 2>&1; then systemctl reload nginx || true; fi
 }
 
+# _tarifas_al_dia <tarifas del codigo nuevo> <carpeta de datos>
+# LAS TARIFAS DEL SERVIDOR SE PONEN AL DIA (medidor-claude-2, 26-10-2026).
+# `instalar.sh` las copia a datos/ una vez, para que quien quiera las ajuste sin
+# que un update se las lleve; pero asi un precio nuevo de OpenAI o Cartesia no
+# llegaba nunca. Ahora: si datos/tarifas.json es la de fabrica que se puso la
+# ultima vez (tarifas.de_fabrica.json), o identica a la nueva, se pone la nueva
+# (dejando tarifas.json.anterior); si se edito a mano, NO se toca y se dice.
+_tarifas_al_dia() {
+  local nueva="$1" datos="$2" actual fabrica
+  actual="$datos/tarifas.json"; fabrica="$datos/tarifas.de_fabrica.json"
+  [ -f "$nueva" ] || return 0
+  if [ ! -f "$actual" ]; then
+    cp "$nueva" "$actual" && si "tarifas puestas (no habia)"
+  elif cmp -s "$actual" "$nueva"; then
+    :                                          # ya estan al dia
+  elif [ -f "$fabrica" ] && cmp -s "$actual" "$fabrica"; then
+    cp -p "$actual" "$actual.anterior"
+    cp "$nueva" "$actual" && si "tarifas al dia (las de antes, en tarifas.json.anterior)"
+  else
+    no "tarifas.json esta cambiado a mano: no lo toco (las de fabrica nuevas: $nueva)"
+  fi
+  cp "$nueva" "$fabrica"
+  chown "$USUARIO:$USUARIO" "$actual" "$fabrica" 2>/dev/null || true
+}
+
 actualizar() {
   local temporal forzar=0 activos anterior
   [ "${1:-}" = "--forzar" ] && forzar=1
@@ -332,6 +357,8 @@ actualizar() {
     || cp "$temporal/codigo/motores/reglas/reglas.json" "$RAIZ/app/motores/reglas/reglas.json"
   rsync -a --delete "${EXCLUIR_LOGIN[@]}" "$temporal/codigo/despliegue/login/" "$RAIZ/login/"
   chown -R "$USUARIO:$USUARIO" "$RAIZ/app" "$RAIZ/login"
+  # LAS TARIFAS, AL DIA (medidor-claude-2): nunca falla ni deshace nada
+  _tarifas_al_dia "$RAIZ/app/tarifas.json" "$RAIZ/datos" || true
   # systemd, nginx, el navegador y el entorno, con copia en anterior/config
   _configurar "$RAIZ/app/despliegue" "$anterior/config"
   chown "$USUARIO:$USUARIO" "$RAIZ/datos/entorno"

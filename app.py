@@ -410,32 +410,119 @@ def _motores_congelados():
 #: CLAUDE.md): dos tandas a la vez tardan el doble por imagen y pierden el
 #: registro del gasto. Con un trabajo por video, nada impedia dibujar en dos
 #: videos a la vez (11-10-2026: el dueño queria trabajar en otro video mientras
-#: uno se montaba). Montar, la voz y el guion SI van en paralelo; dibujar espera
-#: su turno aqui, con la barra diciendo a quien espera.
-_TURNO_IMAGENES = {"cerrojo": threading.Lock(), "quien": ""}
+#: uno se montaba). La voz y el guion SI van en paralelo; dibujar espera su
+#: turno aqui, con la barra diciendo a quien espera.
+#:
+#: Y MONTAR TAMBIEN, DE UNO EN UNO (rama cola-montaje, 25-10-2026). El render
+#: ya reparte un video en tantos procesos como nucleos (`ESTUDIO_LOTES`; el VPS
+#: tiene 4): dos montajes a la vez se reparten la misma maquina y terminan los
+#: dos al final, en vez de uno a la mitad de tiempo y el otro a la misma hora.
+#: «Solo montar» (remezclar sobre los clips que hay, segundos) NO espera.
+#:
+#: LAS DOS FILAS ATIENDEN POR ORDEN DE LLEGADA (`fila`): con el cerrojo a secas
+#: cualquiera de los que esperaban podia colarse, y la vista «Cola del Studio»
+#: enseñaria un orden que no es el de verdad. `quien`/`pid`/`desde` son de quien
+#: tiene el turno; `fila`, de quienes esperan. Todo se lee con `_FILAS_LOCK`.
+_FILAS_LOCK = threading.Lock()
+
+
+def _turno_nuevo():
+    return {"cerrojo": threading.Lock(), "quien": "", "pid": "", "desde": 0.0,
+            "fila": [], "local": threading.local()}
+
+
+_TURNO_IMAGENES = _turno_nuevo()
+_TURNO_MONTAJE = _turno_nuevo()
+
+
+def _avisar_espera(avisar, frase):
+    # avisar LANZA Cancelado si se pide parar: la espera se puede cancelar
+    try:
+        avisar(0.0, frase, publico=frase)
+    except TypeError:
+        avisar(0.0, frase)        # un avisar sin «publico» (las tareas del estilo)
+
+
+def _esperar_turno(turno, avisar, ctx, funcion, frase_de, evento, paso):
+    """Corre `funcion()` con el turno de `turno`; espera, por orden de llegada,
+    si otro vídeo lo tiene. `frase_de(quien, puesto)` es lo que dice la barra."""
+    local = turno["local"]
+    if getattr(local, "dentro", 0):
+        # el MISMO hilo ya tiene el turno (una tarea dentro de otra): no se
+        # espera a sí mismo
+        return funcion()
+    nombre = (getattr(ctx.proyecto, "config", None) or {}).get("nombre") or ctx.id
+    plaza = {"pid": ctx.id, "nombre": nombre, "desde": time.time()}
+    cerrojo = turno["cerrojo"]
+    # CANCELAR ES EN EL ACTO (CLAUDE.md): el gestor llama a esto al pedirlo, y
+    # la espera se despierta y pregunta a `avisar`, que lanza Cancelado
+    parar = threading.Event()
+    registrar = getattr(avisar, "al_cancelar", None)
+    quitar = registrar(parar.set) if callable(registrar) else None
+    with _FILAS_LOCK:
+        turno["fila"].append(plaza)
+    avisado, ultimo = False, 0.0
+    try:
+        while True:
+            with _FILAS_LOCK:
+                puesto = next((i for i, x in enumerate(turno["fila"]) if x is plaza), 0) + 1
+            if puesto == 1 and cerrojo.acquire(timeout=0.5):
+                break
+            if puesto > 1:
+                parar.wait(0.5)
+            if parar.is_set():
+                _avisar_espera(avisar, "cancelando…")     # lanza Cancelado
+            if time.time() - ultimo >= 3 or not avisado:
+                if avisado or puesto > 1 or cerrojo.locked():
+                    quien = turno["quien"] or "otro vídeo"
+                    _avisar_espera(avisar, frase_de(quien, puesto))
+                    ultimo = time.time()
+                    if not avisado:
+                        ctx.bitacora.anotar(evento, paso, {"espera_a": quien, "puesto": puesto})
+                        avisado = True
+    finally:
+        with _FILAS_LOCK:
+            turno["fila"] = [x for x in turno["fila"] if x is not plaza]
+        if callable(quitar):
+            quitar()
+    try:
+        with _FILAS_LOCK:
+            turno.update(quien=nombre, pid=ctx.id, desde=time.time())
+        local.dentro = 1
+        return funcion()
+    finally:
+        local.dentro = 0
+        with _FILAS_LOCK:
+            turno.update(quien="", pid="", desde=0.0)
+        cerrojo.release()
+
+
+def _en_la_fila(puesto):
+    return "" if puesto <= 1 else f" (vas {puesto}.º en la fila)"
 
 
 def _con_turno_de_imagenes(avisar, ctx, funcion):
     """Corre `funcion()` con el turno de dibujar. Espera si otro video dibuja."""
-    cerrojo = _TURNO_IMAGENES["cerrojo"]
-    avisado = False
-    while not cerrojo.acquire(timeout=3):
-        quien = _TURNO_IMAGENES["quien"] or "otro vídeo"
-        # avisar LANZA Cancelado si se pide parar: la espera se puede cancelar
-        frase = f"esperando turno: se están dibujando las imágenes de «{quien}»"
-        try:
-            avisar(0.0, frase, publico=frase)
-        except TypeError:
-            avisar(0.0, frase)        # un avisar sin «publico» (las tareas del estilo)
-        if not avisado:
-            ctx.bitacora.anotar("turno_imagenes", "assets", {"espera_a": quien})
-            avisado = True
-    try:
-        _TURNO_IMAGENES["quien"] = (ctx.proyecto.config or {}).get("nombre") or ctx.id
-        return funcion()
-    finally:
-        _TURNO_IMAGENES["quien"] = ""
-        cerrojo.release()
+    return _esperar_turno(
+        _TURNO_IMAGENES, avisar, ctx, funcion,
+        lambda quien, puesto: (f"esperando turno: se están dibujando las imágenes de «{quien}»"
+                               + _en_la_fila(puesto)),
+        "turno_imagenes", "assets")
+
+
+def _con_turno_de_montaje(avisar, ctx, funcion):
+    """Corre `funcion()` con el turno de montar. Espera si otro video se monta."""
+    return _esperar_turno(
+        _TURNO_MONTAJE, avisar, ctx, funcion,
+        lambda quien, puesto: f"esperando turno de montaje: se está montando «{quien}»" + _en_la_fila(puesto),
+        "turno_montaje", "render")
+
+
+def _foto_de_turno(turno):
+    """Quién tiene el turno y quién espera, por orden. Con `_FILAS_LOCK`."""
+    ahora = {"pid": turno["pid"], "nombre": turno["quien"], "desde": turno["desde"]} \
+        if turno["quien"] else None
+    return {"ahora": ahora, "fila": [dict(x) for x in turno["fila"]]}
 
 
 def _medido_en(paso, unidad=None):
@@ -514,8 +601,12 @@ def _correr_paso_marcado(avisar, ctx, paso_id, modulo, unidades, opciones):
                                        unidades=unidades, **extra)
             return modulo.ejecutar(ctx.proyecto, params, avisar, **extra)
 
-    resultado = (_con_turno_de_imagenes(avisar, ctx, correr) if paso_id == "assets"
-                 else correr())
+    if paso_id == "assets":
+        resultado = _con_turno_de_imagenes(avisar, ctx, correr)
+    elif paso_id == "render" and not extra.get("solo_montar"):
+        resultado = _con_turno_de_montaje(avisar, ctx, correr)
+    else:
+        resultado = correr()
 
     salidas, mapa = _desmontar(modulo, resultado)
 
@@ -2284,6 +2375,77 @@ def listar_trabajos(proyecto: str = Query(default=None),
             ficha["proyecto"] = ctx.id
             fichas.append(ficha)
     return {"trabajos": fichas}
+
+
+# ============================================================ COLA DEL STUDIO
+# rama cola-montaje (25-10-2026): lo que la vista «Cola del Studio» enseña.
+# Solo lee: quién dibuja y quién espera, quién se monta y quién espera (las
+# filas de `_TURNO_IMAGENES` y `_TURNO_MONTAJE`, por orden de llegada), y los
+# demás trabajos en marcha de los vídeos que el servidor tiene abiertos. Un
+# vídeo de un proyecto con clave sin abrir sale sin nombre y sin enlace.
+def _es_taller(ctx):
+    """El proyecto de trabajo de un estilo (láminas, guía…), no un vídeo."""
+    try:
+        return bool((ctx.proyecto.config or {}).get(CONFIG_TALLER))
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
+@app.get("/api/cola_studio")
+def cola_del_studio(peticion: Request):
+    """La cola de todo el Studio: imágenes, montaje y lo demás que trabaja."""
+    try:
+        cerrados = CLIENTES.cerrados_para(raiz_proyectos(), peticion.headers.get("x-estudio-abiertos"))
+    except Exception:                                       # noqa: BLE001
+        cerrados = set()
+
+    def _vestir(plaza):
+        if not plaza:
+            return plaza
+        plaza = dict(plaza)
+        pid = plaza.get("pid") or ""
+        # SOLO LO QUE YA ESTÁ EN MEMORIA: `contexto()` crearía uno nuevo (y al
+        # crearlo limpia marcas en estado.json); un GET no escribe nada
+        with _LOCK:
+            ctx = _CONTEXTOS.get(pid)
+        if ctx is None or _es_taller(ctx):
+            # el taller de un estilo (láminas, imagen base) no es un vídeo: sin «Abrir»
+            plaza["video"] = False
+            return plaza
+        plaza["video"] = True
+        if cerrados and _cliente_del_video(ctx.proyecto) in cerrados:
+            plaza.update(pid="", nombre="un vídeo de un proyecto con clave", video=False)
+        return plaza
+
+    with _FILAS_LOCK:
+        turnos = {"imagenes": _foto_de_turno(_TURNO_IMAGENES),
+                  "montaje": _foto_de_turno(_TURNO_MONTAJE)}
+    for t in turnos.values():
+        t["ahora"] = _vestir(t["ahora"])
+        t["fila"] = [_vestir(x) for x in t["fila"]]
+    with _LOCK:
+        abiertos = list(_CONTEXTOS.items())
+    trabajando = []
+    for pid, ctx in abiertos:
+        try:
+            vivos = ctx.gestor.listar(activos=True)
+        except Exception:                                   # noqa: BLE001
+            continue
+        if not vivos:
+            continue
+        taller = _es_taller(ctx)
+        cerrado = not taller and bool(cerrados) and _cliente_del_video(ctx.proyecto) in cerrados
+        nombre = ("un vídeo de un proyecto con clave" if cerrado
+                  else (ctx.proyecto.config or {}).get("nombre") or pid)
+        for f in vivos:
+            trabajando.append({
+                "pid": "" if cerrado else pid, "nombre": nombre, "video": not (cerrado or taller),
+                "trabajo": "" if cerrado else f.get("id"), "paso": f.get("paso"),
+                "tarea": f.get("nombre"), "estado": f.get("estado"),
+                "progreso": f.get("progreso"), "mensaje": "" if cerrado else (f.get("publico") or f.get("mensaje") or ""),
+                "segundos": f.get("segundos"), "cancelando": f.get("cancelando"),
+            })
+    return {**turnos, "trabajando": trabajando, "ahora": time.time()}
 
 
 @app.get("/api/trabajos/{tid}")

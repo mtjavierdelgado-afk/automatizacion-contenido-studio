@@ -10,6 +10,25 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+**Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
+está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
+cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
+
+**Portadas: los avisos se pueden cerrar (25 de octubre)**
+- En el editor de portadas, el aviso va en su fila, debajo de los botones de
+  arriba (antes tapaba la cabecera).
+- **Lo que sale bien se va solo** a los 6 segundos.
+- **Un error se queda** hasta que lo cierras con su **✕** o hasta que lo mismo
+  sale bien (entonces lo sustituye el aviso bueno).
+- El error se dice **en una línea con qué hacer** (por ejemplo, si OpenAI
+  rechaza la imagen: elegir un plano sin personas con poca ropa, marcas o
+  logos, o usar el texto en capas), y el texto técnico va plegado en «Ver
+  detalle».
+- **«Avisos (N)»** guarda los últimos 10 del editor, con su hora, mientras
+  sigas con el mismo vídeo: cerrar uno no lo borra de ahí.
+- Si cierras el editor mientras la IA o Claude trabajan, el resultado sale en
+  el aviso flotante de siempre, para que no se pierda.
+
 **Varios vídeos a la vez: la cola de montaje y la «Cola del Studio» (25 de octubre)**
 - **El montaje va de uno en uno**, como ya iban las imágenes. Puedes lanzar
   varios vídeos seguidos: el que llega mientras otro se monta espera su turno

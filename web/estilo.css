@@ -3424,9 +3424,22 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .propuesta-portada button { align-self: flex-start; }
 /* portadas-2 (21-10): el aviso dentro del editor, «Esta imagen lleva», las
    muestras de la paleta, las ideas de la IA y el «antes de pagar» */
-.aviso-portada { font-size: 13px; padding: 3px 10px; border-radius: 999px; }
+/* avisos-portada (25-10): el aviso en su fila, bajo la cabecera, con su ✕;
+   el detalle plegado y «Avisos (N)» con los últimos de la sesión */
+.avisos-portada { display: flex; flex-direction: column; gap: 4px; padding: 0 14px; }
+.avisos-portada:not(:empty) { padding: 6px 14px; border-bottom: 1px solid var(--linea); }
+.aviso-portada { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px;
+  padding: 6px 6px 6px 12px; border-radius: 10px; overflow-wrap: anywhere; min-width: 0; }
 .aviso-portada.bueno { background: var(--ok); color: var(--sobre-ok); }
-.aviso-portada.malo { background: var(--aviso); color: var(--blanco); }
+.aviso-portada.malo { background: var(--aviso); color: var(--sobre-ok); }
+.cerrar-aviso-portada { padding: 0 9px; min-width: 32px; min-height: 30px; line-height: 1.8; border-radius: 999px;
+  background: transparent; color: inherit; border: 1px solid currentColor; }
+.detalle-aviso-portada { flex-basis: 100%; font-size: 12px; }
+.detalle-aviso-portada > summary { cursor: pointer; }
+.historial-avisos-portada { font-size: 13px; max-height: 160px; overflow-y: auto; }
+.historial-avisos-portada > summary { cursor: pointer; color: var(--tenue); }
+.linea-aviso-portada { gap: 8px; align-items: baseline; padding: 2px 0; flex-wrap: wrap; overflow-wrap: anywhere; min-width: 0; }
+.linea-aviso-portada.malo { color: var(--aviso); }
 .lleva-portada { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
 .pastilla-lleva { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px;
   border: 1px solid var(--linea); border-radius: 999px; background: var(--hueco); }

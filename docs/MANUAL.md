@@ -497,13 +497,23 @@ a mano (copias los textos y descargas el MP4) o con **Upload-Post**, que lo
 sube ya o a la hora que digas (hora de Lima). Nada de Publicar cambia el vídeo
 ni lo deja por rehacer.
 
+**Cuatro pestañas**: **Calendario** (lo programado y publicado, semana a
+semana), **Por publicar** (los vídeos listos, con sus filtros), **Resultados**
+(las cifras) y **Ajustes** (Upload-Post, las cifras automáticas y cada
+proyecto). Arriba de todas, y también dentro de un vídeo, salen el aviso de
+Upload-Post (simulado o sin clave) y la franja **⚠ Te necesitan** (lo que falló,
+lo que espera tu OK y lo programado que ya debió salir): plegada dice cuántos y
+de qué; **Ver** enseña cada uno con **Dar el OK**, **Comprobar**, **Quitar de la
+lista** o **Ver** el post.
+
 **Antes de la primera vez** (solo para publicar desde aquí; a mano no hace falta):
 1. Crea tu cuenta en upload-post.com y conecta tus redes (Instagram como cuenta
    profesional). Haz una prueba desde su web y comprueba que sale **pública**.
 2. Copia tu API key de Upload-Post y pégala en **Configuración → Publicar en
    redes**. Nunca la pegues en un chat.
-3. En **Publicar → Cuentas y ajustes**: «Probar» (comprueba la clave sin subir
-   nada) y, en cada proyecto, el perfil de Upload-Post:
+3. En **Publicar → Ajustes**: en **General**, «Probar» (comprueba la clave sin
+   subir nada) y, en cada proyecto (a la izquierda), su pestaña **Conexión**
+   con el perfil de Upload-Post:
    - si **ya lo tienes** en Upload-Post, **Elegir de mi cuenta** (un desplegable
      con tus perfiles de verdad; los que ya usa otro proyecto salen y no se
      eligen) o escribe su nombre y pulsa **Usar este perfil** (o Enter). Da
@@ -518,16 +528,19 @@ ni lo deja por rehacer.
    de un solo proyecto: así los vídeos de un cliente nunca salen en las cuentas
    de otro.
 
-**Cuentas y ajustes**, en cada proyecto, también tiene **lo fijo**: la hora
+**Ajustes**: a la izquierda, **General** y cada proyecto con su estado («✓ 4
+cuentas», «⚠ sin perfil de Upload-Post»); a la derecha, el elegido en cuatro
+pestañas: **Conexión** (el perfil y sus cuentas), **Redes**, **Textos** y
+**SEO**. Todo se guarda al cambiar. La pestaña **Textos** (antes «Lo fijo de
+este proyecto») tiene la hora
 por defecto al programar, la firma y los hashtags que van al final de todos
 los textos, el **tono de los textos** (con su ✦ Guía y ✓ Revisar), los
 **emojis en los textos** (Ninguno · Sobrio · Normal · Vistoso; de fábrica
 Vistoso) con los **emojis de la marca**, si se marca
 como hecho con IA, si YouTube avisa a los suscriptores, la privacidad en
-YouTube y las redes que salen marcadas de fábrica. La confirmación antes de
-enviar no se puede quitar.
+YouTube. La confirmación antes de enviar no se puede quitar.
 
-**Redes de este proyecto** (en la misma tarjeta): marca qué redes se enseñan
+**Redes** (la pestaña del proyecto): marca qué redes se enseñan
 en sus vídeos. De fábrica son las cuatro de siempre; las demás (LinkedIn, X,
 Threads, Pinterest, Bluesky, Discord, Telegram, Mastodon y Google Business)
 salen al marcarlas, y cada una necesita su cuenta conectada en Upload-Post
@@ -539,8 +552,9 @@ quién lo ve; **Threads**, el tema. Reddit no está porque Upload-Post la tiene
 caída. En la ficha, LinkedIn y Pinterest tienen **título**, y X, Threads,
 Pinterest, Bluesky, Discord y Mastodon un **texto alternativo** (lo que se ve en
 el vídeo, para quien no puede verlo). Google Business sale en su propia subida.
+Debajo, las redes que salen **marcadas de fábrica** en sus vídeos.
 
-**Cifras automáticas** (arriba en Cuentas y ajustes): las cifras de lo
+**Cifras automáticas** (Ajustes → General): las cifras de lo
 publicado se piden solas, sin pulsar «Actualizar». **Apagadas de fábrica.**
 Elige la frecuencia (una vez a la semana, una vez al día, cada 12 o cada 6
 horas), la hora y cuántos posts (los últimos 10, 30, 60 o 100); debajo sale
@@ -552,45 +566,60 @@ seguidores y lo que Upload-Post ya tiene guardado no gastan cupo. **Pedirlas
 ahora** hace una vuelta en segundo plano. Discord, Telegram, Mastodon y Google
 Business no dan cifras por post, así que no se preguntan.
 
-**La ficha de un vídeo** (desde «Enviar a Publicar» o desde la cola):
+**Un vídeo** (desde «Enviar a Publicar», el calendario o «Por publicar») es
+una pantalla propia, como un vídeo en Crear: **‹ Publicar** vuelve a la
+pestaña de la que viniste; arriba, su cabecera (proyecto, estilo, formato y
+duración, **⬇ Descargar MP4** y **Abrir en Crear ›**); a la izquierda (en el
+móvil, arriba, deslizando) **seis pasos con su estado** —Redes · Textos · SEO
+· Portada · Cuándo · Envíos— y abajo **una barra** con el botón de lo que
+elijas en «Cuándo»: **Programar para jue 22/10 19:00 ›**, **Publicar ahora ›**
+o **Ya lo subí… ›**, más **Dejar esperando mi OK**. Si todavía no se puede, el
+botón está apagado y la barra dice por qué («Falta el texto de Instagram»,
+«TikTok no tiene cuenta conectada»…). Los pasos:
 1. **Redes**: marca dónde va. Si el vídeo no encaja (horizontal en TikTok, un
    vertical largo que en YouTube no sale como Short) se avisa; si la red no lo
    acepta (más de 10 minutos en TikTok), no se deja marcar. Una red sin cuenta
    conectada se avisa y no se deja enviar.
-2. **«Que Claude escriba los textos»**: los escribe para cada red desde el
+2. **Textos · «Que Claude escriba los textos»**: los escribe para cada red desde el
    encargo, el guion final y la duración real (en YouTube, también el título y
    los capítulos), con un gancho en la primera línea, frases cortas, una sola
    llamada a la acción y hashtags que mezclan amplios con otros de nicho o de
    la zona. Mientras escribe se ve **«Claude está escribiendo…»** (suele tardar
-   uno o dos minutos); si falla, sale el motivo con **Reintentar**. Va con tu
+   uno o dos minutos); si falla, sale el motivo con **Reintentar** (está arriba
+   del paso **Textos**, y cada red va en su **pestaña**, con ✓ o ⚠ y su nota
+   SEO). Va con tu
    suscripción de Claude; se apunta en el coste del vídeo como tokens, sin
    dólares. **Título** solo hay en YouTube (máximo 70 caracteres para que no se
    corte en el móvil) y Facebook: en Instagram y TikTok la primera línea del
    texto hace de título.
-3. **Corrige a mano** lo que quieras: se guarda solo. Cada red tiene su
+3. **Textos · corrige a mano** lo que quieras: se guarda solo. Cada red tiene su
    **✦ Guía** (qué poner y qué no) y **✓ Revisar** (comprueba el texto contra la
    guía y propone una versión mejor que se pone con un botón), **Copiar texto**
-   y **Así sale** (el texto final, con la llamada a la acción, la firma y los
-   hashtags). **Reescribir** pide a Claude solo esa red. Lo que escribes se
+   y, al lado, **Así sale** en un marco de teléfono (el texto final, con la
+   llamada a la acción, la firma y los hashtags). **Reescribir** pide a Claude solo esa red. Lo que escribes se
    guarda solo; la pastilla de encima de los textos dice cómo va (**Sin
    guardar…**, **Guardando…**, **✓ Guardado** con la hora, o **No se ha
    guardado** con **Reintentar**), y cambiar de vídeo o de pestaña espera a
    que se guarde. Cada red admite sus hashtags (Instagram 30, YouTube 60, las
    demás 30, contando los fijos del proyecto): los que no caben se dicen
    debajo del texto y no se mandan.
-4. **Portada** (opcional): mueve el deslizador para elegir un **fotograma** del
+4. **SEO**: la palabra clave del vídeo, «Optimizar SEO con Claude» y la nota de
+   cada red, juntas (ver «El SEO», abajo).
+5. **Portada** (opcional): mueve el deslizador para elegir un **fotograma** del
    vídeo (se ve al lado) y pulsa **Usar este fotograma**, o **Sube una imagen**
    (JPG, PNG o WebP; se pasa a JPEG de menos de 2 MB). El fotograma va a
    Instagram y TikTok; a Facebook solo si sale como vídeo (no como Reel). Una
    imagen va a Instagram y Facebook, y a TikTok o YouTube si lo marcas (TikTok
    solo si tu cuenta lo permite; YouTube, solo canales verificados). Sin elegir
    nada, cada red pone la suya.
-5. **Cuándo**: **Publicar ahora**, **Programar** (día y hora de Lima) o **Solo a
-   mano** («Ya lo subí a…» lo apunta en el historial, con el enlace si lo
-   pones). **Dejar esperando mi OK** lo deja preparado sin enviarlo. Si todavía
-   no se puede publicar, el botón está apagado y dice por qué al lado («Falta
-   el texto de Instagram», «TikTok no tiene cuenta conectada»…).
-6. **Confirmas** en la ventana que enseña las redes, las cuentas y la hora.
+6. **Cuándo**: tres tarjetas: **Programar** (día y hora de Lima, con **Buenas
+   horas para publicar** y su **Usar**), **Publicar ahora** o **Solo a mano**
+   («Ya lo subí a…» lo apunta en el historial, con el enlace si lo pones, en un
+   panel). El botón de la barra hace lo que elijas aquí. **Confirmas** en un
+   panel que enseña las redes, las cuentas y la hora (las mismas frases de
+   siempre, con botones que dicen lo que hacen: «Programar», «Enviar solo a
+   TikTok», «No enviar nada»). Al programar se vuelve al **Calendario**, en la
+   semana de ese día, con «Programado para … ✓» y **Volver a la ficha**.
 7. **Envíos**: cada red con su estado (subiendo, programado, publicándose,
    publicado con su enlace, falló con su motivo). Si una red falla, las demás
    siguen. Lo programado se puede **Cancelar**. **Ver lo que se mandó** enseña
@@ -598,7 +627,7 @@ Business no dan cifras por post, así que no se preguntan.
    más corto, avisa de que lo recortó.
 
 **El SEO** (que te encuentren):
-- En **Cuentas y ajustes → SEO de este proyecto**: la **palabra clave
+- En **Ajustes → el proyecto → SEO**: la **palabra clave
   principal**, las **secundarias**, la **zona**, las palabras a evitar y el
   **banco de hashtags** (amplios, de nicho y locales). **Proponer palabras
   clave** te las sugiere Claude con su porqué; tú eliges cuáles usar. Ahí van
@@ -607,22 +636,24 @@ Business no dan cifras por post, así que no se preguntan.
   para niños** (apagado salvo que el vídeo sea PARA niños), la ubicación de
   TikTok y si tu cuenta de TikTok tiene las funciones de ubicación y de
   comentarios (sin ellas no se mandan).
-- En la **ficha**, el bloque **SEO**: la **palabra clave de este vídeo** (si
+- En el paso **SEO** de un vídeo: la **palabra clave de este vídeo** (si
   la dejas vacía vale la del proyecto; Claude propone una y la pones con
   «Usarla»), el nombre con el que se sube el MP4 y **Optimizar SEO con
   Claude**: su propuesta sale campo a campo con el antes y el después;
   **Aceptar**, **Aceptar todo** o **Dejar el mío**, y cuánto subiría la nota
   con esos cambios («con estos cambios: 57 → 72»). Si cambias un texto
   después de pedirla, ese campo no se pisa: vuelve a pedirla.
-- En cada red, la **nota SEO** (de 0 a 100, la única: con lo que está bien y
+- En cada red (en su pestaña de Textos y, todas juntas, en el paso SEO), la
+  **nota SEO** (de 0 a 100, la única: con lo que está bien y
   lo que no, y en cada punto que resta un botón para arreglarlo: **Escribir
   palabra clave** o **Usar «…»** si Claude propone una, **Elegir portada**, ir
   al título, al texto o a los hashtags, y la ubicación de Instagram, que te
-  lleva a SEO de este proyecto con el cursor en su campo),
+  lleva a SEO de este proyecto con el cursor en su campo; cada botón abre el
+  paso o la pestaña donde está su campo),
   el **primer comentario**, **Dame 3 ganchos** (tres primeras líneas para
   elegir) y, en Instagram, **colaboradores** y **etiquetas**.
 
-**El SEO de verdad** (20-10):
+**El SEO de verdad** (20-10), en el paso **SEO** de la ficha:
 - **La palabra clave tiene que ser del vídeo.** Si la del proyecto no sale en
   el guion ni en el material, no se usa en ese vídeo, y la ficha te lo dice.
   Si el vídeo no tiene ninguna, escríbela o usa una de «Búsquedas reales».
@@ -655,8 +686,7 @@ Business no dan cifras por post, así que no se preguntan.
 - La columna **Tendencia** (Google Trends, experimental) dice si la frase sube
   o baja en Perú. Si Trends no contesta, queda en «—».
 
-**Después de publicar** la ficha se queda donde estaba, para seguir con las
-otras redes: arriba dice **Ya publicado en** (con el enlace a cada post) y
+**Después de publicar**, al volver a la ficha, arriba dice **Ya publicado en** (con el enlace a cada post) y
 **En camino** (lo programado o subiendo), y al lado de cada red su último
 estado. Cuando una red termina mientras miras, sale un aviso («Publicado en
 Instagram»). Para seguir, marca otra red, revisa su texto y publica: donde ya
@@ -672,19 +702,32 @@ Mira en upload-post.com si llegó; si no, **Reintentar** lo manda con la misma
 clave (si a Upload-Post ya le había llegado, no se duplica). Y volver a publicar
 un vídeo en una red donde ya salió pide confirmarlo aparte.
 
-**La cola y el calendario**: arriba, un **buscador** y filtros por **proyecto**,
-**estilo**, **estado** (sin publicar, en algunas, en todas, programado, con
-algún fallo) y **fecha**, más **Agrupar por proyecto**; se acuerdan en este
-navegador y valen también para el calendario. Después **Te necesitan** (lo que
-falló y lo que espera tu OK; un fallo se quita con **Quitar de la lista**, aquí
-o en Inicio, y uno que volviste a mandar y salió ya no cuenta), el calendario por **Semana** o por **Mes** (‹ ›
-para moverte; en el mes, «+N más» abre los del día) y los vídeos listos, de 30
-en 30, con el estado de cada red.
+**El calendario** (decisión del dueño, forma B): cada publicación es **una
+línea** —la hora y la red arriba, el vídeo debajo— con el color de su estado en
+el borde y su marca a la derecha (◷ programado, ✓ publicado, ⏸ espera tu OK, ⚠
+falló); pasa el ratón para leerla entera y púlsala para abrir su vídeo. Cada
+día enseña **6** y **«+N más»**, que abre **el día entero** en un panel a la
+derecha (también la cabecera del día): todas sus publicaciones por hora, con su
+red, su vídeo, su proyecto, su estado y lo que se puede hacer (Dar el OK,
+Quitar de la lista, Ver). **Semana · Mes · Agenda**, ‹ **Hoy** › para moverte;
+en el mes, 3 por día y «+N más». En el **móvil**, los siete días van arriba
+(con cuántas publicaciones lleva cada uno) y el elegido sale debajo, a todo lo
+ancho. El calendario no se filtra: enseña siempre todo. Un fallo se quita con
+**Quitar de la lista** (en «Te necesitan», el día entero o Inicio) y uno que
+volviste a mandar y salió ya no cuenta.
 
-**Resultados**: elige el proyecto y el periodo (7, 30 o 90 días) y pulsa
+**Por publicar**: los vídeos listos, de 30 en 30, con su miniatura, su
+proyecto y su estilo, el estado de cada red y **Preparar ›** (sin textos) o
+**Abrir ›**. Arriba, un **buscador** y filtros por **proyecto**, **estilo**,
+**estado** (sin publicar, en algunas, en todas, programado, con algún fallo) y
+**fecha**, más **Agrupar por proyecto**; se acuerdan en este navegador.
+
+**Resultados**: elige el proyecto y el periodo (**7 · 30 · 90 días**) y pulsa
 **Actualizar**: pide a Upload-Post las vistas, me gusta, comentarios y
 compartidos de lo publicado, y los seguidores de cada cuenta. Salen el total,
-cada red y los vídeos de más a menos vistos (pulsa uno para abrir su ficha).
+cada red y los vídeos de más a menos vistos (pulsa uno para abrir su ficha),
+en dos columnas. «Cifras automáticas … **Encenderlas ›**» lleva a Ajustes →
+General.
 En la ficha de un vídeo, **Actualizar métricas** hace lo mismo solo con ese
 vídeo, y cada envío enseña sus cifras. No cuesta nada, pero Upload-Post deja
 unas 100 consultas cada 5 minutos: si hay muchos vídeos, vuelve a pulsar al
@@ -720,7 +763,7 @@ Más abajo:
 
 ### Diseñar la portada
 
-En el bloque **Portada** de un vídeo, **Diseñar portada** abre el editor. Va
+En el paso **Portada** de un vídeo, **Diseñar portada** abre el editor. Va
 por capas, y cada una hace UNA cosa:
 
 1. **Imagen**: el fondo (un plano, que va tal cual; un fotograma del vídeo, que
@@ -818,8 +861,10 @@ YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
   la analice»: temas, ganchos, duración y horarios) y **«Para tu proyecto»**
   («Escribir guiones con lo que le funciona», inspirados y sin copiar, que van
   a la Parrilla, o «Hablar de ella en el chat»), y debajo **Sus vídeos**.
-- Las claves (Google, Meta, Apify) siguen en **Conexiones**, arriba de esa
-  pestaña, con su guía.
+- Las claves (Google, Meta, Apify), el servicio de pago y el tope van en
+  **Configuración → Analizar cuentas** (son de todo el Studio). Aquí sale su
+  estado («⚠ Falta la clave de YouTube», «✓ Apify conectado», lo gastado) y
+  **Configurar ›**, que te lleva allí.
 
 ### Marca del cliente
 
@@ -835,7 +880,13 @@ Claude la usa en todo lo que escribe para él.
 - **Las claves**: OpenAI (imágenes), Cartesia (voz), Claude (guion y asistente),
   Jamendo y FreeSound (música y efectos). **Comprobar que funcionan** las prueba
   sin gastar. La de **Upload-Post** (publicar en redes) va en **Publicar en
-  redes** y se prueba en Publicar → Cuentas y ajustes.
+  redes** y se prueba en Publicar → Ajustes.
+- **Analizar cuentas — YouTube, Instagram y Apify**: las claves para leer las
+  cuentas de otros (antes en Automatizar), como las de Música y efectos: cada
+  una con su estado («…1234» o «sin poner»), su pista, **Guardar/Cambiar** y
+  **Quitar**; desde qué cuenta se mira Instagram (**Volver a buscar**, y cuándo
+  caduca el token), **Usar el servicio de pago cuando lo gratis no sirva**, el
+  **tope al mes** y lo gastado. **Probar todas las claves** las prueba también.
 - **Calidad de las imágenes**: el punto de partida de los vídeos nuevos.
 - **Dictado al asistente**: con OpenAI o con el del navegador.
 - **Hora de tu región**: para que el chat y los vídeos enseñen tu hora.

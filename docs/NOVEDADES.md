@@ -43,6 +43,47 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**Publicar, nuevo (22 de octubre)** — la interfaz que aprobaste en la maqueta.
+Solo cambia cómo se ve y dónde está cada cosa: nada que hacía Publicar deja de
+estar, nada nuevo se paga y las preguntas dicen lo mismo de siempre.
+- **Cuatro pestañas**: **Calendario · Por publicar · Resultados · Ajustes** (la
+  ficha de un vídeo ya no es una pestaña apagada). **⚠ Te necesitan** sale arriba
+  en todas, y dentro de un vídeo, plegada («1 fallo · 1 espera tu OK») y con
+  **Ver**; desde ahí también se da **el OK**. El aviso de Upload-Post, arriba.
+- **El calendario, forma B**: una línea por publicación (hora · red y el vídeo
+  debajo, con el color y la marca de su estado), **6 por día y «+N más»**, que
+  abre el día entero en un panel a la derecha, por horas y con sus botones. El
+  jueves de 26 publicaciones ya no es una columna de 1.800 px. En el **móvil**,
+  los siete días arriba (con cuántas lleva cada uno) y el elegido a todo lo
+  ancho. Mes con 3 por día, y una **Agenda**.
+- **Por publicar**: los vídeos listos, con miniatura, proyecto y estilo, y los
+  **filtros** (que ya no están encima del calendario, que no filtraban).
+- **Un vídeo, en seis pasos** como en Crear: Redes · Textos · SEO · Portada ·
+  Cuándo · Envíos, cada uno con su estado, y **una barra abajo** con el botón de
+  lo elegido («**Programar para jue 22/10 19:00 ›**», «Publicar ahora ›», «Ya lo
+  subí… ›») y, si falta algo, por qué. Los textos van **en pestañas por red**
+  (con ✓/⚠ y su nota SEO) y «**Así sale**» al lado, en un marco de teléfono. El
+  SEO del vídeo y la nota de cada red, juntos en el paso SEO
+  (con «Búsquedas reales» y «Cómo te encontraron en YouTube»). **‹ Publicar**
+  vuelve a donde estabas; al programar, al Calendario en la semana de ese día.
+- **Las confirmaciones**, en un panel de la casa (no la ventanita del
+  navegador), con las mismas frases y botones que dicen lo que hacen
+  («Enviar solo a TikTok», «No enviar nada»). «Ya lo subí a…» pide el enlace ahí.
+  El panel se lleva el foco (Enter es aceptar) y, mientras pregunta, el botón de
+  la barra se apaga: un Enter o un doble clic ya no abren otra pregunta encima
+  ni publican dos veces.
+- **Resultados**: periodo en **7 · 30 · 90 días**, cifras grandes y los bloques
+  en dos columnas. **Ajustes** (antes «Cuentas y ajustes»): a la izquierda
+  General y cada proyecto con su estado; a la derecha sus pestañas **Conexión ·
+  Redes · Textos · SEO** (se acabó la pared de tarjetas con tres plegables).
+- **Las claves de Analizar cuentas (YouTube, Instagram y Apify) están en
+  Configuración**, con las demás y como las de Música y efectos; «Probar todas
+  las claves» también las prueba. En Automatizar queda su estado y
+  **Configurar ›**.
+- El **editor de portadas** no se rediseña aquí: «Diseñar portada» (paso
+  Portada) abre el de «Portadas, segunda vuelta», con su «Qué portada recibe
+  cada red» debajo.
+
 **Tus proyectos y la pantalla de un proyecto, nuevas (22 de octubre)**
 - **«+ Nuevo vídeo» en Crear**, arriba en la portada y en cada proyecto: pregunta
   **¿con qué estilo?** y abre el Encargo de un vídeo nuevo (lo mismo que pulsar
@@ -103,7 +144,9 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   izquierda. Las cuentas ya leídas salen como tarjetas y la abierta en dos
   columnas.
 - Nada cambia de lo que hace: las mismas confirmaciones (también la de pagar
-  a Apify) y las claves de YouTube, Meta y Apify donde estaban.
+  a Apify). Las claves de YouTube, Meta y Apify pasan a Configuración con
+  «Publicar, nuevo» (arriba): en «Cuentas que te gustan» sale su estado y
+  «Configurar ›».
 
 **Publicar: SEO con tu canal y Google Trends (21 de octubre)**
 - **Conecta tu canal de YouTube** en **Configuración → YouTube: tu canal**

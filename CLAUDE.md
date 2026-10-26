@@ -155,6 +155,7 @@ tienen que encajar piezas de otras, detrás de esas otras.
 16. ~~`medidor-claude-2`~~ — UNIDA (26-10).
 17. `costes-menores` — lista (26-10): pruebas y revisión independiente en verde; se une en cuanto esté probada en el servidor.
 18. `descripcion-planos` — lista (26-10): pruebas y revisión independiente en verde. Solo choques de AÑADIR con las abiertas (docs, `prueba_api.py`, `prueba_recorrido.py`, `herramientas/claude_falso.py`).
+19. `insertar-imagen` — lista (26-10): pruebas (54 + 26 de API + recorridos 26/26 + `prueba_pasos_visuales` 264) y revisión independiente en verde, con sus arreglos. Va DETRÁS de `descripcion-planos` (las dos añaden junto a lo de `unir-planos`: choques solo de AÑADIR en `app.py`, `web/app.js`, docs y pruebas).
 
 
 

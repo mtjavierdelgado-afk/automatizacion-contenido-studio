@@ -360,7 +360,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
 | `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
-| `GET` | `/api/cola_studio` | La cola de todo el Studio: imágenes, montaje y lo demás que trabaja. |
+| `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee; sin nombres de proyectos con clave). |
 | `GET` | `/api/dominios` | Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico} |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |

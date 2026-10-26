@@ -11375,7 +11375,11 @@ function tablaDeGasto(d, incluirEstilo) {
     /* CLAUDE DE ESTE VÍDEO (medidor-claude-2): del registro del medidor, que
        lleva todas sus llamadas; sin él (vídeos de antes), del coste. Los
        tokens nuevos y los de caché, aparte. */
-    const c = d.claude_consumo;
+    /* EL REGISTRO SOLO SI ESTÁ ENTERO: empezó con el medidor (26-10) y se poda
+       a 35 días, así que un vídeo con el guion de antes tendría ahí solo lo de
+       hoy. Si cuenta menos llamadas que el coste del vídeo, manda el coste. */
+    const enCoste = (d.claude || []).reduce((n, x) => n + (Number(x.llamadas) || 0), 0);
+    const c = d.claude_consumo && d.claude_consumo.llamadas >= enCoste ? d.claude_consumo : null;
     filas.push(c
       ? filaCoste('Claude', `${c.llamadas} llamadas · ${tokensCorto(c.tokens)} tokens nuevos + ${tokensCorto(c.cache)} de caché`, 0,
         `va por tu suscripción: no se cobra aparte (≈ ${dolares(c.usd)} si fuera por API)`)
@@ -11423,11 +11427,12 @@ async function abrirCosteDelVideo(pid) {
   cuerpo.appendChild(h('h2', {}, 'Este vídeo'));
   cuerpo.appendChild(tablaDeGasto(d));
   /* Claude de este vídeo, por tarea (medidor-claude-2) */
-  const claudeVideo = d.claude_consumo && tablaConsumoClaude('Claude, por tarea',
-    d.claude_consumo.por_tarea, 'Tarea', f => f.tarea);
+  const cv = d.claude_consumo;
+  const claudeVideo = cv && tablaConsumoClaude('Claude, por tarea', cv.por_tarea, 'Tarea', f => f.tarea);
   if (claudeVideo) {
+    const desde = cv.desde ? new Date(Number(cv.desde) * 1000).toLocaleDateString('es') : '';
     cuerpo.appendChild(h('details', { clase: 'detalle-consumo-claude claude-del-video' },
-      h('summary', {}, 'Claude en este vídeo, por tarea'), claudeVideo));
+      h('summary', {}, `Claude en este vídeo, por tarea${desde ? ` (desde el ${desde})` : ''}`), claudeVideo));
   }
   const m = d.musica || {};
   const ef = d.efectos || {};
@@ -11458,10 +11463,10 @@ async function abrirCosteDelVideo(pid) {
   cuerpo.appendChild(h('div', { clase: 'meta' },
     `Lo que se promete antes de pulsar usa ${usdCorto(precio.usd)} por imagen: ${precio.fuente || ''}.`));
   if ((d.claude || []).length) {
-    const det = h('details', {}, h('summary', {}, 'Claude, por para qué se usó (tokens)'));
+    const det = h('details', {}, h('summary', {}, 'Claude, por para qué se usó (del coste del vídeo)'));
     det.appendChild(h('table', { clase: 'tabla tabla-coste' }, h('tbody', {},
       ...d.claude.slice(0, 15).map(c => filaCoste(c.para, `${c.llamadas} llamada(s)`, 0,
-        `${miles(c.tokens)} tokens`)))));
+        `${tokensCorto(c.tokens)} tokens nuevos${c.cache ? ` + ${tokensCorto(c.cache)} de caché` : ''}`)))));
     cuerpo.appendChild(det);
   }
 }
@@ -24757,7 +24762,7 @@ function avisarCupoClaude() {
 /* «12 k», «1,3 M»: los tokens en corto */
 function tokensCorto(n) {
   const v = Number(n) || 0;
-  if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace('.', ',')} M`;
+  if (v >= 999500) return `${(v / 1e6).toFixed(1).replace('.', ',')} M`;
   if (v >= 1000) return `${Math.round(v / 1000)} k`;
   return String(v);
 }

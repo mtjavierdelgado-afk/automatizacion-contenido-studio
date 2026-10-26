@@ -212,7 +212,7 @@ def main():
         comprobar(v.get("five_hour", {}).get("uso") == 0.13 and v.get("seven_day", {}).get("uso") == 0.04
                   and (sobre or {}).get("result") == "ok",
                   "la línea medida el 25-10 con el CLI 2.1.310 se lee entera")
-        print("9. TOKENS NUEVOS Y DE CACHÉ, APARTE, Y LO DE UN VÍDEO (medidor-claude-2)")
+        print("8. TOKENS NUEVOS Y DE CACHÉ, APARTE, Y LO DE UN VÍDEO (medidor-claude-2)")
         caja = cc._caja()
         cc._sumar(caja, {"entrada": 3, "salida": 40, "cache_creada": 1000, "cache_leida": 30000, "usd": 0.01})
         comprobar(caja["tokens"] == 1043 and caja["cache"] == 30000,
@@ -231,7 +231,7 @@ def main():
         comprobar(cc.del_video("no_existe") is None and cc.del_video("") is None,
                   "un vídeo sin llamadas (o de antes del medidor) da None")
 
-        print("8. LAS TAREAS SE AGRUPAN Y EL REGISTRO SE PODA")
+        print("9. LAS TAREAS SE AGRUPAN Y EL REGISTRO SE PODA")
         comprobar(cc.tarea_de("el corrector del plano 12") == cc.tarea_de("el corrector del plano 7")
                   == "el corrector del plano", "«el corrector del plano 12» y «… 7» son la misma tarea")
         comprobar(cc.tarea_de("el revisor de imágenes (p1–p8)") == "el revisor de imágenes",
@@ -251,6 +251,15 @@ def main():
         quedan = [r.get("para") for r in cc.leer_registro()]
         comprobar("viejísima" not in quedan and "la que poda" in quedan,
                   "al pasar del tamaño se poda lo de hace más de DIAS_GUARDAR y lo nuevo se queda")
+        print("10. LAS TARIFAS DEL REPO ESTÁN ENTRE LAS PUBLICADAS (asvs actualizar)")
+        import hashlib                                        # noqa: PLC0415
+        raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(raiz, "tarifas.json"), "rb") as fh:
+            huella = hashlib.sha256(fh.read()).hexdigest()
+        with open(os.path.join(raiz, "despliegue", "asvs"), encoding="utf-8") as fh:
+            asvs = fh.read()
+        comprobar(huella in asvs, "la huella de tarifas.json está en TARIFAS_PUBLICADAS de despliegue/asvs "
+                                  "(si cambias las tarifas, añádela: sha256sum tarifas.json)")
     finally:
         shutil.rmtree(carpeta, ignore_errors=True)
         shutil.rmtree(CARPETA_SECRETOS, ignore_errors=True)

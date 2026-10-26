@@ -2393,7 +2393,10 @@ def _es_taller(ctx):
 
 @app.get("/api/cola_studio")
 def cola_del_studio(peticion: Request):
-    """La cola de todo el Studio: imágenes, montaje y lo demás que trabaja."""
+    """La cola de todo el Studio (solo lee; sin nombres de proyectos con clave).
+
+    Imágenes y montaje con `ahora` (quién tiene el turno) y `fila` (quién
+    espera, por orden de llegada), y `trabajando`: lo demás en marcha."""
     try:
         cerrados = CLIENTES.cerrados_para(raiz_proyectos(), peticion.headers.get("x-estudio-abiertos"))
     except Exception:                                       # noqa: BLE001
@@ -3701,9 +3704,13 @@ def _desglose_de_eventos(eventos):
             # TOKENS NUEVOS Y DE CACHÉ, aparte (medidor-claude-2): la caché
             # leída cuesta ~10 % y sumada inflaba la cifra. Los eventos viejos
             # no traen el desglose: su caché entera cuenta como «de caché».
-            leida = (e.get("detalle") or {}).get("cache_leida")
+            detalle_e = e.get("detalle") if isinstance(e.get("detalle"), dict) else {}
+            leida = detalle_e.get("cache_leida")
             cache = int(t.get("cache") or 0)
-            leida = cache if leida is None else min(cache, int(leida or 0))
+            try:
+                leida = cache if leida is None else max(0, min(cache, int(leida or 0)))
+            except (TypeError, ValueError):
+                leida = cache
             ficha["tokens"] += int(t.get("entrada") or 0) + int(t.get("salida") or 0) + (cache - leida)
             ficha["cache"] += leida
     return {

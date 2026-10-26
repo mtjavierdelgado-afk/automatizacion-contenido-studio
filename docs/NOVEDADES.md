@@ -10,6 +10,14 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+**El nombre nuevo, también en la página de acceso (26 de octubre)**
+- La página donde se pone la contraseña dice **CrearIA Studio · Automatización
+  de contenido**, con el logo de la C y su icono en la pestaña, y el pie con
+  «© 2026 Agencia Redes Botánica · v3.1». Antes seguía con el nombre antiguo y
+  «V2.0».
+- El asistente se presenta con el nombre nuevo, y también el letrero de
+  `asvs estado` y del instalador.
+
 **Claude en el coste de cada vídeo, tokens sin inflar y tarifas al día (26 de octubre)**
 - **«Coste del vídeo» enseña lo de Claude de ese vídeo**: cuántas llamadas, los
   tokens y lo que costaría por API, y en «Claude en este vídeo, por tarea» en qué

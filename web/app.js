@@ -2514,6 +2514,7 @@ function pintarConfig() {
   caja.appendChild(seccionCartesia(ficha));
   caja.appendChild(seccionPronunciacion());
   caja.appendChild(seccionCLI());
+  caja.appendChild(seccionConsumoClaude());  // el medidor de Claude (medidor-claude)
   caja.appendChild(seccionOtrasClaves(ficha));
   caja.appendChild(seccionClaveUploadPost(ficha));  // Publicar en redes (rama publicar-redes-1)
   caja.appendChild(seccionClaveYouTube(ficha));  // búsquedas SEO (rama seo-real)
@@ -24298,6 +24299,7 @@ function pintarBarraModulos() {
   }, 'Configuración'));
   barra.appendChild(enlaces);
   barra.appendChild(gastoDelMenu());
+  barra.appendChild(medidorClaudeDelMenu());
   barra.appendChild(h('button', { type: 'button', id: 'menu-asistente', clase: 'menu-asistente',
     title: 'Abrir el asistente', onclick: () => conmutarAsistente(true) }));
   pintarEstadoAsistenteMenu();
@@ -24545,6 +24547,275 @@ function pintarColaStudio() {
   } else {
     document.body.appendChild(capa);
   }
+}
+
+/* ========================================================== MEDIDOR DE CLAUDE
+ *
+ * Rama medidor-claude (25-10-2026). Cuánto queda de la membresía de Claude y en
+ * qué se gasta, para que un cupo agotado no pille por sorpresa. El cupo de
+ * verdad (ventana de 5 h y semana, con su hora de reinicio) lo da el propio
+ * CLI y lo guarda `pasos/consumo_claude.py`; la pantalla solo lo lee
+ * (`GET /api/claude/consumo`, cada minuto) y pide medir («Medir ahora»).
+ *
+ *   - En la barra lateral, bajo «Gasto del mes»: una barra por ventana.
+ *   - Al pasar del 70 % y del 90 % de una ventana, un aviso (una vez por
+ *     ventana y nivel hasta que se reinicie; recordado en este navegador) y,
+ *     en el móvil, una pastilla «⚠ Claude N %» en la barra de módulos.
+ *   - En Configuración, «Consumo de Claude»: el cupo de cada cuenta y lo
+ *     gastado por día, tarea, vídeo y cuenta.
+ *
+ * Nada de aquí escribe params ni paga: medir es UNA llamada mínima a haiku.
+ */
+const MEDIDOR_CLAUDE = { datos: null, reloj: null, pidiendo: false, midiendo: false, error: '', detalleAbierto: false };
+
+function arrancarMedidorClaude() {
+  if (MEDIDOR_CLAUDE.reloj) return;
+  const vuelta = async () => {
+    if (!document.hidden) await refrescarMedidorClaude();
+    MEDIDOR_CLAUDE.reloj = setTimeout(vuelta, MEDIDOR_CLAUDE.datos && MEDIDOR_CLAUDE.datos.midiendo ? 8000 : 60000);
+  };
+  MEDIDOR_CLAUDE.reloj = setTimeout(vuelta, 0);
+}
+
+async function refrescarMedidorClaude() {
+  if (MEDIDOR_CLAUDE.pidiendo) return;
+  MEDIDOR_CLAUDE.pidiendo = true;
+  try {
+    MEDIDOR_CLAUDE.datos = await pedir(`${BASE}/api/claude/consumo`);
+    MEDIDOR_CLAUDE.error = '';
+    avisarCupoClaude();
+  } catch (e) {
+    MEDIDOR_CLAUDE.error = e.message || 'no se ha podido leer';
+  } finally {
+    MEDIDOR_CLAUDE.pidiendo = false;
+  }
+  repintarMedidorClaude();
+}
+
+async function medirClaudeAhora() {
+  if (MEDIDOR_CLAUDE.midiendo) return;
+  MEDIDOR_CLAUDE.midiendo = true;
+  repintarMedidorClaude();
+  try {
+    MEDIDOR_CLAUDE.datos = await pedir(`${BASE}/api/claude/consumo/medir`, { method: 'POST' });
+    MEDIDOR_CLAUDE.error = '';
+    const sin = (MEDIDOR_CLAUDE.datos.cupo || []).filter(c => !Object.keys(c.ventanas || {}).length);
+    toast(sin.length ? 'medido, pero el CLI no dio el cupo de alguna cuenta' : 'cupo de Claude al día', !!sin.length);
+    avisarCupoClaude();
+  } catch (e) {
+    toast(`no se ha podido medir: ${e.message}`, true);
+  } finally {
+    MEDIDOR_CLAUDE.midiendo = false;
+  }
+  repintarMedidorClaude();
+}
+
+function repintarMedidorClaude() {
+  [['#medidor-claude-menu', medidorClaudeDelMenu], ['#seccion-consumo-claude', seccionConsumoClaude]]
+    .forEach(([sel, pinta]) => {
+      const viejo = document.querySelector(sel);
+      if (viejo) viejo.replaceWith(pinta());
+    });
+}
+
+function nivelCupo(uso) {
+  const u = MEDIDOR_CLAUDE.datos && MEDIDOR_CLAUDE.datos.umbrales || { ojo: 0.7, malo: 0.9 };
+  return uso >= u.malo ? 'malo' : (uso >= u.ojo ? 'ojo' : '');
+}
+
+function porcentajeCupo(uso) {
+  return `${Math.round((Number(uso) || 0) * 100)} %`;
+}
+
+/* «a las 21:30» hoy, «mañana a las 08:00», «el lun 26 a las 08:00» */
+function cuandoSeReinicia(epoch) {
+  if (!epoch) return '';
+  const d = new Date(Number(epoch) * 1000);
+  const hoy = new Date();
+  const hora = d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+  const dias = Math.round((new Date(d.toDateString()) - new Date(hoy.toDateString())) / 86400000);
+  if (dias <= 0) return `a las ${hora}`;
+  if (dias === 1) return `mañana a las ${hora}`;
+  return `el ${d.toLocaleDateString('es', { weekday: 'short', day: 'numeric' })} a las ${hora}`;
+}
+
+function nombreVentana(clave) {
+  const d = MEDIDOR_CLAUDE.datos || {};
+  return (d.nombres || {})[clave] || clave;
+}
+
+/* Las ventanas de una cuenta, la de 5 h primero. */
+function ventanasDe(cuenta) {
+  const orden = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'];
+  return Object.entries((cuenta || {}).ventanas || {})
+    .sort(([a], [b]) => (orden.indexOf(a) + 99) % 99 - (orden.indexOf(b) + 99) % 99);
+}
+
+function filaVentana(clave, v) {
+  const nivel = nivelCupo(v.uso);
+  return h('div', { clase: `ventana-claude ${nivel}` },
+    h('div', { clase: 'fila-ventana' },
+      h('span', {}, nombreVentana(clave)),
+      h('b', {}, porcentajeCupo(v.uso))),
+    barraDeProgreso(v.uso, nivel === 'malo' ? 'pasado' : (nivel === 'ojo' ? 'coral' : '')),
+    v.reinicia ? h('span', { clase: 'meta' }, `se reinicia ${cuandoSeReinicia(v.reinicia)}`) : null);
+}
+
+function haceCuantoClaude(epoch) {
+  if (!epoch) return 'sin medir';
+  const s = Math.max(0, Math.round(Date.now() / 1000 - Number(epoch)));
+  if (s < 60) return 'medido ahora';
+  if (s < 3600) return `medido hace ${Math.round(s / 60)} min`;
+  return `medido hace ${Math.round(s / 3600)} h`;
+}
+
+function medidorClaudeDelMenu() {
+  arrancarMedidorClaude();
+  const d = MEDIDOR_CLAUDE.datos;
+  const caja = h('div', { clase: 'gasto-menu medidor-claude',
+    title: 'Lo usado de tu membresía de Claude (guion, Parrilla, asistente…)' });
+  caja.appendChild(h('span', { clase: 'gasto-etiqueta' }, 'Claude · membresía'));
+  const avisoMovil = h('button', { type: 'button', clase: 'boton-modulo aviso-claude sin-aviso',
+    onclick: () => abrirConsumoClaude() });
+  if (!d) {
+    caja.appendChild(h('span', { clase: 'meta' }, MEDIDOR_CLAUDE.error ? 'sin datos' : 'mirando…'));
+  } else {
+    const cuenta = (d.cupo || [])[0] || {};
+    const ventanas = ventanasDe(cuenta);
+    if (!ventanas.length) {
+      caja.appendChild(h('span', { clase: 'meta' }, cuenta.estado === 'rejected' ? '⛔ cupo agotado' : 'sin medir todavía'));
+    } else {
+      ventanas.slice(0, 3).forEach(([clave, v]) => caja.appendChild(filaVentana(clave, v)));
+    }
+    caja.appendChild(h('button', { type: 'button', clase: 'mini fantasma ver-consumo', onclick: () => abrirConsumoClaude() },
+      `${haceCuantoClaude(cuenta.medido_en)} · ver detalle`));
+    const peor = (d.avisos || [])[0];
+    if (peor) {
+      avisoMovil.classList.remove('sin-aviso');
+      avisoMovil.classList.add(peor.nivel);
+      avisoMovil.textContent = `⚠ Claude ${porcentajeCupo(peor.uso)}`;
+      avisoMovil.title = `${peor.nombre}: ${porcentajeCupo(peor.uso)} usado`;
+    }
+  }
+  /* el cuadro sale en la barra lateral (ordenador) y la pastilla en la fila
+     de módulos (móvil): los dos en una envoltura, que es lo que se repinta */
+  return h('div', { id: 'medidor-claude-menu', clase: 'medidor-claude-envoltura' }, caja, avisoMovil);
+}
+
+function abrirConsumoClaude() {
+  conmutarConfig(true);
+  setTimeout(() => {
+    const s = document.getElementById('seccion-consumo-claude');
+    if (s) s.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, 400);
+}
+
+/* UN AVISO POR VENTANA Y NIVEL hasta que la ventana se reinicie. Lo ya avisado
+   se recuerda en este navegador (si no se puede, se avisa una vez por carga). */
+const AVISADOS_CLAUDE = new Set();
+function avisarCupoClaude() {
+  const d = MEDIDOR_CLAUDE.datos;
+  if (!d) return;
+  let guardados = [];
+  try { guardados = JSON.parse(localStorage.getItem('estudio.claude.avisados') || '[]'); } catch (e) { guardados = []; }
+  const vistos = new Set([...guardados, ...AVISADOS_CLAUDE]);
+  const nuevos = [];
+  (d.avisos || []).forEach(a => {
+    const clave = `${a.cuenta}|${a.ventana}|${a.nivel}|${a.reinicia || a.agotado_en || ''}`;
+    if (vistos.has(clave)) return;
+    vistos.add(clave);
+    AVISADOS_CLAUDE.add(clave);
+    nuevos.push(a);
+  });
+  nuevos.slice(0, 2).forEach((a, i) => setTimeout(() => {
+    const cuando = a.reinicia ? ` Se reinicia ${cuandoSeReinicia(a.reinicia)}.` : '';
+    const texto = a.ventana
+      ? (a.nivel === 'malo'
+        ? `⚠ Claude: llevas el ${porcentajeCupo(a.uso)} de tu ${a.nombre.toLowerCase()}. Si se agota, el guion, la Parrilla y el asistente se paran.${cuando}`
+        : `Claude: llevas el ${porcentajeCupo(a.uso)} de tu ${a.nombre.toLowerCase()}.${cuando}`)
+      : `⛔ Claude: cupo agotado. ${a.mensaje || ''}`;
+    toast(texto, a.nivel === 'malo');
+  }, i * 3500));
+  try { localStorage.setItem('estudio.claude.avisados', JSON.stringify([...vistos].slice(-40))); } catch (e) { /* sin almacén */ }
+}
+
+function tablaConsumoClaude(titulo, filas, columna, nombreDe) {
+  if (!filas || !filas.length) return null;
+  const cuerpo = h('tbody');
+  filas.forEach(f => cuerpo.appendChild(h('tr', {},
+    h('td', { clase: 'que' }, nombreDe(f)),
+    h('td', {}, String(f.llamadas)),
+    h('td', {}, f.tokens >= 1e6 ? `${(f.tokens / 1e6).toFixed(1).replace('.', ',')} M` : `${Math.round(f.tokens / 1000)} k`),
+    h('td', {}, dolares(f.usd)))));
+  return h('div', { clase: 'tabla-consumo-claude' },
+    h('b', {}, titulo),
+    h('table', {},
+      h('thead', {}, h('tr', {}, h('th', {}, columna), h('th', {}, 'Llamadas'), h('th', {}, 'Tokens'),
+        h('th', { title: 'Lo que costaría por API. Con la membresía no se cobra: sirve para comparar.' }, '≈ $ API'))),
+      cuerpo));
+}
+
+function seccionConsumoClaude() {
+  arrancarMedidorClaude();
+  const d = MEDIDOR_CLAUDE.datos;
+  const caja = h('section', { id: 'seccion-consumo-claude', clase: 'bloque-config consumo-claude' },
+    h('div', { clase: 'fila' },
+      h('h3', {}, 'Consumo de Claude (tu membresía)'),
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini', disabled: MEDIDOR_CLAUDE.midiendo, onclick: () => medirClaudeAhora(),
+        title: 'Una llamada mínima (haiku, una palabra) para leer tu cupo de verdad' },
+      MEDIDOR_CLAUDE.midiendo ? 'Midiendo…' : 'Medir ahora')),
+    h('div', { clase: 'pista' },
+      'Lo que dice Anthropic de tu cupo: la ventana de 5 horas y la semanal, con la hora a la que se reinicia '
+      + 'cada una. Avisa al 70 % y al 90 %. Se mide solo cada 15 minutos mientras se usa Claude, o cuando pulsas '
+      + '«Medir ahora». Abajo, en qué se ha gastado los últimos días.'));
+  if (!d) {
+    caja.appendChild(h('div', { clase: 'cargando' }, MEDIDOR_CLAUDE.error ? `no se ha podido leer: ${MEDIDOR_CLAUDE.error}` : 'mirando…'));
+    return caja;
+  }
+  (d.cupo || []).forEach(cuenta => {
+    const tarjeta = h('div', { clase: 'cupo-cuenta-claude' },
+      h('div', { clase: 'fila' },
+        h('b', {}, (d.cupo || []).length > 1 ? `Cuenta «${cuenta.cuenta || 'principal'}»` : 'Tu cuenta'),
+        h('span', { clase: 'crece' }),
+        h('span', { clase: 'meta' }, haceCuantoClaude(cuenta.medido_en) + (cuenta.simulado ? ' (simulado)' : ''))));
+    const ventanas = ventanasDe(cuenta);
+    if (!ventanas.length) {
+      tarjeta.appendChild(h('div', { clase: 'meta' }, cuenta.estado === 'rejected'
+        ? `⛔ Cupo agotado. ${cuenta.mensaje || ''}`
+        : 'Sin medir todavía: pulsa «Medir ahora».'));
+    }
+    ventanas.forEach(([clave, v]) => tarjeta.appendChild(filaVentana(clave, v)));
+    if (cuenta.pago_extra) tarjeta.appendChild(h('div', { clase: 'meta' }, 'Usando el uso extra de pago de tu plan.'));
+    if (cuenta.error) tarjeta.appendChild(h('div', { clase: 'meta' }, `Última medida: ${legibleCorto(cuenta.error)}`));
+    caja.appendChild(tarjeta);
+  });
+  const r = d.resumen || {};
+  if (r.hoy) {
+    caja.appendChild(h('div', { clase: 'meta' },
+      `Hoy: ${r.hoy.llamadas} llamadas (≈ ${dolares(r.hoy.usd)} por API) · últimos ${r.dias || 7} días: `
+      + `${r.semana.llamadas} llamadas (≈ ${dolares(r.semana.usd)})`));
+  }
+  const tablas = [
+    tablaConsumoClaude('Por día', r.por_dia, 'Día', f => f.fecha),
+    tablaConsumoClaude('Por tarea', r.por_tarea, 'Tarea', f => f.tarea),
+    tablaConsumoClaude('Por vídeo', r.por_video, 'Vídeo', f => (f.video && f.pid
+      ? h('a', { href: '#', onclick: ev => { ev.preventDefault(); conmutarConfig(false); irAModulo('crear'); abrirVideoLight(f.pid); } }, legibleCorto(f.nombre))
+      : legibleCorto(f.nombre || '—'))),
+    (r.por_cuenta || []).length > 1 ? tablaConsumoClaude('Por cuenta', r.por_cuenta, 'Cuenta', f => f.cuenta) : null,
+  ].filter(Boolean);
+  if (tablas.length) {
+    /* repintar cada minuto no lo cierra: se recuerda si estaba abierto */
+    const detalle = h('details', { clase: 'detalle-consumo-claude', open: MEDIDOR_CLAUDE.detalleAbierto },
+      h('summary', {}, 'En qué se ha gastado'), ...tablas);
+    detalle.addEventListener('toggle', () => { MEDIDOR_CLAUDE.detalleAbierto = detalle.open; });
+    caja.appendChild(detalle);
+  } else {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay llamadas apuntadas.'));
+  }
+  (r.agotados || []).slice(-2).forEach(a => caja.appendChild(h('div', { clase: 'meta' },
+    `⛔ Se agotó el cupo el ${new Date(Number(a.t) * 1000).toLocaleString('es')}: ${legibleCorto(a.mensaje || '')}`)));
+  return caja;
 }
 
 function dolares(n, redondo) {

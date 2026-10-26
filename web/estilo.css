@@ -5414,3 +5414,31 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   .barra-modulos .modulo-cola .nombre-cola { display: none; }
   .barra-modulos .modulo-cola { padding: 4px 8px; }
 }
+
+/* ========================================================== MEDIDOR DE CLAUDE
+   rama medidor-claude (25-10-2026): el cuadro «Claude · membresía» de la
+   barra lateral (reutiliza `.gasto-menu`), la pastilla de aviso del móvil y la
+   sección de Configuración. */
+.medidor-claude-envoltura { display: contents; }
+.medidor-claude .ventana-claude { display: flex; flex-direction: column; gap: 4px; }
+.ventana-claude .fila-ventana { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.ventana-claude.ojo .fila-ventana b { color: var(--aviso); }
+.ventana-claude.malo .fila-ventana b { color: var(--malo); }
+.medidor-claude .ver-consumo { align-self: flex-start; padding-left: 0; font-size: 12px; }
+.barra-modulos .aviso-claude { border: 1px solid var(--aviso-borde); background: var(--aviso-fondo); color: var(--aviso-texto); cursor: pointer; }
+.barra-modulos .aviso-claude.malo { border-color: var(--malo-borde); background: var(--malo-fondo); color: var(--malo); }
+.barra-modulos .aviso-claude.sin-aviso { display: none; }
+@media (min-width: 1200px) {
+  body.con-menu .barra-modulos .aviso-claude { display: none; }
+}
+.consumo-claude .cupo-cuenta-claude {
+  display: flex; flex-direction: column; gap: 8px; margin: 8px 0; padding: 10px;
+  border: 1px solid var(--linea-suave); border-radius: 10px; background: var(--panel);
+}
+.consumo-claude .ventana-claude { display: flex; flex-direction: column; gap: 4px; }
+.detalle-consumo-claude { margin-top: 8px; }
+.detalle-consumo-claude summary { cursor: pointer; font-weight: 600; }
+.tabla-consumo-claude { margin-top: 10px; overflow-x: auto; }
+.tabla-consumo-claude table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.tabla-consumo-claude th, .tabla-consumo-claude td { padding: 4px 6px; text-align: right; border-bottom: 1px solid var(--linea-suave); white-space: nowrap; }
+.tabla-consumo-claude th:first-child, .tabla-consumo-claude td.que { text-align: left; white-space: normal; overflow-wrap: anywhere; }

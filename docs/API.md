@@ -112,6 +112,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/trabajos/{tid}/cancelar` | Pide la cancelacion cooperativa de un trabajo. |
 | `GET` | `/api/trabajos/{tid}/eventos` | Progreso del trabajo en vivo por Server-Sent Events. |
 | `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee): `imagenes` y `montaje` con `ahora` (quién tiene el turno) y `fila` (quién espera, por orden de llegada), y `trabajando` (todo lo que está en marcha en los vídeos abiertos). Un vídeo de un proyecto con clave sin abrir sale sin nombre ni enlace. |
+| `GET` | `/api/claude/consumo` | El medidor de Claude (solo lee): `cupo` de cada cuenta (las `ventanas` five_hour y seven_day con `uso` 0–1 y `reinicia` en epoch, tal como las da el CLI), `avisos` (≥ 70 % «ojo», ≥ 90 % «malo»), `resumen` de los últimos 7 días (hoy, semana, por día, tarea, vídeo y cuenta). Si han pasado más de 15 min y ha habido llamadas, lanza una medida en segundo plano (nunca con `ESTUDIO_SIMULAR`). |
+| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: una llamada mínima por cuenta (haiku, una palabra, `stream-json`) para leer su cupo; devuelve lo mismo que el GET. Con `ESTUDIO_SIMULAR`, un cupo simulado. |
 
 ## Recetas y pestañas
 

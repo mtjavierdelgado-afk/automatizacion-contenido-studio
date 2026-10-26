@@ -483,8 +483,12 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/sistema/revisiones/{rid}` | — |
 | `GET` | `/api/sistema/terminos` | Los terminos de uso, tal cual estan en docs/TERMINOS.md (el pie). |
 | `POST` | `/api/sonido/subir` | Sube un audio tuyo (MP3, WAV, M4A, OGG) para la música o un efecto. |
+| `GET` | `/api/vidiq/estado` | {puesta, simulado, saldo, saldo_al, creditos_aprox, trabajando}. Sin la clave. |
+| `POST` | `/api/vidiq/probar` | Prueba la clave contra vidIQ (`vidiq_balance`): {estado, mensaje, saldo}. |
+| `GET` | `/api/vidiq/videos/{pid}` | El último «Mejorar con vidIQ» de un vídeo y si sigue consultando. |
+| `POST` | `/api/vidiq/videos/{pid}/titulo` | «Mejorar con vidIQ»: la palabra clave del vídeo, la nota de su título de |
 | `GET` | `/{fichero}` | Sirve un fichero suelto de web/ (app.js, estilo.css...). |
 
 ---
 
-**372 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**377 endpoints.** Escrito por `generar_api.py` desde `app.py`.

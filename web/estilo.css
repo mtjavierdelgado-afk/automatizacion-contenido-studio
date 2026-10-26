@@ -5360,3 +5360,18 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .plano-gv textarea, .plano-gv input[type="text"] { width: 100%; box-sizing: border-box; }
 .plano-gv-cabeza { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; min-width: 0; }
 .plano-gv-cabeza .meta { overflow-wrap: anywhere; }
+
+/* ================================================================ VIDIQ
+   Rama vidiq-1: Configuración → vidIQ y «Mejorar con vidIQ» en Publicar → SEO. */
+.vidiq-seo { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.vidiq-seo h4 { margin: 8px 0 0; }
+.lista-vidiq, .consejos-vidiq { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 6px; }
+.lista-vidiq { list-style: none; padding: 0; }
+.frase-vidiq { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.frase-vidiq .crece { min-width: 0; overflow-wrap: anywhere; }
+.titulo-vidiq { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--linea);
+  border-radius: 8px; min-width: 0; }
+.titulo-vidiq b { overflow-wrap: anywhere; }
+.aviso-vidiq { color: var(--aviso); }
+.saldo-vidiq, .resultado-vidiq { overflow-wrap: anywhere; }
+

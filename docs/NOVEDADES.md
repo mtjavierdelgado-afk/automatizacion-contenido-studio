@@ -10,6 +10,20 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+**vidIQ desde el Studio, con tu membresía (25 de octubre)**
+- **Configuración → vidIQ**: pega la clave MCP de la cuenta de vidIQ del
+  Studio y pulsa **Probar** (dice los créditos que quedan). No hace falta
+  conectar ningún canal. Sin clave, el Studio sigue exactamente como antes.
+- **Publicar → SEO → 📈 Mejorar con vidIQ**: investiga la palabra clave del
+  vídeo, pone nota a tu título y propone 3 títulos con emojis. Te avisa antes
+  de lo que gasta y no cambia nada hasta que pulses **Usar**.
+- **Parrilla → Conversar con Claude → 📈 Ideas con vidIQ**: por mensaje y
+  apagado de fábrica. Claude consulta vidIQ (como mucho 3 veces por mensaje) y
+  marca con ⚠ lo que saca de ahí.
+- Va por el mismo Claude de tu membresía, **sin API de pago**. Cada consulta
+  gasta créditos de tu plan de vidIQ, por eso todo es a pedido con un botón.
+  Solo consulta y puntúa: publicar, subir o generar con vidIQ está bloqueado.
+
 **«Pasar al Encargo» con el formulario limpio (22 de octubre)**
 - Si tenías un vídeo abierto en Crear (por ejemplo, montándose) y pasabas otro
   guion desde la Parrilla, la pantalla seguía enseñando el vídeo de antes y no

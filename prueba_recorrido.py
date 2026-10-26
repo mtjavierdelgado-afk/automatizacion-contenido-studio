@@ -8707,5 +8707,117 @@ def encargo_limpio_suelta_el_video(navegador, datos):
     pg.sin_errores("encargo limpio")
     pg.cerrar()
 
+
+# ===================================================================== VIDIQ
+# vidiq-1 (25-10-2026): sin clave no se ve nada de vidIQ; con ella,
+# Configuración (guardar y «Probar»), «Mejorar con vidIQ» en el paso SEO de la
+# ficha (pregunta antes, no cambia nada hasta «Usar») y «Ideas con vidIQ» en el
+# chat de la Parrilla. El servidor corre con ESTUDIO_SIMULAR: no se llama a
+# vidIQ ni al CLI, y no se gasta nada.
+@escenario
+def vidiq_en_la_pantalla(navegador, datos):
+    pid = datos["video"]
+    api = datos["api"]
+    cid = datos["cliente"]
+    clave = "vq_recorrido_123456789"
+    api.libre(pid)
+    api.put("/api/claves", {"vidiq": {"clave": ""}})
+    _r, antes = api.get(f"/api/publicar/videos/{pid}")
+    titulo_antes = (((antes or {}).get("textos") or {}).get("youtube") or {}).get("titulo") or ""
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["youtube"], "palabra_clave": "consolas para fiestas",
+                                            "textos": {"youtube": {"titulo": "Cumple con consolas",
+                                                                   "descripcion": "Un vídeo para probar vidIQ"}}})
+    try:
+        # 1. sin clave, nada
+        pg = Pagina(navegador, datos)
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        _paso_ficha(pg, "seo")
+        ok(pg.esperar(".seo-video", segundos=15), "el paso SEO de la ficha")
+        pg.p.wait_for_timeout(1200)
+        ok(not pg.visible(".vidiq-seo"), "sin clave de vidIQ, el SEO no enseña nada de vidIQ")
+        pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+        pg.js(f"elegirProyectoParrilla('{cid}'); PAR.form.origen = 'chat'; irASeccionParrilla('anadir');")
+        ok(pg.esperar(".chat-parrilla", segundos=10), "el chat de la Parrilla")
+        pg.p.wait_for_timeout(800)
+        ok(not pg.visible(".interruptor-chat", "Ideas con vidIQ"), "ni la Parrilla ofrece «Ideas con vidIQ»")
+        pg.sin_errores("sin clave de vidIQ")
+        pg.cerrar()
+
+        # 2. Configuración: guardar y probar
+        pg = Pagina(navegador, datos)
+        pg.js("conmutarConfig(true);")
+        ok(pg.esperar("#cuerpo-config .bloque-vidiq h3", "vidIQ", 10), "Configuración tiene la casilla de vidIQ")
+        ok(pg.visible("#cuerpo-config .bloque-vidiq .pista", "sin API de pago"), "y dice que va por la membresía")
+        pg.p.locator(".bloque-vidiq input[type=password]").first.fill(clave)
+        pg.pulsar(".bloque-vidiq button", "Guardar")
+        ok(pg.esperar('.bloque-vidiq button[data-accion="probar-vidiq"]', segundos=8), "guardada: sale «Probar»")
+        _r, claves = api.get("/api/claves")
+        ok(clave not in json.dumps(claves), "la clave no baja a la pantalla")
+        pg.pulsar('.bloque-vidiq button[data-accion="probar-vidiq"]')
+        ok(pg.esperar(".bloque-vidiq .resultado-vidiq", "créditos", 10), "«Probar» dice los créditos que quedan")
+        pg.captura("vidiq_configuracion")
+        pg.sin_errores("vidIQ en Configuración")
+        pg.cerrar()
+
+        # 3. Publicar → SEO → «Mejorar con vidIQ»
+        pg = Pagina(navegador, datos)
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        _paso_ficha(pg, "seo")
+        ok(pg.esperar(".vidiq-seo button[data-accion=mejorar-vidiq]", "Mejorar con vidIQ", 15),
+           "con clave, «Mejorar con vidIQ» en el paso SEO")
+        ok(pg.visible(".vidiq-seo .meta", "créditos"), "y dice lo que gasta antes de pulsar")
+        pg.pulsar(".vidiq-seo button[data-accion=mejorar-vidiq]")
+        texto = _panel_casa(pg)
+        ok("créditos" in texto, f"pregunta antes, con lo que gasta: {texto[:90]!r}")
+        ok(pg.esperar(".vidiq-seo .titulo-vidiq", segundos=20), "salen los títulos propuestos")
+        ok(pg.visible(".vidiq-seo .frase-vidiq", "consolas para fiestas"), "y la palabra clave con sus cifras")
+        ok(pg.visible(".vidiq-seo", "Cumple con consolas"), "y la nota del título actual")
+        _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+        ok(ficha["textos"]["youtube"]["titulo"] == "Cumple con consolas", "consultar no cambia el título")
+        pg.pulsar(".vidiq-seo .titulo-vidiq button", "Usar en YouTube")
+        pg.p.wait_for_timeout(1500)
+        _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+        nuevo = ficha["textos"]["youtube"]["titulo"]
+        ok(nuevo != "Cumple con consolas" and "consolas" in nuevo.lower(), f"«Usar en YouTube» lo pone: {nuevo!r}")
+        pg.captura("vidiq_seo")
+        pg.sin_errores("Mejorar con vidIQ")
+        pg.cerrar()
+
+        # 4. la Parrilla con «Ideas con vidIQ»
+        pg = Pagina(navegador, datos)
+        pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+        pg.js(f"elegirProyectoParrilla('{cid}'); PAR.form.origen = 'chat'; irASeccionParrilla('anadir');")
+        ok(pg.esperar(".interruptor-chat", "Ideas con vidIQ", 10), "con clave, la Parrilla ofrece «Ideas con vidIQ»")
+        pg.p.locator("[data-foco=parrilla-chat]").fill("Dame ideas de vídeos para este nicho")
+        pg.p.locator(".interruptor-chat", has_text="Ideas con vidIQ").locator("input").check()
+        pg.pulsar(".mandos-chat button.primario", "Enviar")
+        ok(pg.esperar(".chat-turno.tuyo .quien-chat", "con vidIQ", 20), "el mensaje dice que fue con vidIQ")
+        ok(pg.esperar(".chat-turno.de-claude .texto-chat", "vidIQ: sí", 20),
+           "y Claude (el doble) lo recibió con vidIQ cargado")
+        pg.captura("vidiq_parrilla")
+        pg.sin_errores("Ideas con vidIQ")
+        pg.cerrar()
+
+        # 5. en el móvil, sin salirse
+        for tema in ("oscuro", "claro"):
+            pg = Pagina(navegador, datos, ancho=390, alto=844, nombre=f"vidiq móvil {tema}")
+            pg.js(f"document.documentElement.dataset.tema = '{tema}'; abrirPublicarVideo('{pid}');")
+            pg.p.wait_for_timeout(2000)
+            _paso_ficha(pg, "seo")
+            ok(pg.esperar(".vidiq-seo .titulo-vidiq", segundos=10), f"lo de vidIQ en el móvil ({tema})")
+            ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+            ok(ancho <= 2, f"cabe en un móvil, tema {tema} ({ancho}px)")
+            texto = pg.p.evaluate("() => document.querySelector('#modulo').innerText")
+            malos = sorted(set(x.group(0) for x in TEXTOS_MALOS.finditer(texto)))
+            ok(not malos, f"sin «undefined», «NaN» ni «null» ({malos})")
+            pg.captura(f"vidiq_movil_{tema}", entera=False)
+            pg.sin_errores(f"vidIQ en el móvil ({tema})")
+            pg.cerrar()
+    finally:
+        api.put("/api/claves", {"vidiq": {"clave": ""}})
+        api.put(f"/api/publicar/videos/{pid}", {"palabra_clave": "",
+                                                "textos": {"youtube": {"titulo": titulo_antes}}})
+
+
 if __name__ == "__main__":
     sys.exit(main())

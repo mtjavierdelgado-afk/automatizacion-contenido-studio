@@ -20268,7 +20268,7 @@ def _parrilla_chat_mensaje_en_hilo(cid, chid, campos, imagenes, peticion):
     vista = _por_guionista(chat.escribir, campos.get("texto") or "", web=campos.get("web") == "1",
                            resultados_texto=resultados, imagenes=imagenes,
                            modelo=campos.get("modelo") or None, cuenta_texto=cuenta_texto,
-                           cuenta=cuenta_nombre)
+                           cuenta=cuenta_nombre, vidiq=campos.get("vidiq") == "1")
     anotar_global("parrilla_chat", {"proyecto": cid, "chat": chat.id,
                                     "web": campos.get("web") == "1", "capturas": len(imagenes)})
     return vista
@@ -20437,6 +20437,76 @@ def parrilla_desde_cuenta(cid: str, peticion: Request, cuerpo: dict = Body(defau
         "analisis": datos.get("analisis") or "", "contexto": _contexto_parrilla(cid, d)})
     anotar_global("parrilla_desde_cuenta", {"proyecto": cid, "red": red, "usuario": usuario})
     return trabajo_
+
+
+# ===================================================================== VIDIQ
+# Rama `vidiq-1` (25-10-2026): vidIQ desde el Claude del Studio, con la
+# membresía (el CLI carga el servidor MCP de vidIQ con una lista blanca de
+# herramientas; ver `pasos/vidiq.py`). La clave vive en el almacén de claves
+# (`/api/claves` → `vidiq`) y no sale nunca. «Mejorar con vidIQ» va en un hilo
+# y se sigue preguntando con el GET. Nada entra en ninguna firma.
+
+try:
+    import vidiq as VIDIQ  # noqa: E402  (pasos/ ya esta en sys.path)
+    ERROR_VIDIQ = ""
+except Exception as _fallo_vidiq:  # noqa: BLE001
+    VIDIQ = None
+    ERROR_VIDIQ = f"{type(_fallo_vidiq).__name__}: {_fallo_vidiq}"
+
+
+def _vidiq():
+    if VIDIQ is None:
+        raise ErrorApi(503, f"vidIQ no se ha podido cargar: {ERROR_VIDIQ}")
+    return VIDIQ
+
+
+def _por_vidiq(fn, *args, **kwargs):
+    V = _vidiq()
+    try:
+        return fn(*args, **kwargs)
+    except V.ErrorVidiq as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+@app.get("/api/vidiq/estado")
+def vidiq_estado():
+    """{puesta, simulado, saldo, saldo_al, creditos_aprox, trabajando}. Sin la clave."""
+    return _vidiq().estado(raiz_proyectos())
+
+
+@app.post("/api/vidiq/probar")
+def vidiq_probar():
+    """Prueba la clave contra vidIQ (`vidiq_balance`): {estado, mensaje, saldo}."""
+    V = _vidiq()
+    prueba = V.probar(raiz_proyectos())
+    anotar_global("vidiq_probar", {"estado": prueba.get("estado")})
+    return {"prueba": prueba, "estado": V.estado(raiz_proyectos())}
+
+
+@app.get("/api/vidiq/videos/{pid}")
+def vidiq_ver_video(pid: str, peticion: Request):
+    """El último «Mejorar con vidIQ» de un vídeo y si sigue consultando."""
+    ctx = _ctx_publicable(pid, peticion)
+    return _por_vidiq(_vidiq().ver_video, raiz_proyectos(), ctx.id)
+
+
+@app.post("/api/vidiq/videos/{pid}/titulo", status_code=202)
+def vidiq_mejorar_titulo(pid: str, peticion: Request):
+    """«Mejorar con vidIQ»: la palabra clave del vídeo, la nota de su título de
+    YouTube y 3 alternativas. Gasta créditos de vidIQ y uso de la membresía;
+    no cambia ningún texto (la pantalla ofrece «Usar»)."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    ficha = publicar_ficha(pid, peticion)
+    textos = ficha.get("textos") or {}
+    titulo = next((str((textos.get(r) or {}).get("titulo") or "") for r in ("youtube", "facebook")
+                   if str((textos.get(r) or {}).get("titulo") or "").strip()), "")
+    guion = " ".join(str(b.get("texto") or "") for b in (info.get("guion") or []))
+    datos = {"nombre": info.get("nombre") or "", "palabra": (ficha.get("seo") or {}).get("palabra") or "",
+             "titulo": titulo, "guion": guion or str(info.get("material") or "")}
+    vista = _por_vidiq(_vidiq().lanzar_titulo, raiz_proyectos(), ctx.id, datos, proyecto=ctx.proyecto)
+    anotar_global("vidiq_titulo", {"proyecto": ctx.id})
+    return vista
 
 
 # ------------------------------------------------------------------------ main

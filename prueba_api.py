@@ -7076,6 +7076,50 @@ def probar_publicar_20oct(cliente, pid):
        "cada envío de la cola dice si ya debió salir")
 
 
+def probar_vidiq(cliente, pid):
+    """Rama `vidiq-1` (25-10-2026): vidIQ desde el Claude del Studio. Con
+    ESTUDIO_SIMULAR no se llama a nadie; se comprueba que sin clave no hay nada,
+    que la clave no baja nunca y que «Mejorar con vidIQ» no cambia ningún texto."""
+    seccion("VIDIQ: CLAVE, PROBAR Y «MEJORAR CON VIDIQ»")
+    clave = "vq_prueba_api_123456789"
+    r, d = cliente.get("/api/vidiq/estado")
+    igual((r.status_code, (d or {}).get("puesta")), (200, False), "GET /api/vidiq/estado: sin clave")
+    ok((d or {}).get("creditos_aprox", {}).get("titulo"), "y dice lo que gasta cada cosa")
+    ruta = f"/api/vidiq/videos/{pid}/titulo"
+    r, _d = cliente.post(ruta)
+    igual(r.status_code, 409, f"POST {ruta} sin clave: 409")
+    r, d = cliente.put("/api/claves", {"vidiq": {"clave": clave}})
+    igual((r.status_code, ((d or {}).get("vidiq") or {}).get("puesta")), (200, True), "la clave se guarda")
+    ok(clave not in json.dumps(d), "y no vuelve en la respuesta")
+    r, d = cliente.get("/api/claves")
+    ok(clave not in json.dumps(d), "ni en GET /api/claves")
+    r, d = cliente.post("/api/vidiq/probar")
+    igual((r.status_code, ((d or {}).get("prueba") or {}).get("estado")), (200, "ok"), "«Probar» (simulado)")
+    igual(((d or {}).get("estado") or {}).get("saldo"), 150, "y apunta el saldo")
+    r, antes = cliente.get(f"/api/publicar/videos/{pid}")
+    palabra_antes = ((antes or {}).get("seo") or {}).get("palabra_propia") or ""
+    r, _d = cliente.put(f"/api/publicar/videos/{pid}", {"palabra_clave": "consolas para fiestas"})
+    igual(r.status_code, 200, "con palabra clave en el vídeo")
+    r, d = cliente.post(ruta)
+    igual(r.status_code, 202, f"POST {ruta}: 202, en un hilo")
+    vista = d or {}
+    for _ in range(50):
+        r, vista = cliente.get(f"/api/vidiq/videos/{pid}")
+        if not (vista or {}).get("trabajando"):
+            break
+        time.sleep(0.2)
+    resultado = (vista or {}).get("resultado") or {}
+    igual(len(resultado.get("alternativas") or []), 3, "tres títulos propuestos")
+    igual((vista or {}).get("palabra"), "consolas para fiestas", "con la palabra con la que se consultó")
+    r, despues = cliente.get(f"/api/publicar/videos/{pid}")
+    igual((despues or {}).get("textos"), (antes or {}).get("textos"), "no cambia ningún texto del vídeo")
+    r, _d = cliente.get("/api/vidiq/videos/noexiste")
+    igual(r.status_code, 404, "un vídeo que no existe: 404")
+    cliente.put(f"/api/publicar/videos/{pid}", {"palabra_clave": palabra_antes})
+    r, d = cliente.put("/api/claves", {"vidiq": {"clave": ""}})
+    igual(((d or {}).get("vidiq") or {}).get("puesta"), False, "«Quitar» la borra")
+
+
 def probar_espacio_fijo():
     """Rama espacio-fijo (20-10-2026): la peticion del catalogo y el ESPACIO FIJO.
 
@@ -7793,6 +7837,7 @@ def main():
         probar_cancelar_en_el_taller()
         probar_mas_emojis(cliente, carpeta, pid)
         probar_publicar_20oct(cliente, pid)
+        probar_vidiq(cliente, pid)
         probar_espacio_fijo()
         probar_tipo_relato()
         probar_dominios()

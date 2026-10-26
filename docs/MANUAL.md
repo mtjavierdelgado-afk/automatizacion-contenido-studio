@@ -686,6 +686,19 @@ botón está apagado y la barra dice por qué («Falta el texto de Instagram»,
 - La columna **Tendencia** (Google Trends, experimental) dice si la frase sube
   o baja en Perú. Si Trends no contesta, queda en «—».
 
+**vidIQ** (opcional, 25-10; solo sale con la clave en **Configuración → vidIQ**),
+también en el paso **SEO**:
+- **📈 vidIQ → Mejorar con vidIQ** investiga en vidIQ la palabra clave del vídeo
+  (volumen, competencia y su puntuación, y frases relacionadas que el vídeo
+  trata), pone **nota a tu título** con consejos y propone **3 títulos** con
+  emojis. Antes de empezar te dice cuánto gasta (unos 15 a 20 créditos de
+  vidIQ y algo de uso de tu membresía de Claude) y te pregunta.
+- **No cambia nada solo.** **Usar** en una frase la deja como palabra clave del
+  vídeo; **Usar en YouTube** (o en Facebook) pone ese título. Sin palabra clave
+  no se consulta, para no gastar créditos a ciegas.
+- Si cambias la palabra clave después, te avisa de que lo de vidIQ era de la
+  otra: **Volver a consultar**.
+
 **Después de publicar**, al volver a la ficha, arriba dice **Ya publicado en** (con el enlace a cada post) y
 **En camino** (lo programado o subiendo), y al lado de cada red su último
 estado. Cuando una red termina mientras miras, sale un aviso («Publicado en
@@ -848,6 +861,14 @@ capturas, **🌐 Buscar en internet**, **📊 Con mis resultados**, una cuenta
 analizada como referencia y el modelo. Cada guion que escriba en el formato del
 Studio sale con su **«Guardar en la Parrilla»**.
 
+Con la clave de vidIQ puesta sale también **📈 Ideas con vidIQ** (por mensaje y
+apagado de fábrica): ese mensaje puede consultar vidIQ (palabras clave con su
+volumen y competencia, vídeos que destacan en el nicho, tendencias, nota de
+títulos). Cada consulta gasta créditos de vidIQ, así que Claude hace como mucho
+3 por mensaje; lo que saque de ahí lo dice «(vidIQ)» y, en un guion, lleva
+«⚠ dato de vidIQ» en los avisos. Los datos son de YouTube: para TikTok e
+Instagram sirven de referencia.
+
 ### Cuentas que te gustan
 
 Escribe el @usuario o pega el enlace de un perfil de **TikTok, Instagram o
@@ -887,6 +908,10 @@ Claude la usa en todo lo que escribe para él.
   **Quitar**; desde qué cuenta se mira Instagram (**Volver a buscar**, y cuándo
   caduca el token), **Usar el servicio de pago cuando lo gratis no sirva**, el
   **tope al mes** y lo gastado. **Probar todas las claves** las prueba también.
+- **vidIQ (ideas, palabras clave y títulos)**: la clave MCP de la cuenta de
+  vidIQ del Studio (app.vidiq.com → Account settings → MCP). **Probar** dice
+  cuántos créditos quedan. Va por el Claude de tu membresía, sin API de pago,
+  y no hace falta conectar ningún canal. Sin ella, nada de vidIQ se enseña.
 - **Calidad de las imágenes**: el punto de partida de los vídeos nuevos.
 - **Dictado al asistente**: con OpenAI o con el del navegador.
 - **Hora de tu región**: para que el chat y los vídeos enseñen tu hora.

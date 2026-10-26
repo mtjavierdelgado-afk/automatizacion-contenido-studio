@@ -4883,6 +4883,18 @@ def prueba_ortografia_por_tandas():
                      '"propuesta": "un mueble negro", "motivo": "sobran las comillas", "tipo": ""}]}}')
         ok((ortografia.leer_json(editorial, "x") or {}).get("propuestas", {}).get("B1", [{}])[0].get("original")
            == 'un "mueble" negro', "y lo mismo en la revisión editorial")
+        # 5) 26-10: el modelo contesta, se corrige a sí mismo y manda OTRO JSON
+        #    (respuesta copiada del CLI de verdad): vale el último
+        dos = ('{"correcciones": {"B001": {"texto": "Nunca contrates a un maestro de obra.", '
+               '"cambios": []}}}\n\nWait — that text is already correct. Correct output:\n\n'
+               '{"correcciones": {}}')
+        llamadas.clear()
+        comillas = dos
+        salida = ortografia.revisar({"B001": "Nunca contrates a un maestro de obra."})
+        ok(salida == {} and len(llamadas) == 1,
+           f"dos JSON seguidos (el modelo se corrige): vale el último, a la primera ({len(llamadas)} llamadas, {salida})")
+        ok(ortografia.leer_json('{"propuestas": {"B1": []}} y luego {"otra": 1}', "x", "propuestas")
+           == {"propuestas": {"B1": []}}, "y se queda con el que trae la clave pedida")
     finally:
         cli_claude.ejecutar = original
 

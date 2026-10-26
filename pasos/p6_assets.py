@@ -72,6 +72,7 @@ import reglas_estilo  # noqa: E402
 import tipo_relato  # noqa: E402
 import dominios  # noqa: E402
 import guion_visual  # noqa: E402
+import quitar_planos  # noqa: E402
 import cta  # noqa: E402
 import encuadres  # noqa: E402
 import estadisticas  # noqa: E402
@@ -556,7 +557,11 @@ def _marcar_origen(escenas, meta):
 
 
 def _texto_clave(escena):
-    return medios.normalizar_texto(escena.get("narracion") or "")
+    # `narracion_imagen`: la frase para la que se DIBUJO un plano que ademas
+    # lleva la voz de un vecino quitado (`quitar_planos`). Es con la que se le
+    # reconoce: su PNG no se mueve ni sale «obsoleto» por llevar mas voz.
+    return medios.normalizar_texto(escena.get("narracion_imagen")
+                                   or escena.get("narracion") or "")
 
 
 def _emparejar_con_previo(escenas, anteriores):
@@ -1504,6 +1509,15 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # las CARTELAS, y eso lo descuenta `_marcar_cartelas` mas arriba.
     informe["estirados"] = []
 
+    # LAS IMAGENES QUITADAS A MANO (rama unir-planos): su voz pasa al vecino,
+    # que conserva su dibujo. Va DESPUES de escribir los prompts --el del que
+    # se queda no cambia-- y de todo lo que se decide por plano. Sin
+    # `planos_quitados.json` no toca nada (ver `pasos/quitar_planos.py`).
+    quitados = quitar_planos.aplicar(escenas, getattr(proyecto, "raiz", None),
+                                     _texto_clave, _sin_imagen)
+    if quitados["absorbidos"] or quitados["sin_casar"]:
+        informe["quitados"] = quitados
+
     plan = {
         "proyecto": proyecto.id,
         # Con que reglas se corto este plan. Ver MOTOR_PLAN: no entra en ninguna
@@ -1572,7 +1586,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # que viajan los planos que deja fuera un recorte.
     absorbidos = sorted({f["absorbido"] for f in
                          (informe.get("cartelas") or {}).get("seguidas") or []
-                         if f.get("absorbido")})
+                         if f.get("absorbido")}
+                        | set(quitados["absorbidos"]))
     # EL PLAN ES LA VERDAD DE QUE PLANOS HAY: un id que sigue en el plan no se
     # retira aunque venga en las dos listas. Los ids son POSICIONALES, asi que
     # un S003 del plan anterior que ya no existe y un S003 del plan de ahora son

@@ -5412,3 +5412,14 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   .barra-modulos .modulo-cola .nombre-cola { display: none; }
   .barra-modulos .modulo-cola { padding: 4px 8px; }
 }
+
+/* ---- AJUSTAR ESTA IMAGEN (rama unir-planos, 25-10): igualar con el vecino y
+   quitar la imagen pasando su voz al de al lado */
+.ajustar-imagen { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding: 8px 10px;
+  border: 1px solid var(--linea); border-radius: 8px; min-width: 0; }
+.ajustar-imagen-titulo { font-size: 11px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--tenue); }
+.ajustar-absorbe { align-items: center; padding: 6px 8px; border-radius: 6px; background: var(--hueco); }
+.ajustar-absorbe .meta { overflow-wrap: anywhere; min-width: 0; }
+.ajustar-quitar { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 6px;
+  border: 1px dashed var(--acento); }

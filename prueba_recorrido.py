@@ -9179,9 +9179,11 @@ def insertar_una_imagen(navegador, datos):
        "sin palabra ni texto, el botón de insertar está apagado")
     ok(pg.p.locator(".insertar-palabra").first.is_disabled(), "la primera palabra no se puede elegir")
     pg.p.locator(".insertar-palabra").nth(2).click()
-    ok(pg.esperar(".insertar-reparto", f"nueva: «{palabras[2]}", 5),
-       "al pulsar una palabra dice qué se queda cada imagen")
+    elegida_txt = pg.p.locator(".insertar-palabra").nth(2).inner_text().strip()
+    ok(pg.esperar(".insertar-reparto", f"nueva: «{elegida_txt}", 5),
+       f"al pulsar una palabra dice qué se queda cada imagen («{elegida_txt}…»)")
     pg.p.locator(".insertar-imagen textarea").first.fill("un primer plano de las baldosas")
+    pg.captura("insertar_imagen_panel", entera=False)
     pg.p.locator(".insertar-imagen button[data-accion=insertar-imagen]").first.click()
     pg.p.wait_for_timeout(2500)
     ok(any("UNA imagen nueva" in d for d in pg.dialogos), f"pregunta antes de pagar ({pg.dialogos[-1:]})")

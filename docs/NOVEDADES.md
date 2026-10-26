@@ -40,6 +40,23 @@ vídeos, estilos, claves y contraseña no se tocan.
   esa era la «respuesta rota» que no se arreglaba ni con «Revisar otra vez».
 - El botón «Cerrar» de un error ya no tapa el final del mensaje.
 
+**El medidor de Claude: cuánto te queda de la membresía (25 de octubre)**
+- **El cupo de verdad**: el Studio lee del propio Claude cuánto llevas usado de
+  la **ventana de 5 horas** y de la **semana**, y a qué hora se reinicia cada
+  una. Es el mismo número que enseña la web de Claude, no una estimación.
+- **En la barra lateral**, debajo de «Gasto del mes», un cuadro «Claude ·
+  membresía» con una barra por ventana.
+- **Avisos al 70 % y al 90 %**: te avisa una vez por ventana (y en el móvil sale
+  «⚠ Claude N %» en la barra de módulos), para que un cupo agotado no te pille
+  a mitad de un guion.
+- **Configuración → «Consumo de Claude»**: el cupo de cada cuenta con «Medir
+  ahora», y en qué se ha gastado los últimos 7 días, por día, por tarea
+  (guion, ortografía, Parrilla, asistente…), por vídeo y por cuenta. El «≈ $
+  API» es lo que costaría por API: con la membresía no se cobra, sirve para
+  comparar.
+- Se mide solo cada 15 minutos mientras se usa Claude, con una llamada mínima
+  que apenas cuenta.
+
 **Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.

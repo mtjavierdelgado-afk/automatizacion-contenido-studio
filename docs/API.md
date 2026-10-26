@@ -353,6 +353,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
+| `GET` | `/api/claude/consumo` | El medidor de Claude (solo lee): el cupo de cada cuenta, los avisos al |
+| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: una llamada mínima por cuenta (haiku, una palabra) para |
 | `GET` | `/api/clientes` | Los proyectos (clientes) y a cual pertenece cada estilo. |
 | `POST` | `/api/clientes` | Un proyecto nuevo: {nombre}. |
 | `PUT` | `/api/clientes/estilos/{preset_id}` | Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca). |
@@ -492,4 +494,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**378 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**380 endpoints.** Escrito por `generar_api.py` desde `app.py`.

@@ -63,6 +63,7 @@ suites=(
   pasos/prueba_quitar_planos.py
   pasos/prueba_seo_real.py
   pasos/prueba_seo_canal.py
+  pasos/prueba_consumo_claude.py
   prueba_recorrido.py
 )
 

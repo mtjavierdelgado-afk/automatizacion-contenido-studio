@@ -2449,6 +2449,108 @@ def cola_del_studio(peticion: Request):
     return {**turnos, "trabajando": trabajando, "ahora": time.time()}
 
 
+# ========================================================== CONSUMO DE CLAUDE
+# rama medidor-claude (25-10-2026): el medidor de la membresía de Claude. El
+# cupo de verdad (ventana de 5 h y semana) lo da el propio CLI y lo guarda
+# `pasos/consumo_claude.py`; aquí solo se lee, se pide medir y se viste el
+# resumen (nombres de los vídeos, sin los de proyectos con clave sin abrir).
+try:
+    import consumo_claude as CONSUMO_CLAUDE  # noqa: E402  (pasos/ ya está en sys.path)
+except Exception:                                           # noqa: BLE001
+    CONSUMO_CLAUDE = None
+
+
+def _cuentas_para_medir():
+    try:
+        return list(CLI_CLAUDE.cuentas()) or [CLI_CLAUDE.POR_DEFECTO]
+    except Exception:                                       # noqa: BLE001
+        return [{"etiqueta": "", "config_dir": ""}]
+
+
+def _nombre_de_pid(pid, cerrados):
+    """Nombre de un vídeo sin abrir su contexto (un GET no crea nada)."""
+    with _LOCK:
+        ctx = _CONTEXTOS.get(pid)
+    if ctx is not None:
+        config = ctx.proyecto.config or {}
+        proyecto = ctx.proyecto
+    else:
+        if not ID_VALIDO.match(str(pid or "")) or str(pid).startswith("_"):
+            return None
+        try:
+            with open(os.path.join(raiz_proyectos(), pid, "proyecto.json"), "r", encoding="utf-8") as fh:
+                config = json.load(fh) or {}
+        except (OSError, ValueError):
+            return None
+        proyecto = type("P", (), {"config": config, "id": pid})()
+    if config.get(CONFIG_TALLER):
+        return {"nombre": f"estilo · {config.get('nombre') or pid}", "video": False}
+    if cerrados:
+        try:
+            if _cliente_del_video(proyecto) in cerrados:
+                return {"nombre": "un vídeo de un proyecto con clave", "video": False, "cerrado": True}
+        except Exception:                                   # noqa: BLE001
+            pass
+    return {"nombre": config.get("nombre") or pid, "video": True}
+
+
+def _consumo_de_claude(peticion):
+    cc = CONSUMO_CLAUDE
+    if cc is None:
+        raise ErrorApi(503, "el medidor de Claude no se ha podido cargar")
+    try:
+        cerrados = CLIENTES.cerrados_para(raiz_proyectos(), peticion.headers.get("x-estudio-abiertos"))
+    except Exception:                                       # noqa: BLE001
+        cerrados = set()
+    cuentas = _cuentas_para_medir()
+    claves = {cc.clave_de(c): cc.etiqueta_de(c) for c in cuentas}
+    todos = cc.leer_cupo()
+    cupo = [dict(todos.get(k) or {"cuenta": etiqueta, "estado": "sin_medir", "ventanas": {}}, clave=k)
+            for k, etiqueta in claves.items()]
+    resumen = cc.resumen()
+    for fila in resumen["por_video"]:
+        visto = _nombre_de_pid(fila["pid"], cerrados) or {"nombre": fila["pid"], "video": False}
+        fila.update(visto)
+        if visto.get("cerrado"):
+            fila["pid"] = ""
+    return {"cupo": cupo, "avisos": cc.avisos({c["clave"]: c for c in cupo}),
+            "resumen": resumen, "midiendo": cc.midiendo(),
+            "umbrales": {"ojo": cc.UMBRAL_OJO, "malo": cc.UMBRAL_MALO},
+            "nombres": cc.NOMBRES_VENTANA, "simulado": cc.simulado(), "ahora": time.time()}
+
+
+@app.get("/api/claude/consumo")
+def consumo_de_claude(peticion: Request):
+    """El medidor de Claude (solo lee): el cupo de cada cuenta, los avisos al
+    70 % y al 90 % y el consumo de los últimos días. Si toca (más de 15 min y
+    ha habido llamadas), lanza una medida en segundo plano: no espera a ella."""
+    if CONSUMO_CLAUDE is not None and not CONSUMO_CLAUDE.midiendo():
+        for cuenta in _cuentas_para_medir():
+            try:
+                if CONSUMO_CLAUDE.toca_medir(cuenta):
+                    CONSUMO_CLAUDE.medir_en_segundo_plano(cuenta)
+            except Exception:                               # noqa: BLE001
+                pass
+    return _consumo_de_claude(peticion)
+
+
+@app.post("/api/claude/consumo/medir")
+def medir_consumo_de_claude(peticion: Request):
+    """«Medir ahora»: una llamada mínima por cuenta (haiku, una palabra) para
+    leer su cupo. Espera a la medida (unos segundos)."""
+    if CONSUMO_CLAUDE is None:
+        raise ErrorApi(503, "el medidor de Claude no se ha podido cargar")
+    # a la vez y con tope: detrás del proxy una petición de un minuto se corta
+    hilos = [threading.Thread(target=CONSUMO_CLAUDE.medir, args=(c,), daemon=True)
+             for c in _cuentas_para_medir()]
+    for hilo in hilos:
+        hilo.start()
+    tope = time.time() + 50
+    for hilo in hilos:
+        hilo.join(max(0.1, tope - time.time()))
+    return _consumo_de_claude(peticion)
+
+
 @app.get("/api/trabajos/{tid}")
 def leer_trabajo(tid: str):
     """Estado y progreso de un trabajo."""

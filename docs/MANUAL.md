@@ -336,6 +336,16 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   coste antes). Los planos de ese estado editan su imagen, así que el objeto
   sale igual en todos. Sin la base y sus estados aprobados no se paga ningún
   plano que los edite.
+
+  **En español, y dónde se usa cada imagen:** lo que se manda a dibujar va en
+  inglés (los generadores lo siguen mejor), pero cada estado y lo que trae la
+  base se leen en **español**, con el inglés plegado debajo («En inglés (lo que
+  se manda a dibujar)»). Lo traduce Claude solo al abrir, con tu membresía y
+  sin tocar nada del vídeo. Debajo, **«Dónde se usa»**: los bloques del guion y
+  los planos de esa imagen. **✎ Cambiar** te deja reescribir el estado en
+  español: Claude lo pasa al inglés y se guarda. Antes de guardar te avisa de
+  que ese estado pierde su aprobación y hará falta otra imagen (y de cuántos
+  planos suyos quedarán para rehacer); no se dibuja nada hasta que lo pidas.
 - **Qué dibujan las imágenes** (opcional): **lo que dice la voz** (por defecto:
   cada imagen ilustra su frase) o **lo que dice el guion**: cada imagen sigue su
   línea del **guion visual** y la voz solo marca los tiempos. El guion visual

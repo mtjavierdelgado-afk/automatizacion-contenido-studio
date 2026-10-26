@@ -9346,6 +9346,19 @@ function leerRelatoDelServidor(est, d) {
   est.copia = tipoRelatoDelEncargo((d || {}).tipo_relato);
   est.cambios = (d || {}).cambios || null;
   est.marcados = new Set(((est.cambios || {}).planos || []).map(x => x.id));
+  traduccionAlLeerRelato(est);
+}
+
+/* Lo que falte en español se pide solo al abrir (una vez: tras un error no se
+   reintenta solo, lo decide el servidor con `auto`), y si ya se está
+   traduciendo se sigue hasta que acabe. */
+function traduccionAlLeerRelato(est) {
+  const t = (est.ficha || {}).traduccion || {};
+  if (t.estado === 'pensando') seguirTraduccionRelato(est);
+  else if (t.faltan > 0 && t.estado !== 'error' && !est.autoTraducido) {
+    est.autoTraducido = true;
+    traducirRelato(true, est);
+  }
 }
 
 function bloqueTipoRelatoDelVideo() {
@@ -9403,6 +9416,8 @@ function imagenBaseDelRelato(est, corriendo) {
     ? '✓ Aprobada: cada plano del sitio se genera editando esta imagen.'
     : (base ? 'Sin aprobar: mírala y apruébala antes de generar los planos.'
       : 'Sin imagen base: los planos de este sitio no se generan hasta que la apruebes.')));
+  const dondeBase = dondeSeUsaRelato(f.donde_base);
+  if (dondeBase) caja.appendChild(dondeBase);
   const fila = h('div', { clase: 'fila' });
   if (base && !f.base_aprobada) {
     fila.appendChild(h('button', { clase: 'mini primario', disabled: est.ocupado,
@@ -9422,8 +9437,9 @@ function imagenBaseDelRelato(est, corriendo) {
   caja.appendChild(fila);
   if (f.base_aprobada && (f.estados || []).length) caja.appendChild(estadosDelRelato(est, corriendo, usd));
   if (f.inicial) {
-    caja.appendChild(h('div', { clase: 'meta' }, `Lo que luego cambia sale ya en la base, así: «${f.inicial}». `
-      + 'Comprueba que está donde va antes de aprobarla.'));
+    caja.appendChild(h('div', { clase: 'meta' }, 'Lo que luego cambia sale ya en la base, así. '
+      + 'Comprueba que está donde va antes de aprobarla:'));
+    caja.appendChild(textoRelatoEnEspanol(est, f.inicial_es, f.inicial, ''));
   }
   caja.appendChild(h('div', { clase: 'pista' }, 'Qué hay en el sitio y dónde lo dice «El espacio '
     + 'fijo»; aquí se dibuja y se aprueba. La imagen base es el sitio vacío y entero, en su '
@@ -9511,9 +9527,12 @@ function estadosDelRelato(est, corriendo, usd) {
         title: 'Abrir a tamaño completo' },
       h('img', { src: url, alt: `el estado ${e.estado}`, clase: 'miniatura-imagen-base' })));
     }
+    const editando = est.editandoEstado && est.editandoEstado.estado === e.estado;
     const lado = h('div', { clase: 'estado-relato-texto' },
       h('strong', {}, e.estado.replace(/_/g, ' ')),
-      h('div', { clase: 'meta' }, e.cambio),
+      editando ? editorEstadoRelato(est, e, usd)
+        : textoRelatoEnEspanol(est, e.cambio_es, e.cambio, e.estado),
+      dondeSeUsaRelato(e.donde),
       h('div', { clase: 'meta' }, e.aprobada ? '✓ Aprobado.'
         : (e.imagen_url && e.vigente ? 'Sin aprobar: míralo y apruébalo.'
           : (e.imagen_url ? 'El cambio se ha reescrito: hace falta otra imagen.'
@@ -9530,11 +9549,221 @@ function estadosDelRelato(est, corriendo, usd) {
     botones.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
       onclick: () => generarEstadoDelRelato(e.estado, !!e.imagen_url, usd) },
     `${e.imagen_url ? 'Otra imagen' : 'Dibujar este estado'} · ≈ ${usdCorto(usd)}`));
+    if (!editando) {
+      botones.appendChild(h('button', { clase: 'mini fantasma',
+        disabled: est.ocupado || corriendo || traduciendoRelato(est),
+        onclick: () => { est.editandoEstado = { estado: e.estado, texto: e.cambio_es || '' }; pintarLight(); } },
+      '✎ Cambiar'));
+    }
     lado.appendChild(botones);
     fila.appendChild(lado);
     caja.appendChild(fila);
   }
   return caja;
+}
+
+/* EN ESPAÑOL, DÓNDE SE USA Y CAMBIAR (rama estados-en-espanol, 22-10). Lo que
+   se manda a dibujar sigue en inglés; aquí se lee en español (traducido por
+   Claude con la membresía y guardado aparte, sin tocar ninguna firma) con el
+   inglés plegado debajo, y se reescribe en español: el servidor lo pasa al
+   inglés. Mientras Claude traduce, la ficha se vuelve a leer sola. */
+function traduciendoRelato(est) {
+  return ((est.ficha || {}).traduccion || {}).estado === 'pensando';
+}
+
+function textoRelatoEnEspanol(est, es, en, estado) {
+  if (!en) return null;
+  const t = (est.ficha || {}).traduccion || {};
+  const caja = h('div', { clase: 'relato-es' });
+  if (t.estado === 'pensando' && t.tipo === 'editar' && t.estado_relato === estado) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Pasando tu cambio al inglés…'));
+    // mientras tanto se enseña lo que se acaba de escribir, no lo de antes
+    if (est.pendienteEstado && est.pendienteEstado.estado === estado) es = est.pendienteEstado.texto;
+  }
+  if (es) {
+    caja.appendChild(h('div', { clase: 'relato-es-texto' }, es));
+    caja.appendChild(h('details', { clase: 'relato-es-ingles' },
+      h('summary', {}, 'En inglés (lo que se manda a dibujar)'),
+      h('div', { clase: 'meta' }, en)));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'meta' }, en));
+  if (t.estado === 'pensando' && t.tipo === 'traducir') {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Traduciendo al español…'));
+  } else {
+    if (t.estado === 'error' && t.error) {
+      caja.appendChild(h('div', { clase: 'pista' }, `No se ha podido traducir: ${partirError(t.error).titular}`));
+    }
+    caja.appendChild(h('div', { clase: 'fila' }, h('button', { clase: 'mini',
+      disabled: est.ocupado || traduciendoRelato(est), onclick: () => traducirRelato(false, est) },
+    'Traducir al español'), h('span', { clase: 'meta' }, 'gratis: lo hace Claude con tu membresía')));
+  }
+  return caja;
+}
+
+function dondeSeUsaRelato(donde) {
+  const d = donde || {};
+  const bloques = d.bloques || [];
+  const planos = d.planos || [];
+  if (!bloques.length && !planos.length) return null;
+  const caja = h('div', { clase: 'relato-donde' }, h('span', { clase: 'relato-donde-titulo' }, 'Dónde se usa'));
+  bloques.slice(0, 3).forEach(b => caja.appendChild(
+    h('div', { clase: 'meta' }, `Bloque ${b.n} · «${b.texto}»`)));
+  if (bloques.length > 3) caja.appendChild(h('div', { clase: 'meta' }, `y ${bloques.length - 3} bloques más`));
+  caja.appendChild(h('div', { clase: 'meta' }, planos.length
+    ? `${planos.length === 1 ? 'Plano' : 'Planos'}: ${planos.join(', ')}`
+    : 'Todavía no hay planos hechos con esta imagen.'));
+  return caja;
+}
+
+function editorEstadoRelato(est, e, usd) {
+  const ed = est.editandoEstado;
+  const area = h('textarea', { rows: 3, value: ed.texto,
+    'aria-label': `qué cambia en el estado ${e.estado}`,
+    placeholder: 'Describe en español qué cambia en este estado: materiales, colores, muebles…',
+    oninput: ev => { ed.texto = ev.target.value; } });
+  return h('div', { clase: 'relato-editor' },
+    area,
+    h('div', { clase: 'pista' }, 'Escríbelo en español: Claude lo pasa al inglés, que es lo que se manda '
+      + 'a dibujar. Al guardarlo, este estado necesitará otra imagen; no se dibuja nada hasta que la pidas.'),
+    h('details', { clase: 'relato-es-ingles' },
+      h('summary', {}, 'Ahora, en inglés'), h('div', { clase: 'meta' }, e.cambio)),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini primario', disabled: est.ocupado || traduciendoRelato(est),
+        onclick: () => guardarEstadoRelato(est, e, usd) }, 'Guardar el cambio'),
+      h('button', { clase: 'mini fantasma', onclick: () => { est.editandoEstado = null; pintarLight(); } },
+        'Cancelar')));
+}
+
+async function traducirRelato(auto, est) {
+  est = est || relatoDelVideoLight();
+  const pid = est.pid;
+  try {
+    const d = await pedir(`${API.proyecto(pid)}/tipo_relato/traducir`,
+      { method: 'POST', cuerpo: { auto: !!auto } });
+    if (!est.ficha || APP.light.video.relato !== est) return;
+    est.ficha = d;
+    pintarLight();
+    seguirTraduccionRelato(est);
+  } catch (err) {
+    if (!auto) toast(err.message, true);
+  }
+}
+
+async function guardarEstadoRelato(est, e, usd) {
+  const ed = est.editandoEstado;
+  const texto = String((ed || {}).texto || '').trim();
+  if (!texto) { toast('escribe el cambio en español antes de guardarlo', true); return; }
+  if (texto === (e.cambio_es || '').trim()) { est.editandoEstado = null; pintarLight(); return; }
+  const planos = ((e.donde || {}).planos || []).length;
+  const lineas = [`Guardar el cambio del estado «${e.estado.replace(/_/g, ' ')}»`, '',
+    'Claude lo pasa al inglés (gratis, con tu membresía). Después:'];
+  if (e.imagen_url) {
+    lineas.push(`· este estado pierde su aprobación y hará falta otra imagen (≈ ${usdCorto(usd)}, `
+      + 'solo cuando la pidas)');
+  }
+  if (planos) {
+    lineas.push(`· ${planos === 1 ? 'su plano quedará' : `sus ${planos} planos quedarán`} para rehacer `
+      + `(≈ ${usdCorto(planos * usd)} si ${planos === 1 ? 'lo rehaces' : 'los rehaces'})`);
+  }
+  lineas.push('· los demás planos conservan su imagen: «Imágenes» puede contarlos como pendientes, '
+    + 'pero al ponerlos al día salen de la caché sin pagar');
+  lineas.push('', 'No se dibuja nada ahora.');
+  if (!confirm(lineas.join('\n'))) return;
+  const pid = est.pid;
+  est.ocupado = true;
+  pintarLight();
+  try {
+    const d = await pedir(`${API.proyecto(pid)}/tipo_relato/estado/editar`,
+      { method: 'POST', cuerpo: { estado: e.estado, es: texto } });
+    if (APP.light.video.relato === est) {
+      est.ficha = d;
+      est.pendienteEstado = { estado: e.estado, texto };
+      est.recargarAlTraducir = true;
+      // el editor se cierra solo si va bien (`terminarTraduccionRelato`): con
+      // un error tu texto sigue ahí para volver a guardarlo
+      if (traduciendoRelato(est)) est.editandoEstado = null;
+      if (traduciendoRelato(est)) seguirTraduccionRelato(est);
+      else terminarTraduccionRelato(est, d);
+    }
+  } catch (err) {
+    toast(err.message, true);
+  }
+  est.ocupado = false;
+  pintarLight();
+}
+
+/* Mientras Claude traduce, se vuelve a leer la ficha cada dos segundos. Solo
+   la ficha: lo elegido en la pantalla (el modo sin aplicar, los planos
+   marcados) no se pisa. Al terminar una EDICIÓN sí se lee todo, porque cambian
+   los planos que habría que rehacer. */
+function seguirTraduccionRelato(est) {
+  if (est.siguiendoTraduccion || !traduciendoRelato(est)) return;
+  est.siguiendoTraduccion = true;
+  const pid = est.pid;
+  let fallos = 0;
+  const vuelta = async () => {
+    if (APP.light.video.relato !== est || est.pid !== pid) { est.siguiendoTraduccion = false; return; }
+    try {
+      // ligero: sin recalcular los planos que cambian (lee cada imagen)
+      const d = await pedir(`${API.proyecto(pid)}/tipo_relato?ligero=1`);
+      if (APP.light.video.relato !== est) { est.siguiendoTraduccion = false; return; }
+      fallos = 0;
+      if ((d.traduccion || {}).estado === 'pensando') {
+        est.ficha = Object.assign({}, d, { cambios: est.cambios });
+        setTimeout(vuelta, 2000);
+        return;
+      }
+      est.siguiendoTraduccion = false;
+      if (est.recargarAlTraducir) {
+        // al terminar una edición, la ficha entera (cambian los planos a rehacer)
+        terminarTraduccionRelato(est, await pedir(`${API.proyecto(pid)}/tipo_relato`));
+      } else {
+        est.ficha = d;
+        pintarLight();
+      }
+    } catch (_err) {
+      // UN CORTE DE RED NO DEJA LA PANTALLA «PENSANDO» PARA SIEMPRE: se
+      // reintenta con más espera, y pasados unos intentos se deja de
+      // preguntar y se suelta el «pensando» de la pantalla
+      fallos += 1;
+      if (fallos < 6 && APP.light.video.relato === est) { setTimeout(vuelta, 2000 * fallos); return; }
+      est.siguiendoTraduccion = false;
+      if (est.ficha && est.ficha.traduccion) {
+        est.ficha.traduccion = Object.assign({}, est.ficha.traduccion,
+          { estado: 'error', error: 'Se ha perdido la conexión con el Studio mientras se traducía: '
+            + 'recarga la página para ver cómo quedó.' });
+      }
+      est.recargarAlTraducir = false;
+      est.pendienteEstado = null;
+      pintarLight();
+    }
+  };
+  setTimeout(vuelta, 2000);
+}
+
+/* Lo que pasa cuando la traducción o la edición termina, haya llegado con la
+   respuesta del POST (un error en el acto) o al preguntar. */
+function terminarTraduccionRelato(est, d) {
+  const t = (d || {}).traduccion || {};
+  const texto = (est.pendienteEstado || {}).texto;
+  const estado = (est.pendienteEstado || {}).estado;
+  est.pendienteEstado = null;
+  if (est.recargarAlTraducir) {
+    est.recargarAlTraducir = false;
+    leerRelatoDelServidor(est, d);
+    if (t.tipo === 'editar' && t.estado === 'error') {
+      // tu texto vuelve al editor, para corregirlo o volver a guardarlo
+      if (estado) est.editandoEstado = { estado, texto: texto || '' };
+      toast(`No se ha guardado: ${partirError(t.error).titular}`, true);
+    } else if (t.tipo === 'editar') {
+      est.editandoEstado = null;
+      toast('cambio guardado: falta su imagen nueva');
+    }
+  } else {
+    est.ficha = d;
+  }
+  pintarLight();
 }
 
 function aprobarEstadoDelRelato(estado, aprobada) {

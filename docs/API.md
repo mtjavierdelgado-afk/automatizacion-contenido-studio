@@ -59,10 +59,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
 | `POST` | `/api/proyectos/{pid}/planos/devolver` | Deshace «Quitar esta imagen». {narracion: lo que decía la imagen quitada} |
 | `GET` | `/api/proyectos/{pid}/planos/elementos` | {planos: {sid: [elementos]}, no_aplica, tipos, entradas, intensidades, |
+| `POST` | `/api/proyectos/{pid}/planos/insertadas/deshacer` | Quita una imagen insertada: el plano del que salió recupera toda su voz, |
+| `GET` | `/api/proyectos/{pid}/planos/insertar` | Cómo va la última imagen insertada y lo que cuesta una. -> {estado, |
 | `GET` | `/api/proyectos/{pid}/planos/montaje` | {video, planos: {sid: {movimiento?, profundidad?}}, no_aplica, niveles, profundidad} |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/elementos` | {elementos: [...]} de UN plano (vacia, los quita). Deja pendientes ese |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/nota-ia` | LA OTRA OPCION (se paga al aplicarla): una nota de imagen que pide |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/vista` | La imagen del plano con sus elementos encima, quietos (todos a la vez), |
+| `POST` | `/api/proyectos/{pid}/planos/{sid}/insertar` | Inserta una imagen nueva en `sid`. {palabra, que, usd} |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | {movimiento?: quieto|sobrio|vivo|dinamico|null, profundidad?: true|false|null} |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/quitar` | Quita la imagen `sid`: su voz pasa a la de antes o a la de después. |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
@@ -494,4 +497,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**380 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**383 endpoints.** Escrito por `generar_api.py` desde `app.py`.

@@ -14378,7 +14378,8 @@ function ajustarImagenDelPlano(e, escenas) {
   const ant = i > 0 ? escenas[i - 1] : null;
   const sig = i >= 0 && i + 1 < escenas.length ? escenas[i + 1] : null;
   const conImagen = x => x && x.imagen && !x.cartela;
-  if (!absorbe.length && !q.anterior && !q.siguiente && !conImagen(ant) && !conImagen(sig)) return null;
+  if (!absorbe.length && !q.anterior && !q.siguiente && !conImagen(ant) && !conImagen(sig)
+      && !e.insertar && !e.insertada) return null;
   const caja = h('div', { clase: 'ajustar-imagen' },
     h('span', { clase: 'ajustar-imagen-titulo' }, 'Ajustar esta imagen'));
   absorbe.forEach(a => caja.appendChild(h('div', { clase: 'fila ajustar-absorbe' },
@@ -14386,6 +14387,7 @@ function ajustarImagenDelPlano(e, escenas) {
       + `«${recortar(legible(a.narracion), 90)}»`),
     h('button', { clase: 'mini', disabled: PREVIA.guardando || !!trabajoVideoLight(),
       onclick: () => devolverImagenQuitada(a) }, `Deshacer · volver a poner ${a.id}`))));
+  const insertada = imagenInsertadaDelPlano(e); if (insertada) caja.appendChild(insertada); // insertar-imagen
   const fila = h('div', { clase: 'fila' });
   [['anterior', ant], ['siguiente', sig]].forEach(([lado, vecino]) => {
     if (!conImagen(vecino) || !e.imagen) return;
@@ -14404,7 +14406,13 @@ function ajustarImagenDelPlano(e, escenas) {
       onclick: () => { PREVIA.quitando = PREVIA.quitando === e.id ? null : e.id; repintarVideo(); } },
     'Quitar esta imagen…'));
   }
+  if (e.insertar) {
+    fila.appendChild(h('button', { clase: 'mini fantasma',
+      disabled: PREVIA.guardando || !!trabajoVideoLight() || INSERTAR.estado === 'pensando',
+      onclick: () => abrirInsertarImagen(e) }, 'Insertar una imagen aquí…'));
+  }
   if (fila.childNodes.length) caja.appendChild(fila);
+  const panelInsertar = panelInsertarImagen(e); if (panelInsertar) caja.appendChild(panelInsertar);
   if (PREVIA.quitando === e.id) {
     const elegir = h('div', { clase: 'ajustar-quitar' },
       h('div', { clase: 'meta' }, `Lo que se oye en ${e.id} pasa a la imagen de al lado, que se alarga `
@@ -14489,6 +14497,155 @@ async function devolverImagenQuitada(a) {
       { method: 'POST', cuerpo: { narracion: a.narracion, n: a.n || 0 } });
     seguirPasadaDeCorte(v.pid, d.trabajo, a.id,
       `${a.id} vuelve a estar. Monta el vídeo para verlo (gratis)`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+  PREVIA.guardando = false;
+  repintarVideo();
+}
+
+/* INSERTAR UNA IMAGEN (rama insertar-imagen, 26-10). Lo contrario de quitar:
+   se pulsa la palabra de la frase donde empieza la imagen nueva y se escribe
+   qué se ve. La de antes conserva su dibujo; la nueva (S004B) se dibuja sola:
+   UNA imagen, con su precio confirmado antes. Deshacer es gratis.
+   `INSERTAR.abierto` es el plano con el panel abierto, y lo escrito vive aquí
+   (nunca como param) hasta que se pulsa insertar. */
+const INSERTAR = { abierto: '', palabra: 0, que: '', precio: null, estado: '', siguiendo: false };
+
+async function abrirInsertarImagen(e) {
+  if (INSERTAR.abierto === e.id) { INSERTAR.abierto = ''; repintarVideo(); return; }
+  Object.assign(INSERTAR, { abierto: e.id, palabra: 0, que: '', precio: null });
+  PREVIA.quitando = null;
+  repintarVideo();
+  try {
+    const d = await pedir(`${API.proyecto(videoAbierto().pid)}/planos/insertar`);
+    INSERTAR.precio = d.precio || null;
+  } catch (err) {
+    toast(`no se ha podido saber el precio: ${err.message}`, true);
+  }
+  repintarVideo();
+}
+
+function panelInsertarImagen(e) {
+  if (INSERTAR.abierto !== e.id || !e.insertar) return null;
+  const palabras = (e.insertar.palabras || []).map(legible);
+  const caja = h('div', { clase: 'insertar-imagen' },
+    h('div', { clase: 'meta' }, `Pulsa la palabra donde empieza la imagen nueva. ${e.id} conserva su `
+      + 'dibujo y se queda con lo de antes; la nueva, con el mismo sitio y estilo, se queda con el resto.'));
+  const chips = h('div', { clase: 'insertar-palabras' });
+  palabras.forEach((p, k) => {
+    chips.appendChild(h('button', {
+      clase: `mini insertar-palabra${k === INSERTAR.palabra ? ' sel' : ''}${k && k >= INSERTAR.palabra && INSERTAR.palabra ? ' nueva' : ''}`,
+      type: 'button', disabled: k === 0, 'aria-pressed': k === INSERTAR.palabra ? 'true' : 'false',
+      title: k === 0 ? 'La imagen nueva no puede empezar en la primera palabra' : `La nueva empieza en «${p}»`,
+      onclick: () => { INSERTAR.palabra = k; repintarVideo(); } }, p));
+  });
+  caja.appendChild(chips);
+  if (INSERTAR.palabra) {
+    caja.appendChild(h('div', { clase: 'meta insertar-reparto' },
+      `${e.id}: «${recortar(palabras.slice(0, INSERTAR.palabra).join(' '), 80)}» · `
+      + `nueva: «${recortar(palabras.slice(INSERTAR.palabra).join(' '), 80)}»`));
+  }
+  caja.appendChild(h('label', { clase: 'meta' }, 'Qué quieres que se vea en la imagen nueva'));
+  caja.appendChild(h('textarea', { clase: 'insertar-que', rows: 2, maxlength: 400,
+    placeholder: 'Por ejemplo: las baldosas grises de cerca, con la junta sucia',
+    oninput: ev => {
+      INSERTAR.que = ev.target.value;
+      const b = caja.querySelector('button[data-accion=insertar-imagen]');
+      if (b) b.disabled = !puedeInsertar();
+    } }, INSERTAR.que));
+  const precio = INSERTAR.precio;
+  caja.appendChild(h('div', { clase: 'meta' }, precio
+    ? `Se dibuja UNA imagen: ≈ ${usdCorto(precio.usd)} (calidad ${precio.calidad}). Deshacerla es gratis.`
+    : 'Mirando lo que cuesta una imagen…'));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini primario', type: 'button', datos: { accion: 'insertar-imagen' },
+      disabled: !puedeInsertar(), onclick: () => insertarImagen(e) },
+    INSERTAR.estado === 'pensando' ? 'Preparándola…'
+      : `Insertar y dibujarla${precio ? ` (≈ ${usdCorto(precio.usd)})` : ''}`),
+    h('button', { clase: 'mini fantasma', type: 'button',
+      onclick: () => { INSERTAR.abierto = ''; repintarVideo(); } }, 'Cancelar')));
+  return caja;
+}
+
+function puedeInsertar() {
+  return !!(INSERTAR.palabra && INSERTAR.que.trim() && INSERTAR.precio
+    && INSERTAR.estado !== 'pensando' && !PREVIA.guardando && !trabajoVideoLight());
+}
+
+async function insertarImagen(e) {
+  const pid = videoAbierto().pid;
+  const precio = INSERTAR.precio;
+  if (!puedeInsertar()) return;
+  if (!confirm(`Se va a dibujar UNA imagen nueva en ${e.id} (≈ ${usdCorto(precio.usd)}). ¿Seguimos?`)) return;
+  INSERTAR.estado = 'pensando';
+  repintarVideo();
+  try {
+    await pedir(`${API.proyecto(pid)}/planos/${encodeURIComponent(e.id)}/insertar`,
+      { method: 'POST', cuerpo: { palabra: INSERTAR.palabra, que: INSERTAR.que.trim(), usd: precio.usd } });
+    seguirInsercion(pid, e.id);
+  } catch (err) {
+    INSERTAR.estado = '';
+    toast(err.message, true);
+    repintarVideo();
+  }
+}
+
+/* Claude pasa lo escrito al inglés en el servidor (segundos): se pregunta
+   hasta que se lanza la tanda, y entonces se sigue como la de quitar. */
+function seguirInsercion(pid, sid) {
+  if (INSERTAR.siguiendo) return;
+  INSERTAR.siguiendo = true;
+  let fallos = 0;
+  const vuelta = async () => {
+    try {
+      const d = await pedir(`${API.proyecto(pid)}/planos/insertar`);
+      fallos = 0;
+      if (d.estado === 'pensando') { setTimeout(vuelta, 1500); return; }
+      INSERTAR.siguiendo = false;
+      INSERTAR.estado = '';
+      if (d.estado === 'error') {
+        toast(d.error || 'no se ha podido insertar la imagen', true);
+      } else if (d.estado === 'lanzado' && d.trabajo_id) {
+        INSERTAR.abierto = '';
+        INSERTAR.que = '';
+        toast(`dibujando ${d.nuevo}…`);
+        seguirPasadaDeCorte(pid, d.trabajo_id, d.nuevo,
+          `${d.nuevo} dibujada. Monta el vídeo para verla (el montaje es gratis)`);
+      }
+    } catch (_err) {
+      fallos += 1;
+      if (fallos < 6) { setTimeout(vuelta, 1500 * fallos); return; }
+      INSERTAR.siguiendo = false;
+      INSERTAR.estado = '';
+      toast('Se ha perdido la conexión con el Studio: recarga la página para ver cómo quedó.', true);
+    }
+    if (videoAbierto().pid === pid) repintarVideo();
+  };
+  setTimeout(vuelta, 1000);
+}
+
+function imagenInsertadaDelPlano(e) {
+  const ins = e.insertada;
+  if (!ins) return null;
+  return h('div', { clase: 'fila ajustar-absorbe' },
+    h('span', { clase: 'meta crece' }, `Imagen insertada en ${ins.en}`
+      + (ins.que ? `: «${recortar(ins.que, 90)}»` : '')),
+    h('button', { clase: 'mini', disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => deshacerImagenInsertada(e) }, 'Deshacer · quitar esta imagen nueva'));
+}
+
+async function deshacerImagenInsertada(e) {
+  const v = videoAbierto();
+  const ins = e.insertada || {};
+  if (!confirm(`¿Quitar ${e.id}? ${ins.en} recupera toda su voz con su dibujo de siempre. Gratis.`)) return;
+  PREVIA.guardando = true;
+  repintarVideo();
+  try {
+    const d = await pedir(`${API.proyecto(v.pid)}/planos/insertadas/deshacer`,
+      { method: 'POST', cuerpo: { texto: ins.texto, n: ins.n || 0, palabra: ins.palabra } });
+    seguirPasadaDeCorte(v.pid, d.trabajo, ins.en,
+      `${e.id} quitada: ${ins.en} vuelve a tener toda su voz. Monta el vídeo para verlo (gratis)`);
   } catch (err) {
     toast(err.message, true);
   }

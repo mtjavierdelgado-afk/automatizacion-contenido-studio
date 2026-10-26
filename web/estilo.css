@@ -5427,6 +5427,17 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   border: 1px dashed var(--acento); }
 
 
+
+/* ---- INSERTAR UNA IMAGEN (rama insertar-imagen, 26-10): la palabra donde
+   empieza la nueva, lo que se ve y su precio */
+.insertar-imagen { display: flex; flex-direction: column; gap: 8px; margin-top: 8px;
+  padding: 10px 12px; border: 1px dashed var(--linea); border-radius: 10px; }
+.insertar-palabras { display: flex; flex-wrap: wrap; gap: 6px; }
+.insertar-palabra.nueva { border-color: var(--acento); }
+.insertar-palabra.sel { background: var(--acento-relleno); color: var(--texto); }
+.insertar-que { width: 100%; box-sizing: border-box; resize: vertical; }
+.insertar-reparto { overflow-wrap: anywhere; }
+
 /* ========================================================== MEDIDOR DE CLAUDE
    rama medidor-claude (25-10-2026): el cuadro «Claude · membresía» de la
    barra lateral (reutiliza `.gasto-menu`), la pastilla de aviso del móvil y la

@@ -429,6 +429,12 @@ alarga y conserva su dibujo: gratis, sin cambiar los números de las demás.
 Después hay que **volver a montar** el vídeo (gratis). La imagen que se lleva la
 voz lo dice («Lleva también la voz de S002») con su botón **Deshacer**, que la
 devuelve con su misma imagen. Las cartelas no se quitan ni reciben voz.
+**Insertar una imagen aquí…** hace lo contrario: pulsas la palabra donde
+empieza la imagen nueva y escribes qué quieres que se vea. La de antes conserva
+su dibujo y se queda con lo de antes; la nueva (**S004B**, sin cambiar los
+números de las demás) se dibuja sola: **se paga una imagen**, y te pregunta con
+el precio. Su diapositiva dice «Imagen insertada en S004» con **Deshacer**, que
+es gratis.
 
 **Retocar o dibujar desde cero.** «Rehacer esta imagen» **retoca** la de ahora:
 es lo mejor para cambios pequeños («que lleve gafas», «más luz»). Para un

@@ -24,6 +24,41 @@ vídeos, estilos, claves y contraseña no se tocan.
   gasta créditos de tu plan de vidIQ, por eso todo es a pedido con un botón.
   Solo consulta y puntúa: publicar, subir o generar con vidIQ está bloqueado.
 
+**Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
+está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
+cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
+
+**Portadas: los avisos se pueden cerrar (25 de octubre)**
+- En el editor de portadas, el aviso va en su fila, debajo de los botones de
+  arriba (antes tapaba la cabecera).
+- **Lo que sale bien se va solo** a los 6 segundos.
+- **Un error se queda** hasta que lo cierras con su **✕** o hasta que lo mismo
+  sale bien (entonces lo sustituye el aviso bueno).
+- El error se dice **en una línea con qué hacer** (por ejemplo, si OpenAI
+  rechaza la imagen: elegir un plano sin personas con poca ropa, marcas o
+  logos, o usar el texto en capas), y el texto técnico va plegado en «Ver
+  detalle».
+- **«Avisos (N)»** guarda los últimos 10 del editor, con su hora, mientras
+  sigas con el mismo vídeo: cerrar uno no lo borra de ahí.
+- Si cierras el editor mientras la IA o Claude trabajan, el resultado sale en
+  el aviso flotante de siempre, para que no se pierda.
+
+**Varios vídeos a la vez: la cola de montaje y la «Cola del Studio» (25 de octubre)**
+- **El montaje va de uno en uno**, como ya iban las imágenes. Puedes lanzar
+  varios vídeos seguidos: el que llega mientras otro se monta espera su turno
+  solo, y la barra dice a quién espera y en qué puesto va («esperando turno de
+  montaje: se está montando «…» (vas 2.º en la fila)»). Así cada vídeo sale
+  antes: dos montajes a la vez se repartían la máquina y terminaban los dos al
+  final. Mientras espera se puede cancelar.
+- **«Solo montar»** (volver a mezclar sobre los clips que ya hay, segundos) no
+  espera.
+- **Las imágenes y el montaje atienden por orden de llegada**: el primero que
+  pidió turno es el primero en entrar.
+- **Nuevo botón «⏳ Cola»** en la barra de módulos, con cuántos vídeos están
+  trabajando. Abre un panel con qué se está dibujando, qué se está montando,
+  quién espera y en qué orden, y todo lo demás que está en marcha (guion, voz…),
+  con «Abrir» para ir al vídeo y «Cancelar».
+
 **«Pasar al Encargo» con el formulario limpio (22 de octubre)**
 - Si tenías un vídeo abierto en Crear (por ejemplo, montándose) y pasabas otro
   guion desde la Parrilla, la pantalla seguía enseñando el vídeo de antes y no

@@ -283,7 +283,7 @@ def herramientas(web, carpeta_aislada, con_imagenes, vidiq=False):
     if vidiq:
         # solo las de consultar; lo que publica o gasta mucho, vetado por nombre
         permitidas += list(VIDIQ.permitidas_cli(VIDIQ.PARA_IDEAS))
-        vetadas += VIDIQ.VETADAS
+        vetadas += VIDIQ.VETADAS_CLI + VIDIQ.VETADAS
     return tuple(permitidas), vetadas
 
 
@@ -503,7 +503,8 @@ class Chat:
                 except RuntimeError as fallo:
                     if avance.cancelado:
                         raise
-                    print(f"[guionista] no se pudo reanudar {sesion[:8]} ({str(fallo)[:120]}): "
+                    print(f"[guionista] no se pudo reanudar {sesion[:8]} "
+                          f"({VIDIQ.tachar(str(fallo))[:120] if vidiq else str(fallo)[:120]}): "
                           "se vuelve a empezar con lo hablado", flush=True)
                     respuesta_texto = None
             if respuesta_texto is None:
@@ -530,7 +531,8 @@ class Chat:
             with self._lock:
                 respuesta.update({
                     "estado": "cancelado" if avance.cancelado else "error",
-                    "texto": "parado" if avance.cancelado else f"no ha podido contestar: {str(fallo)[:500]}",
+                    "texto": "parado" if avance.cancelado else "no ha podido contestar: " + (
+                        VIDIQ.tachar(str(fallo)) if vidiq else str(fallo))[:500],
                     "segundos": round(time.time() - inicio, 1)})
         finally:
             VIDIQ.borrar_fichero(ruta_mcp)

@@ -117,6 +117,14 @@ def prueba_lista_y_fichero():
     ok(not os.path.exists(ruta), "y se borra")
     V.borrar_fichero(ruta)
     ok(True, "borrar dos veces no falla")
+    viejo = V.fichero_mcp(CLAVE)
+    os.utime(viejo, (0, 0))
+    nuevo = V.fichero_mcp(CLAVE)
+    ok(not os.path.exists(viejo) and os.path.exists(nuevo),
+       "el que dejó una llamada cortada de golpe se barre al crear el siguiente")
+    V.borrar_fichero(nuevo)
+    if os.name != "nt":
+        igual(stat.S_IMODE(os.stat(os.path.dirname(nuevo)).st_mode), 0o700, "en una carpeta propia (0700)")
 
     seccion("3] la clave no sale nunca en un mensaje")
     texto = V.tachar(f"401 para {CLAVE}: Authorization: Bearer {CLAVE}", CLAVE)
@@ -159,6 +167,8 @@ def prueba_probar():
         k = doble.llamadas[-1]["kw"]
         igual(k["herramientas_permitidas"], ("mcp__vidiq__vidiq_balance",), "solo con «vidiq_balance»")
         igual((k["modelo"], k["esfuerzo"]), ("haiku", "low"), "con haiku: es una palabra")
+        extra = k["extra"]
+        igual(extra[extra.index("--max-turns") + 1], str(V.VUELTAS["probar"]), "con tope de vueltas")
         ok("--strict-mcp-config" not in (k["extra"] or []), "(el estricto ya lo pone cli_claude)")
         igual(doble.llamadas[-1]["contenido"]["mcpServers"]["vidiq"]["headers"]["Authorization"],
               f"Bearer {CLAVE}", "el fichero llevaba la clave mientras se llamaba")
@@ -221,6 +231,10 @@ def prueba_titulo():
         ok(all(x in k["herramientas_vetadas"] for x in V.VETADAS + ("Bash", "Read", "WebFetch", "Agent")),
            "con todo lo demás vetado")
         ok("--no-session-persistence" in k["extra"], "sin dejar sesión guardada")
+        igual(k["extra"][k["extra"].index("--max-turns") + 1], str(V.VUELTAS["titulo"]),
+              "con tope de vueltas: no puede seguir consultando (y gastando) sin fin")
+        ok("ListMcpResourcesTool" in k["herramientas_vetadas"] and "ReadMcpResourceTool" in k["herramientas_vetadas"],
+           "ni leer recursos MCP")
         igual(k["cwd"], V.carpeta_aislada(), "en una carpeta vacía (sin CLAUDE.md de arriba)")
         ok(k["sistema"] and "\n" not in k["sistema"], "el sistema cabe en una línea")
         ins = doble.llamadas[-1]["instruccion"]
@@ -249,6 +263,23 @@ def prueba_titulo():
             V._TRABAJANDO.pop("v1", None)
     finally:
         cli_claude.ejecutar = viejo
+    # si no se puede arrancar el hilo, el vídeo no se queda en 409 para siempre
+    import threading as _th
+    viejo_hilo = V.threading.Thread
+
+    class SinHilo:
+        def __init__(self, *a, **k):
+            pass
+
+        def start(self):
+            raise RuntimeError("sin hilos")
+    V.threading.Thread = SinHilo
+    try:
+        ok(lanza(V.lanzar_titulo, raiz, "v5", datos) is not None, "un hilo que no arranca da error")
+        ok("v5" not in V._TRABAJANDO, "y suelta el vídeo")
+    finally:
+        V.threading.Thread = viejo_hilo
+    ok(V.threading.Thread is _th.Thread, "(el hilo de verdad vuelve)")
     seccion("7] simulado")
     os.environ["ESTUDIO_SIMULAR"] = "1"
     try:
@@ -279,6 +310,8 @@ def prueba_parrilla():
         ruta = extra[extra.index("--mcp-config") + 1] if "--mcp-config" in extra else ""
         llamadas.append({"mensaje": mensaje, "extra": list(extra), "permitidas": permitidas,
                          "ruta": ruta, "existia": bool(ruta) and os.path.exists(ruta)})
+        if "falla con la clave" in mensaje:
+            raise RuntimeError(f"401 Authorization: Bearer {CLAVE}")
         return "Ideas (vidIQ): …", {"session_id": "s-vq", "usage": {}}
 
     G.EJECUTAR = doble
@@ -292,6 +325,7 @@ def prueba_parrilla():
         v = chat.escribir("dame ideas", vidiq=True, en_hilo=False)
         primera = llamadas[-1]
         ok(primera["existia"] and primera["extra"][:1] == ["--mcp-config"], "el turno carga vidIQ con su fichero")
+        ok("--max-turns" in primera["extra"], "con tope de vueltas")
         ok(not os.path.exists(primera["ruta"]), "que se borra al acabar el turno")
         ok(G.AVISO_VIDIQ in primera["mensaje"], "con el aviso de vidIQ")
         ok(any(t.get("vidiq") for t in v["turnos"] if t["quien"] == "tu"), "el turno queda marcado «con vidIQ»")
@@ -304,6 +338,12 @@ def prueba_parrilla():
         ok(tercera["extra"][:2] == ["--resume", "s-vq"] and "--mcp-config" in tercera["extra"],
            "al reanudar también lo carga")
         ok(not os.path.exists(tercera["ruta"]), "y también lo borra")
+        otro = G.nueva(raiz, "c1", "sonnet")
+        v = otro.escribir("esto falla con la clave", vidiq=True, en_hilo=False)
+        error = [t for t in v["turnos"] if t["quien"] == "claude"][-1]["texto"]
+        ok(error.startswith("no ha podido contestar") and CLAVE not in error,
+           f"un fallo del turno con vidIQ no enseña la clave: {error[:80]}")
+        ok(not os.path.exists(llamadas[-1]["ruta"]), "y su fichero también se borra")
         texto, _s = G.ejecutar_simulado("MI MENSAJE\nhola", ["--mcp-config", "x"], raiz,
                                         V.permitidas_cli(V.PARA_IDEAS), (), "opus")
         ok("vidIQ: sí" in texto, "el simulado dice que lleva vidIQ")

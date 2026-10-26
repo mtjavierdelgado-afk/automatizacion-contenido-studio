@@ -8635,6 +8635,91 @@ def guion_visual(navegador, datos):
         pg.cerrar()
 
 
+# ======================================================================
+# AVISOS-PORTADA (25-10-2026). Tramo propio, al final.
+
+@escenario
+def avisos_de_portada_que_se_cierran(navegador, datos):
+    """Pedido del dueño del 25-10: el error de la IA («RechazoSeguridad…»)
+    tapaba la cabecera del editor y no se podía quitar. Ahora: una línea con
+    qué hacer y el detalle plegado, una ✕, «Avisos (N)» que lo recuerda, el
+    éxito de lo mismo lo sustituye, y lo que sale bien se va solo."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos, nombre="avisos_portada")
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    _paso_ficha(pg, "portada")      # rediseno-publicar: la portada es el paso «Portada» de la ficha
+    ok(pg.esperar(".portada-publicar button", "Diseñar portada", 20), "Publicar abre la ficha")
+    pg.pulsar(".portada-publicar button", "Diseñar portada")
+    ok(pg.esperar(".vista-portada-grande img", segundos=30), "se abre el editor")
+    largo = ("RechazoSeguridad: OpenAI ha rechazado esta imagen con su filtro de seguridad (id req_6084c1f976). "
+             "Suele ser por pedir marcas, logos o personajes con derechos. Hay que describir lo que se ve sin nombres propios.")
+    pg.p.evaluate(f"() => avisoPortada('no se ha podido hacer con la IA: ' + {largo!r}, true, 'ia')")
+    pg.p.wait_for_timeout(300)
+    texto = pg.p.locator(".capa-portada .aviso-portada.malo > span").first.inner_text()
+    ok("filtro de seguridad" in texto and "plano sin personas" in texto and "req_6084" not in texto
+       and texto.startswith("No se ha podido hacer con la IA"),
+       f"el error se dice en una línea con QUÉ falló y qué hacer, sin el texto técnico ({texto[:90]!r})")
+    pg.p.wait_for_timeout(6600)
+    ok(pg.visible(".capa-portada .aviso-portada.malo"), "un error NO se va solo")
+    ok(pg.visible(".capa-portada .aviso-portada.malo summary", "Ver detalle"), "el detalle técnico va plegado")
+    ok(pg.visible(".capa-portada .cab-portada button", "Guardar diseño"),
+       "y ya no está dentro de la cabecera: los botones de arriba siguen a la vista")
+    # un «Pintando…» de OTRA cosa no tapa el error
+    pg.p.evaluate("() => avisoPortada('Pintando la portada a tamaño real…', false, 'descargar')")
+    pg.p.wait_for_timeout(200)
+    ok(pg.visible(".capa-portada .aviso-portada.malo"), "un aviso de otra cosa no tapa el error")
+    pg.pulsar(".capa-portada .cerrar-aviso-portada", "✕")
+    pg.p.wait_for_timeout(200)
+    ok(not pg.visible(".capa-portada .aviso-portada.malo"), "la ✕ lo cierra")
+    ok(pg.visible(".capa-portada .historial-avisos-portada summary", "Avisos (1)"),
+       "y «Avisos (1)» lo sigue recordando (lo que estaba a medias, «Pintando…», no se guarda)")
+    # un error larguísimo sin punto también se guarda (su resumen acaba en «…»)
+    pg.p.evaluate("() => avisoPortada('x'.repeat(240), true, 'otra')")
+    pg.p.wait_for_timeout(200)
+    ok(pg.visible(".capa-portada .historial-avisos-portada summary", "Avisos (2)"), "un error muy largo también queda en «Avisos»")
+    # lo que acaba bien se ve aunque haya un error de otra cosa («Guardar diseño»)
+    pg.p.evaluate("() => avisoPortada('Diseño guardado ✓', false, 'guardar')")
+    pg.p.wait_for_timeout(200)
+    ok(pg.visible(".capa-portada .aviso-portada.bueno", "Diseño guardado"),
+       "«Diseño guardado ✓» se ve aunque hubiera un error de otra cosa")
+    pg.pulsar(".capa-portada .cerrar-aviso-portada", "✕")
+    pg.pulsar(".capa-portada .historial-avisos-portada summary", "Avisos")
+    ok(pg.visible(".capa-portada .linea-aviso-portada", "filtro de seguridad"), "con su hora y su texto")
+    pg.p.evaluate("() => avisoPortada('Fondo hecho con IA ✓', false, 'ia')")
+    pg.p.wait_for_timeout(200)
+    ok(pg.p.evaluate("() => document.querySelector('.capa-portada .historial-avisos-portada').open"),
+       "«Avisos» sigue abierto cuando llega otro aviso")
+    # vuelve a fallar y luego sale bien: el bueno sustituye al error
+    pg.p.evaluate(f"() => avisoPortada({largo!r}, true, 'ia')")
+    pg.p.evaluate("() => avisoPortada('Fondo hecho con IA ✓', false, 'ia')")
+    pg.p.wait_for_timeout(200)
+    ok(not pg.visible(".capa-portada .aviso-portada.malo") and pg.visible(".capa-portada .aviso-portada.bueno", "Fondo hecho"),
+       "cuando lo mismo sale bien, el error se quita solo")
+    pg.p.wait_for_timeout(6800)
+    ok(not pg.visible(".capa-portada .aviso-portada"), "y lo que sale bien se va solo a los 6 s")
+    # de verdad: guardar enseña su aviso
+    pg.pulsar(".capa-portada button", "Guardar diseño")
+    ok(pg.esperar(".capa-portada .aviso-portada.bueno", "guardado", 10), "«Guardar diseño» sigue diciendo que se ha guardado")
+    pg.captura("avisos_portada", entera=False)
+    pg.p.set_viewport_size({"width": 390, "height": 780})
+    pg.p.evaluate("() => avisoPortada('no se ha podido hacer con la IA: ' + 'req_' + 'x'.repeat(300), true, 'ia')")
+    pg.p.wait_for_timeout(300)
+    pg.p.evaluate("() => { const d = document.querySelector('.capa-portada .detalle-aviso-portada'); if (d) d.open = true; }")
+    pg.p.wait_for_timeout(200)
+    ancho = pg.p.evaluate("() => { const e = document.querySelector('.capa-portada .avisos-portada'); return e.scrollWidth - e.clientWidth; }")
+    ok(ancho <= 2 and pg.visible(".capa-portada .cerrar-aviso-portada"),
+       f"en el móvil el aviso (con el detalle abierto) cabe y la ✕ se ve ({ancho}px)")
+    pg.p.evaluate("() => { PORT.cambiado = false; }")
+    pg.pulsar(".capa-portada button", "Cerrar")
+    # con el editor cerrado (la IA acababa mientras tanto): el aviso flotante
+    pg.p.evaluate("() => avisoPortada('no se ha podido hacer con la IA: RechazoSeguridad: algo', true, 'ia')")
+    ok(pg.esperar("#toast.ver", "filtro de seguridad", 5), "con el editor cerrado, el resultado sale en el aviso flotante")
+    pg.sin_errores("los avisos de la portada")
+    pg.cerrar()
+
+
+
 @escenario
 def encargo_limpio_suelta_el_video(navegador, datos):
     """Rama encargo-limpio (22-10): con un vídeo ABIERTO en Crear, «Pasar al
@@ -8818,6 +8903,61 @@ def vidiq_en_la_pantalla(navegador, datos):
         api.put(f"/api/publicar/videos/{pid}", {"palabra_clave": "",
                                                 "textos": {"youtube": {"titulo": titulo_antes}}})
 
+@escenario
+def cola_del_studio(navegador, datos):
+    """Rama cola-montaje (25-10): el botón «Cola» de la barra de módulos abre
+    el panel «Cola del Studio» con Imágenes, Montaje y lo que está en marcha;
+    las filas dicen quién trabaja y en qué puesto espera cada uno; se cierra
+    con la × y con Escape, y en el móvil la barra sigue cabiendo."""
+    pid = datos["video"]
+    api = datos["api"]
+    r, cola = api.get("/api/cola_studio")
+    ok(getattr(r, "status_code", 0) == 200 and {"imagenes", "montaje", "trabajando"} <= set(cola or {}),
+       f"GET /api/cola_studio responde con las tres partes ({getattr(r, 'status_code', 0)})")
+    pg = Pagina(navegador, datos, nombre="cola del studio")
+    ok(pg.esperar("#barra-modulos .modulo-cola", segundos=10), "la barra de módulos tiene «Cola»")
+    pg.pulsar("#barra-modulos .modulo-cola")
+    ok(pg.esperar(".cajon-cola .cab-ajustes b", "Cola del Studio", 8), "y abre el panel «Cola del Studio»")
+    for titulo in ("Imágenes", "Montaje", "Todo lo que está en marcha"):
+        ok(pg.visible(".cajon-cola .titulo-ajustes", titulo), f"con su sección «{titulo}»")
+    # con una cola de mentira, las filas dicen quién trabaja y en qué puesto
+    # sin sondear mientras tanto: la siguiente vuelta pondría la cola de verdad (vacía)
+    pg.js(f"""clearTimeout(COLA_STUDIO.reloj); COLA_STUDIO.pidiendo = true;
+        COLA_STUDIO.datos = {{ ahora: Date.now() / 1000,
+        imagenes: {{ ahora: null, fila: [] }},
+        montaje: {{ ahora: {{ pid: '{pid}', nombre: 'Vídeo que se monta', desde: Date.now() / 1000 - 90, video: true }},
+                    fila: [{{ pid: '', nombre: 'El segundo', desde: Date.now() / 1000 - 30, video: false }},
+                           {{ pid: '', nombre: 'El tercero', desde: Date.now() / 1000 - 10, video: false }}] }},
+        trabajando: [] }}; pintarColaStudio();""")
+    ok(pg.visible(".cajon-cola .fila-cola.trabajando", "Vídeo que se monta"), "quién se está montando")
+    puestos = pg.p.evaluate("() => [...document.querySelectorAll('.cajon-cola .fila-cola.en-espera .puesto-cola')]"
+                            ".map(x => x.textContent)")
+    ok(puestos == ["1.º", "2.º"], f"y quién espera, en orden ({puestos})")
+    ok(pg.visible(".cajon-cola .fila-cola.trabajando button", "Abrir"), "el que es un vídeo se puede abrir")
+    pg.captura("cola_del_studio")
+    pg.js("COLA_STUDIO.pidiendo = false; COLA_STUDIO.reloj = null; arrancarColaStudio();")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-cola"), "Escape lo cierra")
+    pg.pulsar("#barra-modulos .modulo-cola")
+    pg.esperar(".cajon-cola", segundos=5)
+    pg.pulsar(".cajon-cola .cab-ajustes button")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-cola"), "y la × también")
+    pg.sin_errores("la cola del Studio")
+    pg.cerrar()
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="cola móvil")
+    pg.p.wait_for_timeout(1500)
+    caja = pg.p.evaluate("() => { const b = document.querySelector('#barra-modulos'); "
+                         "return b ? [b.scrollWidth, b.clientWidth] : [0, 0]; }")
+    ok(caja[0] <= caja[1] + 2, f"con «Cola», la barra de módulos sigue cabiendo en 390 px ({caja})")
+    pg.pulsar("#barra-modulos .modulo-cola")
+    ok(pg.esperar(".cajon-cola", segundos=5), "y en el móvil se abre igual")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2, f"sin salirse por los lados ({ancho}px)")
+    pg.captura("cola_del_studio_movil", entera=False)
+    pg.sin_errores("la cola del Studio en el móvil")
+    pg.cerrar()
 
 if __name__ == "__main__":
     sys.exit(main())

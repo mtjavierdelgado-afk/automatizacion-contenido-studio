@@ -93,6 +93,16 @@ PARA_IDEAS = ("vidiq_keyword_research", "vidiq_outliers", "vidiq_trending_videos
 #: consulta, según una reseña): el saldo de verdad se enseña después.
 CREDITOS_APROX = {"titulo": "unos 15 a 20", "ideas": "unos 5 a 15 por mensaje"}
 
+#: Tope de vueltas del CLI por llamada (`--max-turns`): la instrucción ya fija
+#: cuántas consultas hacer, pero una web o un dato raro podía hacerle seguir
+#: consultando y gastando créditos. Probar: 1 consulta; título: 4; un turno de la
+#: Parrilla con vidIQ (y quizá internet): hasta 3 de vidIQ y algunas búsquedas.
+VUELTAS = {"probar": 4, "titulo": 8, "chat": 14}
+
+#: Herramientas del CLI para leer recursos de servidores MCP: con vidIQ cargado
+#: no hacen falta y no se autorizan.
+VETADAS_CLI = ("ListMcpResourcesTool", "ReadMcpResourceTool")
+
 #: Sonnet: es buscar y resumir, no escribir un guion (el guion sigue con opus).
 MODELO = os.environ.get("ESTUDIO_VIDIQ_MODELO") or "sonnet"
 ESFUERZO = os.environ.get("ESTUDIO_VIDIQ_ESFUERZO") or "medium"
@@ -149,10 +159,48 @@ def config_mcp(k):
                                       "headers": {"Authorization": f"Bearer {k}"}}}}
 
 
+#: Un fichero que sobrevive a esto es de una llamada que se cortó de golpe (el
+#: servicio reiniciado o matado a media llamada): se borra al crear el siguiente.
+VIEJO_S = 3600
+
+
+def _carpeta_mcp():
+    ruta = os.path.join(tempfile.gettempdir(), "estudio_vidiq_mcp")
+    os.makedirs(ruta, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(ruta, 0o700)
+    except OSError:
+        pass
+    return ruta
+
+
+def barrer_ficheros(carpeta_mcp=None, viejo_s=VIEJO_S):
+    """Borra los ficheros MCP que quedaron de llamadas cortadas de golpe."""
+    carpeta_mcp = carpeta_mcp or _carpeta_mcp()
+    ahora = time.time()
+    try:
+        nombres = os.listdir(carpeta_mcp)
+    except OSError:
+        return 0
+    borrados = 0
+    for nombre in nombres:
+        ruta = os.path.join(carpeta_mcp, nombre)
+        try:
+            if nombre.startswith("estudio_vidiq_") and ahora - os.path.getmtime(ruta) > viejo_s:
+                os.remove(ruta)
+                borrados += 1
+        except OSError:
+            pass
+    return borrados
+
+
 def fichero_mcp(k):
-    """UN FICHERO POR LLAMADA, legible solo por el servicio. Lo borra quien
-    llama al acabar (`borrar_fichero`)."""
-    descriptor, ruta = tempfile.mkstemp(prefix="estudio_vidiq_", suffix=".json")
+    """UN FICHERO POR LLAMADA, legible solo por el servicio, en una carpeta
+    propia (0700). Lo borra quien llama al acabar (`borrar_fichero`); los que
+    dejó una llamada cortada de golpe se barren aquí."""
+    carpeta_mcp = _carpeta_mcp()
+    barrer_ficheros(carpeta_mcp)
+    descriptor, ruta = tempfile.mkstemp(prefix="estudio_vidiq_", suffix=".json", dir=carpeta_mcp)
     try:
         os.chmod(ruta, 0o600)
     except OSError:
@@ -182,7 +230,8 @@ def opciones_turno():
     if not k:
         raise ErrorVidiq("no hay clave de vidIQ: ponla en Configuración → vidIQ", 409)
     ruta = fichero_mcp(k)
-    return ["--mcp-config", ruta], permitidas_cli(PARA_IDEAS), VETADAS, ruta
+    return (["--mcp-config", ruta, "--max-turns", str(VUELTAS["chat"])],
+            permitidas_cli(PARA_IDEAS), VETADAS + VETADAS_CLI, ruta)
 
 
 def carpeta_aislada():
@@ -269,20 +318,21 @@ def _numero(valor):
 
 
 def _llamar(instruccion, permitidas, para, modelo=MODELO, esfuerzo=ESFUERZO,
-            tiempo_max_s=TECHO_S, proyecto=None):
+            tiempo_max_s=TECHO_S, proyecto=None, vueltas=VUELTAS["titulo"]):
     """(texto, sobre) del CLI con vidIQ cargado. La clave no sale nunca."""
     k = clave()
     if not k:
         raise ErrorVidiq("no hay clave de vidIQ: ponla en Configuración → vidIQ", 409)
     ruta = fichero_mcp(k)
     vetadas = tuple(cli_claude.HERRAMIENTAS_VETADAS) + (
-        "MultiEdit", "Agent", "KillShell", "BashOutput") + VETADAS
+        "MultiEdit", "Agent", "KillShell", "BashOutput") + VETADAS_CLI + VETADAS
 
     def llamar():
         return cli_claude.ejecutar(
             instruccion, modelo=modelo, esfuerzo=esfuerzo, cwd=carpeta_aislada(),
             base_tiempo_s=180, tiempo_max_s=tiempo_max_s, sistema=SISTEMA,
-            herramientas_vetadas=vetadas, extra=["--mcp-config", ruta, "--no-session-persistence"],
+            herramientas_vetadas=vetadas,
+            extra=["--mcp-config", ruta, "--no-session-persistence", "--max-turns", str(int(vueltas))],
             para=para, herramientas_permitidas=permitidas_cli(permitidas))
     try:
         try:
@@ -323,7 +373,8 @@ def probar(raiz):
         return {"estado": "ok", "mensaje": "simulado: quedan 150 créditos", "saldo": 150}
     try:
         respuesta, _sobre = _llamar(INSTRUCCION_PROBAR, PARA_PROBAR, "probar vidIQ",
-                                    modelo="haiku", esfuerzo="low", tiempo_max_s=120)
+                                    modelo="haiku", esfuerzo="low", tiempo_max_s=120,
+                                    vueltas=VUELTAS["probar"])
         datos = comun.extraer_json(respuesta, "la prueba de vidIQ")
     except Exception as fallo:                              # noqa: BLE001
         return {"estado": "error", "mensaje": tachar(str(fallo))[:300], "saldo": None}
@@ -465,7 +516,13 @@ def lanzar_titulo(raiz, pid, datos, proyecto=None, en_hilo=True):
             with _LOCK:
                 _TRABAJANDO.pop(pid, None)
     if en_hilo:
-        threading.Thread(target=trabajo, name=f"vidiq-{pid}", daemon=True).start()
+        try:
+            threading.Thread(target=trabajo, name=f"vidiq-{pid}", daemon=True).start()
+        except Exception:
+            # sin hilo no hay quien lo suelte: el vídeo se quedaría en 409
+            with _LOCK:
+                _TRABAJANDO.pop(pid, None)
+            raise
     else:
         trabajo()
     return ver_video(raiz, pid)

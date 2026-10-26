@@ -8648,6 +8648,7 @@ def avisos_de_portada_que_se_cierran(navegador, datos):
     api.libre(pid)
     pg = Pagina(navegador, datos, nombre="avisos_portada")
     pg.js(f"abrirPublicarVideo('{pid}');")
+    _paso_ficha(pg, "portada")      # rediseno-publicar: la portada es el paso «Portada» de la ficha
     ok(pg.esperar(".portada-publicar button", "Diseñar portada", 20), "Publicar abre la ficha")
     pg.pulsar(".portada-publicar button", "Diseñar portada")
     ok(pg.esperar(".vista-portada-grande img", segundos=30), "se abre el editor")

@@ -4956,6 +4956,11 @@ def _ficha_tipo_relato(ctx):
                    and bool(catalogo.get("beats"))
                    and not any(b.get("cambio")
                                for b in catalogo.get("beats") or [] if isinstance(b, dict)))
+    inicial = str(((catalogo.get("relato") or {}) if isinstance(catalogo.get("relato"), dict)
+                   else {}).get("inicial") or "")
+    # EN ESPAÑOL Y DÓNDE SE USA (rama estados-en-espanol): solo lectura, de un
+    # fichero del proyecto y del plan. No escribe nada (regla 1).
+    en_espanol = _relato_en_espanol(ctx, params, sitio_e, pedidos, estados, inicial)
     return {
         "tipo_relato": {k: v for k, v in guardado.items() if k != "bases"},
         "resuelto": dict(resuelto, nombre=tr.nombre(resuelto["modo"], resuelto.get("cambia"))),
@@ -4976,18 +4981,295 @@ def _ficha_tipo_relato(ctx):
         "calidad": str(params.get("calidad") or "low"),
         "faltan_cambios": sin_cambios,
         # como esta en la base lo que luego cambia (lo escribe Claude al repartir)
-        "inicial": str(((catalogo.get("relato") or {}) if isinstance(catalogo.get("relato"), dict)
-                        else {}).get("inicial") or ""),
+        "inicial": inicial,
+        "inicial_es": en_espanol["inicial_es"],
+        # los planos y bloques de la imagen base (los del «antes»)
+        "donde_base": en_espanol["donde_base"],
+        "traduccion": en_espanol["traduccion"],
     }
 
 
 @app.get("/api/proyectos/{pid}/tipo_relato")
-def leer_tipo_relato(pid: str):
-    """El tipo de relato del video: el guardado, el que rige, las bases y los planos que cambian."""
+def leer_tipo_relato(pid: str, ligero: bool = False):
+    """El tipo de relato del video: el guardado, el que rige, las bases y los planos que cambian.
+
+    Con `?ligero=1` no se calculan los planos que cambian (lee la ficha de cada
+    imagen): es lo que pide la pantalla cada dos segundos mientras traduce."""
     ctx = contexto(pid)
     ficha = _ficha_tipo_relato(ctx)
+    if ligero:
+        return ficha
     ficha["cambios"] = _cambios_del_relato(ctx) if _tipo_relato_guardado(ctx) else None
     return ficha
+
+
+# ------------------------------------------- TIPO DE RELATO · EN ESPAÑOL
+#
+# Rama estados-en-espanol (22-10-2026, pedido del dueño). Los cambios de cada
+# estado y lo que la base ya trae (`inicial`) se escriben en INGLÉS, que es lo
+# que se manda a dibujar; aquí se enseñan en español (`pasos/traducciones.py`,
+# un fichero del proyecto FUERA de params y de toda firma), con DÓNDE SE USA
+# cada imagen (bloques del guion y planos), y se pueden reescribir en español:
+# Claude lo pasa al inglés y se guarda en el `cambio` de los tramos de ESE
+# estado. Traducir no cambia nada; editar mueve el estado (pierde la
+# aprobación y pide otra imagen, que no se dibuja sola).
+#
+# Las dos cosas llaman a Claude y tardan unos segundos: van en un hilo, como la
+# ortografía, y NO como trabajo del vídeo (no bloquean generar ni montar). La
+# pantalla vuelve a leer la ficha mientras `traduccion.estado` sea «pensando».
+
+_TRADUCIENDO = {}
+_LOCK_TRADUCIENDO = threading.Lock()
+
+
+def _traducciones():
+    return getattr(PASOS_MODULOS, "traducciones", None) or __import__("traducciones")
+
+
+def _relato_en_espanol(ctx, params, sitio, pedidos, estados, inicial):
+    """Pega a cada estado su `cambio_es` y su `donde`, y devuelve lo demás.
+
+    -> {"inicial_es", "donde_base", "traduccion": {estado, tipo, error, faltan}}.
+    Nada de esto puede tumbar la ficha: sin plan o sin guion, «dónde» va vacío."""
+    textos = [e["cambio"] for e in estados if e.get("cambio")] + ([inicial] if inicial else [])
+    try:
+        mod = _traducciones()
+        traducidos = mod.de(ctx.proyecto.raiz, textos)
+    except Exception:                                       # noqa: BLE001
+        traducidos = {}
+    limpio = lambda t: " ".join(str(t or "").split())        # noqa: E731
+    try:
+        donde = _donde_se_usa_relato(ctx, params, sitio, pedidos)
+    except Exception:                                       # noqa: BLE001
+        donde = {}
+    for e in estados:
+        e["cambio_es"] = traducidos.get(limpio(e.get("cambio")), "")
+        e["donde"] = donde.get(e["estado"]) or {"bloques": [], "planos": []}
+    with _LOCK_TRADUCIENDO:
+        marcha = dict(_TRADUCIENDO.get(ctx.id) or {})
+    faltan = sum(1 for t in textos if not traducidos.get(limpio(t)))
+    return {"inicial_es": traducidos.get(limpio(inicial), "") if inicial else "",
+            "donde_base": donde.get("") or {"bloques": [], "planos": []},
+            "traduccion": {"estado": marcha.get("estado") or "listo",
+                           "tipo": marcha.get("tipo") or "",
+                           "estado_relato": marcha.get("estado_relato") or "",
+                           "error": marcha.get("error") or "",
+                           "faltan": faltan}}
+
+
+def _donde_se_usa_relato(ctx, params, sitio, pedidos):
+    """{estado: {"bloques": [{id, n, texto}], "planos": [ids]}}; la clave "" es la
+    imagen base (los tramos sin cambio, el «antes»).
+
+    Los BLOQUES salen del catálogo (cada tramo dice desde/hasta qué bloque del
+    guion), así que se saben aunque no haya imágenes. Los PLANOS salen del plan
+    cortado: los que editan la imagen de ese estado (mismo `cambio`) o la base
+    (editan y sin cambio). Sin plan, la lista va vacía y la pantalla lo dice."""
+    tr = _tipo_relato()
+    if not sitio:
+        return {}
+    catalogo = params.get("catalogo") or {}
+    bloques = _bloques_del_guion(ctx)
+    posicion = {b["id"].upper(): i for i, b in enumerate(bloques)}
+    salida = {}
+
+    def ficha(clave):
+        return salida.setdefault(clave, {"bloques": [], "planos": [], "_vistos": set()})
+
+    for beat in catalogo.get("beats") or []:
+        if not isinstance(beat, dict) or beat.get("set") not in (None, "", sitio):
+            continue
+        estado = tr.estado_de(beat)
+        if estado and estado not in pedidos:
+            continue
+        desde = posicion.get(str(beat.get("desde") or "").strip().upper())
+        hasta = posicion.get(str(beat.get("hasta") or beat.get("desde") or "").strip().upper())
+        if desde is None:
+            continue
+        hasta = desde if hasta is None or hasta < desde else hasta
+        f = ficha(estado)
+        for i in range(desde, hasta + 1):
+            if i in f["_vistos"]:
+                continue
+            f["_vistos"].add(i)
+            texto = " ".join(bloques[i]["texto"].split())
+            f["bloques"].append({"id": bloques[i]["id"], "n": i + 1,
+                                 "texto": texto[:110] + ("…" if len(texto) > 110 else "")})
+    por_cambio = {" ".join(str(c or "").split()): est for est, c in pedidos.items()}
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    for escena in plan.get("escenas") or []:
+        if not escena.get("editar_base") or not escena.get("id"):
+            continue
+        cambio = " ".join(str(escena.get("cambio") or "").split())
+        # POR LA CLAVE DE SU IMAGEN primero («sitio#estado», `_marcar_edicion`):
+        # sigue valiendo cuando se acaba de editar el cambio y el plan todavía
+        # lleva el texto de antes. Por el texto, solo si no la trae.
+        clave = str(escena.get("base_clave") or "")
+        if "#" in clave:
+            estado = clave.split("#", 1)[1]
+            if estado not in pedidos:
+                continue
+        elif cambio:
+            estado = por_cambio.get(cambio)
+            if estado is None:
+                continue
+        else:
+            estado = ""
+        ficha(estado)["planos"].append(str(escena["id"]))
+    for f in salida.values():
+        f["bloques"].sort(key=lambda b: b["n"])
+        f.pop("_vistos", None)
+    return salida
+
+
+def _textos_del_relato(ctx):
+    """Los textos en inglés que se enseñan traducidos: cada cambio y `inicial`."""
+    p6 = PASOS_MODULOS.p6_assets
+    params = ctx.estado.params("assets") or {}
+    try:
+        _sitio, pedidos = p6.estados_del_relato(ctx.proyecto, params)
+    except Exception:                                       # noqa: BLE001
+        pedidos = {}
+    catalogo = params.get("catalogo") or {}
+    relato = catalogo.get("relato") if isinstance(catalogo.get("relato"), dict) else {}
+    textos = [c for c in pedidos.values() if c]
+    if (relato or {}).get("inicial"):
+        textos.append(relato["inicial"])
+    return textos
+
+
+def _error_para_persona(fallo):
+    error = str(fallo)[:600]
+    if CLI_CLAUDE.es_pasajero(fallo):
+        error = ("La sesión de Claude se estaba renovando y no ha contestado. Vuelve a "
+                 f"intentarlo en un minuto; no se ha cambiado nada.\n\n{error}")
+    return error
+
+
+def _lanzar_traduccion(ctx, tipo, correr, estado_relato=""):
+    """Corre `correr()` en un hilo y deja su estado en `_TRADUCIENDO[pid]`.
+    -> False si ya había una en marcha para este vídeo."""
+    with _LOCK_TRADUCIENDO:
+        if (_TRADUCIENDO.get(ctx.id) or {}).get("estado") == "pensando":
+            return False
+        _TRADUCIENDO[ctx.id] = {"estado": "pensando", "tipo": tipo,
+                                "estado_relato": estado_relato}
+
+    def hilo():
+        try:
+            correr()
+            ficha = {"estado": "listo", "tipo": tipo, "estado_relato": estado_relato}
+        except Exception as fallo:                          # noqa: BLE001
+            ficha = {"estado": "error", "tipo": tipo, "estado_relato": estado_relato,
+                     "error": _error_para_persona(fallo)}
+        with _LOCK_TRADUCIENDO:
+            _TRADUCIENDO[ctx.id] = ficha
+
+    threading.Thread(target=hilo, daemon=True, name=f"traducir-{ctx.id}").start()
+    return True
+
+
+@app.post("/api/proyectos/{pid}/tipo_relato/traducir")
+def traducir_tipo_relato(pid: str, cuerpo: dict = Body(default=None)):
+    """Traduce al español lo que falte (cada cambio y `inicial`). {auto?: bool}
+
+    No cambia ningún param ni ninguna firma: la traducción va a
+    `<proyecto>/traducciones.json`. Con `auto` (lo pide la pantalla sola al
+    abrir) no se relanza tras un error: así una sesión de Claude caída no se
+    reintenta cada vez que se repinta; el botón «Traducir» sí. -> la ficha."""
+    ctx = contexto(pid)
+    auto = bool(_cuerpo(cuerpo).get("auto"))
+    mod = _traducciones()
+    faltan = mod.faltan(ctx.proyecto.raiz, _textos_del_relato(ctx))
+    with _LOCK_TRADUCIENDO:
+        previo = dict(_TRADUCIENDO.get(ctx.id) or {})
+    if faltan and not (auto and previo.get("estado") == "error"):
+        raiz = ctx.proyecto.raiz
+
+        def correr():
+            hechas = mod.al_espanol(faltan, cwd=RAIZ_ESTUDIO)
+            mod.guardar(raiz, hechas)
+            if not hechas:
+                raise mod.ErrorTraduccion("Claude no ha devuelto ninguna traducción; "
+                                          "vuelve a pedirla.")
+            ctx.bitacora.anotar("tipo_relato_traducido", "assets", {"textos": len(hechas)})
+
+        _lanzar_traduccion(ctx, "traducir", correr)
+    return _ficha_tipo_relato(ctx)
+
+
+@app.post("/api/proyectos/{pid}/tipo_relato/estado/editar")
+def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
+    """Reescribe en ESPAÑOL el cambio de un estado. {estado, es}
+
+    Claude lo pasa al inglés (en un hilo) y se guarda en el `cambio` de todos
+    los tramos de ese estado, con la misma etiqueta: su imagen deja de valer
+    (pierde la aprobación y pide otra) y sus planos quedan para rehacer. No se
+    dibuja nada. -> la ficha, con `traduccion.estado` «pensando»."""
+    tr = _tipo_relato()
+    p6 = PASOS_MODULOS.p6_assets
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    estado = str(datos.get("estado") or "").strip()
+    es = " ".join(str(datos.get("es") or "").split())
+    if not es:
+        raise ErrorApi(400, "escribe el cambio en español")
+    if len(es) > 1200:
+        raise ErrorApi(400, "el cambio es demasiado largo: como mucho 1.200 letras")
+    params = ctx.estado.params("assets") or {}
+    sitio, pedidos = p6.estados_del_relato(ctx.proyecto, params)
+    if not sitio or estado not in pedidos:
+        raise ErrorApi(404, f"este vídeo no tiene el estado «{estado}»")
+    if not ((params.get("catalogo") or {}).get("beats")):
+        raise ErrorApi(409, "los cambios de este vídeo no están guardados en el reparto: "
+                            "pulsa antes «Escribir qué cambia en cada tramo»")
+    if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+        raise ErrorApi(409, "hay algo generándose en este vídeo: cámbialo cuando termine")
+    with _COLA_LOCK:
+        if _cola_dibujando(ctx):
+            raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: cámbialo "
+                                "cuando terminen")
+    anterior = pedidos[estado]
+    mod = _traducciones()
+    raiz = ctx.proyecto.raiz
+
+    def correr():
+        ingles = mod.al_ingles(es, anterior=anterior, cwd=RAIZ_ESTUDIO)
+        with _cerrojo_de_cadena(ctx.id):
+            with _COLA_LOCK:
+                dibujando = _cola_dibujando(ctx)
+            if dibujando or _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+                raise RuntimeError("se ha empezado a generar algo en este vídeo mientras "
+                                   "se traducía: vuelve a guardar el cambio cuando termine")
+            catalogo = copy.deepcopy((ctx.estado.params("assets") or {}).get("catalogo") or {})
+            tocados = 0
+            for beat in catalogo.get("beats") or []:
+                if not isinstance(beat, dict) or beat.get("set") not in (None, "", sitio):
+                    continue
+                if tr.estado_de(beat) != estado:
+                    continue
+                # comparado COMO LO LEE `estados_del_catalogo` (recortado a su
+                # tope): un cambio largo escrito a mano no da un falso «se ha
+                # reescrito»
+                if tr._texto(beat.get("cambio"), 400) != tr._texto(anterior, 400):
+                    raise RuntimeError("los cambios de este estado se han reescrito mientras "
+                                       "se traducía: vuelve a abrirlo y guárdalo otra vez")
+                beat["cambio"] = ingles
+                # la MISMA etiqueta: es lo que mantiene el estado (y su sitio
+                # en el mapa de bases) aunque cambie su texto
+                beat["estado"] = estado
+                tocados += 1
+            if not tocados:
+                raise RuntimeError(f"el estado «{estado}» ya no está en el reparto")
+            if ingles != tr._texto(anterior, 400):
+                ctx.estado.actualizar_params("assets", {"catalogo": catalogo})
+        mod.guardar(raiz, {ingles: es})
+        ctx.bitacora.anotar("tipo_relato_estado_editado", "assets",
+                            {"estado": estado, "tramos": tocados})
+
+    if not _lanzar_traduccion(ctx, "editar", correr, estado_relato=estado):
+        raise ErrorApi(409, "ya se está traduciendo algo de este vídeo: espera unos segundos")
+    return _ficha_tipo_relato(ctx)
 
 
 def _cambios_del_relato(ctx):

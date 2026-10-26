@@ -73,6 +73,18 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   imágenes…) sigue en el servidor, y lo vuelves a abrir desde Tus proyectos.
   Un aviso te lo recuerda.
 
+**Los estados del tipo de relato, en español (22 de octubre)**
+- **Cada estado se lee en español.** En «Un espacio que cambia», el cambio de
+  cada estado (y lo que la imagen base ya trae) sale en español, con el inglés
+  que se manda a dibujar plegado debajo. Lo traduce Claude solo, con tu
+  membresía, y no toca nada del vídeo: ni imágenes, ni firmas, ni precios.
+- **«Dónde se usa»**: cada estado y la imagen base dicen en qué bloques del
+  guion salen y qué planos los usan.
+- **✎ Cambiar**: reescribes el estado en español, Claude lo pasa al inglés y
+  se guarda. Antes te avisa de que ese estado pierde su aprobación y pide otra
+  imagen (y de cuántos planos suyos quedarán para rehacer); no se dibuja nada
+  solo.
+
 **«Lo que dice el guion», sin que se cuele la voz (24 de octubre)**
 - **Las líneas «Visual:» de la Parrilla valen solas.** Si casan con el guion
   (cada una con su bloque y en orden), se dibujan sin tener que aprobarlas a

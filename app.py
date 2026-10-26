@@ -3540,8 +3540,14 @@ def coste_por_paso(pid: str):
 
 def _desglose_de_eventos(eventos):
     """Lo gastado en un proyecto, por partes y con lo confirmado aparte."""
-    imagenes = {"nuevas": [0, 0.0], "rehechas": [0, 0.0], "personajes": [0, 0.0],
-                "otras": [0, 0.0]}
+    # POR TIPO DE IMAGEN (notas del dueño, 24-10-2026: «diferenciar el coste de
+    # las imágenes del tipo de relato del de las imágenes a montar, las
+    # regeneradas, las referencias…»). La imagen base de un sitio y la de cada
+    # estado pasan por el mismo `_producir_imagen` que las hojas del reparto
+    # (`asset:base_<sitio>`, `asset:estado_<sitio>_<estado>`) y se contaban como
+    # personajes; las portadas, como «otras».
+    imagenes = {"nuevas": [0, 0.0], "rehechas": [0, 0.0], "base": [0, 0.0],
+                "personajes": [0, 0.0], "portadas": [0, 0.0], "otras": [0, 0.0]}
     vistas = set()
     confirmadas = estimadas = 0
     voz = {"grabacion": [0, 0.0], "regrabaciones": [0, 0.0]}
@@ -3554,8 +3560,12 @@ def _desglose_de_eventos(eventos):
             if unidad.startswith("escena:"):
                 clave = "rehechas" if unidad in vistas else "nuevas"
                 vistas.add(unidad)
+            elif unidad.startswith(("asset:base_", "asset:estado_")) or unidad == "base":
+                clave = "base"
             elif unidad.startswith("asset:"):
                 clave = "personajes"
+            elif unidad.startswith("portada") or e.get("paso") == "publicar":
+                clave = "portadas"
             else:
                 clave = "otras"
             n = int((e.get("cantidad") or {}).get("imagenes") or 1)

@@ -3137,7 +3137,7 @@ def coste_en_detalle(navegador, datos):
     pg.pulsar("button.coste-light")
     ok(pg.esperar("#coste-video", "Coste del vídeo", 15), "y abre el coste del vídeo")
     texto = pg.p.locator("#coste-video").inner_text()
-    for parte in ("Imágenes nuevas", "Imágenes rehechas", "Personajes", "Voz", "Claude",
+    for parte in ("Planos del vídeo: nuevos", "Planos del vídeo: rehechos", "Referencias", "Voz", "Claude",
                   "Música", "Efectos", "Su estilo"):
         ok(parte in texto, f"con «{parte}»")
     _r, total = api.get(f"/api/proyectos/{pid}/coste")
@@ -8684,6 +8684,64 @@ def guion_visual(navegador, datos):
         r, _d = api.put(f"/api/proyectos/{pid}/guion_visual/modo", {"imagenes": None})
         ok(getattr(r, "status_code", 0) == 200, "(4) y se vuelve a lo que diga el estilo")
         pg.sin_errores("el guion visual")
+        pg.cerrar()
+
+# ============================================================ NOTAS DEL 24-10
+@escenario
+def notas_del_24_10(navegador, datos):
+    """Notas de mejoras del dueño (24-10-2026): montar el vídeo aunque el
+    revisor haya dejado notas de rehacer (preguntando antes), y el «Cerrar» de
+    un error que no pisa el texto."""
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="notas del 24-10")
+    try:
+        pg.sin_trabajo(300)
+        pg.js(f"await abrirVideoLight('{pid}');")
+        ir_al_paso(pg, "Imágenes")
+        pg.p.wait_for_timeout(1200)
+        r = pg.js("""
+          const rep = estadoRepaso(); const antes = [rep.notas, rep.pendientes];
+          const vo = window.videoObsoletoLight, mo = window.montarElVideoLight, c = window.confirm;
+          rep.notas = [{ id: 'x', autor: 'revisor', estado: 'pendiente', texto: 'rehacer el mando' }];
+          rep.pendientes = 1;
+          let montajes = 0, pregunta = '', respuesta = false;
+          window.videoObsoletoLight = () => true;
+          window.montarElVideoLight = () => { montajes += 1; };
+          window.confirm = t => { pregunta = t; return respuesta; };
+          const salida = {};
+          try {
+            const nodo = botonRenderizarLight();
+            const b = nodo && (nodo.tagName === 'BUTTON' ? nodo : nodo.querySelector('button'));
+            salida.hay = !!b; salida.apagado = b ? b.disabled : null;
+            if (b) {
+              b.click(); salida.trasCancelar = montajes;
+              respuesta = true; b.click(); salida.trasAceptar = montajes;
+            }
+            salida.pregunta = pregunta;
+          } finally {
+            window.videoObsoletoLight = vo; window.montarElVideoLight = mo; window.confirm = c;
+            rep.notas = antes[0]; rep.pendientes = antes[1];
+          }
+          return salida;""") or {}
+        ok(r.get("hay") and r.get("apagado") is False,
+           f"con una nota del revisor sin aplicar, «Montar el vídeo» se puede pulsar ({r})")
+        ok("1 del revisor" in (r.get("pregunta") or "") and r.get("trasCancelar") == 0,
+           f"al pulsarlo pregunta antes, diciendo que es del revisor; «Cancelar» no monta ({r})")
+        ok(r.get("trasAceptar") == 1, f"y «Aceptar» monta ({r})")
+        pg.js(f"await abrirVideoLight('{pid}'); repintarVideo();")
+        # el error con «Cerrar»: el texto no pasa por debajo del botón
+        pg.js("ERRORES[CLAVE_VIDEO_LIGHT] = 'falta aprobar la imagen base de «bano_calido» (1 plano(s)), "
+              "«bano_calido», estado «despues» (4 plano(s)): genérala o usa la imagen en «El espacio fijo» "
+              "y apruébala antes de generar los planos'; repintarVideo();")
+        ok(pg.esperar(".error-cerrable", "falta aprobar", 10), "sale el error con su «Cerrar»")
+        cajas = pg.p.evaluate("""() => { const e = document.querySelector('.error-cerrable');
+          const t = e.querySelector('.titular').getBoundingClientRect();
+          const b = e.querySelector(':scope > .mini').getBoundingClientRect();
+          return { t: t.right, b: b.left }; }""")
+        ok(cajas["t"] <= cajas["b"] + 1, f"y el texto no pasa por debajo del «Cerrar» ({cajas})")
+        pg.js("limpiarError(CLAVE_VIDEO_LIGHT); repintarVideo();")
+        pg.sin_errores("las notas del 24-10")
+    finally:
         pg.cerrar()
 
 

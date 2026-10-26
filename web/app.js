@@ -11343,14 +11343,24 @@ function filaCoste(que, cuantas, usd, nota) {
 function tablaDeGasto(d, incluirEstilo) {
   const img = d.imagenes || {};
   const voz = d.voz || {};
+  /* POR TIPO DE IMAGEN (notas del dueño, 24-10-2026): las del vídeo (planos
+     nuevos y rehechos), la imagen base del tipo de relato con sus estados, las
+     referencias del reparto y las portadas, cada una en su fila. */
   const filas = [
-    filaCoste('Imágenes nuevas', `${(img.nuevas || {}).cuantas || 0}`, (img.nuevas || {}).usd || 0,
-      'una por plano'),
-    filaCoste('Imágenes rehechas', `${(img.rehechas || {}).cuantas || 0}`, (img.rehechas || {}).usd || 0,
-      'notas, «Desde cero», regenerar'),
-    filaCoste('Personajes (hojas del reparto)', `${(img.personajes || {}).cuantas || 0}`,
-      (img.personajes || {}).usd || 0, ''),
+    filaCoste('Planos del vídeo: nuevos', `${(img.nuevas || {}).cuantas || 0}`, (img.nuevas || {}).usd || 0,
+      'una por plano, la primera vez'),
+    filaCoste('Planos del vídeo: rehechos', `${(img.rehechas || {}).cuantas || 0}`, (img.rehechas || {}).usd || 0,
+      'notas, revisor, «Desde cero», regenerar'),
   ];
+  if ((img.base || {}).cuantas) {
+    filas.push(filaCoste('Tipo de relato: imagen base y estados', `${img.base.cuantas}`, img.base.usd || 0,
+      'el sitio y cada estado, también las «Otra»'));
+  }
+  filas.push(filaCoste('Referencias: hojas del reparto', `${(img.personajes || {}).cuantas || 0}`,
+    (img.personajes || {}).usd || 0, 'personajes, mapas y cabeceras'));
+  if ((img.portadas || {}).cuantas) {
+    filas.push(filaCoste('Portadas', `${img.portadas.cuantas}`, img.portadas.usd || 0, 'dibujadas con IA en Publicar'));
+  }
   if ((img.otras || {}).cuantas) {
     filas.push(filaCoste('Otras imágenes', `${img.otras.cuantas}`, img.otras.usd || 0, 'láminas, pruebas'));
   }
@@ -13844,8 +13854,8 @@ function barraDeLasImagenes(mandos) {
   const aplicar = botonAplicarRepaso();
   const pend = notasDeAhora().filter(n => n.estado !== 'aplicado').length;
   /* «MONTAR EL VÍDEO» SIGUE A MANO, como estaba en los mandos: al lado y en
-     secundario cuando lo principal es otra cosa (con notas sin aplicar sale
-     apagado y con el motivo, no escondido). */
+     secundario cuando lo principal es otra cosa (con notas sin aplicar se
+     puede pulsar y pregunta antes: notas del dueño, 24-10-2026). */
   const montarAlLado = () => {
     const boton = botonRenderizarLight();
     if (!boton) return [];
@@ -14635,27 +14645,44 @@ function botonRenderizarLight() {
   const corriendo = !!trabajoVideoLight();
   /* CON NOTAS SIN APLICAR, ESTE BOTON HACE MENOS que el de al lado: «Aplicar»
      reparte las notas, redibuja lo que toquen y DESPUES monta; esto solo monta,
-     o sea que gasta el render entero para dejarte el video sin tus notas. Es la
-     misma regla que en la pantalla del video. Apagado y con el motivo puesto,
-     no escondido: desaparecer no explica nada. */
+     con las imágenes como están. Antes se apagaba; ahora se puede (notas del
+     dueño, 24-10-2026: «que se me permita montar aunque el revisor pida
+     rehacer imágenes»), en secundario y PREGUNTANDO antes: las notas se quedan
+     apuntadas para aplicarlas cuando quieras. */
   const notasSinAplicar = estadoRepaso().pendientes > 0;
   return conAyuda(
     notasSinAplicar
-      ? 'Tienes notas del repaso sin aplicar. Esto solo montaría el MP4 y '
-        + 'saldría sin ellas. Usa «Aplicar», que aplica y monta de una vez.'
+      ? 'Tienes notas del repaso (o del revisor) sin aplicar. Esto monta el MP4 con '
+        + 'las imágenes como están ahora; las notas se quedan apuntadas y las '
+        + 'puedes aplicar después con «Aplicar».'
       : unirAyuda('Encadena los planos que acabas de mirar, con sus transiciones, '
         + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no cuesta '
         + 'dinero, cuesta tiempo de máquina.', textoDelPlan('render')),
     h('button', {
       clase: notasSinAplicar ? 'secundario-barra' : 'primario principal',
-      disabled: corriendo || notasSinAplicar,
+      disabled: corriendo,
       onclick: () => {
+        if (notasSinAplicar && !confirmarMontarConNotas()) return;
         pararPrevia();
         videoAbierto().vista = 'video';
         repintarVideo();
         montarElVideoLight();
       },
     }, `Montar el vídeo${precioDeMontarLight()}`));
+}
+
+/* Montar con notas sin aplicar: se pregunta, diciendo cuántas son del
+   revisor, y las notas se quedan para después (no se borra ninguna). */
+function confirmarMontarConNotas() {
+  const notas = (estadoRepaso().notas || []).filter(n => n.estado !== 'aplicado');
+  const n = notas.length || estadoRepaso().pendientes || 0;
+  if (!n) return true;
+  const delRevisor = notas.filter(x => x.autor === 'revisor').length;
+  return window.confirm(`Quedan ${n} ${n === 1 ? 'nota' : 'notas'} sin aplicar`
+    + (delRevisor ? ` (${delRevisor} del revisor de imágenes)` : '')
+    + '. Se monta el vídeo sin aplicarlas: las notas se quedan apuntadas y las '
+    + 'puedes aplicar después (si alguna imagen ha quedado vieja, antes te decimos '
+    + 'cuánto cuesta dibujarla). ¿Montar así?');
 }
 
 /* LAS FLECHAS DEL TECLADO. Pasar de escena es el gesto que se repite
@@ -14844,9 +14871,16 @@ function barraDelVideo() {
   const pend = notasSinAplicarDe('video');
   const plan = textoDelPlan('render');
   if (pend && hayMp4Light()) {
+    /* y si el vídeo quedó viejo, montarlo tal cual también se puede, en
+       secundario y preguntando (notas del dueño, 24-10-2026) */
+    const montar = botonRenderizarLight();
+    if (montar) {
+      const b = montar.tagName === 'BUTTON' ? montar : montar.querySelector('button');
+      if (b) b.className = 'secundario-barra';
+    }
     return barraDeAccion({ estado: { e: 'aviso', texto: `${pend} ${pend === 1 ? 'nota' : 'notas'} sin aplicar` },
       plan: 'se aplica lo más barato que resuelva cada nota, y se monta',
-      botones: [botonAplicarRepaso()] });
+      botones: [...(montar ? [montar] : []), botonAplicarRepaso()] });
   }
   const cambios = cambiosDelMontaje();
   const coste = ((((v.planes || {}).render) || {}).coste) || {};

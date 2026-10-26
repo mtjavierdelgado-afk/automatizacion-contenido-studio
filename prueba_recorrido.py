@@ -7993,6 +7993,19 @@ def tipo_de_relato(navegador, datos):
            "(3) «El reparto y los sitios» con su pedido")
         ok(pg.visible(".pedido-sitios button", "Volver a repartir con este pedido"),
            "(3) y «Volver a repartir con este pedido»")
+        # (2c) tipo-de-relato-2 (25-10): un recorrido enseña sus ambientes, cada uno
+        # con su imagen base de referencia y su precio; no se genera nada
+        r, _d = api.post(f"/api/proyectos/{pid}/tipo_relato/aplicar",
+                         {"tipo_relato": {"modo": "recorrido"}})
+        ok(r.status_code == 200, f"(2c) el vídeo pasa a «Recorrido» ({r.status_code})")
+        pg.js("APP.light.video.relato = null; pintarLight();")
+        ok(pg.esperar(".ambientes-relato", "Los ambientes del lugar", 20),
+           "(2c) un recorrido enseña «Los ambientes del lugar»")
+        ok(pg.visible(".ambiente-relato button", "Generar la imagen")
+           or pg.visible(".ambiente-relato button", "Otra imagen"),
+           "(2c) cada ambiente con su botón y su precio")
+        ok(not pg.visible(".imagen-base-relato"), "(2c) y sin la imagen base que se edita")
+        pg.captura("tipo_relato_ambientes")
         # vuelta a lo de antes, para no cambiar nada de lo que venga detrás
         r, _d = api.post(f"/api/proyectos/{pid}/tipo_relato/aplicar", {"tipo_relato": None})
         ok(r.status_code == 200, f"(2) y se puede volver a lo del estilo ({r.status_code})")

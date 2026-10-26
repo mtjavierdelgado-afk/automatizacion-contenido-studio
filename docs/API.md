@@ -23,7 +23,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 |---|---|---|
 | `GET` | `/api/proyectos` | Proyectos disponibles, del mas reciente al mas antiguo. |
 | `POST` | `/api/proyectos` | Crea un proyecto nuevo a partir de {"nombre"}. |
-| `GET` | `/api/proyectos/_resumen` | Por dónde va cada vídeo (`?ids=a,b`, hasta 120; la pantalla pide de 40 en 40), para su tarjeta en Tus proyectos. Lee estado.json y proyecto.json sin abrir el vídeo: no escribe ni cachea nada. |
+| `GET` | `/api/proyectos/_resumen` | Por dónde va cada vídeo, para su tarjeta en Tus proyectos (rediseño de |
 | `DELETE` | `/api/proyectos/papelera` | Vacia la papelera entera. Tampoco tiene vuelta atras. |
 | `GET` | `/api/proyectos/papelera` | Proyectos apartados, del mas recientemente apartado al mas antiguo. |
 | `DELETE` | `/api/proyectos/papelera/{carpeta}` | Borra DE VERDAD un proyecto apartado. No hay vuelta atras. |
@@ -487,4 +487,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**372 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**373 endpoints.** Escrito por `generar_api.py` desde `app.py`.

@@ -479,6 +479,55 @@ def prueba_imagen_base():
     igual(cat["relato"].get("inicial"), puerta, "el catálogo guarda el «inicial» de Claude")
 
 
+def prueba_ambientes_y_camara():
+    import p6_assets as P6                                   # noqa: PLC0415
+    seccion("13] recorrido y clase: varios ambientes del mismo lugar (tipo-de-relato-2)")
+    relato = T.resolver({"tipo_relato": {"modo": "recorrido"}})
+    instr, ficha = _proponer(relato=relato)
+    ok("VARIOS AMBIENTES DE UN MISMO LUGAR" in instr and "ESTE VIDEO PASA EN UN SOLO SITIO" not in instr,
+       "el criterio pide varios ambientes, no un solo sitio")
+    ok(not re.search(r"\{[a-z_]+\}", instr), "sin ningún {hueco} sin rellenar")
+    igual(sorted(ficha["sets"]), ["bano", "tienda"], "los dos ambientes que usa algún tramo se quedan")
+    igual(next(iter(ficha["sets"])), "bano", "el principal es el más usado")
+    igual({s["luz"] for s in ficha["sets"].values()}, {ficha["sets"]["bano"]["luz"]},
+          "la misma luz en todos los ambientes")
+    igual({s["rotulo"] for s in ficha["sets"].values()}, {""}, "sin rótulos de sitio")
+    instr_c, ficha_c = _proponer(relato=T.resolver({"tipo_relato": {"modo": "clase"}}))
+    ok("VARIOS AMBIENTES" in instr_c and len(ficha_c["sets"]) == 2, "la clase, igual")
+    instr_p, _f = _proponer(relato=T.resolver({"tipo_relato": {"modo": "producto"}}))
+    ok("ESTE VIDEO PASA EN UN SOLO SITIO" in instr_p, "producto sigue siendo un solo sitio")
+    params = {"tipo_relato": {"modo": "recorrido"}, "catalogo": ficha}
+    ambientes = P6.ambientes_del_relato(None, params)
+    igual([a["sitio"] for a in ambientes], ["bano", "tienda"], "los ambientes, el principal primero")
+    ok(all(a["espacio"]["descripcion"] for a in ambientes), "cada uno con su descripción")
+    igual(P6.ambientes_del_relato(None, {"tipo_relato": {"modo": "producto"}, "catalogo": ficha}), [],
+          "fuera de recorrido y clase, ninguno")
+    igual(P6.ambientes_del_relato(None, {"catalogo": ficha}), [], "sin tipo de relato, ninguno (regla 1)")
+    frase = P6.frase_de_referencia(2, {"papel": "casa", "nombre": "bano"})
+    ok("ANOTHER room of the same place" in frase and "never copy its layout" in frase,
+       "la base del principal, al dibujar otro ambiente, solo da materiales y luz")
+
+    seccion("14] modo guion: la cámara de la línea decide si el plano edita la base")
+    igual(P6._familia_del_plano({"linea_gv": {"camara": "close-up of the door edge"}}, "foto"),  # noqa: SLF001
+          "cerca", "un primer plano pedido no edita la base")
+    igual(P6._familia_del_plano({"linea_gv": {"camara": "wide shot from the doorway"}}, "foto"),  # noqa: SLF001
+          "lejos", "un plano general la edita")
+    igual(P6._familia_del_plano({"linea_gv": {"camara": "medium shot, detailed tiles"}}, "foto"),  # noqa: SLF001
+          "lejos", "«detailed» no es un detalle")
+    igual(P6._familia_del_plano({"carta": "detalle"}, "ilustracion"), "cerca",  # noqa: SLF001
+          "sin línea, la familia de su carta, como siempre")
+    rel = T.resolver({"tipo_relato": {"modo": "espacio_que_cambia", "cambia": "objeto"}})
+    escena = {"id": "S002", "set": "bano", "linea_gv": {"camara": "close-up of the hinge"}}
+    P6._marcar_edicion(escena, {"cambio": "the door open", "estado": "abierta"}, rel,  # noqa: SLF001
+                       "bano", "foto", {"bano": "espacio_fijo/a.png", "bano#abierta": "espacio_fijo/b.png"})
+    ok("editar_base" not in escena, "el primer plano no se edita")
+    igual(escena.get("ref_clave"), "bano#abierta", "y su referencia es la imagen de SU estado")
+    sin_linea = {"id": "S003", "set": "bano", "carta": "detalle"}
+    P6._marcar_edicion(sin_linea, {"cambio": "the door open", "estado": "abierta"}, rel,  # noqa: SLF001
+                       "bano", "ilustracion", {"bano": "espacio_fijo/a.png"})
+    ok("ref_clave" not in sin_linea, "sin línea (modo voz), el detalle como siempre")
+
+
 def main():
     print("PRUEBA DEL TIPO DE RELATO")
     prueba_modos_y_lineas()
@@ -490,6 +539,7 @@ def main():
     prueba_parrilla()
     prueba_presets()
     prueba_imagen_base()
+    prueba_ambientes_y_camara()
     import shutil                                            # noqa: PLC0415
     shutil.rmtree(_TEMPORAL, ignore_errors=True)
     print("\n" + "=" * 70)

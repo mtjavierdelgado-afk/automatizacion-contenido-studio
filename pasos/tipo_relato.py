@@ -460,6 +460,29 @@ y el encuadre, no el lugar.
 
 """
 
+#: Los modos de VARIOS AMBIENTES de un mismo lugar (rama tipo-de-relato-2):
+#: Claude declara varios sitios que comparten luz y materiales, y cada uno
+#: puede tener su imagen base (de referencia: estos modos no editan).
+AMBIENTES = ("recorrido", "clase")
+
+SETS_AMBIENTES = """SETS — donde ocurre: VARIOS AMBIENTES DE UN MISMO LUGAR
+El editor ha elegido un tipo de relato ({nombre}): el video recorre UN lugar
+(una casa, un local, un aula) por varios de sus ambientes, y eso va por delante
+de todo lo que se dice en este criterio sobre sitios.
+
+  - Declara en 'sets' entre 2 y 6 ambientes de ese lugar, con un id corto cada
+    uno (cocina, sala, dormitorio; pizarra, mesa de trabajo...). El PRIMERO es
+    el principal: el ambiente donde mas pasa.
+  - Cada 'descripcion', en ingles, EMPIEZA por lo que comparten todos (los
+    materiales, los colores, el estilo del lugar: la misma frase en todos) y
+    sigue con lo propio de ese ambiente: tamaño, forma, que hay en cada pared.
+  - 'luz': la eliges tu, en ingles, y es LA MISMA en todos los ambientes.
+  - 'rotulo': vacio. Este video no lleva cabeceras de sitio.
+  - Cada tramo va al ambiente donde pasa lo que cuenta. Sigue habiendo un tramo
+    por idea visual.
+
+"""
+
 #: La «ficha de casa» de un recorrido: varios ambientes que son el mismo lugar.
 CRITERIO_RECORRIDO = """UN RECORRIDO — varios ambientes de un mismo lugar
 Este video recorre un mismo lugar: aunque cambie el ambiente, la luz, los

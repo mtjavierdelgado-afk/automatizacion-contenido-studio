@@ -56,6 +56,7 @@ import json
 import math
 import os
 import re
+import unicodedata
 import shutil
 import subprocess
 import sys
@@ -2060,6 +2061,29 @@ def _familia_de_carta(carta, modo):
     return (encuadres.por_id_de(modo).get(carta or "") or {}).get("familia", "")
 
 
+#: Lo que dice la camara de una linea del guion visual que es «de cerca» (en
+#: ingles o en español, sin tildes): primer plano, detalle, macro, inserto.
+CAMARA_DE_CERCA = re.compile(
+    r"\bclose[- ]?ups?\b|\bcloseups?\b|\bextreme close|\bmacro\b|\bdetail (?:shot|of)\b|"
+    r"\binsert shot\b|\bprimer(?:isimo)? plano\b|\bplano (?:de )?detalle\b|\bde cerca\b",
+    re.IGNORECASE)
+
+
+def _familia_del_plano(escena, modo):
+    """La familia que decide si el plano edita la base. En modo guion (rama
+    tipo-de-relato-2) manda la CAMARA de su linea: un primer plano o un detalle
+    es «cerca» y no edita la base -- editar fija la camara de la base, y el
+    detalle pedido salia como el plano general de siempre (prueba real del
+    23-10) --; cualquier otra camara escrita es un plano del sitio y la edita.
+    Sin linea o sin camara, la de su carta, como siempre."""
+    camara = str(((escena.get("linea_gv") or {}).get("camara")) or "")
+    if camara.strip():
+        llano = unicodedata.normalize("NFKD", camara.lower())
+        llano = "".join(c for c in llano if not unicodedata.combining(c))
+        return "cerca" if CAMARA_DE_CERCA.search(llano) else "lejos"
+    return _familia_de_carta(escena.get("carta"), modo)
+
+
 def _marcar_edicion(escena, beat, relato, principal, modo, bases_rel):
     """Marca en el plano si se genera EDITANDO la base, y que cambia en el.
 
@@ -2067,10 +2091,17 @@ def _marcar_edicion(escena, beat, relato, principal, modo, bases_rel):
     el, el plano no gana ni una clave y el plan sale como siempre. `base` es la
     ruta RELATIVA de la base aprobada: viaja en el plan para la V2.0 fase 5, que
     arrancara los clips de ese sitio desde la misma imagen."""
-    familia = _familia_de_carta(escena.get("carta"), modo)
+    familia = _familia_del_plano(escena, modo)
     if not tipo_relato.plano_se_edita(escena, relato, principal, familia):
-        for clave in ("editar_base", "cambio", "estado", "base", "base_clave"):
+        for clave in ("editar_base", "cambio", "estado", "base", "base_clave", "ref_clave"):
             escena.pop(clave, None)
+        # UN DETALLE DE UN ESTADO, CON SU ESTADO (modo guion, tipo-de-relato-2):
+        # el primer plano de la puerta abierta no edita, pero su referencia del
+        # sitio es la imagen de ESE estado y no la base inicial
+        cambio = str(beat.get("cambio") or "").strip()
+        if escena.get("linea_gv") and cambio and principal and \
+                escena.get("set") == principal and tipo_relato.lleva_estados(relato):
+            escena["ref_clave"] = tipo_relato.clave_estado(principal, tipo_relato.estado_de(beat))
         return
     escena["editar_base"] = True
     escena["cambio"] = str(beat.get("cambio") or "").strip()
@@ -2641,6 +2672,14 @@ def frase_de_referencia(indice, ref, modo="ilustracion"):
         # LA IMAGEN BASE QUE SE EDITA (rama tipo-de-relato): la frase vive en
         # tipo_relato, con lo que cambia en este plano y su subtipo.
         return tipo_relato.frase_edicion(indice, ref, modo)
+    if ref["papel"] == "casa":
+        # LA BASE DEL AMBIENTE PRINCIPAL, al dibujar la de OTRO ambiente del
+        # mismo lugar (recorrido y clase, rama tipo-de-relato-2)
+        return (f"Reference image {indice} shows ANOTHER room of the same place "
+                f"('{ref.get('nombre') or 'the main room'}'). Use it ONLY for what "
+                f"the whole place shares: the materials, colours, finishes, style "
+                f"and light. This shot is a DIFFERENT room: never copy its layout, "
+                f"its furniture or its framing.")
     if ref["papel"] == "espacio":
         # LA IMAGEN DEL ESPACIO FIJO (rama espacio-fijo, 20-10-2026): el sitio
         # donde pasa todo el video, subido por quien lo encarga. Solo la llevan
@@ -5504,12 +5543,13 @@ def _referencia_del_espacio(escena, p, dirs, cache):
     llevan los planos de un recorrido, de un escenario y apoyos, y los de
     detalle de un espacio que cambia. Sin modo explicito, lo de siempre."""
     bases = (dirs or {}).get("bases") or {}
-    if bases and escena.get("set") in bases:
+    clave = escena.get("ref_clave") if escena.get("ref_clave") in bases else escena.get("set")
+    if bases and clave in bases:
         imagen = medios.motor("imagen_openai/imagen.py")
         espacio = p.get("espacio_fijo") or {}
         return [{"papel": "espacio",
                  "nombre": espacio.get("sitio") or escena["set"],
-                 "ruta": imagen.normalizar(bases[escena["set"]], cache)}]
+                 "ruta": imagen.normalizar(bases[clave], cache)}]
     ruta = (dirs or {}).get("espacio_fijo")
     espacio = p.get("espacio_fijo") or {}
     if not ruta or not espacio or not escena.get("set"):
@@ -5592,14 +5632,68 @@ def espacio_del_relato(proyecto, params):
     return principal, espacio
 
 
-def prompt_y_refs_de_base(proyecto, params, cache):
+def ambientes_del_relato(proyecto, params):
+    """Los ambientes de un recorrido o una clase (rama tipo-de-relato-2), el
+    principal primero. -> [{sitio, nombre, espacio}] o [] en cualquier otro modo.
+
+    Salen del espacio fijo (principal y secundarios) o, si nadie lo escribio,
+    de los sitios que declaro Claude; la descripcion y la luz de cada uno son
+    las del catalogo cuando las hay (ahi la luz ya es la misma en todos)."""
+    relato = tipo_relato.resolver(params)
+    if not tipo_relato.activo(relato) or relato.get("modo") not in tipo_relato.AMBIENTES:
+        return []
+    p = params or {}
+    catalogo = _catalogo_de(_con_defectos(p), proyecto) if proyecto is not None \
+        else (p.get("catalogo") or {})
+    try:
+        espacio = catalogo_visual.normalizar_espacio_fijo(p.get("espacio_fijo"))
+    except ValueError:
+        espacio = {}
+    if not espacio:
+        espacio = catalogo_visual.espacio_del_catalogo(catalogo, ambientes=True)
+    if not espacio:
+        return []
+    principal, secundarios = catalogo_visual.ids_del_espacio(espacio)
+    sets = (catalogo or {}).get("sets") or {}
+    luz = (sets.get(principal) or {}).get("luz") or espacio.get("luz") or ""
+    salida = [{"sitio": principal, "nombre": espacio.get("sitio") or principal,
+               "espacio": {"sitio": espacio.get("sitio") or principal,
+                           "descripcion": espacio["descripcion"], "luz": luz}}]
+    for sid, ficha in secundarios.items():
+        descripcion = " ".join(str((sets.get(sid) or {}).get("descripcion")
+                                   or ficha.get("descripcion") or ficha["nombre"]).split())
+        salida.append({"sitio": sid, "nombre": ficha["nombre"],
+                       "espacio": {"sitio": ficha["nombre"], "descripcion": descripcion,
+                                   "luz": (sets.get(sid) or {}).get("luz") or luz}})
+    return salida
+
+
+def prompt_y_refs_de_base(proyecto, params, cache, sitio=None):
     """El prompt y las referencias de la imagen base del sitio. -> (sitio, prompt, refs)
 
     Es un plano mas a ojos del generador: la misma cabecera, las mismas
     referencias de estilo y las mismas reglas de la casa (`_prompt_completo`),
-    con el sitio VACIO, entero y en su estado inicial. Lanza si no hay sitio."""
+    con el sitio VACIO, entero y en su estado inicial. Lanza si no hay sitio.
+
+    Con `sitio` de OTRO ambiente de un recorrido o una clase (rama
+    tipo-de-relato-2), es la base de ese ambiente, y si la del principal esta
+    aprobada va como referencia de lo que comparte el lugar (papel «casa»)."""
     p = _con_defectos(params)
-    sitio, espacio = espacio_del_relato(proyecto, params)
+    principal, espacio = espacio_del_relato(proyecto, params)
+    casa = []
+    if sitio and sitio != principal:
+        ambiente = next((a for a in ambientes_del_relato(proyecto, params)
+                         if a["sitio"] == sitio), None)
+        if not ambiente:
+            raise RuntimeError(f"«{sitio}» no es un ambiente de este vídeo")
+        espacio = ambiente["espacio"]
+        ruta_casa = rutas_de_bases(proyecto, params).get(principal) if principal else None
+        if ruta_casa:
+            imagen = medios.motor("imagen_openai/imagen.py")
+            casa = [{"papel": "casa", "nombre": ambientes_del_relato(proyecto, params)[0]["nombre"],
+                     "ruta": imagen.normalizar(ruta_casa, cache)}]
+    else:
+        sitio = principal
     if not espacio:
         raise RuntimeError("no hay sitio del que hacer la imagen base: escribe el "
                            "espacio fijo (o deduce antes el reparto y los sitios)")
@@ -5612,13 +5706,14 @@ def prompt_y_refs_de_base(proyecto, params, cache):
     refs = list(_referencias_estilo(p, cache, escena))
     if not refs:
         raise RuntimeError("sin referencias de estilo no se puede hacer la imagen base")
+    refs = casa + refs
     formato = p2_brief.comun.ficha_formato(p4_voz.formato_de_salida(proyecto)) \
         if proyecto is not None else {"id": ""}
     prompt = _prompt_completo(escena, refs, p["estilo"], formato=formato.get("id") or "")
     return sitio, prompt, refs
 
 
-def generar_imagen_base(proyecto, params, rehacer=False):
+def generar_imagen_base(proyecto, params, rehacer=False, sitio=None):
     """Genera (y paga) la imagen base del sitio del tipo de relato.
 
     -> {sitio, imagen (ruta relativa), coste, origen}. La guarda en la carpeta
@@ -5627,7 +5722,7 @@ def generar_imagen_base(proyecto, params, rehacer=False):
     p = _con_defectos(params)
     cache = proyecto.ruta("espacio_fijo", "_refs")
     os.makedirs(cache, exist_ok=True)
-    sitio, prompt, refs = prompt_y_refs_de_base(proyecto, params, cache)
+    sitio, prompt, refs = prompt_y_refs_de_base(proyecto, params, cache, sitio=sitio)
     temporal = proyecto.ruta("espacio_fijo", "_base_nueva.png")
     formato = p2_brief.comun.ficha_formato(p4_voz.formato_de_salida(proyecto))
     meta = _producir_imagen(f"base_{sitio}", prompt, [r["ruta"] for r in refs],

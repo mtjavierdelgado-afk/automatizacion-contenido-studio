@@ -306,8 +306,14 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   que cambia solo lo que dice la voz (un objeto, los acabados, el estado o la
   hora): cada plano se genera editando una **imagen base** del sitio, que se
   aprueba en el vídeo antes de generar las imágenes (la subida en «El espacio
-  fijo», gratis, o una generada, que se paga). **Recorrido**, **Escenario y
-  apoyos**, **Producto** y **Clase** completan la lista. En un vídeo hecho,
+  fijo», gratis, o una generada, que se paga). **Recorrido** y **Clase** son
+  varios ambientes de un mismo lugar (la cocina, la sala y el dormitorio de
+  una casa; la pizarra y la mesa de un aula) con la misma luz y los mismos
+  materiales: en el vídeo, «Los ambientes del lugar» deja dibujar y aprobar la
+  imagen de cada uno (opcional, se paga una imagen por ambiente), que sus
+  planos llevan de referencia; la del principal va primero y las demás se
+  dibujan a partir de ella. **Escenario y apoyos** y **Producto** completan la
+  lista. En un vídeo hecho,
   «Aplicar el tipo de relato» enseña qué planos cambian y cuánto cuesta, y
   eliges cuáles rehacer.
 

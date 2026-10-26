@@ -11,6 +11,21 @@ vídeos, estilos, claves y contraseña no se tocan.
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
 
+**Recorrido y clase con varios ambientes; los primeros planos con su cámara (25 de octubre)**
+- **«Recorrido» y «Clase» ya son varios ambientes de un mismo lugar** (la
+  cocina, la sala y el dormitorio de una casa; la pizarra y la mesa de un
+  aula), con la misma luz y los mismos materiales. Antes se quedaban en un solo
+  sitio. Si escribes el espacio fijo, sus «Sitios secundarios» son los
+  ambientes; si no, los propone Claude al repartir.
+- **«Los ambientes del lugar»**, en el tipo de relato del vídeo: la imagen de
+  cada ambiente se dibuja y se aprueba (opcional; se paga una imagen por
+  ambiente, con su precio delante). Sus planos la llevan de referencia. Empieza
+  por el principal: los demás se dibujan a partir de él.
+- **En «Lo que dice el guion», un primer plano es un primer plano.** Con «Un
+  espacio que cambia», una línea cuya cámara pide un primer plano o un detalle
+  ya no edita la imagen base (que fijaba la cámara de siempre): la lleva de
+  referencia, con el estado de su objeto, y respeta su encuadre.
+
 **«Lo que dice el guion», sin que se cuele la voz (24 de octubre)**
 - **Las líneas «Visual:» de la Parrilla valen solas.** Si casan con el guion
   (cada una con su bloque y en orden), se dibujan sin tener que aprobarlas a

@@ -5059,6 +5059,12 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   .coste-origen { font-size: 10.5px; padding: 1px 7px; }
 }
 
+/* ====================================== AMBIENTES (rama tipo-de-relato-2) */
+.ambientes-relato { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; min-width: 0; }
+.ambiente-relato { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--linea);
+  border-radius: 8px; min-width: 0; }
+.ambiente-relato.aprobada { border-color: var(--ok-borde); }
+
 /* ============================================ GUION VISUAL (rama guion-visual) */
 .guion-visual { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .editor-gv { padding: 12px; border: 1px solid var(--linea); border-radius: 10px; margin-top: 10px; }

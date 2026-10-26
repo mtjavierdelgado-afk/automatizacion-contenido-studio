@@ -9372,6 +9372,7 @@ function bloqueTipoRelatoDelVideo() {
         onclick: () => escribirCambiosDelRelato() }, 'Escribir qué cambia en cada tramo'))));
   }
   if (f.edita) caja.appendChild(imagenBaseDelRelato(est, corriendo));
+  if ((f.ambientes || []).length) caja.appendChild(ambientesDelRelato(est, corriendo));
   if (est.cambios) caja.appendChild(cambiosDelRelato(est, corriendo));
   return caja;
 }
@@ -17020,6 +17021,53 @@ function bloqueRelatoEstiloLight(ficha) {
     + 'relato:»), manda el del vídeo. «Documental» aquí quiere decir que el estilo no impone ninguno. '
     + 'A los vídeos ya hechos solo llega con «Traer el estilo», que avisa antes de rehacer nada.'));
   if (RELATO_LIGHT.estado) caja.appendChild(h('div', { clase: 'meta' }, RELATO_LIGHT.estado));
+  return caja;
+}
+
+/* ============================== AMBIENTES (rama tipo-de-relato-2, 25-10-2026)
+   «Recorrido» y «Clase»: varios ambientes de un mismo lugar. Cada uno puede
+   tener su imagen base (se paga una imagen, con su coste delante); no se
+   edita: la llevan de referencia los planos de ese ambiente, para que se vea
+   el mismo sitio en todos. La del principal va primero: con ella aprobada, la
+   de cada ambiente se dibuja con sus materiales y su luz. Opcional: sin bases,
+   los planos se dibujan como siempre. Pintar no escribe nada. */
+function ambientesDelRelato(est, corriendo) {
+  const f = est.ficha || {};
+  const usd = Number(f.usd_base || 0);
+  const principal = (f.ambientes || [])[0] || {};
+  const caja = h('div', { clase: 'ambientes-relato' },
+    h('label', {}, 'Los ambientes del lugar'),
+    h('div', { clase: 'pista' }, 'Opcional. La imagen base de cada ambiente la llevan sus planos '
+      + 'como referencia: mismo sitio, mismos materiales y misma luz en todas las imágenes. '
+      + 'Empieza por el primero: los demás se dibujan a partir de él.'));
+  (f.ambientes || []).forEach((a, i) => {
+    const fila = h('div', { clase: `ambiente-relato${a.aprobada ? ' aprobada' : ''}` },
+      h('strong', {}, `${i === 0 ? 'Principal · ' : ''}${a.nombre || a.sitio}`));
+    if (a.imagen_url) {
+      const url = `${BASE}${a.imagen_url}&v=${Date.now() % 100000}`;
+      fila.appendChild(h('a', { href: url, target: '_blank', rel: 'noopener', title: 'Abrir a tamaño completo' },
+        h('img', { src: url, alt: `la imagen base de ${a.nombre || a.sitio}`, clase: 'miniatura-imagen-base' })));
+    }
+    fila.appendChild(h('div', { clase: 'meta' }, a.aprobada ? '✓ Aprobada: sus planos la llevan de referencia.'
+      : (a.imagen_url ? 'Sin aprobar.' : 'Sin imagen base.')));
+    const botones = h('div', { clase: 'fila' });
+    if (a.imagen_url) {
+      botones.appendChild(h('button', { clase: `mini${a.aprobada ? ' fantasma' : ' primario'}`, disabled: est.ocupado,
+        onclick: () => accionDelRelato('/base/aprobar', { sitio: a.sitio, aprobada: !a.aprobada },
+          a.aprobada ? 'aprobación retirada' : 'imagen del ambiente aprobada') },
+      a.aprobada ? 'Retirar la aprobación' : 'Aprobar esta imagen'));
+    }
+    const espera = i > 0 && !principal.aprobada;
+    botones.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo || espera,
+      title: espera ? 'Aprueba antes la del principal' : '',
+      onclick: () => {
+        if (!confirm(`${a.imagen_url ? 'Otra imagen' : 'La imagen base'} de «${a.nombre || a.sitio}»: `
+          + `≈ ${usdCorto(usd)}.\n\nSe paga una imagen. Después la miras y la apruebas.`)) return;
+        trabajoDelRelato('/base/generar', { otra: !!a.imagen_url, usd, sitio: a.sitio });
+      } }, `${a.imagen_url ? 'Otra imagen' : 'Generar la imagen'} · ≈ ${usdCorto(usd)}`));
+    fila.appendChild(botones);
+    caja.appendChild(fila);
+  });
   return caja;
 }
 

@@ -4784,7 +4784,16 @@ def _ficha_tipo_relato(ctx):
                    and bool(catalogo.get("beats"))
                    and not any(b.get("cambio")
                                for b in catalogo.get("beats") or [] if isinstance(b, dict)))
+    # recorrido y clase (tipo-de-relato-2): los ambientes y la base de cada uno
+    try:
+        ambientes = [{"sitio": a["sitio"], "nombre": a["nombre"],
+                      "aprobada": bool((bases.get(a["sitio"]) or {}).get("aprobada")),
+                      "imagen_url": (bases.get(a["sitio"]) or {}).get("imagen_url")}
+                     for a in p6.ambientes_del_relato(ctx.proyecto, params)]
+    except Exception:                                       # noqa: BLE001
+        ambientes = []
     return {
+        "ambientes": ambientes,
         "tipo_relato": {k: v for k, v in guardado.items() if k != "bases"},
         "resuelto": dict(resuelto, nombre=tr.nombre(resuelto["modo"], resuelto.get("cambia"))),
         "del_estilo": tr.normalizar_de_estilo((params.get("estilo") or {}).get("relato"))
@@ -5003,12 +5012,12 @@ def escribir_cambios_relato(pid: str, cuerpo: dict = Body(default=None)):
 
 @_medido_en("assets", "base")
 @_con_turno
-def _correr_base(avisar, ctx, rehacer):
-    """Genera (y paga) la imagen base del sitio. No la aprueba."""
+def _correr_base(avisar, ctx, rehacer, sitio=None):
+    """Genera (y paga) la imagen base del sitio (o la de un ambiente). No la aprueba."""
     p6 = PASOS_MODULOS.p6_assets
     avisar(0.1, "dibujando la imagen base del sitio (se paga una imagen)")
     hecho = p6.generar_imagen_base(ctx.proyecto, ctx.estado.params("assets") or {},
-                                   rehacer=rehacer)
+                                   rehacer=rehacer, sitio=sitio)
     tr = _tipo_relato()
     with _cerrojo_de_cadena(ctx.id):
         guardado = _tipo_relato_guardado(ctx)
@@ -5059,9 +5068,16 @@ def generar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
     params = ctx.estado.params("assets") or {}
-    if not tr.edita(tr.resolver(params)):
-        raise ErrorApi(400, "la imagen base que se edita es de «Un espacio que cambia» y "
-                            "«Producto»: elige antes uno de los dos")
+    resuelto = tr.resolver(params)
+    # recorrido y clase (tipo-de-relato-2): la base de CADA ambiente, de referencia
+    ambientes = (PASOS_MODULOS.p6_assets.ambientes_del_relato(ctx.proyecto, params)
+                 if tr.activo(resuelto) and resuelto.get("modo") in tr.AMBIENTES else [])
+    sitio = str(datos.get("sitio") or "").strip()
+    if not tr.edita(resuelto) and not ambientes:
+        raise ErrorApi(400, "la imagen base es de «Un espacio que cambia», «Producto», "
+                            "«Recorrido» y «Clase»: elige antes uno de ellos")
+    if sitio and sitio not in [a["sitio"] for a in ambientes]:
+        raise ErrorApi(404, f"«{sitio}» no es un ambiente de este vídeo")
     try:
         visto = float(datos.get("usd"))
     except (TypeError, ValueError):
@@ -5085,7 +5101,8 @@ def generar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
                                            bool(datos.get("otra")), paso="assets")
         else:
             trabajo_id = ctx.gestor.lanzar("tipo_relato_base", _correr_base, ctx,
-                                           bool(datos.get("otra")), paso="assets")
+                                           bool(datos.get("otra")), sitio or None,
+                                           paso="assets")
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}

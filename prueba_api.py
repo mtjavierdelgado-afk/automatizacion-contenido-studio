@@ -7481,6 +7481,40 @@ def probar_dominios():
         presets.FICHERO = antes
 
 
+def probar_ambientes():
+    """Rama tipo-de-relato-2 (25-10-2026): los ambientes de un recorrido y la
+    base de cada uno. En este proceso y sin el CLI: nada se genera ni se paga."""
+    seccion("AMBIENTES: RECORRIDO Y CLASE")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_ambientes_")
+    servidor.fijar_raiz_proyectos(base)
+    pid = Proyecto.crear(base, "ambientes").id
+    Estado(servidor.contexto(pid).proyecto)
+    ctx = servidor.contexto(pid)
+    espacio = {"sitio": "Cocina", "descripcion": "an open kitchen, oak and white", "luz": "day",
+               "secundarios": [{"nombre": "Sala", "descripcion": "a living room, oak and white"}]}
+    servidor._opciones_al_crear(ctx, "", {"espacio_fijo": espacio, "tipo_relato": {"modo": "recorrido"}})
+    codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+    igual(codigo, 200, "AMBIENTES: leer, 200")
+    if codigo == 200:
+        igual([a["sitio"] for a in ficha["ambientes"]], ["cocina", "sala"],
+              "AMBIENTES: el principal y su secundario, en orden")
+        ok(not any(a["aprobada"] for a in ficha["ambientes"]), "AMBIENTES: ninguno aprobado todavía")
+        ok(not ficha["edita"], "AMBIENTES: un recorrido no edita la base")
+    codigo, _m = _llamar(servidor.generar_base_relato, pid, {"sitio": "garaje", "usd": 0.05})
+    igual(codigo, 404, f"AMBIENTES: un ambiente que no existe da 404 ({_m})")
+    codigo, _m = _llamar(servidor.generar_base_relato, pid, {"sitio": "sala"})
+    igual(codigo, 400, f"AMBIENTES: sin el coste que se vio da 400 ({_m})")
+    ok(not ctx.gestor.listar(activos=True), "AMBIENTES: y no se lanza nada")
+    codigo, _m = _llamar(servidor.aprobar_base_relato, pid, {"sitio": "sala", "aprobada": True})
+    igual(codigo, 404, f"AMBIENTES: aprobar uno sin imagen da 404 ({_m})")
+    servidor._opciones_al_crear(ctx, "", {"tipo_relato": {"modo": "producto"}})
+    codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+    ok(codigo == 200 and ficha["ambientes"] == [], "AMBIENTES: en producto, ninguno")
+
+
 def probar_guion_visual():
     """Rama guion-visual (22-10-2026): qué dibujan las imágenes y el guion visual.
 
@@ -7797,6 +7831,7 @@ def main():
         probar_tipo_relato()
         probar_dominios()
         probar_guion_visual()
+        probar_ambientes()
     finally:
         parar(proceso)
         if not argumentos.conservar:

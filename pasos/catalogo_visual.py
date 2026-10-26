@@ -968,8 +968,11 @@ def _criterio(planos, min_s, max_s, espacio=None, relato=None):
         return texto
     extra = tipo_relato.criterio_extra(relato) if activo else ""
     if not espacio:
+        # recorrido y clase: varios ambientes del mismo lugar (tipo-de-relato-2)
+        sets_texto = (tipo_relato.SETS_AMBIENTES if relato.get("modo") in tipo_relato.AMBIENTES
+                      else tipo_relato.SETS_UN_SITIO)
         texto = _cambiar_tramo(texto, "SETS — donde ocurre", "REALES — lo que existe",
-                               tipo_relato.SETS_UN_SITIO.format(
+                               sets_texto.format(
                                    nombre=tipo_relato.nombre(relato["modo"],
                                                              relato.get("cambia")))
                                + extra)
@@ -1075,7 +1078,7 @@ def _aplicar_espacio_fijo(ficha, espacio, ids_bloque):
     return ficha
 
 
-def espacio_del_catalogo(catalogo):
+def espacio_del_catalogo(catalogo, ambientes=False):
     """El espacio fijo que sale del sitio MAS usado por los tramos. -> {} o espacio
 
     Es lo que fija un tipo de relato de un solo sitio cuando nadie ha escrito el
@@ -1092,9 +1095,17 @@ def espacio_del_catalogo(catalogo):
     descripcion = " ".join(str(ficha.get("descripcion") or "").split())
     if not elegido or not descripcion:
         return {}
-    return normalizar_espacio_fijo({"sitio": elegido,
-                                    "descripcion": descripcion[:MAX_DESCRIPCION_SITIO],
-                                    "luz": str(ficha.get("luz") or "")[:MAX_LUZ]})
+    # con `ambientes` (recorrido y clase, tipo-de-relato-2) los demas sitios
+    # que usa algun tramo son secundarios: los ambientes del mismo lugar
+    secundarios = [{"nombre": sid, "descripcion": " ".join(
+                        str((sets.get(sid) or {}).get("descripcion") or "").split())}
+                   for sid in sorted(cuenta, key=lambda s: (-cuenta[s], s))
+                   if ambientes and sid != elegido][:MAX_SECUNDARIOS]
+    crudo = {"sitio": elegido, "descripcion": descripcion[:MAX_DESCRIPCION_SITIO],
+             "luz": str(ficha.get("luz") or "")[:MAX_LUZ]}
+    if secundarios:
+        crudo["secundarios"] = secundarios
+    return normalizar_espacio_fijo(crudo)
 
 
 def _aplicar_relato(catalogo, crudos, relato, espacio, ids_bloque, inicial_crudo=""):
@@ -1106,10 +1117,19 @@ def _aplicar_relato(catalogo, crudos, relato, espacio, ids_bloque, inicial_crudo
     - En «un espacio que cambia», el `cambio` y el `estado` de cada tramo, y el
       `inicial` (como esta en la base lo que luego cambia) en `relato`.
     - `relato` en el catalogo: dice con que modo se repartio."""
+    ambientes = relato["modo"] in tipo_relato.AMBIENTES
     if not espacio:
-        propio = espacio_del_catalogo(catalogo)
+        propio = espacio_del_catalogo(catalogo, ambientes=ambientes)
         if propio:
             catalogo = _aplicar_espacio_fijo(catalogo, propio, ids_bloque)
+    if ambientes:
+        # LA MISMA LUZ EN TODOS LOS AMBIENTES: es el mismo lugar a la misma hora
+        sets = catalogo.get("sets") or {}
+        principal = next(iter(sets), None)
+        luz = (sets.get(principal) or {}).get("luz") if principal else ""
+        if luz:
+            for ficha in sets.values():
+                ficha["luz"] = luz
     inicial = ""
     if relato["modo"] == "espacio_que_cambia":
         tipo_relato.anotar_cambios(crudos, catalogo.get("beats"))

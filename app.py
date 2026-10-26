@@ -2529,9 +2529,11 @@ def _consumo_de_claude(peticion):
 
 @app.get("/api/claude/consumo")
 def consumo_de_claude(peticion: Request):
-    """El medidor de Claude (solo lee): el cupo de cada cuenta, los avisos al
-    70 % y al 90 % y el consumo de los últimos días. Si toca (más de 15 min y
-    ha habido llamadas), lanza una medida en segundo plano: no espera a ella."""
+    """El medidor de Claude: cupo de cada cuenta, avisos y consumo (solo lee).
+
+    El cupo (ventanas de 5 h y semana), los avisos al 70 % y al 90 % y el
+    consumo de los últimos días. Si toca (más de 15 min y ha habido llamadas),
+    lanza una medida en segundo plano: no espera a ella."""
     if CONSUMO_CLAUDE is not None and not CONSUMO_CLAUDE.midiendo():
         for cuenta in _cuentas_para_medir():
             try:
@@ -2544,8 +2546,10 @@ def consumo_de_claude(peticion: Request):
 
 @app.post("/api/claude/consumo/medir")
 def medir_consumo_de_claude(peticion: Request):
-    """«Medir ahora»: una llamada mínima por cuenta (haiku, una palabra) para
-    leer su cupo. Espera a la medida (unos segundos)."""
+    """«Medir ahora»: lee el cupo de cada cuenta con una llamada mínima.
+
+    Una llamada a haiku de una palabra por cuenta; espera a la medida (unos
+    segundos) y devuelve lo mismo que el GET."""
     if CONSUMO_CLAUDE is None:
         raise ErrorApi(503, "el medidor de Claude no se ha podido cargar")
     # a la vez y con tope: detrás del proxy una petición de un minuto se corta

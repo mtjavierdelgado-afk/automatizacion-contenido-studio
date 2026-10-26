@@ -111,9 +111,6 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/trabajos/{tid}` | Estado y progreso de un trabajo. |
 | `POST` | `/api/trabajos/{tid}/cancelar` | Pide la cancelacion cooperativa de un trabajo. |
 | `GET` | `/api/trabajos/{tid}/eventos` | Progreso del trabajo en vivo por Server-Sent Events. |
-| `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee): `imagenes` y `montaje` con `ahora` (quién tiene el turno) y `fila` (quién espera, por orden de llegada), y `trabajando` (todo lo que está en marcha en los vídeos abiertos). Un vídeo de un proyecto con clave sin abrir sale sin nombre ni enlace. |
-| `GET` | `/api/claude/consumo` | El medidor de Claude (solo lee): `cupo` de cada cuenta (las `ventanas` five_hour y seven_day con `uso` 0–1 y `reinicia` en epoch, tal como las da el CLI), `avisos` (≥ 70 % «ojo», ≥ 90 % «malo»), `resumen` de los últimos 7 días (hoy, semana, por día, tarea, vídeo y cuenta). Si han pasado más de 15 min y ha habido llamadas, lanza una medida en segundo plano (nunca con `ESTUDIO_SIMULAR`). |
-| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: una llamada mínima por cuenta (haiku, una palabra, `stream-json`) para leer su cupo; devuelve lo mismo que el GET. Con `ESTUDIO_SIMULAR`, un cupo simulado. |
 
 ## Recetas y pestañas
 
@@ -137,7 +134,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/bitacora` | Historial estructurado del proyecto. |
 | `GET` | `/api/proyectos/{pid}/bitacora/llm` | Historial en texto navegable, pensado para darselo a un LLM. |
 | `GET` | `/api/proyectos/{pid}/coste` | Total del video, desglosado por proveedor, con la linea de cabecera. |
-| `GET` | `/api/proyectos/{pid}/coste/detalle` | EL COSTE DE UN VIDEO, TODO Y DESGLOSADO (11-10-2026). | Con `claude_consumo` (de `consumo_claude.jsonl`: `llamadas`, `tokens` nuevos, `cache` leída, `usd` equivalente por API y `por_tarea`; None en vídeos de antes del medidor) y `claude_cache` junto a `claude_tokens` (medidor-claude-2).
+| `GET` | `/api/proyectos/{pid}/coste/detalle` | EL COSTE DE UN VIDEO, TODO Y DESGLOSADO (11-10-2026). |
 | `GET` | `/api/proyectos/{pid}/coste/eventos` | Detalle de cada consumo, filtrable por proveedor, paso y unidad. |
 | `GET` | `/api/proyectos/{pid}/coste/flujo` | Coste en vivo por SSE, para que la cabecera se mueva mientras corre un paso. |
 | `GET` | `/api/proyectos/{pid}/coste/por-paso` | Desglose por paso del pipeline: que fase se come el presupuesto. |
@@ -354,6 +351,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
+| `GET` | `/api/claude/consumo` | El medidor de Claude: cupo de cada cuenta, avisos y consumo (solo lee). |
+| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: lee el cupo de cada cuenta con una llamada mínima. |
 | `GET` | `/api/clientes` | Los proyectos (clientes) y a cual pertenece cada estilo. |
 | `POST` | `/api/clientes` | Un proyecto nuevo: {nombre}. |
 | `PUT` | `/api/clientes/estilos/{preset_id}` | Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca). |
@@ -361,6 +360,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
 | `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
+| `GET` | `/api/cola_studio` | La cola de todo el Studio: imágenes, montaje y lo demás que trabaja. |
 | `GET` | `/api/dominios` | Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico} |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
@@ -492,4 +492,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**375 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**378 endpoints.** Escrito por `generar_api.py` desde `app.py`.

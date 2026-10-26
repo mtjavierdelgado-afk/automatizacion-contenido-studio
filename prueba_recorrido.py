@@ -574,19 +574,21 @@ def portada_y_proyectos(navegador, datos):
     ok(pg.visible("h2", "Tus proyectos"), "la portada enseña «Tus proyectos»")
     ok(pg.visible(".tarjeta-proyecto", "Estado Play"), "se ve la tarjeta de Estado Play")
     ok(not pg.visible(".tarjeta-proyecto", "Suyu"), "el proyecto oculto no se ve de entrada")
-    ok(pg.visible("button", "Ver los ocultos"), "y hay un botón para ver los ocultos")
-    pg.pulsar("button", "Ver los ocultos")
+    # rediseño de Tus proyectos (22-10-2026): «Ver ocultos (N)» es un chip que
+    # se enciende y se apaga, en la fila del título «Proyectos»
+    ok(pg.visible("button.chip-filtro", "Ver ocultos (1)"), "y hay un botón para ver los ocultos")
+    pg.pulsar("button.chip-filtro", "Ver ocultos")
     ok(pg.visible(".tarjeta-proyecto", "Suyu"),
-       "«Ver los ocultos» ENSEÑA el proyecto oculto (con tamaño en pantalla)")
+       "«Ver ocultos» ENSEÑA el proyecto oculto (con tamaño en pantalla)")
     pg.captura("01_portada_con_ocultos")
-    pg.pulsar("button", "Esconder los ocultos")
-    ok(not pg.visible(".tarjeta-proyecto", "Suyu"), "y «Esconder» lo vuelve a esconder")
+    pg.pulsar("button.chip-filtro", "Ver ocultos")
+    ok(not pg.visible(".tarjeta-proyecto", "Suyu"), "y pulsarlo otra vez lo vuelve a esconder")
     # DEJAR DE OCULTARLO desde la portada (11-10-2026: «lo mantiene como un
-    # oculto visible»)
-    pg.pulsar("button", "Ver los ocultos")
-    ok(pg.visible(".ocultos-portada button", "Dejar de ocultar"),
-       "con los ocultos a la vista, cada uno tiene «Dejar de ocultar»")
-    pg.pulsar(".ocultos-portada button", "Dejar de ocultar")
+    # oculto visible»), ahora dentro de su propia tarjeta
+    pg.pulsar("button.chip-filtro", "Ver ocultos")
+    ok(pg.visible(".tarjeta-proyecto.es-oculto button", "Dejar de ocultar"),
+       "con los ocultos a la vista, cada uno tiene «Dejar de ocultar» en su tarjeta")
+    pg.pulsar(".tarjeta-proyecto.es-oculto button", "Dejar de ocultar")
     pg.p.wait_for_timeout(1000)
     _r, d = api.get("/api/clientes")
     ok(not any(c.get("oculto") for c in d.get("clientes") or [] if c.get("id") == datos["cliente_oculto"]),
@@ -602,7 +604,7 @@ def portada_y_proyectos(navegador, datos):
     api.put(f"/api/clientes/{datos['cliente']}", {"clave": "1234"})
     pg.js("await cargarClientes(); pintarLight();")
     ok(pg.visible(".tarjeta-proyecto", "con clave"), "un proyecto con clave lo dice en su tarjeta")
-    pg.pulsar(".tarjeta-proyecto", "Estado Play")
+    pg.pulsar(".tarjeta-proyecto .abrir-proyecto", "Estado Play")
     ok(pg.esperar(".capa-dialogo input"), "al pulsarlo pide la clave")
     pg.p.locator(".capa-dialogo input").first.fill("1234")
     pg.p.locator(".capa-dialogo button[type=submit]").click()
@@ -768,9 +770,9 @@ def del_video_a_su_estilo_y_de_vuelta(navegador, datos):
     pg = Pagina(navegador, datos)
     pg.js("await cargarGaleriaLight(true); elegirCliente(''); irALight('galeria');")
     ok(pg.visible("h2", "Tus proyectos"), "se empieza en la portada de proyectos")
-    ok(pg.esperar(".video-light button.abrir", "Padres vs hijos"),
-       "el vídeo de prueba sale en «Últimos vídeos»")
-    pg.pulsar(".video-light button.abrir", "Padres vs hijos")
+    ok(pg.esperar(".tarjeta-video button.abrir-video", "Padres vs hijos"),
+       "el vídeo de prueba sale en «Sigue donde lo dejaste»")
+    pg.pulsar(".tarjeta-video button.abrir-video", "Padres vs hijos")
     pg.esperar(".pasos-carril button", "Estilo")
     pg.p.wait_for_timeout(1000)
     ir_al_paso(pg, "Estilo")
@@ -1536,29 +1538,240 @@ def proyectos_a_mano(navegador, datos):
     pg.p.locator(".capa-dialogo input").first.fill("Cliente de prueba")
     pg.p.locator(".capa-dialogo button[type=submit]").click()
     ok(pg.esperar("h2", "Cliente de prueba"), "y entra en el proyecto nuevo")
-    pg.pulsar(".mandos-proyecto button", "Renombrar")
-    pg.p.locator(".capa-dialogo input").first.fill("Cliente renombrado")
-    pg.p.locator(".capa-dialogo button[type=submit]").click()
+    # rediseño de Tus proyectos (22-10-2026): todo eso vive en «⚙ Ajustes del
+    # proyecto», un cajón a la derecha, y no en una fila de seis botones
+    pg.pulsar(".abrir-ajustes-proyecto")
+    ok(pg.esperar(".cajon-proyecto", "Zona de peligro"), "«⚙ Ajustes del proyecto» abre su cajón")
+    pg.p.locator(".cajon-proyecto .nombre-proyecto input").fill("Cliente renombrado")
+    pg.pulsar(".cajon-proyecto .nombre-proyecto button", "Guardar")
     ok(pg.esperar("h2", "Cliente renombrado"), "se renombra")
-    pg.pulsar(".mandos-proyecto button", "Logo")
     logo = _png(os.path.join(datos["base"], "logo.png"), (250, 200, 30))
-    pg.p.locator(".panel-logo-proyecto input[type=file]").set_input_files(logo)
-    ok(pg.esperar(".mandos-proyecto button", "Logo ✓", 15), "se le pone logo")
-    pg.pulsar(".mandos-proyecto button", "Ocultar")
-    ok(pg.esperar(".pastilla", "oculto"), "se oculta (y lo dice)")
-    pg.pulsar(".mandos-proyecto button", "Poner clave")
+    pg.p.locator(".cajon-proyecto .panel-logo-proyecto input[type=file]").set_input_files(logo)
+    ok(pg.esperar(".cab-proyecto .pastilla", "logo ✓", 15), "se le pone logo")
+    pg.p.locator(".cajon-proyecto .ajustes-visibilidad input.conmutador").click()
+    ok(pg.esperar(".cab-proyecto .pastilla", "oculto"), "se oculta (y lo dice)")
+    pg.pulsar(".cajon-proyecto button", "Poner clave")
     pg.p.locator(".capa-dialogo input").nth(0).fill("abcd")
     pg.p.locator(".capa-dialogo input").nth(1).fill("abcd")
     pg.p.locator(".capa-dialogo button[type=submit]").click()
-    ok(pg.esperar(".mandos-proyecto button", "Clave ✓", 10), "se le pone clave")
+    ok(pg.esperar(".cajon-proyecto button", "Cambiar o quitar la clave", 10), "se le pone clave")
     pg.captura("15_proyecto_a_mano")
-    pg.pulsar(".mandos-proyecto button", "Borrar")
+    pg.pulsar(".cajon-proyecto button", "Borrar el proyecto")
+    ok(pg.esperar(".capa-dialogo", "Se borra solo la carpeta", 5),
+       "«Borrar el proyecto» pregunta antes, con su explicación")
     if pg.esperar(".capa-dialogo button", "Borrar", 5):
         pg.pulsar(".capa-dialogo button", "Borrar")
     ok(pg.esperar("h2", "Tus proyectos"), "se borra y vuelve a la portada")
     ok(not pg.visible(".tarjeta-proyecto", "Cliente renombrado"), "y ya no está")
     pg.sin_errores("los proyectos a mano")
     pg.cerrar()
+
+
+@escenario
+def tus_proyectos_rediseno(navegador, datos):
+    """El rediseño de Tus proyectos (rama `rediseno-proyectos`, 22-10-2026):
+    el estado de cada vídeo sale de una ruta de solo lectura, «+ Nuevo vídeo»
+    abre «¿con qué estilo?» (lo mismo que pulsar un estilo), el buscador filtra
+    sin perder el foco, «⋯» por vídeo, el menú de un estilo, los filtros por
+    estado y la vista de lista, el cajón «⚙ Ajustes del proyecto» y el móvil.
+    Nada de esto escribe ni paga: se mira cada petición que sale."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    # LA RUTA DEL ESTADO: solo lectura, y lo de un proyecto con clave no sale
+    r, d = api.get(f"/api/proyectos/_resumen?ids={pid},no_existe")
+    resumen = (d.get("videos") or {}).get(pid) or {}
+    ok(r.status_code == 200 and (resumen.get("pasos") or {}).get("render") == "listo"
+       and "no_existe" not in (d.get("videos") or {}),
+       f"GET /api/proyectos/_resumen dice por dónde va cada vídeo ({resumen})")
+    api.put(f"/api/clientes/{datos['cliente']}", {"clave": "4321"})
+    _r, d = api.get(f"/api/proyectos/_resumen?ids={pid}")
+    ok(pid not in (d.get("videos") or {}), "y no dice nada de un vídeo de un proyecto con clave cerrado")
+    api.put(f"/api/clientes/{datos['cliente']}", {"clave": ""})
+
+    pg = Pagina(navegador, datos)
+    pg.aceptar = False
+    escrituras = []
+    pg.p.on("request", lambda q: escrituras.append(f"{q.method} {q.url.split('/api/', 1)[-1]}")
+            if q.method in ("PUT", "POST", "DELETE", "PATCH") and "/api/" in q.url
+            and not re.search(r"/api/(asistente|sistema/revis|me$|logout|ortografia|estimacion$|presets-light/plan$)",
+                              q.url) else None)
+    pg.js("elegirCliente(''); recordarVideoLight(''); await cargarGaleriaLight(true); irALight('galeria');")
+    ok(pg.visible(".cab-tus-proyectos button.nuevo-video", "+ Nuevo vídeo")
+       and pg.visible(".cab-tus-proyectos button", "+ Nuevo proyecto"),
+       "la portada tiene «+ Nuevo vídeo» y «+ Nuevo proyecto» arriba")
+    ok(pg.esperar(".cab-tus-proyectos button", "Papelera ·", 10), "y la papelera con su número")
+    ok(pg.esperar(".tarjeta-video .estado-tarjeta", "Montado", 15),
+       "la tarjeta del vídeo dice cómo va en Crear («✓ Montado»)")
+    ok(pg.esperar(".tarjeta-video .estado-tarjeta", "Listo para publicar", 15)
+       or pg.visible(".tarjeta-video .estado-tarjeta", "Programado")
+       or pg.visible(".tarjeta-video .estado-tarjeta", "Publicado"),
+       "y cómo va en Publicar")
+    ok("📁 Estado Play · 🎨 Estado Play Matriz" in pg.p.locator(".tarjeta-video", has_text="Padres vs hijos").first.inner_text(),
+       "con «📁 proyecto · 🎨 estilo» y la fecha legible")
+    pg.captura("16_tus_proyectos")
+    # EL BUSCADOR: filtra lo que se ve y el foco sigue en el campo al repintar
+    caja = pg.p.locator(".buscador-proyectos input")
+    caja.click()
+    caja.press_sequentially("zzq", delay=60)
+    pg.p.wait_for_timeout(500)
+    ok(caja.input_value() == "zzq" and pg.p.evaluate("() => document.activeElement && document.activeElement.type === 'search'"),
+       "el buscador no pierde lo escrito ni el foco al repintar")
+    ok(not pg.visible(".tarjeta-video", "Padres vs hijos") and pg.visible(".tarjetas-video .pista", "Ningún vídeo"),
+       "una búsqueda sin nada lo dice")
+    caja.fill("")
+    caja.press_sequentially("padres", delay=40)
+    pg.p.wait_for_timeout(500)
+    ok(pg.visible(".tarjeta-video", "Padres vs hijos") and not pg.visible(".tarjeta-proyecto", "Suyu"),
+       "y con «padres» sale el vídeo y no los proyectos que no casan")
+    caja.fill("")
+    pg.js("APP.light.busca = ''; pintarLight();")
+    # «⋯» DE UN VÍDEO: Renombrar, Mover y Apartar (que pregunta antes)
+    tarjeta = ".tarjeta-video:has-text('Padres vs hijos')"
+    pg.pulsar(f"{tarjeta} .mas-video")
+    ok(pg.visible(".menu-de-video button", "Renombrar") and pg.visible(".menu-de-video button", "Mover a otro proyecto")
+       and pg.visible(".menu-de-video button", "Apartar"), "«⋯» abre Renombrar, Mover a otro proyecto y Apartar")
+    pg.captura("16_menu_del_video", entera=False)
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".menu-de-video"), "Escape lo cierra")
+    pg.pulsar(f"{tarjeta} .mas-video")
+    pg.pulsar(".menu-de-video button", "Renombrar")
+    ok(pg.esperar(".tarjeta-video.renombrando input"), "«Renombrar» pone el nombre en un campo en la propia tarjeta")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    pg.pulsar(f"{tarjeta} .mas-video")
+    antes = len(pg.dialogos)
+    pg.pulsar(".menu-de-video button", "Apartar")
+    pg.p.wait_for_timeout(600)
+    ok(len(pg.dialogos) > antes and "Apartar" in pg.dialogos[-1] and "papelera" in pg.dialogos[-1],
+       "«Apartar» pregunta antes (y dice que va a la papelera)")
+    ok(pg.visible(".tarjeta-video", "Padres vs hijos"), "y cancelado, el vídeo sigue ahí")
+    # «Publicar ›» lleva a su ficha de Publicar
+    pg.pulsar(f"{tarjeta} .chip-publicar")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.evaluate(f"() => MODULOS.actual === 'publicar' && PUB.pid === '{pid}'"),
+       "«Publicar ›» abre la ficha del vídeo en Publicar")
+    pg.js("irAModulo('crear'); elegirCliente(''); irALight('galeria');")
+    # «+ NUEVO VÍDEO»: ¿con qué estilo? Elegir uno es lo mismo que pulsar su tarjeta
+    pg.pulsar(".cab-tus-proyectos button.nuevo-video")
+    ok(pg.esperar("#nuevo-video .elige-estilo", "Estado Play Matriz"),
+       "«+ Nuevo vídeo» pregunta con qué estilo, agrupado por proyecto")
+    ok(pg.visible("#nuevo-video", "📁 Estado Play"), "con el nombre de cada proyecto")
+    pg.captura("16_nuevo_video", entera=False)
+    pg.pulsar("#nuevo-video .elige-estilo", "Estado Play Matriz")
+    pg.p.wait_for_timeout(1200)
+    ok(pg.p.evaluate(f"() => APP.light.vista === 'elegido' && !APP.light.video.pid "
+                     f"&& (estiloElegido() || {{}}).id === '{datos['preset']}'"),
+       "y elegir el estilo abre el Encargo de un vídeo nuevo con él")
+    # DENTRO DEL PROYECTO
+    pg.js(f"recordarVideoLight(''); elegirCliente('{datos['cliente']}'); irALight('galeria');")
+    pg.p.wait_for_timeout(800)
+    ok(pg.visible(".cab-proyecto h2", "Estado Play") and pg.visible(".cab-proyecto button", "Ajustes del proyecto")
+       and pg.visible(".cab-proyecto button.nuevo-video", "+ Nuevo vídeo"),
+       "dentro de un proyecto: su cabecera con «⚙ Ajustes del proyecto» y «+ Nuevo vídeo»")
+    ok(not pg.visible("button", "Renombrar") and not pg.visible(".mandos-proyecto"),
+       "sin la fila de seis mandos de antes")
+    ok(pg.visible(".ficha-estilo .editar-estilo", "Editar"), "«✎ Editar» sigue a la vista en la tarjeta del estilo")
+    ok(pg.visible(".ficha-estilo.traer", "Traer un estilo de otro proyecto"), "«⇄ Traer un estilo» es una tarjeta más")
+    pg.pulsar(".ficha-estilo .cara-y-cuerpo", "Estado Play Matriz")
+    ok(pg.visible(".menu-de-estilo button", "Nuevo vídeo con este estilo") and pg.visible(".menu-de-estilo button", "Editar el estilo")
+       and pg.visible(".menu-de-estilo button", "Duplicar") and pg.visible(".menu-de-estilo button", "Mover a otro proyecto"),
+       "tocar un estilo abre «▶ Nuevo vídeo con este estilo / ✎ Editar el estilo / Duplicar / Mover»")
+    pg.captura("16_menu_del_estilo", entera=False)
+    pg.pulsar(".menu-de-estilo button", "Editar el estilo")
+    pg.p.wait_for_timeout(800)
+    ok(pg.p.evaluate(f"() => APP.light.vista === 'preset' && APP.light.abierto === '{datos['preset']}'"),
+       "«✎ Editar el estilo» abre su ficha")
+    pg.js(f"elegirCliente('{datos['cliente']}'); irALight('galeria');")
+    pg.p.wait_for_timeout(800)
+    # LOS FILTROS Y LA LISTA
+    ok(pg.esperar(".chips-filtro-videos button", "Listos 1", 15) and pg.visible(".chips-filtro-videos button", "Todos 1")
+       and pg.visible(".chips-filtro-videos button", "En curso 0"),
+       "los chips de estado cuentan los vídeos (Todos 1 · En curso 0 · Listos 1)")
+    pg.pulsar(".chips-filtro-videos button", "En curso")
+    ok(pg.visible(".tarjetas-video .pista", "Ningún vídeo con este filtro") and not pg.visible(".tarjeta-video", "Padres vs hijos"),
+       "«En curso» lo filtra")
+    pg.pulsar(".chips-filtro-videos button", "Listos")
+    ok(pg.visible(".tarjeta-video", "Padres vs hijos"), "«Listos» lo enseña")
+    pg.pulsar(".conmutador-vista button", "Lista")
+    ok(pg.visible(".tarjetas-video.en-lista .tarjeta-video.en-lista", "Padres vs hijos"), "«☰ Lista» lo pone en filas")
+    pg.captura("16_proyecto_en_lista")
+    pg.pulsar(".conmutador-vista button", "Tarjetas")
+    ok(pg.visible(".tarjetas-video:not(.en-lista) .tarjeta-video", "Padres vs hijos"), "y «▦ Tarjetas» lo devuelve")
+    # «TE NECESITAN»: los estilos a medias, arriba y con «Apartar»
+    pg.js(f"APP.light.datos.sueltos = [{{ id: 'taller_falso', nombre: 'Estilo a medias de prueba', "
+          f"actualizado: '2026-10-20T18:02:00', cliente: '{datos['cliente']}' }}]; pintarLight();")
+    ok(pg.visible(".te-necesitan", "Estilo a medias de prueba") and pg.visible(".te-necesitan button", "Retomar")
+       and pg.visible(".te-necesitan button", "Descartar"),
+       "«Te necesitan» enseña el estilo a medias con «Retomar» y «Descartar»")
+    pg.js("APP.light.datos.sueltos = []; pintarLight();")
+    # MÁS DE 120 VÍDEOS (revisión del 22-10): el estado se pide en lotes de 40,
+    # como mucho dos a la vez, y un vídeo que no vuelve no se da por perdido
+    ok(pg.p.evaluate("() => partirEnLotes(Array.from({ length: 130 }, (_, i) => 'v' + i), 40).map(l => l.length).join(',')")
+       == "40,40,40,10", "130 ids se parten en lotes de 40, 40, 40 y 10")
+    pg.p.evaluate("() => { window.__lotes = []; window.__enVueloMax = 0; const _p = pedir;"
+                  " pedir = function (url, ...r) { const m = String(url).match(/_resumen\\?ids=([^&]*)/);"
+                  " if (m) { window.__lotes.push(decodeURIComponent(m[1]).split(',').length);"
+                  " window.__enVueloMax = Math.max(window.__enVueloMax, TUS_PROYECTOS.enVuelo); }"
+                  " return _p.call(this, url, ...r); }; }")
+    pg.js(f"const reales = videosLight(); TUS_PROYECTOS.estados = {{}}; TUS_PROYECTOS.espera = {{}};"
+          f" asegurarEstadosDeVideos(Array.from({{ length: 130 }}, (_, i) => ({{ id: 'falso_' + i }})).concat(reales));")
+    pg.p.wait_for_timeout(4000)
+    lotes = pg.p.evaluate("() => window.__lotes")
+    ok(lotes and max(lotes) <= 40 and sum(lotes) == 131 and pg.p.evaluate("() => window.__enVueloMax") <= 2,
+       f"131 vídeos se piden en lotes de 40 como mucho, dos a la vez ({lotes})")
+    ok(pg.p.evaluate(f"() => !!TUS_PROYECTOS.estados['{pid}'] && !('falso_3' in TUS_PROYECTOS.estados)"
+                     " && TUS_PROYECTOS.espera['falso_3'] > Date.now()"),
+       "el vídeo de verdad tiene su estado, y los que no vuelven se vuelven a preguntar más tarde (no quedan en blanco)")
+    # ⚙ AJUSTES DEL PROYECTO: las secciones, en su orden
+    pg.pulsar(".cab-proyecto button", "Ajustes del proyecto")
+    ok(pg.esperar(".cajon-proyecto"), "«⚙ Ajustes del proyecto» abre el cajón")
+    titulos = pg.p.evaluate("() => [...document.querySelectorAll('.cajon-proyecto .titulo-ajustes')].map(t => t.textContent)")
+    ok(titulos[:2] == ["Nombre", "Logo"] and titulos[-1] == "Zona de peligro"
+       and all(t in titulos for t in ("Visibilidad", "Clave", "Publicar")),
+       f"con Nombre, Logo, Visibilidad, Clave, Publicar y la zona de peligro abajo ({titulos})")
+    ok(pg.p.evaluate("() => SECCIONES_AJUSTES_PROYECTO.map(s => s.id).join(',')")
+       == "nombre,logo,visibilidad,clave,publicar,peligro",
+       "hechas con SECCIONES_AJUSTES_PROYECTO (la Ficha del negocio entrará como una sección más)")
+    ok(pg.visible(".cajon-proyecto .zona-peligro", "quedan en «Sin proyecto»"),
+       "«Borrar el proyecto» lleva su explicación delante")
+    caja = pg.p.locator(".cajon-proyecto .nombre-proyecto input")
+    caja.fill("Nombre a medias")
+    pg.js("pintarLight();")
+    ok(pg.p.locator(".cajon-proyecto .nombre-proyecto input").input_value() == "Nombre a medias",
+       "lo escrito en «Nombre» sobrevive a un repintado")
+    pg.captura("16_ajustes_del_proyecto", entera=False)
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-proyecto"), "Escape cierra el cajón")
+    _r, d = api.get("/api/clientes")
+    ok(any(c.get("nombre") == "Estado Play" for c in d.get("clientes") or []), "y sin «Guardar» no se cambió el nombre")
+    pg.pulsar(".cab-proyecto button", "Ajustes del proyecto")
+    pg.pulsar(".cajon-proyecto button", "tono y SEO")
+    pg.p.wait_for_timeout(1200)
+    ok(pg.p.evaluate("() => MODULOS.actual === 'publicar'"), "«Perfil de Upload-Post, tono y SEO ›» lleva a Publicar")
+    ok(not escrituras, f"nada de esto escribe en el servidor -- {escrituras[:6]}")
+    pg.sin_errores("Tus proyectos (rediseño)")
+    pg.cerrar()
+    # EN EL MÓVIL: una columna, sin salirse, y el cajón a pantalla completa
+    for ancho in (390, 360):
+        pg = Pagina(navegador, datos, ancho=ancho, alto=820)
+        pg.js("elegirCliente(''); recordarVideoLight(''); await cargarGaleriaLight(true); irALight('galeria');")
+        pg.p.wait_for_timeout(1200)
+        ok(pg.p.evaluate("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"
+                         " && document.querySelector('#panel').scrollWidth <= document.querySelector('#panel').clientWidth + 1"),
+           f"a {ancho} px la portada no se sale por los lados")
+        pg.js(f"elegirCliente('{datos['cliente']}'); irALight('galeria');")
+        pg.p.wait_for_timeout(1000)
+        columnas = pg.p.evaluate("() => new Set([...document.querySelectorAll('.tarjetas-video .tarjeta-video, .galeria-estilos > *')]"
+                                 ".map(e => Math.round(e.getBoundingClientRect().left))).size")
+        ok(columnas == 1, f"a {ancho} px las tarjetas van en una columna ({columnas})")
+        pg.pulsar(".cab-proyecto button", "Ajustes del proyecto")
+        ancho_cajon = pg.p.evaluate("() => Math.round(document.querySelector('.cajon-proyecto').getBoundingClientRect().width)")
+        ok(abs(ancho_cajon - ancho) <= 2, f"a {ancho} px el cajón ocupa la pantalla entera ({ancho_cajon})")
+        pg.captura(f"16_movil_{ancho}_ajustes", entera=False)
+        pg.sin_errores(f"Tus proyectos a {ancho} px")
+        pg.cerrar()
 
 
 @escenario
@@ -2651,13 +2864,16 @@ def ortografia_de_los_subtitulos(navegador, datos):
        "y lo propuesto sigue ahí aunque la pantalla se repinte")
     _r, antes = api.get(f"/api/proyectos/{pid}")
     estado_assets = {p.get("id"): p.get("estado") for p in antes.get("pasos") or []}.get("assets")
+    # la voz se compara con como estaba ANTES: en la pasada entera otro
+    # escenario puede dejar el guion (y la voz) en obsoleto, y eso no es de aquí
+    estado_voz = {p.get("id"): p.get("estado") for p in antes.get("pasos") or []}.get("voz")
     pg.captura("18_ortografia", entera=False)
     pg.pulsar(".panel-ortografia button", "Aplicar las marcadas")
     pg.p.wait_for_timeout(2000)
     _r, despues = api.get(f"/api/proyectos/{pid}")
     estados = {p.get("id"): p.get("estado") for p in despues.get("pasos") or []}
-    ok(estados.get("assets") == estado_assets and estados.get("voz") != "obsoleto",
-       f"aplicarlas no toca ni la voz ni las imágenes ({estados})")
+    ok(estados.get("assets") == estado_assets and estados.get("voz") == estado_voz,
+       f"aplicarlas no toca ni la voz ni las imágenes ({estados}; antes, voz {estado_voz})")
     ok(pg.esperar(".caja-aviso", "ANTES de tus últimos cambios", 15),
        "y el Vídeo dice que hay que volver a montarlo")
     ok("No se dibuja ninguna imagen" in pg.p.locator(".caja-aviso").filter(
@@ -3680,7 +3896,7 @@ def atras_del_movil_dentro_del_studio(navegador, datos):
     pg.p.wait_for_timeout(500)
     ok(pg.visible("h2", "Tus proyectos"), "se empieza en la portada")
     portada = pg.p.evaluate("() => history.length")
-    pg.pulsar(".video-light button.abrir", "Padres vs hijos")
+    pg.pulsar(".tarjeta-video button.abrir-video", "Padres vs hijos")
     pg.esperar(".pasos-carril button", "Vídeo")
     pg.p.wait_for_timeout(1500)
     ok(pg.p.evaluate("() => history.length") > portada,
@@ -4587,9 +4803,11 @@ def parrilla_de_guiones(navegador, datos):
     pg = Pagina(navegador, datos)
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
     ok(pg.esperar(".parrilla h2", "Automatizar"), "Automatizar abre la Parrilla (ya no es una pestaña vacía)")
-    ok(pg.visible(".parrilla .pestanas-publicar button", "Piloto automático"),
+    # rediseno-automatizar (22-10): el piloto, una tarjeta «próximamente» (no una pestaña que no se pulsa)
+    ok(pg.esperar(".piloto-parrilla", "Piloto automático", 10) and pg.visible(".piloto-parrilla .pastilla", "próximamente"),
        "el piloto automático sale como «próximamente»")
-    ok(pg.visible(".parrilla-opcional", "opcional"), "y dice que la Parrilla es opcional")
+    pg.pulsar(".cab-automatizar .boton-i")
+    ok(pg.visible(".parrilla-opcional", "opcional"), "y la «i» dice que la Parrilla es opcional")
     pg.js(f"elegirProyectoParrilla('{cid}');")
     pg.p.wait_for_timeout(800)
     ok(pg.esperar(".vacio-parrilla h3", "Todavía no hay guiones"), "un proyecto sin guiones lo dice")
@@ -4611,42 +4829,46 @@ def parrilla_de_guiones(navegador, datos):
     pg.p.locator("#modulo [data-foco=parrilla-pegar]").fill(guion)
     pg.p.locator(".anadir-parrilla input[data-foco=parrilla-nombre]").fill("Octubre")
     pg.pulsar(".anadir-parrilla button.primario", "Guardar en la Parrilla")
-    ok(pg.esperar(".fila-guion .titulo-guion", "EP01 — Fregadero simple o doble", 10),
+    ok(pg.esperar(".tarjeta-guion .titulo-guion", "EP01 — Fregadero simple o doble", 10),
        "guardado en la Parrilla, en su matriz")
-    ok(pg.visible(".cab-matriz h3", "Octubre"), "con el nombre de la matriz")
-    ok(pg.visible(".fila-guion .pastilla", "pendiente"), "pendiente")
+    ok(pg.visible(".chip-matriz", "Octubre"), "con el nombre de la matriz")
+    ok(pg.visible(".columna-tablero[data-columna=pendiente] .tarjeta-guion", "EP01"), "pendiente")
 
     # pedir a Claude (el doble)
-    pg.pulsar(".filtros-parrilla button", "Añadir guiones")
+    pg.pulsar(".cab-automatizar .anadir-cabecera", "Añadir guiones")
     pg.pulsar(".origen-parrilla button", "Pedir a Claude")
     pg.p.locator("#modulo [data-foco=parrilla-peticion]").fill("ideas de alquiler de consolas para fiestas")
     pg.p.locator("#modulo [data-foco=parrilla-cuantos]").fill("3")
     pg.pulsar(".anadir-parrilla button.primario", "Pedir a Claude")
     ok(pg.esperar(".trabajo-parrilla", "guardados", 25), "Claude los escribe y lo dice")
-    ok(pg.p.locator(".fila-guion").count() >= 4, "salen en la Parrilla")
+    ok(pg.p.locator(".tarjeta-guion").count() >= 4, "salen en la Parrilla")
 
     # subir un Word
     docx = os.path.join(datos["base"], "matriz_parrilla.docx")
     _docx_de_prueba(docx, ["Cumpleaños con consola", "---", "Karaoke en casa"])
-    pg.pulsar(".filtros-parrilla button", "Añadir guiones")
+    pg.pulsar(".cab-automatizar .anadir-cabecera", "Añadir guiones")
     pg.pulsar(".origen-parrilla button", "Subir un documento")
     pg.p.set_input_files(".anadir-parrilla input[type=file]", docx)
     pg.p.wait_for_timeout(400)
     ok(pg.visible(".anadir-parrilla .meta", "matriz_parrilla.docx"), "el Word elegido se ve")
     pg.pulsar(".anadir-parrilla button.primario", "Subir y convertir")
-    ok(pg.esperar(".cab-matriz h3", "matriz_parrilla", 25), "convertido, en una matriz con el nombre del fichero")
+    ok(pg.esperar(".chip-matriz", "matriz_parrilla", 25), "convertido, en una matriz con el nombre del fichero")
     pg.captura("parrilla_lista")
 
-    # la ficha
-    pg.pulsar(".fila-guion .titulo-guion", "EP01")
+    # la ficha, en su panel lateral (rediseno-automatizar): Guion · Al Encargo · Estado
+    pg.pulsar(".tarjeta-guion", "EP01")
     ok(pg.esperar(".ficha-parrilla h3", "EP01"), "la ficha del guion")
+    pg.pulsar(".pestanas-cajon button", "Al Encargo")
     ok(pg.visible(".encargo-parrilla .material-parrilla", "Por dentro, no."), "con lo que irá al Encargo")
     ok(pg.visible(".encargo-parrilla .pista", "Esto YA es el guion"), "uso exacto: «Esto YA es el guion»")
+    pg.pulsar(".pestanas-cajon button", "Guion")
     pg.p.locator(".ficha-parrilla .rejilla-parrilla select").first.select_option("adaptar")
     pg.p.wait_for_timeout(1200)
     texto = pg.p.evaluate("() => (document.querySelector('#modulo [data-foco=parrilla-texto]') || {}).value || ''")
     ok("Uso: adaptar" in texto, "cambiar el uso cambia su línea en el texto")
+    pg.pulsar(".pestanas-cajon button", "Al Encargo")
     ok(pg.visible(".encargo-parrilla .dato-encargo", "Escríbenos"), "y la llamada a la acción pasa a ir «al final»")
+    pg.pulsar(".pestanas-cajon button", "Guion")
     pg.p.locator(".ficha-parrilla .boton-guia").first.click()
     ok(pg.esperar("#ventana-guia h2", "El formato del guion", 10), "«✦ Guía» abre la guía del formato")
     ok(pg.visible("#ventana-guia pre", "GUION ORIGINAL"), "con el prompt del anexo para otra IA")
@@ -4655,8 +4877,10 @@ def parrilla_de_guiones(navegador, datos):
     pg.captura("parrilla_ficha")
 
     # pasar al Encargo: llena «Un vídeo nuevo» y no crea nada
+    ok(pg.visible(".ficha-parrilla", "EP01"), "Escape cierra la guía, no el panel")
+    pg.pulsar(".pestanas-cajon button", "Al Encargo")
     pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
-    pg.pulsar(".pasar-encargo button", "Pasar al Encargo")
+    pg.pulsar(".pie-cajon .boton-pasar-encargo", "Pasar al Encargo")
     fin = time.time() + 10
     while time.time() < fin and not pg.p.evaluate("() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
         pg.p.wait_for_timeout(300)
@@ -4671,8 +4895,8 @@ def parrilla_de_guiones(navegador, datos):
     _r, despues = api.get("/api/proyectos")
     ok(len((despues or {}).get("proyectos") or []) == n_antes, "sin crear ningún vídeo")
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
-    ok(pg.esperar(".ficha-parrilla .pastilla", "usado", 10) or pg.esperar(".fila-guion .pastilla", "usado", 10),
-       "el guion queda «usado»")
+    ok(pg.esperar(".columna-tablero[data-columna=usado] .tarjeta-guion", "EP01", 10),
+       "el guion queda «usado» (en su columna)")
     pg.sin_errores("la Parrilla")
     pg.cerrar()
 
@@ -4681,13 +4905,14 @@ def parrilla_de_guiones(navegador, datos):
     pg.js("document.documentElement.dataset.tema = 'claro';")
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
     pg.js(f"elegirProyectoParrilla('{cid}');")
-    ok(pg.esperar(".fila-guion", segundos=10), "en el móvil se ven los guiones")
+    ok(pg.esperar(".tarjeta-guion", segundos=10), "en el móvil se ven los guiones")
     for seccion_ in ("parrilla", "anadir"):
         pg.js(f"irASeccionParrilla('{seccion_}');")
         ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
         ok(ancho <= 391, f"«{seccion_}» cabe a lo ancho en el móvil ({ancho} px)")
-    pg.pulsar(".pestanas-publicar button", "Parrilla")
-    pg.pulsar(".fila-guion button", "Abrir")
+    pg.pulsar(".pestanas-automatizar button", "Parrilla")
+    pg.pulsar(".selector-columnas button", "Pendientes")
+    pg.pulsar(".tarjeta-guion")
     ok(pg.esperar(".ficha-parrilla", segundos=10), "la ficha en el móvil")
     ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
     ok(ancho <= 391, f"y cabe ({ancho} px)")
@@ -5069,18 +5294,19 @@ def parrilla_marca_chat_y_resultados(navegador, datos):
     pg = Pagina(navegador, datos)
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
     pg.js(f"elegirProyectoParrilla('{cid}');")
-    pg.pulsar(".pestanas-publicar button", "Marca del cliente")
+    pg.pulsar(".pestanas-automatizar button", "Marca del cliente")
     ok(pg.esperar(".marca-parrilla [data-foco=marca-quien]", segundos=10), "la pestaña de la marca del cliente")
     pg.p.locator("[data-foco=marca-quien]").fill("EstadoPlay, consolas para fiestas en Lima")
     pg.p.locator("[data-foco=marca-cta]").fill("Escríbenos por WhatsApp")
-    pg.pulsar(".marca-parrilla button", "Guardar la marca")
-    ok(pg.esperar(".marca-parrilla .pista", "guardada el", 10), "se guarda")
+    pg.pulsar(".marca-parrilla .barra-accion button", "Guardar la marca")
+    ok(pg.esperar(".marca-parrilla .barra-accion", "guardada el", 10), "se guarda")
     _r, marca = datos["api"].get(f"/api/parrilla/proyectos/{cid}/marca")
     ok(((marca or {}).get("marca") or {}).get("cta") == "Escríbenos por WhatsApp", "y queda en el servidor")
 
-    pg.pulsar(".pestanas-publicar button", "Añadir guiones")
+    pg.pulsar(".pestanas-automatizar button", "Añadir guiones")
     pg.pulsar(".origen-parrilla button", "Conversar con Claude")
     ok(pg.esperar(".chat-parrilla .chat-vacio", segundos=10), "el chat, vacío, explica qué se puede hacer")
+    ok(pg.visible(".pestanas-automatizar button.activa", "Conversar con Claude"), "en su propia pestaña")
     png = os.path.join(datos["base"], "captura_chat.png")
     _png(png, (200, 80, 120))
     pg.p.locator("[data-foco=parrilla-chat]").fill("Hazme un guion para un cumpleaños infantil")
@@ -5096,11 +5322,12 @@ def parrilla_marca_chat_y_resultados(navegador, datos):
     ok(pg.esperar(".guardar-chat .pastilla", "en la Parrilla", 10), "«Guardar en la Parrilla» lo guarda")
     pg.captura("parrilla_chat")
 
+    pg.pulsar(".pestanas-automatizar button", "Añadir guiones")
     pg.pulsar(".origen-parrilla button", "Desde mis resultados")
     ok(pg.esperar(".anadir-parrilla .caja-aviso", "Actualizar", 10) or pg.esperar(".post-parrilla", segundos=5),
        "«Desde mis resultados» enseña los vídeos o dice cómo tenerlos")
-    pg.pulsar(".pestanas-publicar button", "Parrilla")
-    ok(pg.esperar(".cab-matriz h3", "Conversación", 10), "el guion del chat está en la Parrilla")
+    pg.pulsar(".pestanas-automatizar button", "Parrilla")
+    ok(pg.esperar(".chip-matriz", "Conversación", 10), "el guion del chat está en la Parrilla")
     pg.sin_errores("la marca, el chat y los resultados")
     pg.cerrar()
 
@@ -5129,7 +5356,7 @@ def parrilla_analizar_una_cuenta(navegador, datos):
     pg = Pagina(navegador, datos)
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
     pg.js(f"elegirProyectoParrilla('{cid}');")
-    pg.pulsar(".pestanas-publicar button", "Analizar una cuenta")
+    pg.pulsar(".pestanas-automatizar button", "Cuentas que te gustan")
     ok(pg.esperar(".conexiones-cuentas", segundos=10), "la pestaña con sus Conexiones")
     ok(pg.visible(".conexiones-cuentas .caja-aviso", "SIMULADO"), "avisa de que es simulado")
     pg.p.locator("[data-foco=conexion-apify_token]").fill("apify_api_recorrido_1234")
@@ -5151,9 +5378,9 @@ def parrilla_analizar_una_cuenta(navegador, datos):
     ok(pg.esperar(".texto-analisis", "QUÉ LE FUNCIONA", 20), "el análisis")
     pg.captura("cuenta_analizada")
     pg.pulsar(".guiones-cuenta button.primario", "Escribir guiones")
-    ok(pg.esperar(".cab-matriz .meta", "con lo que le funciona a @personal_lucia", 25),
+    ok(pg.esperar('.chip-matriz[title*="con lo que le funciona a @personal_lucia"]', segundos=25),
        "los guiones van a la Parrilla, diciendo de qué cuenta salen")
-    pg.pulsar(".pestanas-publicar button", "Analizar una cuenta")
+    pg.pulsar(".pestanas-automatizar button", "Cuentas que te gustan")
     pg.pulsar(".cuentas-guardadas button", "personal_lucia")
     pg.pulsar(".guiones-cuenta button", "Hablar de ella en el chat")
     ok(pg.esperar(".chat-parrilla", segundos=10), "«Hablar de ella en el chat» abre el chat")
@@ -5173,6 +5400,269 @@ def parrilla_analizar_una_cuenta(navegador, datos):
     ok(ancho <= 391, f"la cuenta cabe a lo ancho en el móvil ({ancho} px)")
     pg.sin_errores("analizar una cuenta en el móvil")
     pg.cerrar()
+
+
+@escenario
+def automatizar_tablero_y_panel(navegador, datos):
+    """rediseno-automatizar (22-10-2026, maqueta aprobada por el dueño): la
+    cabecera con el proyecto y «+ Añadir guiones», las cinco pestañas (sin las
+    que no se podían pulsar), la marca a la vista, el tablero Pendientes ·
+    Usados · Publicados con sus filtros, la ficha en un panel lateral con
+    «Pasar al Encargo ›» siempre abajo, las tarjetas de dónde salen los
+    guiones con su coste (el doble de Claude: nada se paga) y el móvil."""
+    api = datos["api"]
+    r, d = api.post("/api/clientes", {"nombre": "Tablero de prueba"})
+    cid = ((d or {}).get("cliente") or {}).get("id")
+    ok(r.status_code in (200, 201) and cid, f"un proyecto nuevo para el tablero ({r.status_code})")
+    plantilla = ("{c} — {t}\nCliente / proyecto: Tablero\nUso: adaptar\nRed: Reels\nFormato: vertical\n"
+                 "Duración: 30 s\nObjetivo: que pidan\nCTA: Escríbenos\nTono: cercano\n\n"
+                 "ESCENA 1\nVisual: una consola\nVoz: «{t}.»\n\n"
+                 "PARA EL ENCARGO\n- Material: {t}, en Lima.\n- Indicaciones: cercano\n"
+                 "- Llamadas a la acción: Escríbenos\n- Duración: 30 s · Formato: vertical\n\nAVISOS\n- ninguno")
+    matriz = ""
+    for c, t in (("TB01", "Uno pendiente"), ("TB02", "Otro pendiente"), ("TB03", "Uno usado"), ("TB04", "Uno publicado")):
+        cuerpo = {"texto": plantilla.format(c=c, t=t)}
+        cuerpo.update({"matriz": matriz} if matriz else {"nombre": "Tablero"})
+        r, d = api.post(f"/api/parrilla/proyectos/{cid}/guiones", cuerpo)
+        matriz = matriz or (d or {}).get("matriz") or ""
+    _r, todo = api.get(f"/api/parrilla/proyectos/{cid}")
+    ids = {g["codigo"]: g["id"] for m in (todo or {}).get("matrices", []) for g in m.get("guiones", [])}
+    api.put(f"/api/parrilla/proyectos/{cid}/guiones/{ids.get('TB03')}", {"estado": "usado"})
+    api.put(f"/api/parrilla/proyectos/{cid}/guiones/{ids.get('TB04')}", {"estado": "publicado"})
+    ok(len(ids) == 4, f"cuatro guiones sembrados en una matriz ({len(ids)})")
+
+    pg = Pagina(navegador, datos, nombre="automatizar tablero")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    ok(pg.esperar(".tarjeta-guion", "TB01", 10), "el tablero del proyecto")
+    # la cabecera: el proyecto como chip y «+ Añadir guiones»
+    ok(pg.p.evaluate("() => (document.querySelector('.chip-proyecto-auto select') || {}).value") == cid,
+       "el proyecto, como chip en la cabecera")
+    ok(pg.visible(".cab-automatizar .anadir-cabecera", "+ Añadir guiones"), "con «+ Añadir guiones» al lado")
+    pestanas = pg.p.evaluate("() => [...document.querySelectorAll('.pestanas-automatizar button')].map(b => b.textContent.trim())")
+    ok(pestanas == ["Parrilla", "Añadir guiones", "Conversar con Claude", "Cuentas que te gustan", "Marca del cliente"],
+       f"cinco pestañas, todas pulsables: {pestanas}")
+    ok(pg.p.evaluate("() => ![...document.querySelectorAll('#modulo button[disabled]')].some(b => "
+                     "/Piloto|Ficha de un guion/.test(b.textContent))"), "sin pestañas desactivadas")
+    # la marca, a la vista
+    ok(pg.visible(".linea-marca.caja-aviso", "Sin marca de Tablero de prueba"), "sin marca, lo dice arriba de la Parrilla")
+    ok(pg.visible(".pestanas-automatizar button .punto"), "y su pestaña lleva un punto")
+    # el tablero por estado
+    cuentas = pg.p.evaluate("() => Object.fromEntries([...document.querySelectorAll('.columna-tablero')].map(c => "
+                            "[c.dataset.columna, c.querySelectorAll('.tarjeta-guion').length]))")
+    ok(cuentas == {"pendiente": 2, "usado": 1, "publicado": 1}, f"tres columnas por estado: {cuentas}")
+    pg.p.locator("[data-foco=parrilla-buscar]").fill("TB02")
+    pg.p.wait_for_timeout(500)
+    ok(pg.p.locator(".tarjeta-guion").count() == 1 and pg.visible(".columna-tablero .vacia-columna", "Ninguno con este filtro"),
+       "el buscador filtra el tablero")
+    pg.p.locator("[data-foco=parrilla-buscar]").fill("")
+    pg.pulsar(".chip-matriz", "Tablero (4)")
+    ok(pg.esperar(".cab-matriz h3", "Tablero", 5), "una matriz elegida enseña sus datos")
+    pg.pulsar(".cab-matriz button", "Renombrar")
+    ok(pg.esperar(".capa-dialogo input", segundos=5), "«Renombrar» pregunta en un panel de la casa (sin prompt)")
+    pg.p.locator(".capa-dialogo input").first.fill("Tablero renombrado")
+    pg.p.locator(".capa-dialogo button[type=submit]").click()
+    ok(pg.esperar(".chip-matriz", "Tablero renombrado", 10), "y la renombra")
+    pg.pulsar(".cab-matriz button", "Borrar")
+    ok(pg.esperar(".capa-dialogo", "No se puede deshacer", 5), "«Borrar» la matriz pregunta antes, con su aviso")
+    pg.pulsar(".capa-dialogo button", "Cancelar")
+    pg.p.wait_for_timeout(400)
+    ok(pg.p.locator(".tarjeta-guion").count() == 4, "y al cancelar no se borra nada")
+    pg.captura("automatizar_tablero")
+
+    # la ficha, en el panel lateral
+    pg.pulsar(".tarjeta-guion", "TB01")
+    ok(pg.esperar(".cajon-guion h3", "TB01", 10), "pulsar una tarjeta abre su ficha en el panel lateral")
+    ok(pg.visible(".tarjeta-guion", "TB02"), "sin perder la Parrilla de vista (detrás)")
+    for pestana in ("Guion", "Al Encargo", "Estado"):
+        pg.pulsar(".pestanas-cajon button", pestana)
+        ok(pg.visible(".pie-cajon .boton-pasar-encargo", "Pasar al Encargo"),
+           f"«Pasar al Encargo ›» a la vista desde «{pestana}»")
+    pg.pulsar(".pestanas-cajon button", "Guion")
+    area = pg.p.locator("#modulo [data-foco=parrilla-texto]")
+    area.fill(area.input_value() + "\n")
+    pg.p.wait_for_timeout(300)
+    ok(pg.p.evaluate("() => document.querySelector('.pie-cajon .boton-pasar-encargo').disabled")
+       and pg.visible(".pie-cajon .texto-estado", "Guarda antes el texto"),
+       "con el texto a medio cambiar, «Pasar al Encargo» se apaga y dice por qué")
+    pg.pulsar(".cajon-guion button", "Descartar cambios")
+    ok(not pg.p.evaluate("() => document.querySelector('.pie-cajon .boton-pasar-encargo').disabled"),
+       "al descartar, se vuelve a encender")
+    # CERRAR NO PIERDE LO ESCRITO (revisión independiente, 22-10): Escape con el
+    # foco en el texto no cierra, y × con cambios pregunta (Seguir / Descartar / Guardar)
+    area = pg.p.locator("#modulo [data-foco=parrilla-texto]")
+    original = area.input_value()
+    area.fill(original + "\n- revisar la luz")
+    area.focus()
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(pg.visible(".cajon-guion") and pg.visible(".cajon-guion .guardar-texto-guion:not([disabled])"),
+       "Escape con el foco en el texto no cierra el panel")
+    pg.pulsar(".cajon-guion .cerrar-cajon")
+    ok(pg.esperar(".capa-dialogo", "Tienes cambios sin guardar en «TB01", 5),
+       "cerrar con el texto a medio cambiar pregunta antes")
+    pg.pulsar(".capa-dialogo button", "Seguir editando")
+    ok(pg.visible(".cajon-guion") and "revisar la luz" in pg.p.locator("#modulo [data-foco=parrilla-texto]").input_value(),
+       "«Seguir editando» deja el panel abierto con lo escrito")
+    pg.p.mouse.click(30, 300)
+    ok(pg.esperar(".capa-dialogo", "cambios sin guardar", 5), "pulsar fuera también pregunta")
+    pg.pulsar(".capa-dialogo button", "Guardar")
+    pg.p.wait_for_timeout(1500)
+    _r, g1 = api.get(f"/api/parrilla/proyectos/{cid}/guiones/{ids.get('TB01')}")
+    ok(not pg.visible(".cajon-guion") and "revisar la luz" in ((g1 or {}).get("texto") or ""),
+       "«Guardar» lo guarda (como «Guardar el texto») y cierra")
+    pg.pulsar(".tarjeta-guion", "TB01")
+    area = pg.p.locator("#modulo [data-foco=parrilla-texto]")
+    area.fill(original)
+    pg.pulsar(".cajon-guion .cerrar-cajon")
+    ok(pg.esperar(".capa-dialogo", "cambios sin guardar", 5), "(otra vez, para descartar)")
+    pg.pulsar(".capa-dialogo button", "Descartar")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-guion"), "«Descartar» cierra sin guardar")
+    pg.pulsar(".tarjeta-guion", "TB01")
+    ok("revisar la luz" in pg.p.locator("#modulo [data-foco=parrilla-texto]").input_value(),
+       "y al reabrirlo está lo guardado, no lo descartado")
+    pg.pulsar(".pestanas-cajon button", "Estado")
+    pg.pulsar(".cajon-guion button", "Borrar el guion")
+    ok(pg.esperar(".capa-dialogo", "No se puede deshacer", 5), "«Borrar el guion» pregunta antes")
+    pg.pulsar(".capa-dialogo button", "Cancelar")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-guion"), "Escape cierra el panel")
+    pg.pulsar(".tarjeta-guion", "TB01")
+    pg.p.mouse.click(30, 300)
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-guion"), "pulsar fuera también")
+    pg.captura("automatizar_ficha")
+
+    # «Pasar al Encargo ›»: llena «Un vídeo nuevo» y no crea nada
+    _r, antes = api.get("/api/proyectos")
+    pg.pulsar(".tarjeta-guion", "TB02")
+    pg.pulsar(".pestanas-cajon button", "Al Encargo")
+    pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
+    pg.p.wait_for_timeout(300)
+    pg.pulsar(".pie-cajon .boton-pasar-encargo", "Pasar al Encargo")
+    if pg.esperar(".capa-dialogo", "medio escribir", 3):
+        pg.pulsar(".capa-dialogo button[type=submit]")
+    fin = time.time() + 10
+    while time.time() < fin and not pg.p.evaluate("() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
+        pg.p.wait_for_timeout(300)
+    material = pg.p.evaluate("() => (APP.light.video.encargo || {}).material || ''")
+    ok(material == "Otro pendiente, en Lima.", f"«Pasar al Encargo ›» llena «Un vídeo nuevo»: {material!r}")
+    _r, despues = api.get("/api/proyectos")
+    ok(len((despues or {}).get("proyectos") or []) == len((antes or {}).get("proyectos") or []), "sin crear ningún vídeo")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    ok(pg.esperar(".columna-tablero[data-columna=usado] .tarjeta-guion", "TB02", 10), "y el guion pasa a «Usados»")
+
+    # añadir guiones: las tarjetas de dónde salen, con su coste
+    pg.pulsar(".cab-automatizar .anadir-cabecera")
+    ok(pg.esperar(".cab-anadir h3", "De dónde salen", 5), "«+ Añadir guiones» pregunta de dónde salen")
+    costes = pg.p.evaluate("() => [...document.querySelectorAll('.tarjeta-origen')].map(t => "
+                           "[t.querySelector('b').textContent, t.querySelector('.coste-origen').textContent])")
+    ok(len(costes) == 6 and all(c for _n, c in costes), f"seis tarjetas, cada una con su coste: {costes}")
+    ok(not pg.visible(".anadir-parrilla .barra-accion"), "sin elegir, no hay botón que lanzar")
+    pg.pulsar(".tarjeta-origen", "Desde una cuenta que te guste")
+    ok(pg.esperar(".conexiones-cuentas", segundos=5) and pg.visible(".pestanas-automatizar button.activa", "Cuentas"),
+       "«Desde una cuenta que te guste» lleva a Cuentas que te gustan (con sus claves, como antes)")
+    pg.pulsar(".pestanas-automatizar button", "Añadir guiones")
+    pg.pulsar(".tarjeta-origen", "Conversar con Claude")
+    ok(pg.esperar(".chat-parrilla .lista-chats", segundos=5), "«Conversar con Claude» lleva al chat, en su pestaña")
+    pg.pulsar(".pestanas-automatizar button", "Añadir guiones")
+    pg.pulsar(".tarjeta-origen", "Escribir o pegar")
+    pg.p.locator(".anadir-parrilla input[type=checkbox]").first.check()
+    pg.p.wait_for_timeout(300)
+    ok(pg.visible(".anadir-parrilla .barra-accion .plan", "No usa Claude.") and
+       pg.visible(".anadir-parrilla .barra-accion button.primario", "Guardar en la Parrilla"),
+       "pegado en el formato: «Guardar en la Parrilla», sin Claude")
+    pg.pulsar(".tarjeta-origen", "Pedir a Claude")
+    ok(pg.visible(".anadir-parrilla .barra-accion .plan", "Usa Claude (tokens de la suscripción, sin coste en dólares).")
+       and pg.visible(".anadir-parrilla .barra-accion button.primario", "Pedir a Claude"),
+       "pedir: el botón de siempre en la barra, con la misma línea de coste")
+    pg.p.locator("#modulo [data-foco=parrilla-peticion]").fill("ideas para el tablero")
+    pg.p.locator("#modulo [data-foco=parrilla-cuantos]").fill("2")
+    pg.pulsar(".anadir-parrilla .barra-accion button.primario", "Pedir a Claude")
+    ok(pg.esperar(".trabajo-parrilla", "guardados", 25), "Claude (el doble) los escribe y lo dice")
+    ok(pg.esperar(".columna-tablero[data-columna=pendiente] .tarjeta-guion", segundos=5)
+       and pg.p.locator(".columna-tablero[data-columna=pendiente] .tarjeta-guion").count() >= 3,
+       "y quedan en «Pendientes»")
+
+    # si la marca no se pudo leer no se dice «Sin marca» (no se sabe)
+    pg.js("PAR.marca = { marca: {}, campos: [], error: 'sin red' }; pintarModulo();")
+    ok(pg.visible(".linea-marca", "No se pudo leer la marca") and not pg.visible(".linea-marca", "Sin marca"),
+       "una marca que no se pudo leer lo dice, con «Reintentar»")
+    pg.pulsar(".linea-marca button", "Reintentar")
+    ok(pg.esperar(".linea-marca", "Sin marca de Tablero de prueba", 10), "y «Reintentar» la vuelve a leer")
+    # la marca: se guarda en la barra y la Parrilla lo dice
+    pg.pulsar(".linea-marca button", "Apuntarla")
+    ok(pg.esperar(".marca-parrilla [data-foco=marca-quien]", segundos=10), "«Apuntarla ›» lleva a la marca")
+    pg.p.locator("[data-foco=marca-quien]").fill("Tablero, consolas para fiestas")
+    pg.pulsar(".marca-parrilla .barra-accion button", "Guardar la marca")
+    pg.pulsar(".pestanas-automatizar button", "Parrilla")
+    ok(pg.esperar(".linea-marca.caja-info", "✓ guardada", 10), "y la Parrilla enseña la marca guardada")
+    ok(not pg.visible(".pestanas-automatizar button .punto"), "sin el punto en su pestaña")
+
+    # UNA PREGUNTA CADA VEZ (revisión de Publicar, 22-10): pulsar «Borrar el
+    # guion» y luego Enter no vuelve a pulsar el botón de detrás (dos paneles):
+    # el foco está en el panel y Enter acepta
+    pg.pulsar(".columna-tablero[data-columna=publicado] .tarjeta-guion", "TB04")
+    pg.pulsar(".pestanas-cajon button", "Estado")
+    pg.pulsar(".cajon-guion button", "Borrar el guion")
+    ok(pg.p.evaluate("() => !!document.activeElement && !!document.activeElement.closest('.capa-dialogo')"),
+       "la pregunta se lleva el foco (no se queda en el botón de detrás)")
+    pg.p.keyboard.press("Enter")
+    pg.p.wait_for_timeout(300)
+    paneles = pg.p.locator(".capa-dialogo").count()
+    pg.p.wait_for_timeout(1200)
+    r, _g = api.get(f"/api/parrilla/proyectos/{cid}/guiones/{ids.get('TB04')}")
+    ok(paneles <= 1 and r.status_code == 404 and not pg.visible(".capa-dialogo"),
+       f"Enter acepta la pregunta, sin apilar otra ({paneles} paneles, guion {r.status_code})")
+    pg.p.evaluate("() => document.querySelectorAll('.capa-dialogo').forEach(x => x.remove())")
+    pg.sin_errores("el Automatizar nuevo")
+    pg.cerrar()
+
+    # el móvil (390 y 360), con el tema claro
+    for ancho in (390, 360):
+        pg = Pagina(navegador, datos, ancho=ancho, alto=780, nombre=f"automatizar {ancho}")
+        pg.js("document.documentElement.dataset.tema = 'claro';")
+        pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+        pg.js(f"elegirProyectoParrilla('{cid}');")
+        ok(pg.esperar(".selector-columnas", segundos=10), f"{ancho}: las columnas, como botones")
+        visibles = pg.p.evaluate("() => [...document.querySelectorAll('.columna-tablero')].filter(c => c.offsetParent).map(c => c.dataset.columna)")
+        ok(visibles == ["pendiente"], f"{ancho}: una columna a la vista: {visibles}")
+        pg.pulsar(".selector-columnas button", "Usados")
+        visibles = pg.p.evaluate("() => [...document.querySelectorAll('.columna-tablero')].filter(c => c.offsetParent).map(c => c.dataset.columna)")
+        ok(visibles == ["usado"], f"{ancho}: «Usados» enseña la suya: {visibles}")
+        ancho_pagina = pg.p.evaluate("() => document.documentElement.scrollWidth")
+        ok(ancho_pagina <= ancho + 1, f"{ancho}: el tablero cabe a lo ancho ({ancho_pagina} px)")
+        pg.pulsar(".columna-tablero[data-columna=usado] .tarjeta-guion")
+        caja = pg.p.locator(".cajon-guion").bounding_box()
+        ok(caja and caja["width"] >= ancho - 1 and caja["x"] <= 1, f"{ancho}: la ficha, a pantalla completa ({caja})")
+        barra = pg.p.locator(".pie-cajon").bounding_box()
+        ok(barra and barra["height"] <= 80 and barra["y"] + barra["height"] <= 781,
+           f"{ancho}: su barra, en una fila y abajo ({barra})")
+        pg.captura(f"automatizar_ficha_{ancho}", entera=False)
+        pg.pulsar(".cajon-guion .cerrar-cajon")
+        pg.pulsar(".pestanas-automatizar button", "Añadir guiones")
+        pg.pulsar(".tarjeta-origen", "Pedir a Claude")
+        barra = pg.p.locator(".anadir-parrilla .barra-accion").bounding_box()
+        ok(barra and barra["height"] <= 80, f"{ancho}: la barra de Añadir, en una fila ({barra and round(barra['height'])} px)")
+        pg.p.evaluate("() => toast('aviso de prueba')")
+        pg.p.wait_for_timeout(400)
+        tapa = pg.p.evaluate("() => { const t = document.querySelector('#toast').getBoundingClientRect(); "
+                             "const b = document.querySelector('.anadir-parrilla .barra-accion').getBoundingClientRect(); "
+                             "return t.bottom > b.top + 1; }")
+        ok(not tapa, f"{ancho}: el aviso flotante sale encima de la barra, sin tapar su botón")
+        pg.pulsar(".anadir-parrilla .boton-mas-barra")
+        ok(pg.visible(".anadir-parrilla .barra-accion.abierta") and
+           not pg.p.evaluate("() => BARRA_MAS.abiertas.crear"), f"{ancho}: «⋯» abierto aquí no abre el de Crear")
+        pg.pulsar(".anadir-parrilla .boton-mas-barra")
+        for que in ("anadir", "chat", "cuentas", "marca", "parrilla"):
+            pg.js(f"irASeccionParrilla('{que}');")
+            ancho_pagina = pg.p.evaluate("() => document.documentElement.scrollWidth")
+            ok(ancho_pagina <= ancho + 1, f"{ancho}: «{que}» cabe a lo ancho ({ancho_pagina} px)")
+        pg.captura(f"automatizar_movil_{ancho}", entera=False)
+        pg.sin_errores(f"el Automatizar nuevo a {ancho} px")
+        pg.cerrar()
 
 
 # ======================================================================
@@ -5361,9 +5851,15 @@ def lo_de_v2h_en_la_pantalla(navegador, datos):
     ok(pg.esperar(".previa-mandos"), "la pantalla de Imágenes en el móvil")
     burbuja = pg.p.locator(".burbuja-asistente").bounding_box()
     siguiente = pg.p.locator(".previa-mandos button", has_text="Siguiente").first.bounding_box()
-    ok(burbuja and siguiente and burbuja["y"] + burbuja["height"] <= siguiente["y"],
-       f"B10: la burbuja no pisa «Siguiente ›» ({burbuja and burbuja['y'] + burbuja['height']} "
-       f"frente a {siguiente and siguiente['y']})")
+    # desde arreglos-crear-movil (21-10-2026) los mandos van encima de la
+    # imagen en el móvil, no pegados encima de la barra: lo que importa es que
+    # no se pisen
+    pisa = bool(burbuja and siguiente
+                and burbuja["x"] < siguiente["x"] + siguiente["width"] and siguiente["x"] < burbuja["x"] + burbuja["width"]
+                and burbuja["y"] < siguiente["y"] + siguiente["height"] and siguiente["y"] < burbuja["y"] + burbuja["height"])
+    ok(burbuja and siguiente and not pisa,
+       f"B10: la burbuja no pisa «Siguiente ›» (burbuja {burbuja and (round(burbuja['x']), round(burbuja['y']))} "
+       f"frente a {siguiente and (round(siguiente['x']), round(siguiente['y']))})")
     pg.pulsar(".burbuja-asistente")
     ok(pg.esperar("#asistente:not(.plegado)", segundos=5), "el asistente se abre a pantalla completa")
     ok(not pg.visible(".minimizar-burbuja"), "U1: y el «–» de la burbuja no queda encima del chat")
@@ -5416,12 +5912,15 @@ def portadas_disenadas(navegador, datos):
     pg.p.wait_for_timeout(800)
     ok(pg.p.evaluate("() => PORT.diseno.plantilla") == "oferta", "y se puede usar una")
     # el fondo con IA, con el precio delante (motor de imágenes simulado)
-    antes = len(pg.dialogos)
     pg.pulsar(".capa-portada button", "Hacer el fondo con IA")
+    # portadas-2: antes de pagar, el prompt a la vista y el precio en el botón
+    ok(pg.esperar(".capa-portada .antes-de-pagar textarea", segundos=15), "antes de pagar enseña el prompt")
+    precio = pg.p.locator(".capa-portada .antes-de-pagar button", has_text="Dibujar").inner_text()
+    pg.pulsar(".capa-portada .antes-de-pagar button", "Dibujar")
     fin = time.time() + 90
     while time.time() < fin and pg.p.evaluate("() => (PORT.diseno.fondo || {}).tipo") != "ia":
         pg.p.wait_for_timeout(700)
-    ok(len(pg.dialogos) > antes and "$" in pg.dialogos[-1], "antes de pagar enseña el precio y pregunta")
+    ok("$" in precio, f"y el precio, en el botón que paga ({precio})")
     ok(pg.p.evaluate("() => PORT.diseno.fondo.tipo") == "ia" and pg.p.evaluate("() => !!PORT.diseno.fondo.imagen"),
        "el fondo hecho con IA queda puesto")
     hecho = pg.p.evaluate("() => PORT.diseno.fondo.imagen")
@@ -5430,7 +5929,7 @@ def portadas_disenadas(navegador, datos):
     # cambiar la paleta no se lleva lo hecho a mano
     n_antes = pg.p.evaluate("() => PORT.diseno.elementos.length")
     pg.p.evaluate("() => { PORT.diseno.elementos.push({tipo: 'icono', icono: 'fuego', x: 0.1, y: 0.1}); }")
-    pg.p.locator(".capa-portada select").nth(1).select_option("fiesta")
+    pg.p.locator(".capa-portada .campo-portada", has_text="Paleta").locator("select").select_option("fiesta")
     pg.p.wait_for_timeout(1500)
     ok(pg.p.evaluate("() => PORT.diseno.elementos.length") == n_antes + 1
        and pg.p.evaluate("() => PORT.diseno.paleta") == "fiesta",
@@ -6597,10 +7096,11 @@ def parrilla_con_espacio_fijo(navegador, datos):
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
     pg.js(f"elegirProyectoParrilla('{cid}');")
     pg.p.wait_for_timeout(800)
-    pg.pulsar(".fila-guion .titulo-guion", "EF01")
+    pg.pulsar(".tarjeta-guion .titulo-guion", "EF01")
     ok(pg.esperar(".ficha-parrilla h3", "EF01"), "su ficha")
+    pg.pulsar(".pestanas-cajon button", "Al Encargo")
     pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
-    pg.pulsar(".pasar-encargo button", "Pasar al Encargo")
+    pg.pulsar(".pie-cajon .boton-pasar-encargo", "Pasar al Encargo")
     fin = time.time() + 10
     while time.time() < fin and not pg.p.evaluate(
             "() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
@@ -6922,11 +7422,12 @@ def tipos_de_negocio(navegador, datos):
        "Configuración ya no tiene «Tipos de negocio» (es del proyecto)")
     pg.js("conmutarConfig(false);")
     pg.js(f"elegirCliente('{cid}'); irALight('galeria');")
-    ok(pg.esperar(".mandos-proyecto button", "Ficha del negocio", 15),
-       "dentro del proyecto hay «Ficha del negocio»")
+    ok(pg.esperar(".abrir-ajustes-proyecto", None, 15), "dentro del proyecto está «⚙ Ajustes del proyecto»")
     ok(negocio() is None, "el proyecto de prueba no tiene ficha")
-    pg.pulsar(".mandos-proyecto button", "Ficha del negocio")
-    ok(pg.esperar(".panel-negocio-proyecto", "Ficha del negocio", 10), "abre su panel")
+    pg.pulsar(".abrir-ajustes-proyecto")
+    ok(pg.esperar(".cajon-proyecto .ajustes-ficha-negocio", "Ficha del negocio", 10),
+       "el cajón de ajustes trae la sección «Ficha del negocio»")
+    ok(pg.esperar(".cajon-proyecto .panel-negocio-proyecto", "Qué hace este negocio", 10), "con su panel")
     ok(negocio() is None, "abrirlo no guarda nada")
     panel = pg.p.locator(".panel-negocio-proyecto")
     panel.locator("input").first.fill("Alquiler de consolas para eventos")
@@ -6946,7 +7447,8 @@ def tipos_de_negocio(navegador, datos):
        and (n.get("reglas") or [{}])[0].get("palabras") == ["mando", "consola"]
        and (n.get("revisor") or {}).get("equipo") == "teles sin trípode",
        f"«Guardar la ficha» la guarda con su regla y su revisor ({n})")
-    ok(pg.esperar(".mandos-proyecto button", "Ficha del negocio ✓", 10), "y el botón lo dice")
+    ok(pg.esperar(".panel-negocio-proyecto", "la usan sus estilos", 10), "y el panel lo dice")
+    pg.js("cerrarAjustesProyecto();")
     pg.sin_errores("la ficha del negocio en el proyecto")
 
     # EN LA PESTAÑA «REGLAS» DEL ESTILO DEL PROYECTO
@@ -6958,13 +7460,813 @@ def tipos_de_negocio(navegador, datos):
     ok(pg.visible(".regla-negocio", "Los mandos se sujetan"), "con sus reglas, sin editarlas")
     pg.captura("negocio_en_reglas_del_estilo", entera=False)
     pg.pulsar(".negocio-del-estilo button", "Editar la ficha")
-    ok(pg.esperar(".panel-negocio-proyecto", "Ficha del negocio", 15),
-       "«✎ Editar la ficha» lleva al proyecto con la ficha abierta")
+    ok(pg.esperar(".cajon-proyecto .panel-negocio-proyecto", "Qué hace este negocio", 15),
+       "«✎ Editar la ficha» lleva al proyecto con el cajón de ajustes y la ficha abiertos")
     pg.pulsar(".panel-negocio-proyecto button", "Quitar la ficha")
     pg.p.wait_for_timeout(1500)
     ok(negocio() is None, "«Quitar la ficha» (tras confirmar) la quita")
     pg.sin_errores("el negocio en las reglas del estilo")
     pg.cerrar()
+
+# ======================================================================
+# PORTADAS-2 (21-10-2026). Tramo propio, al final.
+
+@escenario
+def portadas_2_capas_y_pantalla_quieta(navegador, datos):
+    """Notas del dueño del 21-10: la imagen sale limpia (la plantilla ya no le
+    mete efectos), el texto pequeño de arriba sale al escribirlo, lo añadido
+    se queda al cambiar de plantilla, «Guardar diseño» se ve, se descarga la
+    portada, la IA enseña el prompt antes de pagar; en Publicar, red por red
+    qué portada se manda; y la pantalla no se mueve al llegar los ganchos."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    ruta = os.path.join(datos["proyectos"], "_sistema", "publicar", "portadas", f"{pid}.diseno.json")
+    if os.path.exists(ruta):
+        os.remove(ruta)          # empezar de un diseño de partida
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    api.post(f"/api/publicar/proyectos/{cid}/conectar", {"redes": ["tiktok", "instagram", "youtube"]})
+    api.post(f"/api/publicar/proyectos/{cid}/cuentas")
+    pg = Pagina(navegador, datos, nombre="portadas_2")
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    ok(pg.esperar(".portada-publicar button", "Diseñar portada", 20), "Publicar abre la ficha")
+    ok(pg.visible(".portada-por-red", "Qué portada recibe cada red"), "red por red, qué portada se manda")
+    ok(pg.visible(".portada-por-red", "Facebook") or pg.visible(".portada-por-red", "Instagram"),
+       "con las redes marcadas")
+    pg.pulsar(".portada-publicar button", "Diseñar portada")
+    ok(pg.esperar(".vista-portada-grande img", segundos=30), "se abre el editor")
+    d = pg.p.evaluate("() => PORT.diseno")
+    ok(d.get("efectos") == {}, f"la imagen empieza SIN ajustes ({d.get('efectos')})")
+    ok((d.get("fondo") or {}).get("tipo") == "plano", "y el fondo de partida es la imagen de un plano, limpia")
+    ok(pg.visible(".lleva-portada", "tal cual"), "«Esta imagen lleva» dice que va tal cual")
+    # el texto pequeño de arriba sale al escribirlo
+    pg.p.locator(".capa-portada input[data-foco=portada-antetitulo]").fill("SOLO HOY")
+    pg.p.wait_for_timeout(300)
+    ok(pg.p.evaluate("() => PORT.diseno.elementos.some(e => e.rol === 'antetitulo' && e.texto === 'SOLO HOY')"),
+       "el texto pequeño de arriba tiene dónde salir aunque estuviera vacío")
+    # añadir: nace en un hueco libre y se queda al cambiar de plantilla
+    pg.p.locator(".capa-portada select[aria-label='Elemento que se añade']").select_option("insignia")
+    pg.pulsar(".capa-portada button", "Añadir")
+    pg.p.wait_for_timeout(400)
+    nuevo = pg.p.evaluate("() => PORT.diseno.elementos[PORT.diseno.elementos.length - 1]")
+    ok(nuevo.get("propio") and abs((nuevo.get("x") or 0.5) - 0.5) + abs((nuevo.get("y") or 0.5) - 0.5) > 0.1,
+       f"lo añadido no nace encima del título, en el centro ({nuevo.get('x')}, {nuevo.get('y')})")
+    ok(pg.visible(".capa-portada .aviso-portada", "añadido"), "y se avisa dentro del editor")
+    pg.pulsar(".capa-portada .plantilla-portada", "Pregunta")
+    pg.p.wait_for_timeout(1200)
+    ok(pg.p.evaluate("() => PORT.diseno.plantilla") == "pregunta"
+       and pg.p.evaluate("() => PORT.diseno.elementos.some(e => e.propio && e.tipo === 'insignia')"),
+       "cambiar de plantilla conserva lo añadido a mano")
+    ok(pg.p.evaluate("() => JSON.stringify(PORT.diseno.efectos)") == "{}", "y no le mete efectos a la foto")
+    # el look de la plantilla, opcional, y «Sin ajustes»
+    pg.pulsar(".capa-portada button", "Poner el look de la plantilla")
+    pg.p.wait_for_timeout(500)
+    ok(pg.p.evaluate("() => Object.keys(PORT.diseno.efectos).length") > 0 and pg.visible(".lleva-portada .pastilla-lleva", "Contraste"),
+       "el look se pone solo si se pide, y se ve en «Esta imagen lleva»")
+    pg.pulsar(".capa-portada button", "Sin ajustes")
+    pg.p.wait_for_timeout(500)
+    ok(pg.p.evaluate("() => JSON.stringify(PORT.diseno.efectos)") == "{}", "«Sin ajustes» deja la imagen tal cual")
+    # restablecer un elemento
+    pg.p.evaluate("() => { const e = PORT.diseno.elementos.find(x => x.rol === 'titulo'); e.x = 0.1; e.tam = 0.03; pintarEditorPortada(); }")
+    fila = pg.p.locator(".capa-portada .elemento-portada", has_text="Título").first
+    fila.locator("button", has_text="Restablecer").click()
+    pg.p.wait_for_timeout(300)
+    ok(pg.p.evaluate("() => { const e = PORT.diseno.elementos.find(x => x.rol === 'titulo'); return e.x !== 0.1 && e.tam !== 0.03; }"),
+       "«Restablecer» devuelve el elemento a como nació")
+    # sin paleta
+    pg.p.locator(".capa-portada .campo-portada", has_text="Paleta").locator("select").select_option("ninguna")
+    pg.p.wait_for_timeout(1200)
+    ok(pg.p.evaluate("() => PORT.diseno.paleta") == "ninguna", "se puede quitar la paleta («Sin paleta»)")
+    # guardar se ve, y el aviso flotante queda por encima del editor
+    pg.pulsar(".capa-portada button", "Guardar diseño")
+    ok(pg.esperar(".capa-portada .aviso-portada", "guardado", 10), "«Guardar diseño» dice que se ha guardado, dentro del editor")
+    z = pg.p.evaluate("() => [Number(getComputedStyle(document.getElementById('toast')).zIndex), Number(getComputedStyle(document.querySelector('.capa-portada')).zIndex)]")
+    ok(z[0] > z[1], f"y el aviso flotante sale por ENCIMA de la capa del editor ({z})")
+    # descargar
+    with pg.p.expect_download(timeout=30000) as bajada:
+        pg.pulsar(".capa-portada button", "Descargar portada")
+    ok(bajada.value.suggested_filename.endswith(".png"), f"«Descargar portada» baja el PNG ({bajada.value.suggested_filename})")
+    # la IA: ideas de Claude y el prompt editable antes de pagar
+    pg.pulsar(".capa-portada button", "Ideas de imagen con Claude")
+    ok(pg.esperar(".capa-portada .idea-ia-portada", "La sala llena", 60), "Claude propone ideas de imagen con su prompt")
+    pg.p.locator(".capa-portada .idea-ia-portada", has_text="La sala llena").locator("button", has_text="Fondo con esta idea").click()
+    ok(pg.esperar(".capa-portada .antes-de-pagar textarea", segundos=15), "antes de pagar sale el prompt")
+    ok("diez pantallas" in pg.p.locator(".capa-portada .antes-de-pagar textarea").input_value(),
+       "y es el de la idea elegida, para cambiarlo si se quiere")
+    pg.pulsar(".capa-portada .antes-de-pagar button", "Cancelar")
+    ok(not pg.visible(".capa-portada .antes-de-pagar"), "y se puede no pagar")
+    # UN DOBLE CLIC EN «Dibujar» PAGA UNA SOLA IMAGEN (revisión del 21-10)
+    def de_ia():
+        _r, lista = api.get(f"/api/trabajos?proyecto={pid}")
+        lista = lista if isinstance(lista, list) else (lista or {}).get("trabajos") or []
+        return len([t for t in lista if str(t.get("tipo") or t.get("nombre") or "").startswith("portada_ia")])
+    antes_ia = de_ia()
+    pg.pulsar(".capa-portada button", "Hacer el fondo con IA")
+    pg.esperar(".capa-portada .antes-de-pagar button", "Dibujar", 15)
+    pg.p.evaluate("() => { const b = [...document.querySelectorAll('.capa-portada .antes-de-pagar button')].find(x => x.textContent.includes('Dibujar')); b.click(); b.click(); }")
+    fin = time.time() + 90
+    while time.time() < fin and pg.p.evaluate("() => !!PORT.ia"):
+        pg.p.wait_for_timeout(700)
+    ok(de_ia() - antes_ia == 1, f"un doble clic en «Dibujar» lanza UNA imagen ({de_ia() - antes_ia})")
+    pg.captura("portadas_2_editor", entera=False)
+    pg.p.evaluate("() => { PORT.cambiado = false; }")
+    pg.pulsar(".capa-portada button", "Cerrar")
+    pg.sin_errores("portadas-2")
+    pg.cerrar()
+
+    # LA PANTALLA NO SE MUEVE al llegar los ganchos de una red de más arriba.
+    # Se sostiene sola (en la pasada entera otros escenarios dejan la ficha a
+    # su manera): tres redes con texto, cada una con su «Dame 3 ganchos».
+    r, _d = api.put(f"/api/publicar/videos/{pid}", {
+        "redes": ["tiktok", "instagram", "youtube"],
+        "textos": {"tiktok": {"descripcion": "Alquila consolas para tu fiesta en Lima"},
+                   "instagram": {"descripcion": "Tu fiesta con consolas y pantallas gigantes"},
+                   "youtube": {"titulo": "Consolas para fiestas en Lima",
+                               "descripcion": "Así montamos una fiesta con diez consolas"}}})
+    ok(r.status_code == 200, f"la ficha con tres redes y sus textos ({r.status_code})")
+    movil = Pagina(navegador, datos, ancho=390, alto=780, nombre="portadas_2_movil")
+    movil.js(f"abrirPublicarVideo('{pid}');")
+    movil.esperar(".ficha-publicar .nombre-ficha", segundos=20)
+    movil.p.wait_for_timeout(1200)
+    pos = ("() => { const b = [...document.querySelectorAll('#modulo button')].filter(x => /ganchos|pensando/.test(x.textContent))[1];"
+           " return b ? Math.round(b.getBoundingClientRect().top) : null; }")
+    llegan = ("() => { const red = (PUB.ficha.redes || [])[0] || 'tiktok';"
+              " PUB.ficha.seo = Object.assign({}, PUB.ficha.seo, {ganchos: Object.assign({}, (PUB.ficha.seo || {}).ganchos,"
+              " {[red]: ['Un gancho largo para ocupar sitio en la pantalla del móvil uno', 'Un gancho largo para ocupar sitio en la pantalla del móvil dos',"
+              " 'Un gancho largo para ocupar sitio en la pantalla del móvil tres']})}); pintarModulo(); }")
+    ponerse = ("() => { const b = [...document.querySelectorAll('#modulo button')].filter(x => x.textContent.includes('Dame 3 ganchos'))[1];"
+               " const m = document.getElementById('modulo'); m.scrollTop += b.getBoundingClientRect().top - 200; }")
+    if movil.p.locator("#modulo button", has_text="Dame 3 ganchos").count() >= 2:
+        movil.p.evaluate(ponerse)
+        movil.p.wait_for_timeout(300)
+        antes = movil.p.evaluate(pos)
+        movil.p.evaluate(llegan)
+        movil.p.wait_for_timeout(500)
+        despues = movil.p.evaluate(pos)
+        ok(antes is not None and despues is not None and abs(despues - antes) <= 4,
+           f"al llegar los ganchos de otra red, lo que se mira no se mueve ({antes} → {despues})")
+        # y la comprobación SÍ caza el fallo: sin el ancla, se mueve
+        movil.p.evaluate("() => { PUB.ficha.seo.ganchos = {}; pintarModulo(); }")
+        movil.p.evaluate(ponerse)
+        movil.p.wait_for_timeout(300)
+        movil.p.evaluate("() => { window.__ancla = volverAlAncla; volverAlAncla = () => {}; }")
+        antes = movil.p.evaluate(pos)
+        movil.p.evaluate(llegan)
+        movil.p.wait_for_timeout(500)
+        despues = movil.p.evaluate(pos)
+        movil.p.evaluate("() => { volverAlAncla = window.__ancla; }")
+        ok(despues is not None and antes is not None and abs(despues - antes) > 40,
+           f"(sin el ancla la pantalla sí se movía: {antes} → {despues})")
+    else:
+        ok(False, "la ficha de prueba tiene al menos dos redes con «Dame 3 ganchos»")
+    movil.sin_errores("la pantalla quieta en Publicar")
+    movil.cerrar()
+
+
+# ======================================================================
+# CREAR EN EL MÓVIL (rama `arreglos-crear-movil`, 21-10-2026). Tramo propio y
+# al final. Lo que vio el dueño en el teléfono: el carril parpadeaba al paso 1
+# con cada refresco, el paso Vídeo se vaciaba al pulsar «Montar», la barra
+# cambiaba de alto y tapaba media pantalla, el aviso flotante tapaba su botón
+# y escribiendo una nota no quedaba sitio. Se mide POR FOTOGRAMA
+# (requestAnimationFrame), como el diagnóstico: a 25 fps un vídeo no caza un
+# destello de un fotograma.
+
+#: La sonda: cada fotograma apunta el scroll del panel, su alto, el
+#: desplazamiento de la fila del carril, si el paso activo se ve dentro de ella,
+#: el alto de la barra y dónde empieza el panel (lo de encima es la cabecera).
+#: Cuenta además cuántas filas del carril se construyen.
+SONDA_FOTOGRAMAS = r"""() => {
+  window.__fot = []; window.__parar_fot = false; window.__filas_carril = 0;
+  if (!window.__pasosDelCarrilEnvuelto) {
+    window.__pasosDelCarrilEnvuelto = true;
+    const original = pasosDelCarril;
+    pasosDelCarril = function () { window.__filas_carril += 1; return original.apply(this, arguments); };
+  }
+  const q = s => document.querySelector(s);
+  const paso = () => {
+    const panel = q('#panel'), fila = q('#panel .pasos-carril');
+    const act = q('#panel .paso-carril.actual'), barra = q('.barra-accion');
+    const fr = fila ? fila.getBoundingClientRect() : null, ar = act ? act.getBoundingClientRect() : null;
+    const br = barra && barra.getClientRects().length ? barra.getBoundingClientRect() : null;
+    window.__fot.push({
+      t: Math.round(performance.now()), top: Math.round(panel.scrollTop), alto: panel.scrollHeight,
+      x: fila ? Math.round(fila.scrollLeft) : -1,
+      dentro: !!(fr && ar && ar.left >= fr.left - 2 && ar.right <= fr.right + 2),
+      barra: br ? Math.round(br.height) : 0, cab: Math.round(panel.getBoundingClientRect().top),
+      paso: act ? (act.dataset.paso || '') : '',
+    });
+    if (!window.__parar_fot) requestAnimationFrame(paso);
+  };
+  requestAnimationFrame(paso);
+}"""
+
+#: Lo que tapan la cabecera (todo lo que hay encima del panel) y la barra.
+TAPADO = r"""() => {
+  const panel = document.querySelector('#panel'), barra = document.querySelector('.barra-accion');
+  const cab = Math.max(0, Math.round(panel.getBoundingClientRect().top));
+  const b = barra && barra.getClientRects().length ? Math.round(barra.getBoundingClientRect().height) : 0;
+  return { cab, barra: b, vh: innerHeight, pct: Math.round(1000 * (cab + b) / innerHeight) / 10 };
+}"""
+
+#: Cuánto pisa el aviso flotante a los botones de la barra (px²).
+SOLAPE_AVISO = r"""() => {
+  const t = document.querySelector('#toast');
+  if (!t || !t.classList.contains('ver')) return -1;
+  const a = t.getBoundingClientRect();
+  let total = 0;
+  document.querySelectorAll('.barra-accion button').forEach(b => {
+    if (!b.getClientRects().length) return;
+    const r = b.getBoundingClientRect();
+    const x = Math.max(0, Math.min(a.right, r.right) - Math.max(a.left, r.left));
+    const y = Math.max(0, Math.min(a.bottom, r.bottom) - Math.max(a.top, r.top));
+    total += x * y;
+  });
+  return Math.round(total);
+}"""
+
+
+def _fotogramas(pg):
+    return pg.p.evaluate("() => { window.__parar_fot = true; return window.__fot || []; }")
+
+
+def _cambiar_donde_van_los_subtitulos(pg, destino=None):
+    """Abre «Subtítulos» de los ajustes del montaje del paso Vídeo y cambia
+    «Dónde va» (a `destino`, o a la otra de Arriba/Abajo). -> la elegida."""
+    fila = pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Subtítulos").first
+    if not pg.p.locator(".ajustes-en-video .editor-ajuste .campo").filter(
+            has=pg.p.locator("label", has_text="Dónde va")).count():
+        boton = fila.locator("button", has_text="Cambiar")
+        # habilitado y fuera de lo `inert` (el paso Vídeo lo está mientras monta)
+        fin = time.time() + 120
+        while time.time() < fin and not pg.p.evaluate(
+                "(b) => !!b && !b.disabled && !b.closest('[inert]')", boton.first.element_handle()):
+            pg.p.wait_for_timeout(500)
+        boton.click()
+        pg.p.wait_for_timeout(800)
+    campo = pg.p.locator(".ajustes-en-video .editor-ajuste .campo").filter(
+        has=pg.p.locator("label", has_text="Dónde va")).first
+    if not destino:
+        activa = campo.locator("button.activo, button.elegido, button[aria-pressed=true]", has_text="Arriba").count()
+        destino = "Abajo" if activa else "Arriba"
+    campo.locator("button", has_text=destino).first.click()
+    pg.p.wait_for_timeout(1500)
+    return destino
+
+
+@escenario
+def crear_en_el_movil(navegador, datos):
+    """arreglos-crear-movil (21-10-2026): en el móvil, con un montaje en marcha,
+    el carril no salta, el paso Vídeo no se vacía, la barra no cambia de alto
+    ni tapa más de un cuarto de pantalla con la cabecera, el aviso no pisa sus
+    botones, dos avisos no se pisan y escribiendo queda sitio. Y en escritorio,
+    el paso Vídeo tampoco se vacía al montar."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    freno = os.path.join(os.path.dirname(datos["proyectos"]), "ffmpeg_lento")
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="crear en el móvil")
+    # 0) «Un estilo nuevo» no pasa por barraDeAccion ni tiene «⋯»: lo que falta
+    #    para poder generar tiene que verse también en el móvil (revisión, 22-10)
+    pg.js("APP.light.encargo = null; irALight('crear', { taller: null });")
+    ok(pg.esperar("input, textarea"), "MÓVIL: «Un estilo nuevo» se abre")
+    pg.p.wait_for_timeout(1200)
+    ok(pg.visible(".pie-creacion .plan .aviso-falta", "nombre al estilo"),
+       "MÓVIL: en «Un estilo nuevo» se ve lo que falta («ponle un nombre al estilo»)")
+    pg.js("APP.light.encargo = null;")
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.p.wait_for_timeout(1500)
+
+    # 1) barra + cabecera, paso a paso, a 390×844
+    for paso in ("Estilo", "Encargo", "Guion", "Voz", "Imágenes", "Vídeo"):
+        ir_al_paso(pg, paso)
+        pg.p.wait_for_timeout(1500)
+        pg.p.evaluate("() => { const p = document.querySelector('#panel'); p.scrollTop = 600; }")
+        pg.p.wait_for_timeout(500)
+        t = pg.p.evaluate(TAPADO)
+        ok(t["pct"] <= 25, f"MÓVIL 390: en {paso}, barra + cabecera tapan ≤ 25 % "
+           f"({t['cab']} + {t['barra']} px = {t['pct']} %)")
+    pg.captura("movil_390_video", entera=False)
+
+    # 2) «⋯» abre lo demás ENCIMA de la barra, sin cambiarle el alto
+    alto_barra = pg.p.evaluate(TAPADO)["barra"]
+    if pg.visible(".barra-accion .boton-mas-barra"):
+        pg.pulsar(".barra-accion .boton-mas-barra")
+        ok(pg.visible(".barra-accion .mas-de-la-barra"), "MÓVIL: «⋯» abre el estado entero y el plan")
+        ok(abs(pg.p.evaluate(TAPADO)["barra"] - alto_barra) <= 2,
+           "MÓVIL: y la barra no cambia de alto al abrirlo")
+        pg.captura("movil_390_barra_abierta", entera=False)
+        pg.pulsar(".barra-accion .boton-mas-barra")
+        ok(not pg.visible(".barra-accion .mas-de-la-barra"), "MÓVIL: «⋯» otra vez lo cierra")
+    else:
+        ok(False, "MÓVIL: la barra del vídeo lleva «⋯» con el estado entero y el plan")
+
+    # 3) dos avisos seguidos no se pisan, y no tapan los botones de la barra
+    pg.p.evaluate("() => { toast('Primer aviso de prueba'); toast('Segundo aviso de prueba'); }")
+    pg.p.wait_for_timeout(300)
+    texto = pg.toast()
+    ok("Primer aviso" in texto and "Segundo aviso" in texto,
+       f"MÓVIL: dos avisos seguidos se ven los dos ({texto!r})")
+    solape = pg.p.evaluate(SOLAPE_AVISO)
+    ok(solape == 0, f"MÓVIL: el aviso flotante no pisa los botones de la barra ({solape} px²)")
+    pg.p.wait_for_timeout(3500)
+
+    # 4) el montaje: se cambia un ajuste con la pantalla bajada y se monta
+    _cambiar_donde_van_los_subtitulos(pg)
+    pg.p.evaluate("() => { const c = document.querySelector('.ajustes-en-video'); "
+                  "if (c) c.scrollIntoView({block: 'center'}); }")
+    pg.p.wait_for_timeout(800)
+    with open(freno, "w", encoding="utf-8"):
+        pass
+    try:
+        pg.p.evaluate(SONDA_FOTOGRAMAS)
+        pg.p.wait_for_timeout(600)
+        pg.p.evaluate("() => { const b = [...document.querySelectorAll('.barra-accion button')]"
+                      ".find(x => /Montar el vídeo con/.test(x.innerText)); if (b) b.click(); }")
+        pg.p.wait_for_timeout(1200)
+        solape = pg.p.evaluate(SOLAPE_AVISO)
+        ok(solape <= 0, f"MÓVIL: el aviso del montaje no pisa «Parar» ({solape} px²)")
+        pg.captura("movil_390_montando", entera=False)
+        pg.p.wait_for_timeout(4800)
+        fot = _fotogramas(pg)
+        corriendo = pg.p.evaluate("() => ((APP.trabajos[CLAVE_VIDEO_LIGHT] || {}).estado) === 'ejecutando'")
+        ok(corriendo, "MÓVIL: el montaje sigue en marcha mientras se mide")
+        ok(len(fot) > 60, f"MÓVIL: la sonda ha visto los fotogramas ({len(fot)})")
+        if fot:
+            xs = [f["x"] for f in fot]
+            # Reajustarse sí: el paso activo cambia de ancho («⟳ N %», «2
+            # notas sin aplicar») y la fila se recoloca para que siga entero a
+            # la vista. Lo que no puede es PARPADEAR (un valor de 1–3
+            # fotogramas que vuelve al de antes: el salto al paso 1) ni dejar
+            # el paso activo fuera.
+            tramos = []
+            for x in xs:
+                if tramos and tramos[-1][0] == x:
+                    tramos[-1][1] += 1
+                else:
+                    tramos.append([x, 1])
+            destellos = sum(1 for a, b, c in zip(tramos, tramos[1:], tramos[2:])
+                            if b[1] <= 3 and a[0] == c[0])
+            ok(destellos == 0 and min(xs) >= xs[0] - 150 and all(f["dentro"] for f in fot),
+               f"MÓVIL: con el montaje en marcha el carril no parpadea ni salta al paso 1 "
+               f"({destellos} destellos, desplazamiento {sorted(set(xs))[:6]}, "
+               f"{sum(1 for f in fot if not f['dentro'])} fotogramas con el paso activo fuera)")
+            altos = [f["alto"] for f in fot]
+            ok(min(altos) >= 0.85 * altos[0],
+               f"MÓVIL: el paso Vídeo no se vacía al montar (alto {altos[0]} → mín {min(altos)})")
+            tops = [f["top"] for f in fot]
+            ok(max(abs(x - tops[0]) for x in tops) <= 40,
+               f"MÓVIL: y la pantalla sigue donde estaba (scroll {tops[0]} → {min(tops)}…{max(tops)})")
+            barras = [f["barra"] for f in fot if f["barra"]]
+            ok(barras and max(barras) - min(barras) <= 6,
+               f"MÓVIL: la barra no cambia de alto al montar ({min(barras or [0])}–{max(barras or [0])} px)")
+            peor = max(f["cab"] + f["barra"] for f in fot)
+            ok(peor <= 0.25 * 844, f"MÓVIL: barra + cabecera ≤ 25 % durante el montaje ({peor} px)")
+        # lo deslizado a mano en el carril se queda donde se dejó
+        pg.p.evaluate(SONDA_FOTOGRAMAS)
+        # (el dedo: un `pointerdown` y el desplazamiento)
+        pg.p.evaluate("() => { const f = document.querySelector('#panel .pasos-carril'); if (f) {"
+                      " f.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true})); f.scrollLeft = 0; } }")
+        pg.p.wait_for_timeout(2500)
+        fot = _fotogramas(pg)
+        ok(fot and fot[-1]["x"] <= 5,
+           f"MÓVIL: lo deslizado a mano en el carril no vuelve solo (ahora en {fot and fot[-1]['x']})")
+    finally:
+        try:
+            os.remove(freno)
+        except OSError:
+            pass
+    # con la máquina cargada el montaje tarda: si se sigue sin esperar, el paso
+    # Vídeo sigue `inert` y el 8) no puede pulsar «Cambiar»
+    ok(pg.sin_trabajo(600), "MÓVIL: el montaje del móvil termina")
+    pg.p.wait_for_timeout(2000)
+
+    # 5) cambiar de paso: la fila se construye una vez y el paso se ve
+    pg.p.evaluate(SONDA_FOTOGRAMAS)
+    ir_al_paso(pg, "Imágenes")
+    pg.p.wait_for_timeout(2500)
+    fot = _fotogramas(pg)
+    filas = pg.p.evaluate("() => window.__filas_carril")
+    nuevos = [f for f in fot if f["paso"] == "imagenes"]
+    ok(filas <= 2, f"MÓVIL: cambiar de paso construye el carril una vez ({filas})")
+    ok(nuevos and len({f["x"] for f in nuevos}) <= 1 and nuevos[-1]["dentro"],
+       f"MÓVIL: y el paso nuevo sale centrado de una vez, sin pasar por el paso 1 "
+       f"({sorted({f['x'] for f in nuevos})[:6]})")
+
+    # 6) escribiendo una nota con el teclado abierto: la barra y la cabecera se apartan
+    pg.js("PREVIA.i = 2; repintarVideo();")
+    area = pg.p.locator(".previa-feedback textarea").first
+    if area.count():
+        area.click()
+        pg.p.set_viewport_size({"width": 390, "height": 464})
+        pg.p.wait_for_timeout(800)
+        t = pg.p.evaluate(TAPADO)
+        util = t["vh"] - t["cab"] - t["barra"]
+        ok(util >= 0.75 * t["vh"], f"MÓVIL: escribiendo con el teclado abierto queda sitio "
+           f"({util} de {t['vh']} px; cabecera {t['cab']}, barra {t['barra']})")
+        pg.captura("movil_390_escribiendo", entera=False)
+        pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
+        pg.p.set_viewport_size({"width": 390, "height": 844})
+        pg.p.wait_for_timeout(800)
+        ok(pg.visible(".barra-accion"), "MÓVIL: al dejar de escribir la barra vuelve")
+    else:
+        ok(False, "MÓVIL: la nota de la imagen se puede escribir")
+    pg.sin_errores("crear en el móvil (390)")
+    pg.cerrar()
+
+    # 7) a 360×740, barra + cabecera ≤ 25 % en cada paso
+    pg = Pagina(navegador, datos, ancho=360, alto=740, nombre="crear en el móvil 360")
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.p.wait_for_timeout(1500)
+    for paso in ("Estilo", "Encargo", "Guion", "Voz", "Imágenes", "Vídeo"):
+        ir_al_paso(pg, paso)
+        pg.p.wait_for_timeout(1500)
+        pg.p.evaluate("() => { const p = document.querySelector('#panel'); p.scrollTop = 600; }")
+        pg.p.wait_for_timeout(500)
+        t = pg.p.evaluate(TAPADO)
+        ok(t["pct"] <= 25, f"MÓVIL 360: en {paso}, barra + cabecera tapan ≤ 25 % "
+           f"({t['cab']} + {t['barra']} px = {t['pct']} %)")
+        if paso in ("Imágenes", "Vídeo"):
+            pg.captura(f"movil_360_{'imagenes' if paso == 'Imágenes' else 'video'}", entera=False)
+    pg.sin_errores("crear en el móvil (360)")
+    pg.cerrar()
+
+    # 8) en escritorio, el paso Vídeo tampoco se vacía al montar (y se deja
+    #    «Dónde va» como estaba)
+    pg = Pagina(navegador, datos, nombre="crear al montar, escritorio")
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.sin_trabajo(600)
+    pg.p.wait_for_timeout(1500)
+    ir_al_paso(pg, "Vídeo")
+    pg.p.wait_for_timeout(1500)
+    _cambiar_donde_van_los_subtitulos(pg)
+    pg.p.evaluate("() => { const c = document.querySelector('.ajustes-en-video'); "
+                  "if (c) c.scrollIntoView({block: 'center'}); }")
+    pg.p.wait_for_timeout(800)
+    pg.p.evaluate(SONDA_FOTOGRAMAS)
+    pg.p.wait_for_timeout(400)
+    pg.p.evaluate("() => { const b = [...document.querySelectorAll('.barra-accion button')]"
+                  ".find(x => /Montar el vídeo con/.test(x.innerText)); if (b) b.click(); }")
+    pg.p.wait_for_timeout(1500)
+    fot = _fotogramas(pg)
+    if fot:
+        altos = [f["alto"] for f in fot]
+        tops = [f["top"] for f in fot]
+        ok(min(altos) >= 0.85 * altos[0],
+           f"ESCRITORIO: el paso Vídeo no se vacía al montar (alto {altos[0]} → mín {min(altos)})")
+        ok(max(abs(x - tops[0]) for x in tops) <= 40,
+           f"ESCRITORIO: y la pantalla sigue donde estaba (scroll {tops[0]} → {min(tops)}…{max(tops)})")
+    pg.captura("escritorio_montando", entera=False)
+    pg.sin_trabajo()
+    pg.sin_errores("crear al montar, en escritorio")
+    pg.cerrar()
+
+
+
+# tipo-de-relato (20-10-2026): el tipo de relato en la Parrilla y el Encargo,
+# aplicado a un vídeo hecho (gratis, con su imagen base) y por defecto en el
+# estilo. Nada de esto paga una imagen.
+@escenario
+def tipo_de_relato(navegador, datos):
+    """Parrilla con «Tipo de relato:» → el Encargo lo trae y lo manda al crear;
+    un vídeo hecho → «El tipo de relato» → «Aplicar» no lanza nada → la imagen
+    base con su precio; el pedido del reparto de sitios; y el estilo lo guarda."""
+    api = datos["api"]
+    cid = datos["cliente"]
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="tipo de relato")
+
+    def parte(nombre, fn):
+        try:
+            fn()
+        except Exception as fallo:                           # noqa: BLE001
+            traceback.print_exc()
+            ok(False, f"{nombre} se cortó: {type(fallo).__name__}: {str(fallo)[:120]}")
+
+    def parte_parrilla():
+        guion = ("TR01 — Mampara que choca\nCliente / proyecto: Baños\nUso: adaptar\nRed: Reels\n"
+                 "Formato: vertical\nDuración: 30 s\nObjetivo: que pidan\nCTA: Escríbenos\n"
+                 "Tono: cercano\nTipo de relato: Un espacio que cambia (objeto)\n\n"
+                 "ESPACIO FIJO\n- Sitio: bano_mampara\n"
+                 "- Descripción: small apartment bathroom, toilet on the left wall\n"
+                 "- Luz: day, soft cool daylight\n- Secundarios: ninguno\n\n"
+                 "ESCENA 1\nVisual: la mampara\nVoz: «La mampara choca.»\n\n"
+                 "PARA EL ENCARGO\n- Material: La mampara choca con el inodoro.\n"
+                 "- Indicaciones: cercano\n- Llamadas a la acción: Escríbenos\n"
+                 "- Duración: 30 s · Formato: vertical\n\nAVISOS\n- ninguno")
+        r, hecho = api.post(f"/api/parrilla/proyectos/{cid}/guiones",
+                            {"texto": guion, "nombre": "Tipo de relato"})
+        ok(r.status_code == 201 and (hecho or {}).get("guiones"),
+           f"(1) el guion con «Tipo de relato:» se guarda ({r.status_code})")
+        pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+        pg.js(f"elegirProyectoParrilla('{cid}');")
+        pg.p.wait_for_timeout(800)
+        pg.pulsar(".tarjeta-guion .titulo-guion", "TR01")
+        ok(pg.esperar(".ficha-parrilla h3", "TR01"), "(1) su ficha")
+        pg.pulsar(".pestanas-cajon button", "Al Encargo")
+        pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
+        pg.pulsar(".pie-cajon .boton-pasar-encargo", "Pasar al Encargo")
+        fin = time.time() + 10
+        while time.time() < fin and not pg.p.evaluate(
+                "() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
+            pg.p.wait_for_timeout(300)
+        ok(pg.esperar(".bloque-light h3", "El tipo de relato", 10),
+           "(1) «Un vídeo nuevo» trae el bloque «El tipo de relato»")
+        enviado = pg.p.evaluate("() => opcionesParaCrear(APP.light.video.encargo).tipo_relato || null")
+        ok(enviado == {"modo": "espacio_que_cambia", "cambia": "objeto"},
+           f"(1) relleno con lo del guion y es lo que se manda al crear: {enviado}")
+        ok(pg.visible(".tipo-relato .pista", "imagen base"), "(1) y avisa de la imagen base")
+        pg.captura("tipo_relato_encargo")
+        pg.p.locator(".tipo-relato select").first.select_option("")
+        pg.p.wait_for_timeout(300)
+        ok(pg.p.evaluate("() => !('tipo_relato' in opcionesParaCrear(APP.light.video.encargo))"),
+           "(1) sin elegir, no se manda nada (regla 1)")
+
+    def parte_video():
+        pg.sin_trabajo(300)
+        # un sitio del que hacer la imagen base (el último escenario: no molesta a otros)
+        _r, ef = api.get(f"/api/proyectos/{pid}/espacio_fijo")
+        if not ((ef or {}).get("espacio_fijo") or {}).get("descripcion"):
+            api.post(f"/api/proyectos/{pid}/espacio_fijo/aplicar", {"espacio_fijo": {
+                "sitio": "Baño", "descripcion": "a narrow bathroom, toilet on the left",
+                "luz": "day", "secundarios": []}})
+        antes = _huellas_de_planos(datos, pid)
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; pintarLight();")
+        ok(pg.esperar(".bloque-light h3", "El tipo de relato", 15), "(2) el vídeo trae «El tipo de relato»")
+        ok(pg.esperar(".tipo-relato button", "Aplicar el tipo de relato", 15), "(2) con «Aplicar»")
+        caja = pg.p.locator(".bloque-light").filter(has_text="cómo se cuenta en imágenes").first
+        caja.locator("select").first.select_option("espacio_que_cambia")
+        pg.p.wait_for_timeout(400)
+        caja = pg.p.locator(".bloque-light").filter(has_text="cómo se cuenta en imágenes").first
+        ok(caja.locator("select").count() >= 2, "(2) en «Un espacio que cambia» sale «Qué cambia»")
+        caja.locator("button", has_text="Aplicar el tipo de relato").first.click()
+        ok(pg.esperar(".imagen-base-relato", segundos=20), "(2) aplicado: sale la imagen base del sitio")
+        _r, vivos = api.get(f"/api/trabajos?proyecto={pid}&activos=1")
+        lista = vivos if isinstance(vivos, list) else (vivos.get("trabajos") or [])
+        ok(not lista, f"(2) aplicar no lanza ningún trabajo ({len(lista)})")
+        ok(_huellas_de_planos(datos, pid) == antes, "(2) ni toca ninguna imagen")
+        _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+        ok((ficha.get("resuelto") or {}).get("modo") == "espacio_que_cambia" and ficha.get("edita"),
+           f"(2) el servidor guarda el modo: {(ficha.get('resuelto') or {}).get('modo')}")
+        ok(pg.visible(".imagen-base-relato button", "Generar la imagen base") or
+           pg.visible(".imagen-base-relato button", "Otra imagen base")
+           or not ficha.get("sitio"), "(2) con «Generar la imagen base» y su precio")
+        if ficha.get("puede_usar_subida"):
+            pg.pulsar(".imagen-base-relato button", "Usar la imagen subida")
+            ok(pg.esperar(".imagen-base-relato.aprobada", segundos=15),
+               "(2) «Usar la imagen subida» la deja aprobada (gratis)")
+        elif ficha.get("sitio"):
+            # sin subida: se genera (el motor de imagen es el falso) y se aprueba
+            pg.pulsar(".imagen-base-relato button", "Generar la imagen base")
+            pg.sin_trabajo(120)
+            pg.js("APP.light.video.relato = null; pintarLight();")
+            ok(pg.esperar(".imagen-base-relato button", "Aprobar esta imagen", 30),
+               "(2) la imagen base generada se puede aprobar")
+            ok(pg.visible(".imagen-base-relato a img"), "(2) con su miniatura, que abre a tamaño completo")
+            pg.pulsar(".imagen-base-relato button", "Aprobar esta imagen")
+            ok(pg.esperar(".imagen-base-relato.aprobada", segundos=15), "(2) y queda aprobada")
+        if pg.visible(".imagen-base-relato.aprobada"):
+            # UN ESTADO, UNA IMAGEN (21-10): Claude escribe qué cambia por tramo
+            # (el CLI falso: «antes» y «despues»), y el estado se dibuja una vez
+            # (motor de imagen falso) y se aprueba en la pantalla
+            r, lanz = api.post(f"/api/proyectos/{pid}/tipo_relato/cambios", {})
+            fin_cambios = api.esperar(lanz["trabajo_id"], 120) if r.status_code == 202 else lanz
+            pg.js("APP.light.video.relato = null; pintarLight();")
+            if pg.esperar(".estados-relato", segundos=20):
+                ok(pg.visible(".estado-relato button", "Dibujar este estado"),
+                   "(2b) cada estado del guion, con «Dibujar este estado» y su precio")
+                pg.pulsar(".estado-relato button", "Dibujar este estado")
+                pg.sin_trabajo(120)
+                pg.js("APP.light.video.relato = null; pintarLight();")
+                ok(pg.esperar(".estado-relato button", "Aprobar este estado", 30),
+                   "(2b) dibujado, se puede aprobar")
+                ok(pg.visible(".estado-relato a img"), "(2b) con su miniatura, que abre a tamaño completo")
+                pg.pulsar(".estado-relato button", "Aprobar este estado")
+                ok(pg.esperar(".estado-relato.aprobada", segundos=15), "(2b) y queda aprobado")
+                _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+                ok(ficha.get("listo"), "(2b) con la base y sus estados aprobados, listo para dibujar")
+                pg.captura("tipo_relato_estados")
+            else:
+                _r, f2 = api.get(f"/api/proyectos/{pid}/tipo_relato")
+                ok(False, "(2b) tras escribir qué cambia, salen los estados del vídeo: "
+                   f"{r.status_code} {str(fin_cambios)[:300]} estados={f2.get('estados')}")
+        pg.captura("tipo_relato_video")
+        ok(pg.esperar(".bloque-light h3", "El reparto y los sitios", 10),
+           "(3) «El reparto y los sitios» con su pedido")
+        ok(pg.visible(".pedido-sitios button", "Volver a repartir con este pedido"),
+           "(3) y «Volver a repartir con este pedido»")
+        # vuelta a lo de antes, para no cambiar nada de lo que venga detrás
+        r, _d = api.post(f"/api/proyectos/{pid}/tipo_relato/aplicar", {"tipo_relato": None})
+        ok(r.status_code == 200, f"(2) y se puede volver a lo del estilo ({r.status_code})")
+        pg.js("APP.light.video.relato = null; pintarLight();")
+
+    def parte_estilo():
+        preset = datos["preset"]
+        pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{preset}' }});")
+        # con el rediseño de Crear, la ficha va en pestañas: el tipo de relato vive en «Cómo se cuenta»
+        pg.js("if (typeof abrirPestanaDeEstilo === 'function') abrirPestanaDeEstilo('cuenta');")
+        ok(pg.esperar(".bloque-light h3", "Tipo de relato", 15), "(4) el estilo trae «🧭 Tipo de relato»")
+        bloque = pg.p.locator(".bloque-light").filter(has_text="cómo se cuentan por defecto").first
+        _r, lista = api.get("/api/presets-light")
+        fp = next((x for x in (lista or {}).get("presets") or [] if x.get("id") == preset), {})
+        if not (((fp.get("datos") or {}).get("estilo") or {}).get("referencias")):
+            # un estilo sin láminas no se puede guardar: se dice, sin selector
+            ok(pg.esperar(".bloque-light .pista", "podrás elegir su tipo de relato", 15),
+               "(4) sin láminas, dice que primero se genera el estilo (no hay selector que falle)")
+            pg.captura("tipo_relato_estilo")
+            return
+        ok(pg.esperar(".bloque-light .tipo-relato select", segundos=15), "(4) con su selector")
+        bloque.locator("select").first.select_option("producto")
+        fin = time.time() + 10
+        relato = {}
+        while time.time() < fin and relato.get("modo") != "producto":
+            pg.p.wait_for_timeout(500)
+            _r, d = api.get(f"/api/presets-light/{preset}/relato")
+            relato = (d or {}).get("relato") or {}
+        ok(relato == {"modo": "producto"}, f"(4) elegirlo lo guarda en el estilo: {relato}")
+        bloque = pg.p.locator(".bloque-light").filter(has_text="cómo se cuentan por defecto").first
+        bloque.locator("select").first.select_option("")
+        fin = time.time() + 10
+        while time.time() < fin and relato:
+            pg.p.wait_for_timeout(500)
+            _r, d = api.get(f"/api/presets-light/{preset}/relato")
+            relato = (d or {}).get("relato") or {}
+        ok(relato == {}, "(4) y documental es no tenerlo")
+        pg.captura("tipo_relato_estilo")
+
+    parte("la Parrilla y el Encargo", parte_parrilla)
+    parte("un vídeo hecho", parte_video)
+    parte("el estilo", parte_estilo)
+    pg.sin_errores("el tipo de relato")
+    pg.cerrar()
+
+
+@escenario
+def publicar_seo_real(navegador, datos):
+    """Rama seo-real (20-10): la nota SEO en tres partes (Relevancia, Demanda,
+    Tu historial) con la forma aparte, «Investigar búsquedas» con su tabla y
+    «Usar», la palabra del proyecto que el vídeo no trata fuera, y la casilla
+    de la clave de YouTube en Configuración. En el móvil, sin salirse."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    # una palabra del proyecto que este vídeo NO trata: no tiene que salir
+    api.put(f"/api/publicar/proyectos/{cid}", {"palabra_clave": "clases de guitarra eléctrica"})
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["instagram"], "palabra_clave": "", "textos": {
+        "instagram": {"descripcion": "Un reel para el SEO de verdad", "cta": "Escríbenos",
+                      "hashtags": ["lima", "fiesta", "consolas"]}}})
+    pg = Pagina(navegador, datos)
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    ok(pg.esperar(".seo-video .busquedas-seo", "Búsquedas reales", 15), "la ficha tiene «Búsquedas reales»")
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    if ficha["seo"].get("proyecto_fuera"):
+        ok(pg.visible(".seo-video .meta", "no se usa aquí"),
+           "la palabra del proyecto que el vídeo no trata se dice que no se usa")
+    ok(ficha["seo"]["palabra"] != "clases de guitarra eléctrica" or not ficha["seo"].get("proyecto_fuera"),
+       "y no es la palabra del vídeo")
+    pg.js("PUB.notaAbierta = {instagram: true}; pintarModulo();")
+    nota = ".texto-red[data-red=instagram] .nota-seo"
+    ok(pg.esperar(f"{nota} .parte-seo b", "Relevancia", 5), "la nota trae la parte de Relevancia")
+    ok(pg.visible(f"{nota} .parte-seo b", "Demanda") and pg.visible(f"{nota} .parte-seo b", "Tu historial"),
+       "y la de Demanda y Tu historial")
+    ok(pg.visible(f"{nota} .parte-seo .meta", "Investigar búsquedas"), "sin investigar, dice cómo medir la demanda")
+    ok(pg.visible(f"{nota} .titulo-forma-seo", "no cuentan"), "los detalles de forma, aparte y sin contar")
+    pg.pulsar('.busquedas-seo button[data-accion="investigar-busquedas"]')
+    ok(pg.esperar(".tabla-busquedas tbody tr", segundos=20), "«Investigar búsquedas»: la tabla de frases")
+    ok(pg.visible(".tabla-busquedas th", "Demanda"), "con su demanda, competencia, historial y total")
+    pg.pulsar(".tabla-busquedas tbody tr button", "Usar")
+    pg.p.wait_for_timeout(1500)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    ok(bool(ficha["seo"]["palabra_propia"]), f"«Usar» la deja como palabra del vídeo: {ficha['seo']['palabra_propia']!r}")
+    ok(pg.esperar(".tabla-busquedas .pastilla", "en uso", 8), "y la tabla la marca «en uso»")
+    pg.js("PUB.notaAbierta = {instagram: true}; pintarModulo();")
+    pg.p.wait_for_timeout(500)
+    ok(not pg.visible(f"{nota} .parte-seo .meta", "sin investigar"), "la nota ya tiene la demanda investigada")
+    pg.captura("publicar_seo_real")
+    pg.sin_errores("el SEO de verdad")
+    pg.cerrar()
+    # la clave de YouTube en Configuración
+    pg = Pagina(navegador, datos)
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#cuerpo-config h3", "YouTube (búsquedas SEO)", 10),
+       "Configuración tiene la casilla de la clave de YouTube")
+    ok(pg.visible("#cuerpo-config .pista", "YouTube Data API v3"), "y dice qué API activar")
+    pg.sin_errores("la clave de YouTube en Configuración")
+    pg.cerrar()
+    for tema in ("oscuro", "claro"):
+        pg = Pagina(navegador, datos, ancho=390, alto=844, nombre=f"seo real móvil {tema}")
+        pg.js(f"document.documentElement.dataset.tema = '{tema}'; abrirPublicarVideo('{pid}');")
+        pg.p.wait_for_timeout(2500)
+        pg.js("PUB.notaAbierta = {instagram: true}; PUB.busquedasAbiertas = true; pintarModulo();")
+        pg.p.wait_for_timeout(500)
+        ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        ok(ancho <= 2, f"las búsquedas y la nota caben en un móvil, tema {tema} ({ancho}px)")
+        texto = pg.p.evaluate("() => document.querySelector('#modulo').innerText")
+        malos = sorted(set(x.group(0) for x in TEXTOS_MALOS.finditer(texto)))
+        ok(not malos, f"sin «undefined», «NaN» ni «null» ({malos})")
+        pg.captura(f"publicar_seo_real_movil_{tema}", entera=False)
+        pg.sin_errores(f"el SEO de verdad en el móvil ({tema})")
+        pg.cerrar()
+    api.put(f"/api/publicar/proyectos/{cid}", {"palabra_clave": ""})
+    api.put(f"/api/publicar/videos/{pid}", {"palabra_clave": ""})
+
+
+@escenario
+def publicar_seo_canal(navegador, datos):
+    """Rama seo-real-3 (21-10): Configuración → «YouTube: tu canal» con la
+    dirección de vuelta para copiar y el ID de cliente; en la ficha, la
+    columna «Tendencia» de las búsquedas. Sin conectar nada de verdad."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#cuerpo-config h3", "YouTube: tu canal", 10), "Configuración tiene «YouTube: tu canal»")
+    ok(pg.visible("#cuerpo-config .canal-youtube code", "/api/publicar/youtube/oauth/vuelta"),
+       "con la dirección de vuelta para copiar en Google Cloud")
+    pg.p.locator(".canal-youtube input[type=text]").first.fill("123-abc.apps.googleusercontent.com")
+    pg.p.locator(".canal-youtube input[type=password]").first.fill("GOCSPX-prueba")
+    pg.pulsar(".canal-youtube button", "Guardar")
+    ok(pg.esperar(".canal-youtube button", "Conectar mi canal", 8), "guardado el cliente: «Conectar mi canal»")
+    _r, claves = api.get("/api/claves")
+    ok("GOCSPX-prueba" not in json.dumps(claves), "el secreto no baja a la pantalla")
+    pg.sin_errores("el canal de YouTube en Configuración")
+    pg.cerrar()
+    pg = Pagina(navegador, datos)
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["instagram"], "textos": {
+        "instagram": {"descripcion": "Un reel para la tendencia", "cta": "Escríbenos", "hashtags": ["lima"]}}})
+    pg.js(f"abrirPublicarVideo('{pid}'); PUB.busquedasAbiertas = true;")
+    ok(pg.esperar(".busquedas-seo button[data-accion=investigar-busquedas]", segundos=15), "la ficha con sus búsquedas")
+    pg.pulsar(".busquedas-seo button[data-accion=investigar-busquedas]")
+    ok(pg.esperar(".tabla-busquedas th", "Tendencia", 20), "la tabla trae la columna «Tendencia»")
+    pg.captura("publicar_seo_canal")
+    pg.sin_errores("las búsquedas con la tendencia")
+    pg.cerrar()
+    _r, claves = api.get("/api/claves")
+    api.put("/api/claves", {"youtube_oauth": {"cliente_id": "", "secreto": ""}})
+
+
+# ============================================================== GUION VISUAL
+# guion-visual (22-10-2026): «Qué dibujan las imágenes» en el Encargo de un
+# vídeo hecho, el guion visual en el paso Imágenes (proponer con el CLI falso,
+# aprobar) y vuelta a lo de antes. No dibuja ni paga nada.
+@escenario
+def guion_visual(navegador, datos):
+    """Encargo → «Lo que dice el guion» → Imágenes → «Proponer con Claude» →
+    planos → «Aprobar el guion visual» → vuelve a «lo que diga el estilo»."""
+    api = datos["api"]
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="guion visual")
+    try:
+        pg.sin_trabajo(300)
+        antes = _huellas_de_planos(datos, pid)
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; "
+              "APP.light.video.gv = null; pintarLight();")
+        ok(pg.esperar(".bloque-light h3", "Qué dibujan las imágenes", 15),
+           "(1) el Encargo trae «Qué dibujan las imágenes»")
+        caja = pg.p.locator(".bloque-light").filter(has_text="la voz o el guion visual").first
+        caja.locator("select").first.select_option("guion")
+        fin = time.time() + 15
+        modo = ""
+        while time.time() < fin and modo != "guion":
+            pg.p.wait_for_timeout(500)
+            _r, f = api.get(f"/api/proyectos/{pid}/guion_visual")
+            modo = (f or {}).get("modo")
+        ok(modo == "guion", f"(1) elegir «Lo que dice el guion» lo guarda ({modo})")
+        ok(_huellas_de_planos(datos, pid) == antes, "(1) y no toca ninguna imagen")
+        # (1b) visto por el dueño el 23-10: ANTES de la primera tanda el paso
+        # Imágenes está bloqueado, así que el guion visual tiene que salir en la
+        # Voz (donde está «Generar las imágenes"). Se simula «sin planos».
+        pg.js("APP.light.video._assets = APP.light.video.fichas.assets; "
+              "APP.light.video.fichas.assets = {}; APP.light.video.vista = 'voz'; "
+              "APP.light.video.gv = null; pintarLight();")
+        ok(pg.esperar(".editor-gv", segundos=20),
+           "(1b) sin imágenes todavía, la Voz trae el editor del guion visual")
+        pg.captura("guion_visual_en_la_voz")
+        pg.js("APP.light.video.fichas.assets = APP.light.video._assets; pintarLight();")
+        pg.js(f"APP.light.video.vista = 'previa'; APP.light.video.gv = null; pintarLight();")
+        ok(pg.esperar(".editor-gv", segundos=20), "(2) el paso Imágenes trae el editor del guion visual")
+        ok(pg.visible(".editor-gv button", "Proponer con Claude"), "(2) con «Proponer con Claude · solo texto»")
+        pg.pulsar(".editor-gv button", "Proponer con Claude")
+        pg.sin_trabajo(120)
+        pg.js("APP.light.video.gv = null; pintarLight();")
+        ok(pg.esperar(".plano-gv", segundos=30), "(2) Claude propone planos, uno por fila")
+        ok(pg.visible(".editor-gv button", "Aprobar el guion visual"), "(2) y se puede aprobar")
+        pg.captura("guion_visual_propuesto")
+        pg.pulsar(".editor-gv button", "Aprobar el guion visual")
+        ok(pg.esperar(".editor-gv.aprobado", segundos=20), "(3) aprobado")
+        _r, f = api.get(f"/api/proyectos/{pid}/guion_visual")
+        ok((f or {}).get("aprobado"), "(3) el servidor lo tiene aprobado")
+        pg.sin_trabajo(120)
+        pg.captura("guion_visual_aprobado")
+    finally:
+        r, _d = api.put(f"/api/proyectos/{pid}/guion_visual/modo", {"imagenes": None})
+        ok(getattr(r, "status_code", 0) == 200, "(4) y se vuelve a lo que diga el estilo")
+        pg.sin_errores("el guion visual")
+        pg.cerrar()
 
 if __name__ == "__main__":
     sys.exit(main())

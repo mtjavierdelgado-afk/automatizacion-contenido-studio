@@ -838,13 +838,32 @@ function nombreDe(id) {
 
 let relojToast = null;
 
+/* DOS AVISOS SEGUIDOS NO SE PISAN (arreglos-crear-movil, 21-10-2026). Al
+   acabar un montaje salían dos el mismo milisegundo («El vídeo: Listo» y «el
+   vídeo ya está montado de nuevo») y el primero no llegaba a verse. Si llega
+   otro con el de antes todavía recién puesto, se apilan: el anterior encima y
+   el nuevo debajo, y los dos cuentan su tiempo desde ahora. */
+const AVISO_FLOTANTE = { desde: 0, lineas: [] };
+
 function toast(texto, malo) {
   const n = $('#toast');
-  n.textContent = texto;
-  n.classList.toggle('malo', !!malo);
+  apartarAvisoDeLaBarra();
+  const ahora = Date.now();
+  const recien = n.classList.contains('ver') && ahora - AVISO_FLOTANTE.desde < 2500;
+  const lineas = recien ? AVISO_FLOTANTE.lineas.filter(l => l.texto !== String(texto)).slice(-1) : [];
+  lineas.push({ texto: String(texto), malo: !!malo });
+  AVISO_FLOTANTE.lineas = lineas;
+  AVISO_FLOTANTE.desde = ahora;
+  if (lineas.length === 1) n.textContent = lineas[0].texto;
+  else {
+    vaciar(n);
+    lineas.forEach(l => n.appendChild(h('div', { clase: 'linea-aviso' }, l.texto)));
+  }
+  const algunMalo = lineas.some(l => l.malo);
+  n.classList.toggle('malo', algunMalo);
   n.classList.add('ver');
   clearTimeout(relojToast);
-  relojToast = setTimeout(() => n.classList.remove('ver'), malo ? 6000 : 3000);
+  relojToast = setTimeout(() => n.classList.remove('ver'), algunMalo ? 6000 : 3000);
 }
 
 /* Todo fallo acaba aqui: se ve en la propia pestana, no solo en consola. En la
@@ -2497,6 +2516,8 @@ function pintarConfig() {
   caja.appendChild(seccionCLI());
   caja.appendChild(seccionOtrasClaves(ficha));
   caja.appendChild(seccionClaveUploadPost(ficha));  // Publicar en redes (rama publicar-redes-1)
+  caja.appendChild(seccionClaveYouTube(ficha));  // búsquedas SEO (rama seo-real)
+  caja.appendChild(seccionCanalYouTube(ficha));  // tu canal con OAuth (rama seo-real-3)
   caja.appendChild(h('div', { clase: 'fila' },
     h('button', {
       clase: 'mini fantasma',
@@ -5555,6 +5576,21 @@ function marcaEstado(e) {
   return h('span', { clase: 'marca-estado', 'aria-hidden': 'true' }, h('span', {}, MARCA_DEL_ESTADO[e] || '·'));
 }
 
+/* EL CARRIL NO SE MUEVE SOLO (arreglos-crear-movil, 21-10-2026). En el móvil
+   la fila de pasos se desliza, y «parpadeaba»: cada refresco (dos por segundo
+   con algo en marcha) volvía a colgar la fila, eso le pone el desplazamiento a
+   cero, y el centrado llegaba un `setTimeout` después; entre medias se pintaba
+   el paso 1. Lo que se deslizaba a mano también volvía solo, y cada clic en un
+   paso construía la fila 4–6 veces. Ahora:
+     · la fila es UNA mientras no cambie lo que dice (la huella vive aquí, no en
+       cada pintado), y refrescar sin cambios no la descuelga;
+     · al colgarla (pintado entero, refresco con cambios) se le devuelve en el
+       acto el desplazamiento que tenía (`x`, que apunta su propio `scroll`, o
+       sea también lo deslizado a mano), antes de que el navegador pinte;
+     · se centra en el paso activo SOLO al cambiar de paso o de vídeo.
+   Solo pantalla: no lee ni escribe nada del vídeo. */
+const CARRIL_VISTA = { paso: '', pid: '', x: null, mano: false, huella: '', nodo: null };
+
 /* EL CARRIL: seis pasos en columna (en el móvil, una fila que se desliza) y,
    debajo, lo gastado en este vídeo. */
 function carrilCrear(actual) {
@@ -5564,21 +5600,54 @@ function carrilCrear(actual) {
   /* VIVO: mientras corre una tanda, su paso dice «⟳ 42 %» y lo gastado sube.
      Se rehace solo si ha cambiado lo que dice (la huella), así que entre tic
      y tic los botones son los mismos nodos y un clic no se pierde. */
-  const memoria = { huella: '', nodo: null };
   caja.appendChild(enVivo(() => {
     const pasos = estadosDelCarril();
     const v = APP.light.video;
-    const huella = JSON.stringify([actual, pasos, v.pid ? Number((v.coste || {}).total_usd || 0) : null]);
-    if (huella === memoria.huella && memoria.nodo) {
-      // volver a colgar la fila le devuelve el scroll a cero: se recoloca
-      centrarPasoActivo(memoria.nodo.querySelector('.pasos-carril'));
-      return memoria.nodo;
-    }
-    memoria.huella = huella;
-    memoria.nodo = pasosDelCarril(pasos, actual);
-    return memoria.nodo;
-  }));
+    const huella = JSON.stringify([actual, v.pid || '', pasos, v.pid ? Number((v.coste || {}).total_usd || 0) : null]);
+    if (huella === CARRIL_VISTA.huella && CARRIL_VISTA.nodo) return CARRIL_VISTA.nodo;
+    CARRIL_VISTA.huella = huella;
+    CARRIL_VISTA.nodo = pasosDelCarril(pasos, actual);
+    return CARRIL_VISTA.nodo;
+  }, () => colocarCarril(actual)));
   return caja;
+}
+
+/* LA FILA, YA COLGADA: o se centra (paso o vídeo nuevos) o vuelve a donde
+   estaba. Síncrono a propósito: con un `setTimeout` el navegador llega a pintar
+   la fila en el paso 1. */
+function colocarCarril(actual) {
+  const fila = document.querySelector('#panel .pasos-carril');
+  if (!fila) return;
+  if (!fila.dataset.vigilada) {
+    fila.dataset.vigilada = '1';
+    fila.addEventListener('scroll', () => { if (fila.isConnected) CARRIL_VISTA.x = fila.scrollLeft; },
+      { passive: true });
+    // lo toca una persona (dedo, ratón, rueda): desde ahí manda lo que deje
+    const aMano = () => { CARRIL_VISTA.mano = true; };
+    ['pointerdown', 'touchstart', 'wheel'].forEach(ev => fila.addEventListener(ev, aMano, { passive: true }));
+  }
+  const pid = (APP.light.video || {}).pid || '';
+  if (CARRIL_VISTA.paso !== actual || CARRIL_VISTA.pid !== pid || CARRIL_VISTA.x === null) {
+    CARRIL_VISTA.paso = actual;
+    CARRIL_VISTA.pid = pid;
+    CARRIL_VISTA.mano = false;
+    BARRA_MAS.abierta = false;   // el «⋯» de la barra era del paso de antes
+    centrarPasoActivo(fila);
+  } else {
+    if (Math.abs(fila.scrollLeft - CARRIL_VISTA.x) > 1) fila.scrollLeft = CARRIL_VISTA.x;
+    /* SI NADIE LO HA DESLIZADO y el paso activo se ha quedado a medias (los
+       pasos cambian de ancho: «⟳ 42 %», «1 cambio sin aplicar»), se vuelve a
+       centrar, en el acto. Lo deslizado a mano no se toca. */
+    if (!CARRIL_VISTA.mano && !pasoActivoALaVista(fila)) centrarPasoActivo(fila);
+  }
+  CARRIL_VISTA.x = fila.scrollLeft;
+}
+
+function pasoActivoALaVista(fila) {
+  const activo = fila.querySelector('.paso-carril.actual');
+  if (!activo || fila.scrollWidth <= fila.clientWidth + 2) return true;
+  const f = fila.getBoundingClientRect(), a = activo.getBoundingClientRect();
+  return a.left >= f.left - 2 && a.right <= f.right + 2;
 }
 
 function pasosDelCarril(pasos, actual) {
@@ -5615,19 +5684,17 @@ function pasosDelCarril(pasos, actual) {
       h('b', {}, datos ? `$ ${Number(datos.total_usd || 0).toFixed(2)}` : '$ —'),
       h('span', { clase: 'meta' }, `${alDia} de ${pasos.length} pasos al día`)));
   }
-  centrarPasoActivo(fila);
   return caja;
 }
 
 /* EN EL MÓVIL EL PASO ACTIVO SE CENTRA SOLO en la fila (sin mover la página:
-   `scrollIntoView` arrastraría también el scroll del panel). */
+   `scrollIntoView` arrastraría también el scroll del panel). Con la fila ya
+   colgada y en el acto (ver `colocarCarril`). */
 function centrarPasoActivo(fila) {
-  setTimeout(() => {
-    const activo = fila && fila.querySelector('.paso-carril.actual');
-    if (!activo || fila.scrollWidth <= fila.clientWidth + 2) return;
-    const dentro = activo.getBoundingClientRect().left - fila.getBoundingClientRect().left + fila.scrollLeft;
-    fila.scrollLeft = Math.max(0, dentro - (fila.clientWidth - activo.offsetWidth) / 2);
-  }, 0);
+  const activo = fila && fila.isConnected && fila.querySelector('.paso-carril.actual');
+  if (!activo || fila.scrollWidth <= fila.clientWidth + 2) return;
+  const dentro = activo.getBoundingClientRect().left - fila.getBoundingClientRect().left + fila.scrollLeft;
+  fila.scrollLeft = Math.max(0, dentro - (fila.clientWidth - activo.offsetWidth) / 2);
 }
 
 /* El carril se repinta solo, sin el resto de la pantalla (una lectura que
@@ -5637,6 +5704,7 @@ function repintarCarril() {
   const paso = pasoDelCarril();
   if (!viejo || !paso) return;
   viejo.replaceWith(carrilCrear(paso));
+  colocarCarril(paso);
 }
 
 /* LA SALIDA DE CREAR (el logo es la otra). Sustituye a «‹ Mis vídeos», «←
@@ -5788,19 +5856,77 @@ function campoRenombrar(pid, antes) {
  *   encima      nodo                 lo que va pegado encima (los mandos de Imágenes)
  *   clase       clase extra
  */
+/* EN EL MÓVIL, UNA FILA (arreglos-crear-movil, 21-10-2026). La barra llegaba a
+ * tapar la mitad de la pantalla: el botón principal se quedaba la columna y el
+ * estado salía con una palabra por renglón, el plan en otra fila y en Imágenes
+ * un segundo botón; y cambiaba de alto con cada estado de una tanda. En ≤700 px
+ * es una fila de alto fijo: el estado en una línea (con su marca) y el botón
+ * principal. Lo demás —el estado entero, el plan y los botones secundarios— va
+ * en «⋯», que lo abre ENCIMA de la barra sin cambiarle el alto (pulsar el
+ * estado también lo abre). En pantalla ancha «⋯» no sale y todo se ve como
+ * siempre. Ningún botón cambia de lo que hace: solo de sitio. */
+/* ABIERTO O CERRADO, POR PANTALLA (rediseno-automatizar): Crear y cada
+   pestaña de Automatizar (y su panel) llevan el suyo; abrir el «⋯» en una no
+   deja abierto el de la otra. `abierta` lee y escribe el de la pantalla en la
+   que se está. */
+function claveBarraMas() {
+  if (typeof MODULOS === 'undefined' || MODULOS.actual === 'crear') return 'crear';
+  if (MODULOS.actual === 'automatizar' && typeof PAR !== 'undefined') {
+    return `automatizar:${PAR.fichaAbierta ? 'ficha' : PAR.seccion || ''}`;
+  }
+  return MODULOS.actual || '';
+}
+const BARRA_MAS = {
+  abiertas: {},
+  get abierta() { return !!this.abiertas[claveBarraMas()]; },
+  set abierta(v) { this.abiertas[claveBarraMas()] = !!v; },
+};
+
+function esMovilCrear() {
+  try { return window.matchMedia('(max-width: 700px)').matches; } catch (e) { return false; }
+}
+
+function alternarMasDeLaBarra() {
+  BARRA_MAS.abierta = !BARRA_MAS.abierta;
+  repintarBarra();
+}
+
 function barraDeAccion(op) {
-  const barra = h('div', { clase: 'barra-accion' + (op.clase ? ` ${op.clase}` : '') });
+  const botones = (op.botones || []).filter(Boolean);
+  const esSecundario = n => !!(n.matches && (n.matches('.secundario-barra') || n.querySelector('.secundario-barra')));
+  const secundarios = botones.filter(esSecundario);
+  const principales = botones.filter(n => !esSecundario(n));
+  const textoEstado = (op.estado || {}).texto || '';
+  const hayMas = !op.corriendo && !!(secundarios.length || op.plan || textoEstado);
+  const abierta = hayMas && BARRA_MAS.abierta;
+  const barra = h('div', { clase: 'barra-accion' + (op.clase ? ` ${op.clase}` : '') + (abierta ? ' abierta' : '') });
   if (op.encima) barra.appendChild(op.encima);
   const dentro = h('div', { clase: 'dentro' + (op.corriendo ? ' corriendo' : '') });
   if (op.corriendo) {
     dentro.appendChild(h('div', { clase: 'progreso' }, op.progreso || barraTandaLight(op.tanda)));
   } else {
     const e = (op.estado || {}).e || 'pend';
-    dentro.appendChild(h('div', { clase: `estado ${claseEstado(e)}` }, marcaEstado(e),
-      h('span', {}, (op.estado || {}).texto || '')));
+    dentro.appendChild(h('div', { clase: `estado ${claseEstado(e)}`, title: textoEstado || null,
+      onclick: () => { if (hayMas && esMovilCrear()) alternarMasDeLaBarra(); } }, marcaEstado(e),
+      h('span', { clase: 'texto-estado' }, textoEstado)));
     dentro.appendChild(h('div', { clase: 'plan' }, op.plan || ''));
   }
-  dentro.appendChild(h('div', { clase: 'derecha' }, ...(op.botones || [])));
+  /* «⋯» Y LO QUE ABRE. En pantalla ancha la caja no existe para la maquetación
+     (`display: contents`) y su texto no se ve: los secundarios quedan a la
+     izquierda del principal, como siempre. */
+  const mas = hayMas ? h('div', { clase: 'mas-de-la-barra',
+    onclick: ev => { if (ev.target.closest && ev.target.closest('button')) BARRA_MAS.abierta = false; } },
+    h('div', { clase: 'mas-texto' },
+      textoEstado ? h('b', {}, textoEstado) : null,
+      op.plan ? h('span', { clase: 'meta' }, op.plan) : null),
+    secundarios.length ? h('div', { clase: 'secundarios-barra' }, ...secundarios) : null) : null;
+  dentro.appendChild(h('div', { clase: 'derecha' }, mas,
+    hayMas ? h('button', {
+      clase: 'mini fantasma boton-mas-barra', 'aria-expanded': abierta ? 'true' : 'false',
+      'aria-label': 'Más: el estado entero, el plan y los otros botones',
+      title: 'El estado entero, el plan y los otros botones', onclick: alternarMasDeLaBarra,
+    }, '⋯') : null,
+    ...principales));
   barra.appendChild(dentro);
   return barra;
 }
@@ -5833,8 +5959,89 @@ function ajustarAltoDeLaBarra() {
     const raiz = document.documentElement.style;
     if (barra && barra.isConnected && barra.offsetHeight) raiz.setProperty('--alto-pie', `${barra.offsetHeight}px`);
     else raiz.removeProperty('--alto-pie');
+    apartarAvisoDeLaBarra();
   });
 }
+
+/* EL AVISO FLOTANTE NO TAPA LA BARRA (arreglos-crear-movil). Salía justo donde
+   está la barra pegada, encima de su botón principal, 3 s (6 s si era un
+   error). Aquí solo se publica cuánto ocupa la barra que se VE desde abajo
+   (`--alto-barra-accion`) y una clase en <body>; la regla que sube el aviso
+   está en el bloque CREAR · CARRIL de estilo.css (la capa de `#toast` es de
+   otra rama y no se toca). Se mide también al sacar cada aviso: así vale
+   aunque se haya cambiado de módulo y la barra ya no se vea. */
+function apartarAvisoDeLaBarra() {
+  // la de Crear o la del módulo que se ve (Automatizar): la que tenga caja en pantalla
+  const barra = [...document.querySelectorAll('#panel .barra-accion, #modulo .barra-accion')]
+    .find(b => b.getClientRects().length) || null;
+  let alto = 0;
+  if (barra && barra.getClientRects().length) {
+    const r = barra.getBoundingClientRect();
+    if (r.height > 0 && r.top < window.innerHeight) alto = Math.round(window.innerHeight - r.top);
+  }
+  if (alto > 0) document.documentElement.style.setProperty('--alto-barra-accion', `${alto}px`);
+  else document.documentElement.style.removeProperty('--alto-barra-accion');
+  document.body.classList.toggle('con-barra-accion', alto > 0);
+}
+
+/* UN AVISO QUE EN EL MÓVIL ES UNA LÍNEA (arreglos-crear-movil, 21-10-2026).
+   «Hay algo por actualizar» se decía en la barra, en el carril, en una caja y
+   en una franja, y en el móvil la caja y la franja eran un cuarto de la
+   pantalla antes de llegar al reproductor. El detalle no se quita: en el móvil
+   sale plegado en una línea y se abre al tocarlo; en pantalla ancha, la caja
+   de siempre. Lo que se abre o se cierra a mano se recuerda entre repintados. */
+const AVISOS_PLEGADOS = {};
+
+function avisoPlegable(clave, resumen, detalle, clase) {
+  const extra = clase ? ` ${clase}` : '';
+  if (!esMovilCrear()) return h('div', { clase: `caja-aviso${extra}` }, detalle);
+  const caja = h('details', { clase: `caja-aviso aviso-plegable${extra}` },
+    h('summary', {}, h('span', { clase: 'resumen-aviso' }, resumen)),
+    h('div', { clase: 'detalle-aviso' }, detalle));
+  if (AVISOS_PLEGADOS[clave]) caja.open = true;
+  caja.addEventListener('toggle', () => { AVISOS_PLEGADOS[clave] = caja.open; });
+  return caja;
+}
+
+/* AL CRUZAR LOS 700 PX (girar el teléfono, estrechar la ventana) cambia lo que
+   va en la barra y lo que se pliega: se vuelve a pintar Crear, sin más. */
+try {
+  window.matchMedia('(max-width: 700px)').addEventListener('change', () => {
+    BARRA_MAS.abiertas = {};
+    if (typeof MODULOS !== 'undefined' && MODULOS.actual === 'crear' && pasoDelCarril()) pintarLight();
+  });
+} catch (e) { /* un navegador sin matchMedia: se queda como se pintó */ }
+
+/* ESCRIBIENDO CON EL TECLADO DEL MÓVIL ABIERTO (arreglos-crear-movil). La
+   cabecera y la barra pegada se quedaban y al campo le tocaban 130 px (19 px a
+   360×740). Con un campo de texto con el foco, en ≤700 px y con el teclado
+   abierto (el visor visible encoge: `visualViewport`), la barra de acción, la
+   cabecera de arriba y la burbuja se apartan (`body.escribiendo-movil`, en
+   estilo.css); al salir del campo vuelven. */
+const TECLADO_MOVIL = { ancho: 0, alto: 0 };
+
+function mirarTecladoMovil() {
+  const vv = window.visualViewport;
+  const ancho = window.innerWidth;
+  const alto = vv ? vv.height : window.innerHeight;
+  if (ancho !== TECLADO_MOVIL.ancho) { TECLADO_MOVIL.ancho = ancho; TECLADO_MOVIL.alto = 0; }
+  const escribe = esCampoDeTexto(document.activeElement);
+  // el alto sin teclado es el mayor visto con este ancho y sin escribir
+  if (!escribe || !TECLADO_MOVIL.alto) TECLADO_MOVIL.alto = Math.max(TECLADO_MOVIL.alto, alto);
+  const si = escribe && esMovilCrear() && alto < TECLADO_MOVIL.alto * 0.8
+    && typeof MODULOS !== 'undefined' && MODULOS.actual === 'crear';
+  if (document.body.classList.contains('escribiendo-movil') === si) return;
+  document.body.classList.toggle('escribiendo-movil', si);
+  ajustarAltoDeLaBarra();
+}
+
+try {
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', mirarTecladoMovil);
+  window.addEventListener('resize', mirarTecladoMovil);
+  document.addEventListener('focusin', () => setTimeout(mirarTecladoMovil, 0));
+  document.addEventListener('focusout', () => setTimeout(mirarTecladoMovil, 0));
+  setTimeout(mirarTecladoMovil, 0);   // el alto sin teclado, al cargar
+} catch (e) { /* sin visor: la barra se queda donde está */ }
 
 /* Los vídeos con una tanda pedida (`lanzarTandaLight`) o un «Montar el vídeo»
    pulsado (`montarElVideoLight`) y sin contestar todavía: sus botones de la
@@ -5947,6 +6154,44 @@ function devolverScroll(id, clave) {
   const c = clave();
   if (!c || c !== m.clave) return;
   if (Math.abs(caja.scrollTop - m.top) > 1) caja.scrollTop = m.top;
+}
+
+/* EL ANCLA (portadas-2, 21-10-2026). Devolver la MISMA altura no basta: si al
+   repintar crece algo que está más arriba (llegan los 3 ganchos de otra red,
+   sale «Claude está pensando…»), lo que se estaba mirando baja y la pantalla
+   «se mueve» aunque `scrollTop` sea el mismo (medido en móvil: 275 px). Antes
+   de repintar se apunta el primer título o etiqueta visible y a qué distancia
+   del borde estaba; después se corrige para dejarlo en el mismo sitio. Se
+   buscan títulos y etiquetas, que no cambian de texto; un botón sí cambia
+   («Dame 3 ganchos» → «Claude está pensando…»). */
+const SELECTOR_ANCLA = 'h2, h3, h4, label, b, .nombre-ficha';
+const textoDeAncla = el => (el.textContent || '').trim().slice(0, 80);
+
+function anclaDeScroll(id, clave) {
+  const caja = document.getElementById(id);
+  // sin sitio (cargando, o en Crear) no hay ancla, como en `devolverScroll`
+  if (!caja || !caja.scrollTop || !clave()) return null;
+  const arriba = caja.getBoundingClientRect().top;
+  const todos = Array.from(caja.querySelectorAll(SELECTOR_ANCLA));
+  const el = todos.find(x => {
+    const r = x.getBoundingClientRect();
+    return r.height > 0 && r.top >= arriba - 2 && textoDeAncla(x);
+  });
+  if (!el) return null;
+  const texto = textoDeAncla(el);
+  const n = todos.filter(x => x.tagName === el.tagName && textoDeAncla(x) === texto).indexOf(el);
+  return { id, sitio: clave(), tag: el.tagName, texto, n, distancia: el.getBoundingClientRect().top - arriba };
+}
+
+function volverAlAncla(ancla, clave) {
+  if (!ancla || !ancla.texto || !ancla.sitio || clave() !== ancla.sitio) return;
+  const caja = document.getElementById(ancla.id);
+  if (!caja) return;
+  const el = Array.from(caja.querySelectorAll(SELECTOR_ANCLA))
+    .filter(x => x.tagName === ancla.tag && textoDeAncla(x) === ancla.texto)[ancla.n];
+  if (!el) return;
+  const salto = (el.getBoundingClientRect().top - caja.getBoundingClientRect().top) - ancla.distancia;
+  if (Math.abs(salto) > 1) caja.scrollTop += salto;
 }
 
 function subirArriba(id) {
@@ -6105,9 +6350,11 @@ window.addEventListener('popstate', ev => {
  * documento y volver a pintarlas seria escribir en un panel que se tiro. */
 const VIVOS = [];
 
-function enVivo(pinta) {
+/* `alColgar` (opcional): lo que hay que hacer con lo pintado YA en el
+   documento, en el mismo turno (el carril le devuelve su desplazamiento). */
+function enVivo(pinta, alColgar) {
   const caja = h('div', { clase: 'vivo' });
-  VIVOS.push({ caja, pinta });
+  VIVOS.push({ caja, pinta, alColgar });
   const dentro = pinta();
   if (dentro) caja.appendChild(dentro);
   return caja;
@@ -6120,7 +6367,7 @@ function refrescarVivosLight() {
   if (!VIVOS.length) return;
   const foco = recordarFoco();
   try {
-    VIVOS.forEach(({ caja, pinta }) => {
+    VIVOS.forEach(({ caja, pinta, alColgar }) => {
       if (!caja.isConnected) return;
       /* NO SE LE QUITA EL SITIO A LO QUE SE ESTA USANDO. Si el foco esta
          dentro de la caja, se deja como esta hasta el siguiente pintado
@@ -6128,8 +6375,12 @@ function refrescarVivosLight() {
          viene a arreglar, no uno que pueda permitirse repetir. */
       if (caja.contains(document.activeElement)) return;
       const dentro = pinta();
+      /* LO QUE NO HA CAMBIADO NO SE DESCUELGA: volver a colgar el mismo nodo
+         le pone el scroll a cero (el carril saltaba al paso 1 en cada tic). */
+      if (dentro && caja.childNodes.length === 1 && caja.firstChild === dentro) return;
       vaciar(caja);
       if (dentro) caja.appendChild(dentro);
+      if (alColgar) alColgar();
     });
   } finally {
     devolverFoco(foco);
@@ -6193,6 +6444,7 @@ function pintarLightAhora() {
     donde = h('div', { clase: 'paso-crear' });
     try {
       contenido.appendChild(carrilCrear(paso));
+      colocarCarril(paso);   // ya colgado: su desplazamiento, antes de pintar
       donde.appendChild(salidaTusProyectos());
       donde.appendChild(cabeceraDelVideo());
     } catch (e) {
@@ -6435,6 +6687,12 @@ function apuntarClienteDe(cid) {
 
 function elegirCliente(cid) {
   apuntarCliente(cid);
+  // lo de la página (rediseño de Tus proyectos): cada sitio empieza limpio
+  APP.light.busca = '';
+  APP.light.filtroVideos = 'todos';
+  APP.light.menuTarjeta = '';
+  APP.light.ajustesProyecto = '';
+  APP.light.nombreProyecto = null;
   subirArriba('panel');
   pintarLight();
 }
@@ -6450,22 +6708,34 @@ function videosDeCliente(cid) {
 function origenDeVideo(video) {
   const estilo = fichaLight(video.estilo_light || '');
   const cliente = fichaCliente(clienteDeVideo(video));
-  return [estilo ? `🎨 ${estilo.nombre || estilo.id}` : '', cliente ? `📁 ${cliente.nombre}` : '']
+  return [cliente ? `📁 ${cliente.nombre}` : '', estilo ? `🎨 ${estilo.nombre || estilo.id}` : '']
     .filter(Boolean).join(' · ');
 }
 
 /* UN DIÁLOGO DE LA CASA, en vez de los `prompt` del navegador: con su diseño,
    con campo de contraseña de verdad (no se ve lo que se escribe) y con
    desplegables. Devuelve los valores o null si se cancela. */
+/* UNA PREGUNTA CADA VEZ (revisión de Publicar, 22-10-2026): el foco se
+   quedaba en el botón que la abrió, detrás del panel, y Enter lo volvía a
+   pulsar: dos paneles apilados (en Publicar, publicar dos veces). Ahora el foco
+   pasa al panel (su primer campo o su botón de aceptar) y, mientras hay una
+   abierta, otra llamada no abre nada encima: contesta «cancelar» (null). */
+const DIALOGO_ABIERTO = { capa: null };
+
 function dialogo(op) {
   const { titulo, texto, campos = [], aceptar = 'Aceptar', cancelar = 'Cancelar', peligro = false } = op;
+  // la de verdad abierta (una capa quitada desde fuera ya no cuenta)
+  if (DIALOGO_ABIERTO.capa && DIALOGO_ABIERTO.capa.isConnected) return Promise.resolve(null);
+  try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) { /* nada */ }
   return new Promise(resolver => {
     const valores = {};
     const capa = h('div', { clase: 'capa-dialogo' });
+    DIALOGO_ABIERTO.capa = capa;
     const teclas = ev => { if (ev.key === 'Escape') cerrar(null); };
     const cerrar = valor => {
       capa.remove();
       document.removeEventListener('keydown', teclas);
+      if (DIALOGO_ABIERTO.capa === capa) DIALOGO_ABIERTO.capa = null;
       resolver(valor);
     };
     const campo = c => {
@@ -6512,7 +6782,12 @@ function dialogo(op) {
     capa.addEventListener('click', ev => { if (ev.target === capa) cerrar(null); });
     document.addEventListener('keydown', teclas);
     document.body.appendChild(capa);
-    setTimeout(() => { const f = formulario.querySelector('input, select, textarea'); if (f) f.focus(); }, 0);
+    const enfocar = () => {
+      const f = formulario.querySelector('input, select, textarea') || formulario.querySelector('button[type=submit]');
+      if (f) f.focus();
+    };
+    enfocar();               // ya, para que un Enter seguido no vaya al botón de detrás
+    setTimeout(enfocar, 0);
   });
 }
 
@@ -6569,14 +6844,6 @@ async function cambiarCliente(ficha, cambios, aviso) {
   } catch (e) { toast(e.message, true); }
 }
 
-async function renombrarCliente(ficha) {
-  const r = await dialogo({ titulo: 'Renombrar el proyecto',
-    campos: [{ clave: 'nombre', etiqueta: 'Nombre', valor: ficha.nombre }], aceptar: 'Guardar' });
-  if (r && r.nombre.trim() && r.nombre.trim() !== ficha.nombre) {
-    cambiarCliente(ficha, { nombre: r.nombre }, 'Proyecto renombrado');
-  }
-}
-
 async function claveCliente(ficha) {
   const r = await dialogo({ titulo: ficha.con_clave ? 'Cambiar o quitar la clave' : 'Poner clave',
     texto: 'Con clave, sus estilos y vídeos no se ven hasta escribirla (en cada pestaña nueva). '
@@ -6612,6 +6879,7 @@ async function borrarCliente(ficha) {
     await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}`, { method: 'DELETE' });
     await cargarClientes();
     elegirCliente('');
+    toast('Proyecto borrado: sus estilos y vídeos están en «Sin proyecto»');
   } catch (e) { toast(e.message, true); }
 }
 
@@ -6664,156 +6932,691 @@ async function traerEstiloACliente(ficha) {
     await pedir(`${BASE}/api/clientes/estilos/${encodeURIComponent(r.estilo)}`,
       { method: 'PUT', cuerpo: { cliente: ficha.id } });
     await cargarClientes();
+    toast(`«${(fichaLight(r.estilo) || {}).nombre || r.estilo}» ya está en ${ficha.nombre}`);
     pintarLight();
   } catch (e) { toast(e.message, true); }
 }
 
+/* ============================================ PROYECTOS · TARJETAS
+ *
+ * Tus proyectos y la pantalla de un proyecto en la línea de Crear (rama
+ * `rediseno-proyectos`, maqueta aprobada por el dueño el 22-10-2026). SOLO
+ * cambia cómo se ve y dónde está cada cosa: las rutas, los diálogos y las
+ * confirmaciones son los de antes.
+ *
+ *   portada            cabecera con «+ Nuevo vídeo», «+ Nuevo proyecto» y la
+ *                      papelera con su número; un buscador; «Te necesitan»
+ *                      (vídeos que perdieron imágenes, estilos a medias);
+ *                      «Sigue donde lo dejaste» (tarjetas con su estado) y las
+ *                      tarjetas de los proyectos
+ *   dentro de uno      «‹ Tus proyectos», cabecera con logo, chips, «+ Nuevo
+ *                      vídeo» y «⚙ Ajustes del proyecto» (un cajón a la
+ *                      derecha, hecho con SECCIONES_AJUSTES_PROYECTO); sus
+ *                      estilos (tocar uno abre un menú) y sus vídeos, con
+ *                      filtros por estado y vista de tarjetas o de lista
+ *
+ * EL ESTADO DE CADA VÍDEO SALE DE LO QUE EL STUDIO YA DEVUELVE, sin escribir
+ * nada: por dónde va en Crear, de `GET /api/proyectos/_resumen` (los mismos
+ * estados que se ven al abrirlo, en una llamada), y lo de Publicar, de
+ * `GET /api/publicar/cola`. Lo de la página (búsqueda, filtro, menú abierto,
+ * cajón) vive en `APP.light` y no se guarda en ningún sitio; la vista
+ * tarjetas/lista, en localStorage (es de quien mira).
+ */
+const TUS_PROYECTOS = {
+  datos: null,           // la lista de la galería con la que se pidió lo de abajo
+  cola: null,            // GET /api/publicar/cola
+  papelera: null,        // cuántas cosas hay en la papelera
+  estados: {},           // pid -> resumen de `/api/proyectos/_resumen` (solo los que volvieron)
+  pidiendo: new Set(),
+  espera: {},            // pid -> hasta cuándo no se vuelve a preguntar (no volvió o falló)
+  lotes: [],             // los lotes de ids que faltan por pedir
+  enVuelo: 0,
+  reloj: null,           // vuelve a mirar los vídeos que se están generando
+  escuchando: false,
+};
+const CLAVE_VISTA_VIDEOS = 'estudio.light.vistaVideos';
+const FILTROS_DE_VIDEOS = [['todos', 'Todos'], ['curso', 'En curso'], ['listos', 'Listos'],
+  ['programados', 'Programados'], ['publicados', 'Publicados']];
+const TRABAJO_EN_LA_TARJETA = {
+  ingesta: 'Leyendo el material', brief: 'Preparando el encargo', guion: 'Escribiendo el guion',
+  voz: 'Grabando la voz', revision_audio: 'Revisando la voz', assets: 'Dibujando los planos',
+  callouts: 'Preparando los rótulos', render: 'Montando el vídeo',
+};
+const PASOS_DE_LA_TARJETA = ['guion', 'voz', 'assets', 'render'];
+const DIAS_DE_LA_TARJETA = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+
+/* Lo de la portada que no viene en la lista de la galería: se pide una vez
+   por cada lectura de la galería (`cargarGaleriaLight` cambia `APP.light.datos`). */
+function datosDeTusProyectos() {
+  if (TUS_PROYECTOS.datos === APP.light.datos) return;
+  TUS_PROYECTOS.datos = APP.light.datos;
+  TUS_PROYECTOS.estados = {};
+  TUS_PROYECTOS.pidiendo.clear();
+  TUS_PROYECTOS.espera = {};
+  TUS_PROYECTOS.lotes = [];
+  TUS_PROYECTOS.cola = null;
+  const datos = APP.light.datos;
+  pedir(rutaPublicar('/cola')).then(cola => {
+    if (TUS_PROYECTOS.datos !== datos) return;
+    TUS_PROYECTOS.cola = cola;
+    repintarTusProyectos();
+  }).catch(() => { if (TUS_PROYECTOS.datos === datos) TUS_PROYECTOS.cola = { listos: [], envios: [] }; });
+  contarPapelera().then(n => {
+    if (TUS_PROYECTOS.datos !== datos) return;
+    TUS_PROYECTOS.papelera = n;
+    repintarTusProyectos();
+  }).catch(() => {});
+}
+
+/* Lo mismo que cuenta la capa de la papelera (`abrirPapelera`): los vídeos y
+   los estilos apartados, sin los talleres que vuelven con su estilo. */
+async function contarPapelera() {
+  let presets = [];
+  try { presets = listaDe((await pedir(API.presetsCanal())).papelera) || []; } catch (e) { presets = []; }
+  const datos = await pedir(API.papelera());
+  const conSuEstilo = new Set(presets.map(p => (((p.datos || {}).origen) || {}).taller).filter(Boolean));
+  const lista = (listaDe(datos.papelera) || []).filter(f => !(f.taller && conSuEstilo.has(f.id)));
+  return lista.length + presets.length;
+}
+
+function repintarTusProyectos() {
+  if (typeof MODULOS !== 'undefined' && MODULOS.actual !== 'crear') return;
+  if ((APP.light.vista || 'galeria') !== 'galeria') return;
+  pintarLight();
+}
+
+/* Pide el resumen de los vídeos que se van a enseñar y aún no lo tienen.
+   EN LOTES DE 40 Y COMO MUCHO DOS A LA VEZ (revisión del 22-10): todos los ids
+   en una sola URL pasaban de 8 KB con ~150 vídeos (nginx contesta 414) y el
+   servidor solo resume 120 por petición. Un vídeo que no vuelve en la
+   respuesta (o una petición que falla) no se da por perdido: se vuelve a
+   preguntar en un repintado de dentro de un rato. */
+const LOTE_DE_TARJETAS = 40;
+const LOTES_A_LA_VEZ = 2;
+const ESPERA_PARA_REPREGUNTAR_MS = 20000;
+
+function partirEnLotes(lista, tamano) {
+  const lotes = [];
+  for (let i = 0; i < lista.length; i += tamano) lotes.push(lista.slice(i, i + tamano));
+  return lotes;
+}
+
+function asegurarEstadosDeVideos(videos) {
+  const ahora = Date.now();
+  const faltan = videos.map(v => v.id)
+    .filter(id => !(id in TUS_PROYECTOS.estados) && !TUS_PROYECTOS.pidiendo.has(id)
+      && !((TUS_PROYECTOS.espera[id] || 0) > ahora));
+  if (!faltan.length) return;
+  faltan.forEach(id => TUS_PROYECTOS.pidiendo.add(id));
+  TUS_PROYECTOS.lotes.push(...partirEnLotes(faltan, LOTE_DE_TARJETAS));
+  pedirLotesDeEstados();
+}
+
+function pedirLotesDeEstados() {
+  while (TUS_PROYECTOS.enVuelo < LOTES_A_LA_VEZ && TUS_PROYECTOS.lotes.length) {
+    const lote = TUS_PROYECTOS.lotes.shift();
+    const datos = TUS_PROYECTOS.datos;
+    const aplazar = id => {
+      TUS_PROYECTOS.espera[id] = Date.now() + ESPERA_PARA_REPREGUNTAR_MS;
+      TUS_PROYECTOS.pidiendo.delete(id);
+    };
+    TUS_PROYECTOS.enVuelo += 1;
+    pedir(`${BASE}/api/proyectos/_resumen?${consulta({ ids: lote.join(',') })}`).then(r => {
+      if (TUS_PROYECTOS.datos !== datos) return;
+      const vueltos = (r || {}).videos || {};
+      lote.forEach(id => {
+        if (vueltos[id]) {
+          TUS_PROYECTOS.estados[id] = vueltos[id];
+          delete TUS_PROYECTOS.espera[id];
+          TUS_PROYECTOS.pidiendo.delete(id);
+        } else aplazar(id);
+      });
+      repintarTusProyectos();
+      vigilarVideosEnCurso();
+    }).catch(() => {
+      if (TUS_PROYECTOS.datos !== datos) return;
+      lote.forEach(aplazar);
+    }).finally(() => {
+      TUS_PROYECTOS.enVuelo -= 1;
+      pedirLotesDeEstados();
+    });
+  }
+}
+
+/* Un vídeo que se está generando cambia solo: se vuelve a mirar cada pocos
+   segundos mientras la portada esté a la vista. */
+function vigilarVideosEnCurso() {
+  if (TUS_PROYECTOS.reloj) return;
+  const enCurso = () => Object.keys(TUS_PROYECTOS.estados)
+    .filter(id => (TUS_PROYECTOS.estados[id] || {}).trabajo);
+  if (!enCurso().length) return;
+  TUS_PROYECTOS.reloj = setTimeout(() => {
+    TUS_PROYECTOS.reloj = null;
+    enCurso().forEach(id => { delete TUS_PROYECTOS.estados[id]; });
+    repintarTusProyectos();
+  }, 6000);
+}
+
+/* El menú «⋯» de una tarjeta y el cajón se cierran con Escape o pulsando fuera. */
+function escucharTusProyectos() {
+  if (TUS_PROYECTOS.escuchando) return;
+  TUS_PROYECTOS.escuchando = true;
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== 'Escape') return;
+    // con una pregunta encima (la clave, borrar), Escape cierra solo la pregunta
+    if (document.querySelector('.capa-dialogo')) return;
+    if (APP.light.menuTarjeta) { APP.light.menuTarjeta = ''; pintarLight(); }
+    else if (APP.light.ajustesProyecto) cerrarAjustesProyecto();
+  });
+  document.addEventListener('click', ev => {
+    if (!APP.light.menuTarjeta) return;
+    if (ev.target.closest && ev.target.closest('.menu-tarjeta, .abre-menu')) return;
+    APP.light.menuTarjeta = '';
+    pintarLight();
+  });
+}
+
+function abrirMenuTarjeta(clave) {
+  APP.light.menuTarjeta = APP.light.menuTarjeta === clave ? '' : clave;
+  pintarLight();
+}
+
+/* Cierra el menú y deja que la acción siga (las que preguntan, preguntan). */
+function desdeMenuTarjeta(hacer) {
+  return () => {
+    APP.light.menuTarjeta = '';
+    pintarLight();
+    hacer();
+  };
+}
+
+function vistaDeVideos() {
+  try { return localStorage.getItem(CLAVE_VISTA_VIDEOS) === 'lista' ? 'lista' : 'tarjetas'; } catch (e) { return 'tarjetas'; }
+}
+
+function ponerVistaDeVideos(vista) {
+  try { localStorage.setItem(CLAVE_VISTA_VIDEOS, vista); } catch (e) { /* sin almacén */ }
+  pintarLight();
+}
+
+function sinTildes(texto) {
+  return String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function casaConLaBusqueda(...textos) {
+  const q = sinTildes(APP.light.busca || '').trim();
+  return !q || sinTildes(textos.join(' ')).includes(q);
+}
+
+/* «hoy 17:31», «ayer 09:02», «lun 19/10», y la fecha entera si es de otro año. */
+function fechaAmable(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (!m) return fechaCorta(iso);
+  const dia = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const dias = Math.round((hoy - dia) / 86400000);
+  if (dias === 0) return `hoy ${m[4]}:${m[5]}`;
+  if (dias === 1) return `ayer ${m[4]}:${m[5]}`;
+  if (dia.getFullYear() !== hoy.getFullYear()) return `${m[3]}/${m[2]}/${m[1]}`;
+  return `${DIAS_DE_LA_TARJETA[dia.getDay()]} ${m[3]}/${m[2]}`;
+}
+
+/* Un tono fijo por nombre (para la inicial de un proyecto o de un vídeo sin
+   miniatura): siempre el mismo para el mismo cliente. */
+function tonoDe(texto) {
+  let suma = 0;
+  for (const letra of String(texto || '')) suma = (suma * 31 + letra.charCodeAt(0)) % 997;
+  return suma % 4;
+}
+
+function inicialDe(texto) {
+  return (String(texto || '?').trim().charAt(0) || '?').toUpperCase();
+}
+
+/* ---- el estado de un vídeo, en la tarjeta */
+
+/* Por dónde va en Crear, con las marcas del carril. null mientras se pregunta. */
+function estadoCrearDeVideo(video) {
+  const r = TUS_PROYECTOS.estados[video.id];
+  if (!r) return null;
+  if (r.trabajo) {
+    const pct = Math.round((Number(r.trabajo.progreso) || 0) * 100);
+    return { e: 'curso', m: '⟳', t: `${pct} % · ${TRABAJO_EN_LA_TARJETA[r.trabajo.paso] || 'Trabajando'}` };
+  }
+  const p = r.pasos || {};
+  if (p.render === 'listo') return { e: 'hecho', m: '✓', t: 'Montado' };
+  const NOMBRE = { guion: 'el guion', voz: 'la voz', assets: 'las imágenes', render: 'el montaje' };
+  const fallo = PASOS_DE_LA_TARJETA.find(paso => p[paso] === 'error');
+  if (fallo) return { e: 'aviso', m: '⚠', t: `Falló ${NOMBRE[fallo]}` };
+  if (p.guion === 'obsoleto') return { e: 'aviso', m: '⚠', t: 'Guion obsoleto' };
+  if (p.voz === 'obsoleto') return { e: 'aviso', m: '⚠', t: 'Voz por regrabar' };
+  if (r.imagenes_obsoletas) {
+    return { e: 'aviso', m: '⚠', t: `${plural(r.imagenes_obsoletas, 'imagen obsoleta', 'imágenes obsoletas')}` };
+  }
+  if (p.render === 'obsoleto') return { e: 'aviso', m: '⚠', t: 'Vídeo obsoleto' };
+  if (PASOS_DE_LA_TARJETA.some(paso => p[paso] === 'ejecutando')) return { e: 'curso', m: '⟳', t: 'Trabajando' };
+  const DONDE = { guion: 'En el Guion', voz: 'En la Voz', assets: 'En las Imágenes', render: 'Por montar' };
+  const paso = PASOS_DE_LA_TARJETA.find(x => p[x] !== 'listo');
+  return { e: 'pend', m: '●', t: DONDE[paso] || 'Por montar' };
+}
+function montadoDe(video) {
+  const cola = TUS_PROYECTOS.cola;
+  if (cola && (cola.listos || []).some(v => v.pid === video.id)) return true;
+  return ((TUS_PROYECTOS.estados[video.id] || {}).pasos || {}).render === 'listo';
+}
+
+function enviosDeVideo(video) {
+  const listo = ((TUS_PROYECTOS.cola || {}).listos || []).find(v => v.pid === video.id);
+  return listo ? (listo.envios || {}) : null;
+}
+
+/* «jue 22/10 12:00», de un `cuando` en hora de Lima («2026-10-22T12:00…»). */
+function cuandoDeEnvio(cuando) {
+  const m = String(cuando || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (!m) return '';
+  const dia = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return `${DIAS_DE_LA_TARJETA[dia.getDay()]} ${m[3]}/${m[2]} ${m[4]}:${m[5]}`;
+}
+
+/* Lo que Publicar ya sabe del vídeo, en una línea. null si no está montado. */
+function estadoPublicarDeVideo(video) {
+  const envios = enviosDeVideo(video);
+  if (!envios) return null;
+  const estados = Object.values(envios);
+  if (estados.some(e => e === 'fallido' || e === 'comprobar')) return { e: 'aviso', m: '⚠', t: 'Un envío falló' };
+  if (estados.includes('espera_ok')) return { e: 'aviso', m: '⏸', t: 'Espera tu OK' };
+  const cola = TUS_PROYECTOS.cola || {};
+  const ahora = String(cola.ahora || '');
+  const proximos = (cola.envios || [])
+    .filter(e => e.pid === video.id && ['programado', 'enviando'].includes(e.estado)
+      && String(e.cuando || '') >= ahora)
+    .sort((a, b) => String(a.cuando).localeCompare(String(b.cuando)));
+  if (proximos.length) {
+    const primero = proximos[0].cuando;
+    const redes = new Set(proximos.filter(e => e.cuando === primero).map(e => e.red));
+    return { e: 'curso', m: '◷', t: `${cuandoDeEnvio(primero)} · ${plural(redes.size, 'red', 'redes')}`, que: 'Programado' };
+  }
+  const programadas = estados.filter(e => ['programado', 'enviando', 'publicando'].includes(e)).length;
+  if (programadas) return { e: 'curso', m: '◷', t: `Programado · ${plural(programadas, 'red', 'redes')}` };
+  const salieron = estados.filter(e => e === 'publicado' || e === 'a_mano').length;
+  if (salieron) return { e: 'hecho', m: '✓', t: `Publicado en ${plural(salieron, 'red', 'redes')}` };
+  return { e: 'pend', m: '○', t: 'Listo para publicar' };
+}
+
+function pasaElFiltro(video, filtro) {
+  const envios = Object.values(enviosDeVideo(video) || {});
+  if (filtro === 'curso') {
+    const e = estadoCrearDeVideo(video);
+    return !!e && e.e !== 'hecho';
+  }
+  if (filtro === 'listos') return montadoDe(video);
+  if (filtro === 'programados') return envios.some(e => ['programado', 'espera_ok', 'enviando', 'publicando'].includes(e));
+  if (filtro === 'publicados') return envios.some(e => e === 'publicado' || e === 'a_mano');
+  return true;
+}
+
+function chipDeEstado(estado) {
+  return h('span', { clase: `estado-tarjeta e-${estado.e}`, title: estado.que ? `${estado.que} ${estado.t}` : estado.t },
+    h('i', { 'aria-hidden': 'true' }, estado.m),
+    estado.que ? h('span', { clase: 'solo-lector' }, `${estado.que} `) : null,
+    estado.t);
+}
+
+/* ---- la galería: sin proyectos, la portada o dentro de uno */
+
 function vistaGaleriaLight() {
-  const caja = h('div', {});
-  caja.appendChild(avisoEstilosPerdidos());
+  const caja = h('div', { clase: 'tus-proyectos' });
+  datosDeTusProyectos();
+  escucharTusProyectos();
   const lista = listaClientes();
   const elegido = clienteElegido();
-  if (!lista.length) {
-    // SIN PROYECTOS: la galería de siempre, con la invitación a ordenarla
-    caja.appendChild(h('div', { clase: 'invitacion-proyectos' },
-      h('div', {}, h('b', {}, '¿Trabajas para varios clientes? '),
-        'Crea un proyecto por cliente y tendrás sus estilos y vídeos separados (con logo propio y, si quieres, clave).'),
-      h('button', { clase: 'mini primario', onclick: crearCliente }, '+ Nuevo proyecto'),
-      botonPapeleraLight()));
-    seccionEstilos(caja, presetsLight(), '');
-    seccionVideos(caja, videosLight(), '');
-    seccionSueltos(caja, null);
-    return caja;
-  }
-  if (!elegido) {
-    portadaDeProyectos(caja, lista);
-    return caja;
-  }
-  dentroDeProyecto(caja, elegido);
+  if (!lista.length) portadaSinProyectos(caja);
+  else if (!elegido) portadaDeProyectos(caja, lista);
+  else dentroDeProyecto(caja, elegido);
   return caja;
 }
 
-/* LA PAPELERA, A LA VISTA. «Borrar» un estilo y «Apartar» un vídeo dicen «se
-   puede recuperar desde la papelera», y la papelera solo se abría desde el
-   menú de proyectos del modo editor, que en esta pantalla no se ve: lo
-   prometido no tenía puerta (11-10-2026). */
+/* LA PAPELERA, A LA VISTA y con su número. «Apartar» un vídeo o un estilo
+   dice «se puede devolver desde la papelera», y la papelera solo se abría
+   desde el menú del modo editor, que en esta pantalla no se ve: lo prometido
+   no tenía puerta (11-10-2026). */
 function botonPapeleraLight() {
-  return h('button', { clase: 'mini fantasma', title: 'Lo que has borrado o apartado: se puede devolver',
-    onclick: () => abrirPapelera() }, '🗑 Papelera');
+  const n = TUS_PROYECTOS.papelera;
+  return h('button', { clase: 'mini boton-papelera', title: 'Lo que has apartado: se puede devolver',
+    onclick: () => abrirPapelera() }, n === null || n === undefined ? '🗑 Papelera' : `🗑 Papelera · ${n}`);
 }
 
-/* LA PORTADA: una tarjeta por proyecto. */
+function botonNuevoVideo(cid) {
+  return h('button', { clase: 'primario nuevo-video', title: 'Elige el estilo y empieza su Encargo',
+    onclick: () => abrirNuevoVideo(cid) }, '+ Nuevo vídeo');
+}
+
+function buscadorDeProyectos(pista) {
+  const entrada = h('input', { type: 'search', value: APP.light.busca || '', placeholder: pista,
+    'aria-label': 'Buscar', datos: { foco: 'buscar-proyectos' } });
+  entrada.addEventListener('input', () => { APP.light.busca = entrada.value; pintarLight(); });
+  return h('label', { clase: 'buscador-proyectos' }, h('span', { 'aria-hidden': 'true' }, '🔎'), entrada);
+}
+
+/* SIN PROYECTOS: la galería de siempre, con la invitación a ordenarla. */
+function portadaSinProyectos(caja) {
+  const estilos = presetsLight();
+  const videos = videosLight();
+  caja.appendChild(h('div', { clase: 'cab-tus-proyectos' },
+    h('div', { clase: 'izq' }, h('h2', {}, 'Tus vídeos'),
+      h('span', { clase: 'meta' }, `${plural(estilos.length, 'estilo', 'estilos')} · ${plural(videos.length, 'vídeo', 'vídeos')}`)),
+    h('div', { clase: 'acc' }, botonPapeleraLight(), botonNuevoVideo(''))));
+  caja.appendChild(h('div', { clase: 'invitacion-proyectos' },
+    h('div', {}, h('b', {}, '¿Trabajas para varios clientes? '),
+      'Crea un proyecto por cliente y tendrás sus estilos y vídeos separados (con logo propio y, si quieres, clave).'),
+    h('button', { clase: 'mini primario', onclick: crearCliente }, '+ Nuevo proyecto')));
+  caja.appendChild(buscadorDeProyectos('Buscar un vídeo o un estilo…'));
+  const necesitan = franjaTeNecesitan(null);
+  if (necesitan) caja.appendChild(necesitan);
+  seccionEstilos(caja, estilos.filter(f => casaConLaBusqueda(f.nombre, f.id)), '');
+  seccionVideos(caja, videos.filter(v => casaConLaBusqueda(v.nombre, v.id, origenDeVideo(v))), '', 'Tus vídeos');
+}
+
+/* LA PORTADA: lo último que se movió y una tarjeta por proyecto. */
 function portadaDeProyectos(caja, lista) {
-  const visibles = lista.filter(c => !c.oculto || APP.light.verOcultos);
   const ocultos = lista.filter(c => c.oculto).length;
+  const verOcultos = !!APP.light.verOcultos;
+  const deUnVisible = v => {
+    const ficha = fichaCliente(clienteDeVideo(v));
+    return !ficha || !ficha.oculto || verOcultos;
+  };
+  const todos = videosLight();
+  caja.appendChild(h('div', { clase: 'cab-tus-proyectos' },
+    h('div', { clase: 'izq' }, h('h2', {}, 'Tus proyectos'),
+      h('span', { clase: 'meta' }, `${plural(lista.length, 'proyecto', 'proyectos')} · ${plural(todos.length, 'vídeo', 'vídeos')}`)),
+    h('div', { clase: 'acc' },
+      botonPapeleraLight(),
+      h('button', { clase: 'mini', onclick: crearCliente }, '+ Nuevo proyecto'),
+      botonNuevoVideo(''))));
+  caja.appendChild(buscadorDeProyectos('Buscar un vídeo, un estilo o un proyecto…'));
+  const necesitan = franjaTeNecesitan(null);
+  if (necesitan) caja.appendChild(necesitan);
+
+  // SIGUE DONDE LO DEJASTE: lo último que se movió, de los proyectos que se ven
+  const busca = !!(APP.light.busca || '').trim();
+  const recientes = todos.filter(deUnVisible).filter(v => casaConLaBusqueda(v.nombre, v.id, origenDeVideo(v)));
+  const cuantos = busca ? 20 : 5;
+  if (recientes.length || busca) {
+    caja.appendChild(h('div', { clase: 'light-cab' },
+      h('h3', {}, 'Sigue donde lo dejaste'),
+      h('span', { clase: 'meta' }, recientes.length > cuantos
+        ? `los ${cuantos} últimos de ${recientes.length}` : plural(recientes.length, 'vídeo', 'vídeos'))));
+    caja.appendChild(rejillaDeVideos(recientes.slice(0, cuantos), false,
+      'Ningún vídeo con esa búsqueda.'));
+  }
+
+  // LOS PROYECTOS
+  const proyectos = lista.filter(c => !c.oculto || verOcultos)
+    .filter(c => casaConLaBusqueda(c.nombre, ...estilosDeCliente(c.id).map(f => f.nombre)));
   caja.appendChild(h('div', { clase: 'light-cab' },
-    h('h2', {}, 'Tus proyectos'),
-    h('span', { clase: 'meta' }, `${lista.length} proyecto${lista.length === 1 ? '' : 's'}`),
+    h('h3', {}, 'Proyectos'),
+    h('span', { clase: 'meta' }, 'un cliente, con sus estilos y vídeos'),
     h('span', { clase: 'crece' }),
-    ocultos ? h('button', { clase: 'mini fantasma', onclick: () => {
-      APP.light.verOcultos = !APP.light.verOcultos; pintarLight(); } },
-    APP.light.verOcultos ? 'Esconder los ocultos' : `Ver los ocultos (${ocultos})`) : null,
+    ocultos ? h('button', { clase: 'mini chip-filtro' + (verOcultos ? ' activo' : ''),
+      'aria-pressed': verOcultos ? 'true' : 'false', title: 'Los proyectos ocultos no salen en la portada',
+      onclick: () => { APP.light.verOcultos = !APP.light.verOcultos; pintarLight(); } },
+    `Ver ocultos (${ocultos})`) : null,
     Object.keys(pasesAbiertos()).length ? h('button', { clase: 'mini fantasma',
       title: 'Vuelve a pedir la clave de los proyectos que has abierto', onclick: cerrarProyectosConClave },
-    '🔒 Cerrar los abiertos') : null,
-    botonPapeleraLight()));
+    '🔒 Cerrar los abiertos') : null));
   const rejilla = h('div', { clase: 'galeria-proyectos' });
-  visibles.forEach(ficha => rejilla.appendChild(tarjetaProyecto(ficha)));
+  proyectos.forEach(ficha => rejilla.appendChild(tarjetaProyecto(ficha)));
   const sueltosEstilos = estilosDeCliente('_sin').length;
   const sueltosVideos = videosDeCliente('_sin').length;
-  if (sueltosEstilos || sueltosVideos) {
+  if ((sueltosEstilos || sueltosVideos) && casaConLaBusqueda('Sin proyecto')) {
     rejilla.appendChild(h('button', { clase: 'tarjeta-proyecto sin', onclick: () => elegirCliente('_sin') },
-      h('div', { clase: 'icono-proyecto' }, '🗂️'),
-      h('div', { clase: 'nombre' }, 'Sin proyecto'),
-      h('div', { clase: 'meta' }, `${sueltosEstilos} estilo${sueltosEstilos === 1 ? '' : 's'} · `
-        + `${sueltosVideos} vídeo${sueltosVideos === 1 ? '' : 's'}`)));
+      h('span', { clase: 'icono-proyecto' }, '🗂️'),
+      h('span', { clase: 'nombre' }, 'Sin proyecto'),
+      h('span', { clase: 'meta' }, `${plural(sueltosEstilos, 'estilo', 'estilos')} · ${plural(sueltosVideos, 'vídeo', 'vídeos')}`)));
   }
   rejilla.appendChild(h('button', { clase: 'tarjeta-proyecto nuevo', onclick: crearCliente },
-    h('div', { clase: 'icono-proyecto' }, '+'),
-    h('div', { clase: 'nombre' }, 'Nuevo proyecto'),
-    h('div', { clase: 'meta' }, 'un cliente, con sus estilos y vídeos')));
+    h('span', { clase: 'icono-proyecto' }, '+'),
+    h('span', { clase: 'nombre' }, 'Nuevo proyecto'),
+    h('span', { clase: 'meta' }, 'un cliente, con sus estilos y vídeos')));
   caja.appendChild(rejilla);
-  /* LOS OCULTOS, CON SU BOTÓN PARA DEJAR DE SERLO. «Ver los ocultos» solo los
-     enseña: el proyecto seguía oculto, y la forma de volver a mostrarlo estaba
-     dentro de él («Mostrar en la portada»), donde nadie la buscaba. Se leía
-     como «no me deja quitarlo de ocultos» (11-10-2026). */
-  const listaOcultos = lista.filter(c => c.oculto);
-  if (APP.light.verOcultos && listaOcultos.length) {
-    const caja2 = h('div', { clase: 'sueltos ocultos-portada' },
-      h('b', {}, listaOcultos.length === 1 ? 'Oculto: 1 proyecto' : `${listaOcultos.length} proyectos ocultos`),
-      h('span', { clase: 'meta' }, ' — se ven porque has pulsado «Ver los ocultos». Para que vuelvan a salir siempre:'));
-    listaOcultos.forEach(ficha => caja2.appendChild(h('div', { clase: 'fila' },
-      h('span', { clase: 'crece' }, ficha.nombre),
-      h('button', { clase: 'mini primario',
-        onclick: () => cambiarCliente(ficha, { oculto: false }, `«${ficha.nombre}» ya se ve en la portada`) },
-      'Dejar de ocultar'))));
-    caja.appendChild(caja2);
+}
+
+/* El logo del proyecto o su inicial en un color fijo (🔒 si está cerrado). */
+function insigniaDeProyecto(ficha, grande) {
+  const abierto = clienteAbierto(ficha);
+  if (ficha.logo && abierto) {
+    return h('img', { clase: 'insignia-proyecto con-logo' + (grande ? ' grande' : ''), alt: '',
+      src: `${BASE}/api/logos/${encodeURIComponent(ficha.logo.fichero)}` });
   }
-  // lo último que se movió, de los proyectos que se ven: para seguir sin buscar
-  const recientes = videosLight().filter(v => {
-    const cid = clienteDeVideo(v);
-    const ficha = fichaCliente(cid);
-    return !ficha || (!ficha.oculto || APP.light.verOcultos);
-  }).slice(0, 5);
-  if (recientes.length) seccionVideos(caja, recientes, '', 'Últimos vídeos');
-  seccionSueltos(caja, '');
+  return h('span', { clase: `insignia-proyecto tono-${tonoDe(ficha.nombre)}` + (grande ? ' grande' : ''), 'aria-hidden': 'true' },
+    abierto ? inicialDe(ficha.nombre) : '🔒');
 }
 
 function tarjetaProyecto(ficha) {
   const abierto = clienteAbierto(ficha);
   const estilos = estilosDeCliente(ficha.id).length;
-  const videos = videosDeCliente(ficha.id).length;
-  return h('button', {
-    clase: 'tarjeta-proyecto' + (ficha.oculto ? ' es-oculto' : ''),
-    title: abierto ? 'Abrir el proyecto' : 'Tiene clave: pulsa para escribirla',
-    onclick: () => entrarEnCliente(ficha),
-  },
-    ficha.logo && abierto
-      ? h('img', { clase: 'logo-proyecto', alt: '', src: `${BASE}/api/logos/${encodeURIComponent(ficha.logo.fichero)}` })
-      : h('div', { clase: 'icono-proyecto' }, abierto ? '📁' : '🔒'),
-    h('div', { clase: 'nombre' }, ficha.nombre),
-    h('div', { clase: 'meta' }, abierto
-      ? `${estilos} estilo${estilos === 1 ? '' : 's'} · ${videos} vídeo${videos === 1 ? '' : 's'}`
-        + (ficha.con_clave ? ' · 🔓 abierto' : '')
-      : 'con clave'),
-    ficha.oculto ? h('div', { clase: 'meta' }, 'oculto') : null);
+  const videos = videosDeCliente(ficha.id);
+  const listos = abierto ? videos.filter(v => estadoPublicarDeVideo(v)
+    && estadoPublicarDeVideo(v).t === 'Listo para publicar').length : 0;
+  return h('div', { clase: 'tarjeta-proyecto' + (ficha.oculto ? ' es-oculto' : '') },
+    h('button', {
+      clase: 'abrir-proyecto',
+      title: abierto ? 'Abrir el proyecto' : 'Tiene clave: pulsa para escribirla',
+      onclick: () => entrarEnCliente(ficha),
+    },
+      h('span', { clase: 'fila-nombre' }, insigniaDeProyecto(ficha), h('span', { clase: 'nombre' }, ficha.nombre)),
+      h('span', { clase: 'meta' }, abierto
+        ? `${plural(estilos, 'estilo', 'estilos')} · ${plural(videos.length, 'vídeo', 'vídeos')}`
+        : 'con clave'),
+      abierto ? h('span', { clase: 'tira-miniaturas' },
+        ...(videos.length ? videos.slice(0, 3).map(v => miniaturaDeVideo(v)) : [h('span', { clase: 'meta' }, 'sin vídeos todavía')]))
+        : null,
+      h('span', { clase: 'chips-proyecto' },
+        ficha.con_clave ? h('span', { clase: 'pastilla' }, abierto ? '🔓 abierto' : '🔒 con clave') : null,
+        ficha.oculto ? h('span', { clase: 'pastilla' }, 'oculto') : null,
+        listos ? h('span', { clase: 'pastilla ok' }, `${listos} ${listos === 1 ? 'listo' : 'listos'} para publicar`) : null)),
+    /* LOS OCULTOS, CON SU BOTÓN PARA DEJAR DE SERLO, dentro de su tarjeta.
+       «Ver ocultos» solo los enseña: la forma de volver a mostrarlo estaba
+       dentro del proyecto, donde nadie la buscaba (11-10-2026). */
+    ficha.oculto ? h('div', { clase: 'pie-proyecto' },
+      h('button', { clase: 'mini primario',
+        onclick: () => cambiarCliente(ficha, { oculto: false }, `«${ficha.nombre}» ya se ve en la portada`) },
+      'Dejar de ocultar')) : null);
 }
 
 /* DENTRO DE UN PROYECTO (o de «Sin proyecto»). */
 function dentroDeProyecto(caja, cid) {
   const ficha = fichaCliente(cid);
   const nombre = ficha ? ficha.nombre : 'Sin proyecto';
-  caja.appendChild(h('div', { clase: 'migas' },
-    h('button', { clase: 'mini fantasma salida-crear', title: 'Tus proyectos: todos, en tarjetas',
-      onclick: () => elegirCliente('') }, '‹ Tus proyectos'),
-    h('span', { clase: 'crece' }),
-    botonPapeleraLight()));
-  caja.appendChild(h('div', { clase: 'light-cab cab-proyecto' },
-    ficha && ficha.logo ? h('img', { clase: 'logo-proyecto pequeno', alt: '',
-      src: `${BASE}/api/logos/${encodeURIComponent(ficha.logo.fichero)}` }) : null,
-    h('h2', {}, `${ficha ? (ficha.con_clave ? '🔒 ' : '📁 ') : '🗂️ '}${nombre}`),
-    ficha && ficha.oculto ? h('span', { clase: 'pastilla' }, 'oculto') : null));
-  if (ficha) {
-    caja.appendChild(h('div', { clase: 'mandos-proyecto' },
-      h('button', { clase: 'mini', onclick: () => renombrarCliente(ficha) }, 'Renombrar'),
-      h('button', { clase: 'mini' + (APP.light.logoProyecto === cid ? ' activo' : ''),
-        onclick: () => { APP.light.logoProyecto = APP.light.logoProyecto === cid ? '' : cid; pintarLight(); } },
-      ficha.logo ? 'Logo ✓' : 'Logo'),
-      h('button', { clase: 'mini', onclick: () => cambiarCliente(ficha, { oculto: !ficha.oculto },
-        ficha.oculto ? 'Ya se ve en la portada' : 'Oculto: sale con «Ver los ocultos»') },
-      ficha.oculto ? 'Dejar de ocultar' : 'Ocultar'),
-      h('button', { clase: 'mini', onclick: () => claveCliente(ficha) }, ficha.con_clave ? 'Clave ✓' : 'Poner clave'),
-      h('button', { clase: 'mini' + (APP.light.negocioProyecto === cid ? ' activo' : ''),
-        onclick: () => abrirPanelNegocio(cid) },
-      negocioDe(cid) ? 'Ficha del negocio ✓' : 'Ficha del negocio'),  // Etapa Foto C
-      h('button', { clase: 'mini', onclick: () => traerEstiloACliente(ficha) }, 'Traer un estilo'),
-      h('button', { clase: 'mini fantasma peligro', onclick: () => borrarCliente(ficha) }, 'Borrar')));
-    if (APP.light.logoProyecto === cid) caja.appendChild(panelLogoProyecto(ficha));
-    if (APP.light.negocioProyecto === cid) caja.appendChild(panelNegocioProyecto(ficha));  // Etapa Foto C
+  const estilos = estilosDeCliente(cid);
+  const videos = videosDeCliente(cid);
+  caja.appendChild(h('button', { clase: 'mini fantasma salida-crear', title: 'Tus proyectos: todos, en tarjetas',
+    onclick: () => elegirCliente('') }, '‹ Tus proyectos'));
+  caja.appendChild(h('div', { clase: 'cab-tus-proyectos cab-proyecto' },
+    h('div', { clase: 'izq con-insignia' },
+      ficha ? insigniaDeProyecto(ficha, true) : h('span', { clase: 'insignia-proyecto grande sin' }, '🗂️'),
+      h('div', { clase: 'titulo-proyecto' },
+        h('h2', {}, nombre),
+        h('span', { clase: 'chips-proyecto' },
+          ficha && ficha.con_clave ? h('span', { clase: 'pastilla' }, '🔓 abierto · con clave') : null,
+          ficha && ficha.oculto ? h('span', { clase: 'pastilla' }, 'oculto') : null,
+          h('span', { clase: 'pastilla' }, `${plural(estilos.length, 'estilo', 'estilos')} · ${plural(videos.length, 'vídeo', 'vídeos')}`),
+          ficha && ficha.logo ? h('span', { clase: 'pastilla ok' }, 'logo ✓') : null))),
+    h('div', { clase: 'acc' },
+      ficha ? h('button', { clase: 'mini abrir-ajustes-proyecto', title: 'Nombre, logo, ficha del negocio, ocultar, clave y borrar',
+        onclick: () => abrirAjustesProyecto(cid) }, '⚙ Ajustes del proyecto') : null,
+      botonPapeleraLight(),
+      botonNuevoVideo(cid))));
+  caja.appendChild(buscadorDeProyectos(`Buscar en ${nombre}…`));
+  const necesitan = franjaTeNecesitan(cid);
+  if (necesitan) caja.appendChild(necesitan);
+  seccionEstilos(caja, estilos.filter(f => casaConLaBusqueda(f.nombre, f.id)), cid);
+  seccionVideosDelProyecto(caja, videos.filter(v => casaConLaBusqueda(v.nombre, v.id, origenDeVideo(v))), cid);
+  if (ficha && APP.light.ajustesProyecto === cid) caja.appendChild(cajonAjustesProyecto(ficha));
+}
+
+/* ---- «⚙ Ajustes del proyecto»: un cajón a la derecha
+ *
+ * Lo que antes era una fila de seis botones encima de los estilos. Cada
+ * sección es una entrada de esta lista, en este orden: `pinta(c)` devuelve el
+ * nodo (o null para no salir), con `c = { cid, cliente }`. Para añadir una, una
+ * línea aquí; no otro botón suelto en la cabecera. */
+const SECCIONES_AJUSTES_PROYECTO = [
+  { id: 'nombre', titulo: 'Nombre', pinta: c => seccionNombreDelProyecto(c) },
+  { id: 'logo', titulo: 'Logo', pinta: c => panelLogoProyecto(c.cliente) },
+  // Etapa Foto C: la ficha del negocio de este cliente (sus estilos de foto la usan)
+  { id: 'ficha-negocio', titulo: 'Ficha del negocio', pinta: c => panelNegocioProyecto(c.cliente) },
+  { id: 'visibilidad', titulo: 'Visibilidad', pinta: c => seccionVisibilidadDelProyecto(c) },
+  { id: 'clave', titulo: 'Clave', pinta: c => seccionClaveDelProyecto(c) },
+  { id: 'publicar', titulo: 'Publicar', pinta: () => seccionPublicarDelProyecto() },
+  { id: 'peligro', titulo: 'Zona de peligro', pinta: c => seccionPeligroDelProyecto(c) },
+];
+
+function abrirAjustesProyecto(cid) {
+  APP.light.ajustesProyecto = cid;
+  APP.light.menuTarjeta = '';
+  pintarLight();
+  setTimeout(() => {
+    const cajon = document.querySelector('.cajon-proyecto');
+    if (cajon) cajon.focus({ preventScroll: true });
+  }, 0);
+}
+
+function cerrarAjustesProyecto() {
+  APP.light.ajustesProyecto = '';
+  APP.light.nombreProyecto = null;
+  pintarLight();
+}
+
+function cajonAjustesProyecto(ficha) {
+  const c = { cid: ficha.id, cliente: ficha };
+  const cuerpo = h('div', { clase: 'cuerpo-ajustes' });
+  SECCIONES_AJUSTES_PROYECTO.forEach(seccion => {
+    const nodo = seccion.pinta(c);
+    if (!nodo) return;
+    cuerpo.appendChild(h('section', { clase: `seccion-ajustes ajustes-${seccion.id}` },
+      h('h3', { clase: 'titulo-ajustes' }, seccion.titulo), nodo));
+  });
+  const capa = h('div', { clase: 'capa-ajustes-proyecto',
+    onclick: ev => { if (ev.target === capa) cerrarAjustesProyecto(); } },
+  h('aside', { clase: 'cajon-proyecto', role: 'dialog', 'aria-label': `Ajustes de ${ficha.nombre}`, tabindex: '-1' },
+    h('div', { clase: 'cab-ajustes' },
+      h('b', {}, `⚙ Ajustes de ${ficha.nombre}`),
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini fantasma', title: 'Cerrar', 'aria-label': 'Cerrar', onclick: cerrarAjustesProyecto }, '×')),
+    cuerpo));
+  return capa;
+}
+
+/* El nombre se cambia en su campo; lo escrito sobrevive a un repintado. */
+function seccionNombreDelProyecto(c) {
+  const borrador = APP.light.nombreProyecto;
+  const valor = borrador && borrador.cid === c.cid ? borrador.texto : c.cliente.nombre;
+  const entrada = h('input', { type: 'text', value: valor, 'aria-label': 'Nombre del proyecto',
+    datos: { foco: 'nombre-proyecto' } });
+  entrada.addEventListener('input', () => { APP.light.nombreProyecto = { cid: c.cid, texto: entrada.value }; });
+  const guardar = () => {
+    const nombre = entrada.value.trim();
+    if (!nombre || nombre === c.cliente.nombre) return;
+    APP.light.nombreProyecto = null;
+    cambiarCliente(c.cliente, { nombre }, 'Proyecto renombrado');
+  };
+  entrada.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); guardar(); } });
+  return h('div', { clase: 'fila nombre-proyecto' }, entrada,
+    h('button', { clase: 'mini primario', onclick: guardar }, 'Guardar'));
+}
+
+function seccionVisibilidadDelProyecto(c) {
+  const ficha = c.cliente;
+  const casilla = h('input', { type: 'checkbox', clase: 'conmutador', checked: !!ficha.oculto,
+    'aria-label': 'Oculto en la portada',
+    onchange: ev => cambiarCliente(ficha, { oculto: ev.target.checked },
+      ev.target.checked ? 'Oculto: sale con «Ver ocultos»' : 'Ya se ve en la portada') });
+  return h('label', { clase: 'interruptor-tarjeta' }, casilla,
+    h('span', { clase: 'textos' }, h('b', {}, 'Oculto en la portada'),
+      h('span', { clase: 'meta' }, 'Sale solo con «Ver ocultos». No borra nada.')));
+}
+
+function seccionClaveDelProyecto(c) {
+  const ficha = c.cliente;
+  return h('div', { clase: 'col-ajustes' },
+    h('div', { clase: 'pista' }, 'Con clave, sus estilos y vídeos no se ven hasta escribirla (en cada pestaña nueva). '
+      + 'Es privacidad de pantalla: la seguridad de verdad es la contraseña de acceso al Studio.'),
+    h('div', { clase: 'fila' },
+      h('span', { clase: 'pastilla' }, ficha.con_clave ? '🔒 con clave' : 'sin clave'),
+      h('button', { clase: 'mini', onclick: () => claveCliente(ficha) },
+        ficha.con_clave ? 'Cambiar o quitar la clave' : 'Poner clave')));
+}
+
+function seccionPublicarDelProyecto() {
+  return h('div', { clase: 'col-ajustes' },
+    h('div', { clase: 'pista' }, 'El perfil de Upload-Post, el tono de los textos y el SEO de este proyecto viven en Publicar.'),
+    h('div', {}, h('button', { clase: 'mini', onclick: () => {
+      APP.light.ajustesProyecto = '';
+      irASeccionPublicar('cuentas');
+    } }, 'Perfil de Upload-Post, tono y SEO de este proyecto ›')));
+}
+
+function seccionPeligroDelProyecto(c) {
+  return h('div', { clase: 'col-ajustes zona-peligro' },
+    h('div', { clase: 'pista' }, 'Se borra solo la carpeta: sus estilos y vídeos NO se borran, quedan en «Sin proyecto».'),
+    h('div', {}, h('button', { clase: 'mini peligro', onclick: () => borrarCliente(c.cliente) }, 'Borrar el proyecto')));
+}
+
+/* ---- «+ Nuevo vídeo»: ¿con qué estilo?
+ *
+ * Un acceso nuevo, no una función nueva: elegir un estilo aquí es lo mismo que
+ * pulsar «▶ Nuevo vídeo con este estilo» en su tarjeta (`elegirEstiloLight`),
+ * que abre el Encargo de un vídeo nuevo. Fuera de un proyecto salen los estilos
+ * de todos los que se ven, agrupados; dentro, solo los suyos. */
+function abrirNuevoVideo(cid) {
+  const viejo = document.getElementById('nuevo-video');
+  if (viejo) viejo.remove();
+  const grupos = [];
+  if (cid) grupos.push({ cid, nombre: '', estilos: estilosDeCliente(cid) });
+  else if (!listaClientes().length) grupos.push({ cid: '', nombre: '', estilos: presetsLight() });
+  else {
+    listaClientes().filter(c => !c.oculto || APP.light.verOcultos)
+      .forEach(c => grupos.push({ cid: c.id, nombre: c.nombre, estilos: estilosDeCliente(c.id) }));
+    grupos.push({ cid: '_sin', nombre: 'Sin proyecto', estilos: estilosDeCliente('_sin') });
   }
-  seccionEstilos(caja, estilosDeCliente(cid), cid);
-  seccionVideos(caja, videosDeCliente(cid), cid);
-  seccionSueltos(caja, cid === '_sin' ? '' : cid);
+  const conEstilos = grupos.filter(g => g.estilos.length);
+  const teclas = ev => { if (ev.key === 'Escape') cerrar(); };
+  const cerrar = () => { capa.remove(); document.removeEventListener('keydown', teclas); };
+  const cuerpo = h('div', { clase: 'cuerpo-nuevo-video' });
+  conEstilos.forEach(g => {
+    cuerpo.appendChild(h('div', { clase: 'grupo-nuevo-video' },
+      g.nombre ? h('span', { clase: 'titulo-ajustes' }, `📁 ${g.nombre}`) : null,
+      h('div', { clase: 'rejilla-nuevo-video' }, ...g.estilos.map(f => h('button', {
+        clase: 'elige-estilo', title: `Un vídeo nuevo con «${f.nombre || f.id}»`,
+        onclick: () => { cerrar(); elegirEstiloLight(f); },
+      },
+        caraDeEstilo(f),
+        h('b', {}, `▶ ${f.nombre || f.id}`),
+        h('span', { clase: 'meta' }, (f.vinetas || []).map(v => v.texto || v).join(' · ')))))));
+  });
+  if (!conEstilos.length) {
+    cuerpo.appendChild(h('div', { clase: 'pista' }, cid
+      ? 'Este proyecto todavía no tiene estilos: crea uno primero.'
+      : 'Todavía no hay ningún estilo: crea uno primero.'));
+  }
+  cuerpo.appendChild(h('div', {}, h('button', { clase: 'mini', onclick: () => {
+    cerrar();
+    APP.light.encargo = null;
+    irALight('crear', { taller: null });
+  } }, '+ Crear un estilo nuevo')));
+  const capa = h('div', { clase: 'capa-dialogo', id: 'nuevo-video',
+    onclick: ev => { if (ev.target === capa) cerrar(); } },
+  h('div', { clase: 'dialogo dialogo-nuevo-video', role: 'dialog', 'aria-label': 'Un vídeo nuevo: ¿con qué estilo?' },
+    h('div', { clase: 'fila' },
+      h('div', { clase: 'crece' }, h('h3', {}, 'Un vídeo nuevo: ¿con qué estilo?'),
+        h('div', { clase: 'meta' }, 'Elegir el estilo abre el Encargo de un vídeo nuevo (lo mismo que «▶ Nuevo vídeo con este estilo» en su tarjeta).')),
+      h('button', { type: 'button', clase: 'mini fantasma', title: 'Cerrar', 'aria-label': 'Cerrar', onclick: cerrar }, '×')),
+    cuerpo));
+  document.addEventListener('keydown', teclas);
+  document.body.appendChild(capa);
+  setTimeout(() => { const b = capa.querySelector('.elige-estilo, button'); if (b) b.focus(); }, 0);
 }
 
 /* El logo del proyecto: lo llevan de fábrica los vídeos NUEVOS de sus estilos. */
@@ -6861,67 +7664,6 @@ function panelLogoProyecto(ficha) {
   return caja;
 }
 
-function seccionEstilos(caja, fichas, cid) {
-  const ficha = fichaCliente(cid);
-  caja.appendChild(h('div', { clase: 'light-cab' },
-    h('h3', {}, ficha ? `Estilos de ${ficha.nombre}` : (cid === '_sin' ? 'Estilos sin proyecto' : 'Tus estilos')),
-    h('span', { clase: 'meta' }, fichas.length
-      ? `${fichas.length} estilo${fichas.length === 1 ? '' : 's'}`
-      : 'una estética, un tono, una voz y un idioma')));
-  const rejilla = h('div', { clase: 'galeria-estilos' });
-  fichas.forEach(f => rejilla.appendChild(tarjetaEstiloLight(f, !cid)));
-  rejilla.appendChild(tarjetaNuevoEstilo(fichas.length, ficha));
-  caja.appendChild(rejilla);
-}
-
-function seccionVideos(caja, videos, cid, titulo) {
-  if (!videos.length) return;
-  const ficha = fichaCliente(cid);
-  caja.appendChild(h('div', { clase: 'light-cab' },
-    h('h3', {}, titulo || (ficha ? `Vídeos de ${ficha.nombre}` : (cid === '_sin' ? 'Vídeos sin proyecto' : 'Tus vídeos'))),
-    h('span', { clase: 'meta' }, `${videos.length} vídeo${videos.length === 1 ? '' : 's'}`)));
-  const lista = h('div', { clase: 'videos-light' });
-  videos.forEach(video => lista.appendChild(filaVideoLight(video)));
-  caja.appendChild(lista);
-}
-
-/* LOS INTENTOS A MEDIAS de un estilo. Un taller nace antes que su estilo, así
-   que una generación que falla deja una carpeta sin nadie que la borre: se
-   enseña con sus dos salidas. Dentro de un proyecto, solo los suyos. */
-function seccionSueltos(caja, cid) {
-  let sueltos = (APP.light.datos || {}).sueltos || [];
-  if (cid !== null) sueltos = sueltos.filter(t => !cid || (t.cliente || '') === cid);
-  if (!sueltos.length) return;
-  const aviso = h('div', { clase: 'sueltos' },
-    h('b', {}, sueltos.length === 1 ? 'Un estilo a medias' : `${sueltos.length} estilos a medias`),
-    h('span', { clase: 'meta' }, ' — se quedaron sin terminar. «Retomar» sigue por donde iba sin volver a pagar lo hecho.'));
-  sueltos.forEach(taller => aviso.appendChild(h('div', { clase: 'fila' },
-    h('span', { clase: 'meta crece' }, `${taller.nombre} · ${fechaCorta(taller.actualizado) || ''}`),
-    h('button', { clase: 'mini', onclick: () => irALight('crear', { taller: taller.id }) }, 'Retomar'),
-    h('button', { clase: 'mini peligro', onclick: () => descartarTallerLight(taller) }, 'Descartar'))));
-  caja.appendChild(aviso);
-}
-
-/* LOS VÍDEOS QUE PERDIERON SUS IMÁGENES DE ESTILO (antes del 10-10-2026,
-   guardar un estilo podía cambiarles el nombre). Se reparan aquí, sin
-   regenerar nada (`/api/proyectos/{pid}/reparar-estilo`). */
-function avisoEstilosPerdidos() {
-  const caja = h('div', {});
-  const perdidos = (APP.light.datos || {}).perdidos || [];
-  if (!perdidos.length) return caja;
-  caja.appendChild(h('div', { clase: 'sueltos aviso-perdidos' },
-    h('b', {}, perdidos.length === 1 ? 'Un vídeo ha perdido sus imágenes de estilo'
-      : `${perdidos.length} vídeos han perdido sus imágenes de estilo`),
-    h('span', { clase: 'meta' }, ' — pasaba al volver a guardar un estilo y ya no puede pasar. '
-      + 'Repararlo las vuelve a apuntar a las que sí están: no regenera ni cobra nada.'),
-    ...perdidos.map(video => h('div', { clase: 'fila' },
-      h('span', { clase: 'meta crece' }, `${video.nombre} · ${video.rotas.length} imagen${video.rotas.length === 1 ? '' : 'es'}`),
-      video.reparable
-        ? h('button', { clase: 'mini primario', onclick: () => repararEstiloDeVideo(video) }, 'Reparar')
-        : h('span', { clase: 'meta' }, 'no hay otra que la sustituya: pregúntale al asistente')))));
-  return caja;
-}
-
 async function repararEstiloDeVideo(video) {
   try {
     const r = await pedir(`${API.proyecto(video.id)}/reparar-estilo`, { method: 'POST', cuerpo: { aplicar: true } });
@@ -6930,62 +7672,222 @@ async function repararEstiloDeVideo(video) {
   } catch (e) { toast(e.message, true); }
 }
 
-/* Una fila de «Tus vídeos»: abrir, de dónde salió, y sus mandos. */
-function filaVideoLight(video) {
-  /* EL NOMBRE SE CAMBIA EN LA PROPIA FILA (rediseño de Crear): era una ventana
-     del navegador (`prompt`). */
-  if (APP.light.renombrando === video.id) {
-    return h('div', { clase: 'video-light renombrando' },
-      campoRenombrar(video.id, video.nombre || video.id));
-  }
-  return h('div', { clase: 'video-light' },
-    h('button', { clase: 'abrir', title: 'Seguir con este vídeo', onclick: () => abrirVideoLight(video.id) },
-      h('span', { clase: 'nombre' }, video.nombre || video.id),
-      // DE QUÉ ESTILO (y proyecto) SALIÓ, para saber de quién es cada vídeo
-      h('span', { clase: 'meta' }, [origenDeVideo(video), fechaCorta(video.actualizado)]
-        .filter(Boolean).join(' · '))),
-    /* EL LAPIZ VA FUERA DEL BOTON DE ABRIR: un botón dentro de otro no es HTML
-       válido y el clic acabaría abriendo el vídeo en vez de renombrarlo. */
-    h('button', { clase: 'mini fantasma renombrar', title: 'Cambiar el nombre',
-      'aria-label': `Cambiar el nombre de ${video.nombre || video.id}`,
-      onclick: () => { APP.light.renombrando = video.id; pintarLight(); } }, '✏️'),
-    listaClientes().length ? h('button', { clase: 'mini fantasma', title: 'Moverlo a otro proyecto',
-      onclick: () => moverVideoACliente(video) }, '📁') : null,
-    h('button', { clase: 'mini fantasma peligro', title: 'A la papelera de proyectos',
-      onclick: () => apartarVideoLight(video) }, 'Apartar'));
+function seccionEstilos(caja, fichas, cid) {
+  const ficha = fichaCliente(cid);
+  caja.appendChild(h('div', { clase: 'light-cab' },
+    h('h3', {}, ficha ? `Estilos de ${ficha.nombre}` : (cid === '_sin' ? 'Estilos sin proyecto' : 'Tus estilos')),
+    h('span', { clase: 'meta' }, fichas.length
+      ? `${plural(fichas.length, 'estilo', 'estilos')} · pulsa uno para empezar un vídeo con él o editarlo`
+      : 'una estética, un tono, una voz y un idioma')));
+  const rejilla = h('div', { clase: 'galeria-estilos' });
+  fichas.forEach(f => rejilla.appendChild(tarjetaEstiloLight(f, !cid)));
+  if (cid !== '_sin') rejilla.appendChild(tarjetaNuevoEstilo(fichas.length, ficha));
+  if (ficha) rejilla.appendChild(tarjetaTraerEstilo(ficha));
+  caja.appendChild(rejilla);
 }
 
-/* PULSAR UNA TARJETA LA ELIGE Y PASA AL SIGUIENTE PASO, no la abre. Lo que se
-   hace con un estilo el 95 % de las veces es usarlo para un vídeo. Editarlo
-   vivía escondido en el menú de los tres puntos; desde el rediseño de Crear
-   (20-10-2026) «✎ Editar» va a la vista en la propia tarjeta, y en «⋯» quedan
-   Duplicar y Mover a otro proyecto. */
+/* Los vídeos en tarjetas (la portada y «Sin proyectos»). */
+function seccionVideos(caja, videos, cid, titulo) {
+  if (!videos.length) return;
+  const ficha = fichaCliente(cid);
+  caja.appendChild(h('div', { clase: 'light-cab' },
+    h('h3', {}, titulo || (ficha ? `Vídeos de ${ficha.nombre}` : 'Tus vídeos')),
+    h('span', { clase: 'meta' }, plural(videos.length, 'vídeo', 'vídeos'))));
+  caja.appendChild(rejillaDeVideos(videos, false));
+}
+
+/* Los vídeos de un proyecto: chips de estado para filtrar y tarjetas o lista. */
+function seccionVideosDelProyecto(caja, videos, cid) {
+  const ficha = fichaCliente(cid);
+  const lista = vistaDeVideos() === 'lista';
+  const filtro = APP.light.filtroVideos || 'todos';
+  asegurarEstadosDeVideos(videos);
+  caja.appendChild(h('div', { clase: 'light-cab cab-videos' },
+    h('h3', {}, ficha ? `Vídeos de ${ficha.nombre}` : 'Vídeos sin proyecto'),
+    h('span', { clase: 'meta' }, plural(videosDeCliente(cid).length, 'vídeo', 'vídeos')),
+    h('span', { clase: 'crece' }),
+    h('div', { clase: 'conmutador-vista', role: 'group', 'aria-label': 'Cómo se ven los vídeos' },
+      h('button', { clase: 'mini' + (lista ? ' fantasma' : ' activo'), 'aria-pressed': lista ? 'false' : 'true',
+        onclick: () => ponerVistaDeVideos('tarjetas') }, '▦ Tarjetas'),
+      h('button', { clase: 'mini' + (lista ? ' activo' : ' fantasma'), 'aria-pressed': lista ? 'true' : 'false',
+        onclick: () => ponerVistaDeVideos('lista') }, '☰ Lista'))));
+  caja.appendChild(h('div', { clase: 'chips-filtro-videos', role: 'group', 'aria-label': 'Filtrar los vídeos por estado' },
+    ...FILTROS_DE_VIDEOS.map(([clave, nombre]) => h('button', {
+      clase: 'mini chip-filtro' + (filtro === clave ? ' activo' : ''), 'aria-pressed': filtro === clave ? 'true' : 'false',
+      onclick: () => { APP.light.filtroVideos = clave; pintarLight(); },
+    }, `${nombre} ${videos.filter(v => pasaElFiltro(v, clave)).length}`))));
+  const vistos = videos.filter(v => pasaElFiltro(v, filtro));
+  caja.appendChild(rejillaDeVideos(vistos, lista, videosDeCliente(cid).length
+    ? (videos.length ? 'Ningún vídeo con este filtro.' : 'Ningún vídeo con esa búsqueda.')
+    : 'Todavía no hay vídeos: pulsa «+ Nuevo vídeo» o un estilo.'));
+}
+
+function rejillaDeVideos(videos, enLista, vacio) {
+  asegurarEstadosDeVideos(videos);
+  const rejilla = h('div', { clase: 'tarjetas-video' + (enLista ? ' en-lista' : '') });
+  videos.forEach(video => rejilla.appendChild(tarjetaVideoLight(video, enLista)));
+  if (!videos.length && vacio) rejilla.appendChild(h('div', { clase: 'pista' }, vacio));
+  return rejilla;
+}
+
+/* TE NECESITAN: los vídeos que perdieron sus imágenes de estilo (antes del
+   10-10-2026, guardar un estilo podía cambiarles el nombre; se reparan sin
+   regenerar nada, `/api/proyectos/{pid}/reparar-estilo`) y los estilos a
+   medias (un taller nace antes que su estilo, así que una generación que falla
+   deja una carpeta sin nadie que la borre). Juntos y arriba: antes iban uno
+   arriba y otro abajo del todo. Dentro de un proyecto, solo los suyos. */
+function franjaTeNecesitan(cid) {
+  const dentro = cid !== null && cid !== undefined;
+  const delProyecto = pid => {
+    if (!dentro) return true;
+    const video = videosLight().find(v => v.id === pid);
+    return !!video && clienteDeVideo(video) === (cid === '_sin' ? '' : cid);
+  };
+  const perdidos = ((APP.light.datos || {}).perdidos || []).filter(v => delProyecto(v.id));
+  let sueltos = (APP.light.datos || {}).sueltos || [];
+  if (dentro) sueltos = sueltos.filter(t => (t.cliente || '') === (cid === '_sin' ? '' : cid));
+  if (!perdidos.length && !sueltos.length) return null;
+  const franja = h('div', { clase: 'te-necesitan' },
+    h('b', { clase: 'titulo-te-necesitan' }, `⚠ Te necesitan · ${perdidos.length + sueltos.length}`));
+  if (perdidos.length) {
+    franja.appendChild(h('div', { clase: 'grupo-te-necesitan aviso-perdidos' },
+      h('div', {}, h('b', {}, perdidos.length === 1 ? 'Un vídeo ha perdido sus imágenes de estilo'
+        : `${perdidos.length} vídeos han perdido sus imágenes de estilo`),
+      h('span', { clase: 'meta' }, ' — pasaba al volver a guardar un estilo y ya no puede pasar. '
+        + 'Repararlo las vuelve a apuntar a las que sí están: no regenera ni cobra nada.')),
+      ...perdidos.map(video => h('div', { clase: 'fila' },
+        h('span', { clase: 'meta crece' }, `${video.nombre} · ${plural(video.rotas.length, 'imagen', 'imágenes')}`),
+        video.reparable
+          ? h('button', { clase: 'mini primario', onclick: () => repararEstiloDeVideo(video) }, 'Reparar')
+          : h('span', { clase: 'meta' }, 'no hay otra que la sustituya: pregúntale al asistente')))));
+  }
+  if (sueltos.length) {
+    franja.appendChild(h('div', { clase: 'grupo-te-necesitan estilos-a-medias' },
+      h('div', {}, h('b', {}, sueltos.length === 1 ? 'Un estilo a medias' : `${sueltos.length} estilos a medias`),
+        h('span', { clase: 'meta' }, ' — se quedaron sin terminar. «Retomar» sigue por donde iba sin volver a pagar lo hecho.')),
+      ...sueltos.map(taller => h('div', { clase: 'fila' },
+        h('span', { clase: 'meta crece' }, `${taller.nombre} · ${fechaAmable(taller.actualizado) || ''}`),
+        h('button', { clase: 'mini', onclick: () => irALight('crear', { taller: taller.id }) }, 'Retomar'),
+        h('button', { clase: 'mini peligro', title: 'A la papelera (se puede devolver)',
+          onclick: () => descartarTallerLight(taller) }, 'Descartar')))));
+  }
+  return franja;
+}
+
+/* La miniatura de un vídeo: la de su estilo (como en la cabecera del vídeo en
+   Crear) o, si el estilo no tiene, su inicial en un color fijo. */
+function miniaturaDeVideo(video) {
+  const estilo = fichaLight(video.estilo_light || '');
+  if (estilo && estilo.hay_miniatura) {
+    return h('img', { clase: 'miniatura-tarjeta', alt: '', loading: 'lazy',
+      src: API.presetCanalMiniatura(estilo.id, estilo.modificado) });
+  }
+  return h('span', { clase: `miniatura-tarjeta vacia tono-${tonoDe(video.estilo_light || video.nombre || video.id)}`,
+    'aria-hidden': 'true' }, inicialDe(video.nombre || video.id));
+}
+
+/* UNA TARJETA DE VÍDEO: abrir (donde toca), de dónde salió, cómo va en Crear
+   y en Publicar, «Publicar ›» si está montado y «⋯» con lo demás. Se acaba el
+   «Apartar» rojo repetido en cada fila. */
+function tarjetaVideoLight(video, enLista) {
+  const nombre = video.nombre || video.id;
+  /* EL NOMBRE SE CAMBIA EN LA PROPIA TARJETA (rediseño de Crear): era una
+     ventana del navegador (`prompt`). */
+  if (APP.light.renombrando === video.id) {
+    return h('div', { clase: 'tarjeta-video renombrando' + (enLista ? ' en-lista' : '') },
+      campoRenombrar(video.id, nombre));
+  }
+  const crear = estadoCrearDeVideo(video);
+  const publicar = estadoPublicarDeVideo(video);
+  const abierto = APP.light.menuTarjeta === `v:${video.id}`;
+  return h('div', { clase: 'tarjeta-video' + (enLista ? ' en-lista' : '') + (abierto ? ' con-menu' : '') },
+    h('button', { clase: 'abrir-video', title: 'Seguir con este vídeo', onclick: () => abrirVideoLight(video.id) },
+      miniaturaDeVideo(video),
+      h('span', { clase: 'cuerpo-video' },
+        h('span', { clase: 'nombre' }, nombre),
+        // DE QUÉ PROYECTO Y ESTILO SALIÓ, para saber de quién es cada vídeo
+        h('span', { clase: 'meta' }, [origenDeVideo(video), fechaAmable(video.actualizado)].filter(Boolean).join(' · ')),
+        h('span', { clase: 'estados-video' },
+          crear ? chipDeEstado(crear) : null,
+          publicar && (!crear || crear.e !== 'curso') ? chipDeEstado(publicar) : null))),
+    /* LOS BOTONES VAN FUERA DEL DE ABRIR: un botón dentro de otro no es HTML
+       válido y el clic acabaría abriendo el vídeo. */
+    h('div', { clase: 'acciones-video' },
+      montadoDe(video) ? h('button', { clase: 'mini chip-publicar', title: 'Su ficha en Publicar',
+        onclick: () => abrirPublicarVideo(video.id) }, 'Publicar ›') : null,
+      h('button', { clase: 'mini fantasma abre-menu mas-video', title: 'Renombrar, mover o apartar',
+        'aria-label': `Más opciones de ${nombre}`, 'aria-haspopup': 'menu', 'aria-expanded': abierto ? 'true' : 'false',
+        onclick: () => abrirMenuTarjeta(`v:${video.id}`) }, '⋯'),
+      abierto ? menuDeVideo(video) : null));
+}
+
+function menuDeVideo(video) {
+  return h('div', { clase: 'menu-tarjeta menu-de-video', role: 'menu' },
+    h('button', { clase: 'mini fantasma', role: 'menuitem', title: 'Cambiar el nombre (no regenera nada)',
+      onclick: desdeMenuTarjeta(() => { APP.light.renombrando = video.id; pintarLight(); }) }, '✏️ Renombrar'),
+    listaClientes().length ? h('button', { clase: 'mini fantasma', role: 'menuitem',
+      onclick: desdeMenuTarjeta(() => moverVideoACliente(video)) }, '📁 Mover a otro proyecto') : null,
+    h('button', { clase: 'mini fantasma peligro', role: 'menuitem', title: 'A la papelera (se puede devolver)',
+      onclick: desdeMenuTarjeta(() => apartarVideoLight(video)) },
+    'Apartar', h('span', { clase: 'meta' }, ' · a la papelera: se puede devolver')));
+}
+
+/* La cara de un estilo: su hoja de muestras o, si aún no tiene, una franja
+   corta con su tono (sin el hueco enorme de «sin muestras»). */
+function caraDeEstilo(ficha) {
+  if (ficha.hay_miniatura) {
+    return h('div', { clase: 'cara' },
+      h('img', { src: API.presetCanalMiniatura(ficha.id, ficha.modificado), alt: '', loading: 'lazy' }));
+  }
+  return h('div', { clase: `cara sin-muestras tono-${tonoDe(ficha.nombre || ficha.id)}` },
+    h('span', { clase: 'sin-cara' }, 'sin muestras todavía'));
+}
+
+/* PULSAR UNA TARJETA DE ESTILO ABRE SU MENÚ: «▶ Nuevo vídeo con este estilo»
+   (lo de antes al pulsarla, `elegirEstiloLight`) y «✎ Editar el estilo», y
+   debajo Duplicar, Mover y Apartar. «✎ Editar» sigue a la vista en la tarjeta
+   (rediseño de Crear, 20-10-2026). La tarjeta es un div con botones dentro:
+   un botón dentro de otro no es HTML válido. */
 function tarjetaEstiloLight(ficha, conProyecto) {
   const vinetas = ficha.vinetas || [];
   const cliente = conProyecto ? fichaCliente(clienteDe(ficha.id)) : null;
-  return h('div', { clase: 'ficha-estilo' },
+  const abierto = APP.light.menuTarjeta === `e:${ficha.id}`;
+  return h('div', { clase: 'ficha-estilo' + (abierto ? ' con-menu' : '') },
     h('button', {
-      clase: 'cara-y-cuerpo', title: 'Usar este estilo',
-      onclick: () => elegirEstiloLight(ficha),
+      clase: 'cara-y-cuerpo abre-menu', title: 'Nuevo vídeo con este estilo, editarlo, duplicarlo o moverlo',
+      'aria-haspopup': 'menu', 'aria-expanded': abierto ? 'true' : 'false',
+      onclick: () => abrirMenuTarjeta(`e:${ficha.id}`),
     },
-      h('div', { clase: 'cara' }, ficha.hay_miniatura
-        ? h('img', { src: API.presetCanalMiniatura(ficha.id, ficha.modificado), alt: '', loading: 'lazy' })
-        : h('div', { clase: 'sin-cara' }, 'sin muestras')),
+      caraDeEstilo(ficha),
       h('div', { clase: 'cuerpo' },
         h('div', { clase: 'nombre' }, ficha.nombre || ficha.id),
         cliente ? h('div', { clase: 'chip-proyecto' }, `📁 ${cliente.nombre}`) : null,
         h('ul', { clase: 'vinetas' },
-          // el icono lo manda el servidor con cada línea (`presets_canal.vinetas_de`):
-          // aquí no hay forma de saber cuál es el idioma y cuál la voz sin deducirlo
-          // del orden, y el orden se rompe en cuanto una línea no sale
+          // el icono lo manda el servidor con cada línea (`presets_canal.vinetas_de`)
           ...vinetas.map(v => h('li', {},
             h('span', { clase: 'ico' }, v.icono || '·'), v.texto || v))))),
     h('div', { clase: 'pie-tarjeta' },
       h('button', {
         clase: 'mini editar-estilo', title: 'Abrir la ficha del estilo para cambiarlo',
         onclick: ev => { ev.stopPropagation(); editarEstiloLight(ficha); },
-      }, '✎ Editar'),
-      menuDeEstilo(ficha)));
+      }, '✎ Editar')),
+    abierto ? menuDeEstilo(ficha) : null);
+}
+
+function menuDeEstilo(ficha) {
+  return h('div', { clase: 'menu-tarjeta menu-de-estilo', role: 'menu' },
+    h('button', { clase: 'primario', role: 'menuitem', onclick: desdeMenuTarjeta(() => elegirEstiloLight(ficha)) },
+      '▶ Nuevo vídeo con este estilo'),
+    h('button', { clase: 'mini', role: 'menuitem', onclick: desdeMenuTarjeta(() => editarEstiloLight(ficha)) },
+      '✎ Editar el estilo'),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini fantasma', role: 'menuitem', onclick: desdeMenuTarjeta(() => duplicarEstiloLight(ficha)) },
+        'Duplicar'),
+      listaClientes().length ? h('button', { clase: 'mini fantasma', role: 'menuitem',
+        onclick: desdeMenuTarjeta(() => moverEstiloACliente(ficha)) }, 'Mover a otro proyecto') : null),
+    h('button', { clase: 'mini fantasma peligro', role: 'menuitem', title: 'A la papelera (se puede devolver)',
+      onclick: desdeMenuTarjeta(() => borrarPresetLight(ficha)) },
+    'Apartar', h('span', { clase: 'meta' }, ' · a la papelera')));
 }
 
 function tarjetaNuevoEstilo(cuantos, cliente) {
@@ -6993,11 +7895,21 @@ function tarjetaNuevoEstilo(cuantos, cliente) {
     clase: 'ficha-estilo nuevo', title: 'Crear un estilo nuevo',
     onclick: () => { APP.light.encargo = null; irALight('crear', { taller: null }); },
   },
-    h('div', { clase: 'cara' }, h('span', { clase: 'mas' }, '+')),
     h('div', { clase: 'cuerpo' },
-      h('div', { clase: 'nombre' }, cliente ? `Nuevo estilo en ${cliente.nombre}`
-        : (cuantos ? 'Otro estilo' : 'Tu primer estilo')),
+      h('div', { clase: 'nombre' }, cliente ? `+ Nuevo estilo en ${cliente.nombre}`
+        : (cuantos ? '+ Otro estilo' : '+ Tu primer estilo')),
       h('div', { clase: 'pista' }, 'unas imágenes y cómo suena')));
+}
+
+/* «Traer un estilo» sale de la fila de mandos: es de los estilos. */
+function tarjetaTraerEstilo(ficha) {
+  return h('button', {
+    clase: 'ficha-estilo nuevo traer', title: 'Mover aquí un estilo de otro proyecto (con sus vídeos)',
+    onclick: () => traerEstiloACliente(ficha),
+  },
+    h('div', { clase: 'cuerpo' },
+      h('div', { clase: 'nombre' }, '⇄ Traer un estilo de otro proyecto'),
+      h('div', { clase: 'pista' }, 'lo mueve aquí con sus vídeos')));
 }
 
 /* Los vídeos hechos con este modo, del más reciente al más antiguo. Los sirve
@@ -7042,7 +7954,7 @@ async function apartarVideoLight(video) {
     await pedir(API.apartar(video.id), { method: 'DELETE' });
     if (videoLightGuardado() === video.id) recordarVideoLight('');
     await cargarGaleriaLight(true);
-    toast('vídeo apartado');
+    toast('vídeo apartado: está en la papelera');
   } catch (e) { toast(`no se ha podido apartar: ${e.message}`, true); }
 }
 
@@ -7060,26 +7972,6 @@ async function descartarTallerLight(taller) {
   } catch (e) {
     toast(`no se ha podido descartar: ${e.message}`, true);
   }
-}
-
-/* Los tres puntos. Va fuera del botón de la tarjeta —un botón dentro de otro no
-   es HTML válido y el clic acabaría eligiendo el estilo— y por eso la tarjeta es
-   un div con un botón grande dentro. */
-function menuDeEstilo(ficha) {
-  const menu = h('div', { clase: 'menu-estilo plegado' },
-    h('button', { clase: 'mini fantasma', onclick: () => duplicarEstiloLight(ficha) }, 'Duplicar'),
-    listaClientes().length ? h('button', { clase: 'mini fantasma', onclick: () => moverEstiloACliente(ficha) },
-      'Mover a otro proyecto') : null);
-  const puntos = h('button', {
-    clase: 'puntos', title: 'Más opciones',
-    onclick: ev => {
-      ev.stopPropagation();
-      const abierto = menu.classList.contains('plegado');
-      document.querySelectorAll('.menu-estilo').forEach(m => m.classList.add('plegado'));
-      menu.classList.toggle('plegado', !abierto);
-    },
-  }, '⋯');
-  return h('div', { clase: 'esquina' }, puntos, menu);
 }
 
 function editarEstiloLight(ficha) {
@@ -7652,6 +8544,19 @@ const BLOQUES_DEL_ENCARGO = [
     ? bloqueLight('El espacio fijo', 'si todo el vídeo pasa en un mismo sitio (opcional)', bloqueEspacioFijoLight(c.e))
     : bloqueLight('El espacio fijo', 'todo el vídeo en un mismo sitio: se aplica como corrección',
       bloqueEspacioFijoDelVideo())) },
+  // el tipo de relato (rama tipo-de-relato): detrás del espacio fijo, que da el sitio de la base
+  { id: 'tipo-relato', pinta: c => (c.nuevo
+    ? bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes (opcional)', bloqueTipoRelatoLight(c.e))
+    : bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes: se aplica como corrección',
+      bloqueTipoRelatoDelVideo())) },
+  // qué dibujan las imágenes (rama guion-visual): la voz o el guion
+  { id: 'imagenes', pinta: c => (c.nuevo
+    ? bloqueLight('Qué dibujan las imágenes', 'la voz o el guion visual (opcional)', bloqueImagenesLight(c.e, c.ficha))
+    : bloqueLight('Qué dibujan las imágenes', 'la voz o el guion visual: se aplica como corrección',
+      bloqueImagenesDelVideo())) },
+  { id: 'reparto-sitios', pinta: c => (c.nuevo ? null
+    : bloqueLight('El reparto y los sitios', 'quién sale y dónde ocurre, deducido del guion',
+      bloquePedidoSitiosDelVideo())) },
 ];
 
 /* PUNTO DE ENGANCHE DE CADA PASO del carril. Para añadir un bloque al final
@@ -7664,10 +8569,37 @@ const BLOQUES_EXTRA_DEL_PASO = {
   estilo: [],
   encargo: [],
   guion: [],
-  voz: [],
-  imagenes: [],
+  /* ANTES DE LA PRIMERA TANDA, en la Voz: el paso Imágenes sigue bloqueado
+     hasta que haya planos, y «Generar las imágenes» se pulsa desde aquí. Sin
+     esto, la imagen base y el guion visual que hay que aprobar ANTES de pagar
+     no se podían alcanzar (visto por el dueño, 23-10). */
+  voz: [c => (sinPlanosTodavia(c) ? bloqueBaseEnImagenes(c) : null),
+    c => (sinPlanosTodavia(c) ? editorGuionVisual() : null)],
+  // la imagen base del tipo de relato y el guion visual, a mano donde se generan los planos
+  imagenes: [c => bloqueBaseEnImagenes(c), c => editorGuionVisual()],
   video: [],
 };
+
+/* LA IMAGEN BASE, TAMBIÉN EN «IMÁGENES» (arreglo urgente, 22-10-2026). Con un
+   tipo de relato que edita, los planos no se generan sin la base (y la de cada
+   estado) aprobada, y el aviso mandaba a buscarla a otro paso. Aquí sale el
+   MISMO bloque del Encargo (`imagenBaseDelRelato`, sin tocarlo por dentro),
+   solo mientras falte algo por aprobar. Pintar no escribe nada (regla 1). */
+function bloqueBaseEnImagenes(c) {
+  if (!c.v || !c.v.pid) return null;
+  const est = relatoDelVideoLight();
+  if (!est.cargado || est.error) return null;
+  const f = est.ficha || {};
+  if (!f.edita || f.listo) return null;
+  return bloqueLight('La imagen base', 'apruébala antes de generar los planos: cada plano la edita',
+    imagenBaseDelRelato(est, !!trabajoVideoLight()));
+}
+
+/* Un vídeo con voz y sin ninguna tanda de imágenes todavía. */
+function sinPlanosTodavia(c) {
+  if (!c.v || !c.v.pid || !c.v.audio) return false;
+  return !versionDe((c.v.fichas || {}).assets || {});
+}
 
 function pintarBloquesExtraDelPaso(donde, paso) {
   (BLOQUES_EXTRA_DEL_PASO[paso] || []).forEach(pinta => {
@@ -8116,7 +9048,9 @@ function campoImagenDelEspacio(ef, urlGuardada, alCambiar) {
       }, 'Quitarla') : null),
     h('div', { clase: 'pista' }, 'Se adjunta a cada imagen de plano de este sitio (no a los '
       + 'secundarios) para que se reconozca el lugar. Se paga como una referencia más: alrededor '
-      + 'de medio céntimo por imagen.'));
+      + 'de medio céntimo por imagen. Con el tipo de relato «Un espacio que cambia» o «Producto» '
+      + 'no hace falta: el Studio dibuja la imagen base del sitio a partir de esta descripción '
+      + '(en «El tipo de relato», donde la apruebas); si subes una, puedes usarla como base, gratis.'));
 }
 
 function bloqueEspacioFijoLight(e) {
@@ -8295,6 +9229,435 @@ async function rehacerPlanosDelEspacio(planos, unidad) {
   }
 }
 
+/* EL TIPO DE RELATO (rama tipo-de-relato, 20-10-2026): CÓMO se cuenta el vídeo
+ * en imágenes (`pasos/tipo_relato.py`). Habla de estructura, nunca de un
+ * negocio. Se elige en el Encargo (viaja en `opcionesParaCrear` SOLO si se
+ * eligió uno: sin elegir manda el del estilo y no se escribe nada), lo trae la
+ * Parrilla con «Tipo de relato:», o se aplica a un vídeo hecho como corrección
+ * (`POST /tipo_relato/aplicar`, gratis), igual que el espacio fijo. Los modos
+ * que EDITAN («Un espacio que cambia», «Producto») necesitan la imagen base del
+ * sitio aprobada antes de pagar ningún plano. */
+const MODOS_RELATO = [
+  { valor: 'documental', nombre: 'Documental' },
+  { valor: 'espacio_que_cambia', nombre: 'Un espacio que cambia' },
+  { valor: 'recorrido', nombre: 'Recorrido' },
+  { valor: 'escenario_y_apoyos', nombre: 'Escenario y apoyos' },
+  { valor: 'producto', nombre: 'Producto' },
+  { valor: 'clase', nombre: 'Clase' },
+];
+const CAMBIA_RELATO = [
+  { valor: 'objeto', nombre: 'Un objeto' },
+  { valor: 'acabados', nombre: 'Los acabados' },
+  { valor: 'estado', nombre: 'El estado (obra, montaje, terminado)' },
+  { valor: 'hora', nombre: 'La hora (la luz y la gente)' },
+];
+const AYUDA_RELATO = {
+  documental: 'El guion se reparte en sitios, como siempre.',
+  espacio_que_cambia: 'Un solo sitio que se ve siempre igual; cada plano cambia solo lo que dice '
+    + 'la voz (o, con «Lo que dice el guion», su línea del guion visual). Cada plano se genera '
+    + 'EDITANDO una imagen base del sitio, que apruebas antes.',
+  recorrido: 'Varios ambientes de un mismo lugar, con la misma luz, materiales y estilo.',
+  escenario_y_apoyos: 'Un sitio principal con sus secundarios (el espacio fijo de siempre).',
+  producto: 'El producto manda y el fondo no se mueve: cada plano edita la imagen base del fondo.',
+  clase: 'Una clase: de momento se cuenta como un recorrido.',
+};
+
+function nombreRelato(modo, cambia) {
+  const m = MODOS_RELATO.find(x => x.valor === modo);
+  let texto = m ? m.nombre : 'Documental';
+  const c = CAMBIA_RELATO.find(x => x.valor === cambia);
+  if (modo === 'espacio_que_cambia' && c) texto += ` (${c.nombre.split(' (')[0].toLowerCase()})`;
+  return texto;
+}
+
+/* El selector: el modo y, en «Un espacio que cambia», qué cambia. `rel` es
+   {modo, cambia}; `heredado` el texto de la primera opción (lo que rige si no
+   se elige nada). */
+function selectorTipoRelato(rel, alCambiar, heredado) {
+  const caja = h('div', { clase: 'tipo-relato' });
+  caja.appendChild(campoSelect('Tipo de relato', rel.modo || '',
+    [{ valor: '', nombre: heredado || 'Lo que diga el estilo' }, ...MODOS_RELATO],
+    v => { rel.modo = v; if (v === 'espacio_que_cambia' && !rel.cambia) rel.cambia = 'objeto'; alCambiar(); },
+    rel.modo ? AYUDA_RELATO[rel.modo] : 'Sin elegir, manda el del estilo; si el estilo no trae '
+      + 'ninguno, con espacio fijo es «Escenario y apoyos» y sin él, «Documental».'));
+  if (rel.modo === 'espacio_que_cambia') {
+    caja.appendChild(campoSelect('Qué cambia', rel.cambia || 'objeto', CAMBIA_RELATO,
+      v => { rel.cambia = v; alCambiar(); }));
+  }
+  return caja;
+}
+
+function tipoRelatoDelEncargo(r) {
+  const t = (r && typeof r === 'object') ? r : {};
+  return { modo: String(t.modo || ''), cambia: String(t.cambia || '') };
+}
+
+function tipoRelatoParaCrear(e) {
+  const t = e.tipo_relato;
+  if (!t || !t.modo) return null;
+  return t.modo === 'espacio_que_cambia' ? { modo: t.modo, cambia: t.cambia || 'objeto' }
+    : { modo: t.modo };
+}
+
+function bloqueTipoRelatoLight(e) {
+  if (!e.tipo_relato) e.tipo_relato = tipoRelatoDelEncargo(null);
+  const caja = h('div', {});
+  caja.appendChild(selectorTipoRelato(e.tipo_relato, pintarLight));
+  if (['espacio_que_cambia', 'producto'].includes(e.tipo_relato.modo)) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Al crear el vídeo, aprueba su imagen base en '
+      + '«El tipo de relato» del vídeo antes de generar las imágenes: sube una en «El espacio fijo» '
+      + '(gratis) o genérala (se paga una imagen, con su coste delante).'));
+  }
+  return caja;
+}
+
+/* EL TIPO DE RELATO DE UN VÍDEO YA CREADO. El estado vive en
+   `APP.light.video.relato` para que el repintado no pierda lo elegido. */
+function relatoDelVideoLight() {
+  const v = APP.light.video;
+  if (v.relato && v.relato.pid === v.pid) return v.relato;
+  const pid = v.pid;
+  v.relato = { pid, cargado: false, ficha: null, copia: { modo: '', cambia: '' },
+    marcados: new Set(), ocupado: false, error: '', pedido: '' };
+  pedir(`${API.proyecto(pid)}/tipo_relato`).then(d => {
+    const est = APP.light.video.relato;
+    if (!est || est.pid !== pid) return;
+    leerRelatoDelServidor(est, d);
+    pintarLight();
+  }).catch(err => {
+    const est = APP.light.video.relato;
+    if (!est || est.pid !== pid) return;
+    est.cargado = true;
+    est.error = err.message;
+    pintarLight();
+  });
+  return v.relato;
+}
+
+function leerRelatoDelServidor(est, d) {
+  est.cargado = true;
+  est.error = '';
+  est.ficha = d || {};
+  est.copia = tipoRelatoDelEncargo((d || {}).tipo_relato);
+  est.cambios = (d || {}).cambios || null;
+  est.marcados = new Set(((est.cambios || {}).planos || []).map(x => x.id));
+}
+
+function bloqueTipoRelatoDelVideo() {
+  const est = relatoDelVideoLight();
+  if (!est.cargado) return h('div', { clase: 'cargando' }, 'cargando…');
+  const f = est.ficha || {};
+  const corriendo = !!trabajoVideoLight();
+  const res = f.resuelto || {};
+  const origen = { video: 'elegido para este vídeo: manda sobre el del estilo',
+    estilo: 'el que trae el estilo', espacio_fijo: 'porque tiene espacio fijo',
+    '': 'por defecto' }[res.origen || ''] || '';
+  const heredado = f.del_estilo && f.del_estilo.modo
+    ? `Lo del estilo: ${nombreRelato(f.del_estilo.modo, f.del_estilo.cambia)}`
+    : 'Lo que diga el estilo';
+  const caja = h('div', { clase: 'tipo-relato' },
+    h('div', { clase: 'meta' }, `Ahora: ${res.nombre || nombreRelato(res.modo, res.cambia)} (${origen})`),
+    selectorTipoRelato(est.copia, pintarLight, heredado),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', disabled: corriendo || est.ocupado,
+        onclick: () => aplicarTipoRelatoDelVideo() }, 'Aplicar el tipo de relato'),
+      h('span', { clase: 'meta' }, 'gratis: no se dibuja nada; después eliges qué planos rehacer')));
+  if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
+  if (f.faltan_cambios) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      'Falta decir qué cambia en cada tramo. Lo escribe Claude leyendo el guion (no se paga '
+      + 'ninguna imagen).',
+      h('div', { clase: 'fila' }, h('button', { clase: 'mini', disabled: corriendo || est.ocupado,
+        onclick: () => escribirCambiosDelRelato() }, 'Escribir qué cambia en cada tramo'))));
+  }
+  if (f.edita) caja.appendChild(imagenBaseDelRelato(est, corriendo));
+  if (est.cambios) caja.appendChild(cambiosDelRelato(est, corriendo));
+  return caja;
+}
+
+function imagenBaseDelRelato(est, corriendo) {
+  const f = est.ficha || {};
+  const base = (f.bases || {})[f.sitio] || null;
+  const usd = Number(f.usd_base || 0);
+  const caja = h('div', { clase: `imagen-base-relato${f.base_aprobada ? ' aprobada' : ''}` },
+    h('label', {}, `Imagen base de «${f.sitio_nombre || f.sitio || 'el sitio'}»`));
+  if (!f.sitio) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Todavía no hay sitio: escribe el espacio fijo '
+      + 'o deduce antes el reparto y los sitios.'));
+    return caja;
+  }
+  if (base) {
+    // pulsarla la abre a tamaño completo: la miniatura no deja juzgarla (21-10)
+    const url = `${BASE}${base.imagen_url}&v=${Date.now() % 100000}`;
+    caja.appendChild(h('a', { href: url, target: '_blank', rel: 'noopener',
+      title: 'Abrir a tamaño completo' },
+    h('img', { src: url, alt: 'la imagen base del sitio', clase: 'miniatura-imagen-base' })));
+    caja.appendChild(h('div', { clase: 'pista' }, 'Púlsala para verla a tamaño completo.'));
+  }
+  caja.appendChild(h('div', { clase: 'meta' }, f.base_aprobada
+    ? '✓ Aprobada: cada plano del sitio se genera editando esta imagen.'
+    : (base ? 'Sin aprobar: mírala y apruébala antes de generar los planos.'
+      : 'Sin imagen base: los planos de este sitio no se generan hasta que la apruebes.')));
+  const fila = h('div', { clase: 'fila' });
+  if (base && !f.base_aprobada) {
+    fila.appendChild(h('button', { clase: 'mini primario', disabled: est.ocupado,
+      onclick: () => aprobarBaseDelRelato(true) }, 'Aprobar esta imagen'));
+  }
+  if (base && f.base_aprobada) {
+    fila.appendChild(h('button', { clase: 'mini fantasma', disabled: est.ocupado,
+      onclick: () => aprobarBaseDelRelato(false) }, 'Retirar la aprobación'));
+  }
+  if (f.puede_usar_subida) {
+    fila.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+      onclick: () => usarSubidaComoBase() }, 'Usar la imagen subida del espacio · gratis'));
+  }
+  fila.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+    onclick: () => generarBaseDelRelato(!!base, usd) },
+  `${base ? 'Otra imagen base' : 'Generar la imagen base'} · ≈ ${usdCorto(usd)}`));
+  caja.appendChild(fila);
+  if (f.base_aprobada && (f.estados || []).length) caja.appendChild(estadosDelRelato(est, corriendo, usd));
+  if (f.inicial) {
+    caja.appendChild(h('div', { clase: 'meta' }, `Lo que luego cambia sale ya en la base, así: «${f.inicial}». `
+      + 'Comprueba que está donde va antes de aprobarla.'));
+  }
+  caja.appendChild(h('div', { clase: 'pista' }, 'Qué hay en el sitio y dónde lo dice «El espacio '
+    + 'fijo»; aquí se dibuja y se aprueba. La imagen base es el sitio vacío y entero, en su '
+    + 'estado inicial. Es lo que garantiza que todas las imágenes sean el mismo sitio con la misma '
+    + 'cámara. Los planos de detalle la llevan como referencia.'));
+  return caja;
+}
+
+function cambiosDelRelato(est, corriendo) {
+  const c = est.cambios;
+  const planos = c.planos || [];
+  const unidad = Number(c.usd_por_imagen || 0);
+  if (!planos.length) {
+    return h('div', { clase: 'caja-info cambios-espacio-fijo' },
+      `Ningún plano hecho cambia con este tipo de relato${c.hechas ? ` (${c.hechas} con imagen)` : ''}: `
+      + 'lo que se dibuje desde ahora ya sale así.');
+  }
+  const f = est.ficha || {};
+  const bloqueado = f.edita && !f.base_aprobada;
+  const marcados = planos.filter(x => est.marcados.has(x.id)).map(x => x.id);
+  const lista = h('div', { clase: 'lista-espacio-fijo' });
+  planos.forEach(x => {
+    lista.appendChild(h('label', { clase: 'fila-espacio-fijo' },
+      h('input', { type: 'checkbox', checked: est.marcados.has(x.id),
+        onchange: ev => { if (ev.target.checked) est.marcados.add(x.id); else est.marcados.delete(x.id); pintarLight(); } }),
+      h('span', { clase: 'id' }, x.id),
+      h('span', { clase: 'crece' }, x.narracion || '', h('span', { clase: 'meta' }, ` · ${x.sitio || 'sin sitio'}`))));
+  });
+  return h('div', { clase: 'caja-aviso cambios-espacio-fijo' },
+    h('div', {}, `${planos.length} ${planos.length === 1 ? 'plano cambiaría' : 'planos cambiarían'} `
+      + `con el tipo de relato. Rehacer cada uno cuesta ≈ ${usdCorto(unidad)}. Nada se rehace `
+      + 'hasta que lo pidas; lo que no rehagas se queda como está.'
+      + (bloqueado ? ' Antes aprueba la imagen base.' : '')),
+    lista,
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo || est.ocupado || bloqueado,
+        onclick: () => rehacerPlanosDelRelato(planos.map(x => x.id), unidad) },
+      `Rehacer los ${planos.length} · ≈ ${usdCorto(planos.length * unidad)}`),
+      h('button', { clase: 'mini', disabled: corriendo || est.ocupado || bloqueado || !marcados.length,
+        onclick: () => rehacerPlanosDelRelato(marcados, unidad) },
+      `Solo los marcados (${marcados.length}) · ≈ ${usdCorto(marcados.length * unidad)}`),
+      h('button', { clase: 'mini fantasma',
+        onclick: () => { est.cambios = null; toast('no se rehace ninguno: el vídeo se queda como está'); pintarLight(); } },
+      'Ninguno')));
+}
+
+async function accionDelRelato(ruta, cuerpo, mensaje) {
+  const est = relatoDelVideoLight();
+  est.ocupado = true;
+  pintarLight();
+  try {
+    const d = await pedir(`${API.proyecto(est.pid)}/tipo_relato${ruta}`,
+      { method: 'POST', cuerpo: cuerpo || {} });
+    leerRelatoDelServidor(est, d);
+    if (mensaje) toast(mensaje);
+  } catch (err) {
+    est.error = err.message;
+  }
+  est.ocupado = false;
+  pintarLight();
+}
+
+function aplicarTipoRelatoDelVideo() {
+  const est = relatoDelVideoLight();
+  const t = est.copia;
+  const cuerpo = { tipo_relato: t.modo ? (t.modo === 'espacio_que_cambia'
+    ? { modo: t.modo, cambia: t.cambia || 'objeto' } : { modo: t.modo }) : null };
+  return accionDelRelato('/aplicar', cuerpo, 'tipo de relato aplicado: no se ha dibujado nada');
+}
+
+/* UN ESTADO, UNA IMAGEN: cada cambio del vídeo (la mampara abierta, la
+   corrediza…) se dibuja UNA vez editando la base aprobada; se aprueba como la
+   base, y los planos de ese estado la editan sin volver a inventarlo. */
+function estadosDelRelato(est, corriendo, usd) {
+  const f = est.ficha || {};
+  const caja = h('div', { clase: 'estados-relato' },
+    h('label', {}, 'Cada estado, dibujado una vez'),
+    h('div', { clase: 'pista' }, 'Cada cambio que pide el guion se dibuja una sola vez sobre la '
+      + 'imagen base. Apruébalos: los planos de cada estado editan su imagen y así salen iguales.'));
+  for (const e of f.estados || []) {
+    const fila = h('div', { clase: `estado-relato${e.aprobada ? ' aprobada' : ''}` });
+    if (e.imagen_url) {
+      const url = `${BASE}${e.imagen_url}&v=${Date.now() % 100000}`;
+      fila.appendChild(h('a', { href: url, target: '_blank', rel: 'noopener',
+        title: 'Abrir a tamaño completo' },
+      h('img', { src: url, alt: `el estado ${e.estado}`, clase: 'miniatura-imagen-base' })));
+    }
+    const lado = h('div', { clase: 'estado-relato-texto' },
+      h('strong', {}, e.estado.replace(/_/g, ' ')),
+      h('div', { clase: 'meta' }, e.cambio),
+      h('div', { clase: 'meta' }, e.aprobada ? '✓ Aprobado.'
+        : (e.imagen_url && e.vigente ? 'Sin aprobar: míralo y apruébalo.'
+          : (e.imagen_url ? 'El cambio se ha reescrito: hace falta otra imagen.'
+            : 'Sin imagen: los planos de este estado esperan a que la apruebes.'))));
+    const botones = h('div', { clase: 'fila' });
+    if (e.imagen_url && e.vigente && !e.aprobada) {
+      botones.appendChild(h('button', { clase: 'mini primario', disabled: est.ocupado,
+        onclick: () => aprobarEstadoDelRelato(e.estado, true) }, 'Aprobar este estado'));
+    }
+    if (e.aprobada) {
+      botones.appendChild(h('button', { clase: 'mini fantasma', disabled: est.ocupado,
+        onclick: () => aprobarEstadoDelRelato(e.estado, false) }, 'Retirar la aprobación'));
+    }
+    botones.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+      onclick: () => generarEstadoDelRelato(e.estado, !!e.imagen_url, usd) },
+    `${e.imagen_url ? 'Otra imagen' : 'Dibujar este estado'} · ≈ ${usdCorto(usd)}`));
+    lado.appendChild(botones);
+    fila.appendChild(lado);
+    caja.appendChild(fila);
+  }
+  return caja;
+}
+
+function aprobarEstadoDelRelato(estado, aprobada) {
+  const est = relatoDelVideoLight();
+  return accionDelRelato('/base/aprobar', { sitio: (est.ficha || {}).sitio, estado, aprobada },
+    aprobada ? `estado «${estado}» aprobado` : 'aprobación retirada');
+}
+
+function generarEstadoDelRelato(estado, otra, usd) {
+  if (!confirm(`${otra ? 'Otra imagen' : 'Dibujar'} del estado «${estado}»: ≈ ${usdCorto(usd)}.`
+    + '\n\nSe paga una imagen: la base aprobada con ese cambio. Después la miras y la apruebas.')) return;
+  trabajoDelRelato('/base/generar', { estado, otra: !!otra, usd });
+}
+
+function aprobarBaseDelRelato(aprobada) {
+  const est = relatoDelVideoLight();
+  return accionDelRelato('/base/aprobar', { sitio: (est.ficha || {}).sitio, aprobada },
+    aprobada ? 'imagen base aprobada' : 'aprobación retirada');
+}
+
+function usarSubidaComoBase() {
+  return accionDelRelato('/base/usar_subida', {}, 'la imagen subida es ahora la imagen base, aprobada');
+}
+
+/* Los dos trabajos del tipo de relato (la imagen base, que se paga, y los
+   cambios por tramo, que no) se siguen con la barra del vídeo y al terminar se
+   vuelve a leer la ficha. */
+async function trabajoDelRelato(ruta, cuerpo) {
+  const est = relatoDelVideoLight();
+  const pid = est.pid;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(`${API.proyecto(pid)}/tipo_relato${ruta}`,
+      { method: 'POST', cuerpo: cuerpo || {} });
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (['listo', 'error', 'cancelado'].includes(trabajo.estado)) {
+        const ahora = APP.light.video.relato;
+        if (ahora && ahora.pid === pid) APP.light.video.relato = null;
+      }
+      pintarLight();
+    }, () => refrescarVivosLight(), pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
+function generarBaseDelRelato(otra, usd) {
+  if (!confirm(`${otra ? 'Otra imagen base' : 'Generar la imagen base'} del sitio: ≈ ${usdCorto(usd)}.`
+    + '\n\nSe paga una imagen. Después la miras y la apruebas.')) return;
+  trabajoDelRelato('/base/generar', { otra: !!otra, usd });
+}
+
+function escribirCambiosDelRelato() {
+  trabajoDelRelato('/cambios', {});
+}
+
+async function rehacerPlanosDelRelato(planos, unidad) {
+  const est = relatoDelVideoLight();
+  const pid = est.pid;
+  if (!planos.length) return;
+  if (!confirm(`Rehacer ${planos.length} ${planos.length === 1 ? 'imagen' : 'imágenes'} con el `
+    + `tipo de relato: ≈ ${usdCorto(planos.length * unidad)}.\n\nSolo esas; las demás no se `
+    + 'tocan. Después hay que volver a montar el vídeo.')) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(`${API.proyecto(pid)}/tipo_relato/rehacer`, {
+      method: 'POST', cuerpo: { planos, imagenes: planos.length },
+    });
+    est.cambios = null;
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        reiniciarPrevia();
+        await cargarVideoLight(pid);
+        refrescarPlanLight('video', true);
+        APP.light.video.relato = null;
+      }
+      pintarLight();
+    }, () => { refrescarPlanosLight(); refrescarVivosLight(); }, pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
+/* «PEDIDO PARA EL REPARTO DE SITIOS», junto a «El reparto y los sitios»: una
+   frase corta que llega a Claude al repartir (el backend ya la recibía:
+   `POST /escenarios` con `peticion`). Con un pedido escrito se vuelve a
+   repartir aunque el guion no haya cambiado. No dibuja nada. */
+function bloquePedidoSitiosDelVideo() {
+  const est = relatoDelVideoLight();
+  const corriendo = !!trabajoVideoLight();
+  return h('div', { clase: 'pedido-sitios' },
+    campoTexto('Pedido para el reparto de sitios', est.pedido, x => { est.pedido = x; },
+      { pista: 'todo en la cocina; el patio solo en el último tramo' }),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo || !String(est.pedido || '').trim(),
+        onclick: () => repartirSitiosConPedido() }, 'Volver a repartir con este pedido'),
+      h('span', { clase: 'meta' }, 'lo lee Claude (no se paga ninguna imagen); las imágenes '
+        + 'hechas se quedan hasta que pidas rehacerlas')));
+}
+
+async function repartirSitiosConPedido() {
+  const est = relatoDelVideoLight();
+  const pid = est.pid;
+  const peticion = String(est.pedido || '').trim().slice(0, 400);
+  if (!peticion) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(API.escenarios(pid), { method: 'POST', cuerpo: { peticion, rehacer: true } });
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        toast('reparto y sitios repartidos de nuevo con tu pedido');
+        APP.light.video.relato = null;
+        APP.light.video.espacio = null;
+        await cargarVideoLight(pid);
+      }
+      pintarLight();
+    }, () => refrescarVivosLight(), pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
 /* Lo elegido en «Ajustes del montaje» del borrador, tal como lo entiende
    `_opciones_al_crear`. Lo que no se eligió no viaja: queda automático. */
 function opcionesParaCrear(e) {
@@ -8313,6 +9676,10 @@ function opcionesParaCrear(e) {
   if (op.ritmo) salida.ritmo = op.ritmo;
   const espacio = espacioFijoParaCrear(e);
   if (espacio) salida.espacio_fijo = espacio;
+  const relato = tipoRelatoParaCrear(e);
+  if (relato) salida.tipo_relato = relato;
+  const imagenes = imagenesParaCrear(e);
+  if (imagenes) Object.assign(salida, imagenes);
   return salida;
 }
 
@@ -8464,13 +9831,15 @@ function vistaEncargoVideoLight() {
 
   if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
 
-  caja.appendChild(h('div', { clase: v.guion ? 'caja-aviso' : 'caja-info' }, v.guion
-    ? 'Esto es lo que se le pidió al redactor, y de aquí salió el guion que hay. '
+  /* en el móvil, plegado en una línea (ver `avisoPlegable`) */
+  caja.appendChild(v.guion
+    ? avisoPlegable('encargo-con-guion', 'Lo que cambies aquí deja el guion obsoleto',
+      'Esto es lo que se le pidió al redactor, y de aquí salió el guion que hay. '
       + 'Lo que cambies se guarda solo y deja el guion obsoleto: la barra de abajo ofrece '
       + 'regenerarlo, y con él se rehacen después la voz y las imágenes que ya '
       + 'no cuadren; lo que siga valiendo no se vuelve a pagar. El nombre se '
-      + 'cambia sin regenerar nada. El formato rehace TODAS las imágenes.'
-    : 'Lo que se le va a pedir al redactor. Se guarda solo; cuando esté, '
+      + 'cambia sin regenerar nada. El formato rehace TODAS las imágenes.')
+    : h('div', { clase: 'caja-info' }, 'Lo que se le va a pedir al redactor. Se guarda solo; cuando esté, '
       + '«Generar el guion» abajo.'));
 
   /* TODO LO QUE SE TECLEA O SE MARCA AQUÍ DENTRO PROGRAMA UN VOLCADO. Por
@@ -12182,8 +13551,16 @@ function vistaPreviaLight() {
      de esta pantalla. Cada tarjeta tiene ademas el suyo para ir una a una. */
   /* DESDE EL REDISEÑO DE CREAR, las acciones van en la barra de acción
      («Aplicar N notas», «Poner al día N imágenes», «Montar el vídeo») y los
-     mandos de mirar quedan pegados ENCIMA de ella. */
-  ponerBarra(() => barraDeLasImagenes(mandos));
+     mandos de mirar quedan pegados ENCIMA de ella.
+     EN EL MÓVIL, ENCIMA DE LA IMAGEN (arreglos-crear-movil, 21-10-2026):
+     pegados encima de la barra eran otra franja fija, y barra más mandos
+     tapaban hasta la mitad de la pantalla. Ahí se pasa de plano también
+     deslizando la imagen. */
+  if (esMovilCrear()) {
+    mandos.classList.add('en-la-pagina');
+    marco.before(mandos);
+    ponerBarra(() => barraDeLasImagenes(null));
+  } else ponerBarra(() => barraDeLasImagenes(mandos));
   return caja;
 }
 
@@ -12955,7 +14332,12 @@ function vistaVideoLight() {
        paga. Sale del plan del servidor, la misma cifra que el botón. */
     const coste = (((v.planes || {}).render || {}).coste) || {};
     const porDibujar = Number(coste.imagenes_por_generar) || 0;
-    caja.appendChild(h('div', { clase: 'caja-aviso' },
+    /* EN EL MÓVIL, UNA LÍNEA QUE SE ABRE (arreglos-crear-movil): la barra ya
+       dice «Vídeo obsoleto» y este aviso, abierto, empujaba el reproductor
+       una pantalla abajo. El precio, si lo hay, va en la línea. */
+    caja.appendChild(avisoPlegable('video-obsoleto',
+      'Este vídeo es de ANTES de tus últimos cambios'
+        + (porDibujar ? ` · se dibujarán ${porDibujar} imagen(es), ≈ ${usdCorto(Number(coste.usd_por_generar) || 0)}` : ''),
       'Este vídeo es de ANTES de tus últimos cambios (por ejemplo, imágenes rehechas '
       + 'en «Imágenes»): lo que ves aquí todavía no los lleva. «Montar el vídeo», en la '
       + 'barra de abajo, lo vuelve a montar con ellos.'
@@ -12986,9 +14368,23 @@ function vistaVideoLight() {
         'Arreglar los subtítulos')));
   }
 
+  /* MIENTRAS SE MONTA, LA PANTALLA NO SE DESMONTA (arreglos-crear-movil,
+     21-10-2026). Antes, con un trabajo en marcha, se quitaban el reproductor,
+     los ajustes y el repaso: el paso medía un tercio (3155 → 1183 px en un
+     móvil), el navegador recortaba el scroll y estabas tocando los subtítulos
+     y acababas mirando un recuadro vacío; al terminar no volvía. Ahora todo
+     sigue en su sitio, apagado (`inert`: ni se pulsa ni se escribe), y el
+     reproductor enseña el MP4 de ahora con «montando…» encima. El MP4 de la
+     versión activa no se toca hasta que el montaje nuevo se sella. */
+  const trabajo = trabajoVideoLight();
   const marco = h('div', { clase: `marco-video ${formatoDelVideo()}` });
-  if (hayMp4Light() && !trabajoVideoLight()) {
+  if (hayMp4Light() && (!trabajo || !v.planos.length)) {
     marco.appendChild(videoLight());
+    if (trabajo) {
+      marco.classList.add('montando');
+      marco.appendChild(h('div', { clase: 'sello sello-montando' },
+        'montando el vídeo nuevo… este es el de antes hasta que acabe'));
+    }
   } else if (v.planos.length) {
     // el último que ha caído, grande: es lo que se acaba de generar
     const ultimo = v.planos[v.planos.length - 1];
@@ -13020,17 +14416,28 @@ function vistaVideoLight() {
   /* LOS AJUSTES DEL MONTAJE, el MISMO panel que en el Encargo y con el mismo
      comportamiento (decisión 9 del rediseño): lo que se toca se guarda sin
      montar, y lo monta la barra de abajo. Se ven también sin MP4 (sus
-     cambios entran en el primer montaje); mientras se monta, no. */
-  if (!trabajoVideoLight()) caja.appendChild(ajustesEnElVideo());
+     cambios entran en el primer montaje); mientras se monta, a la vista pero
+     apagados (ver «MIENTRAS SE MONTA» arriba). */
+  const apagadoSiMonta = nodo => {
+    if (!trabajo) return nodo;
+    return h('div', { clase: 'apagado-montando', inert: true, 'aria-disabled': 'true',
+      title: 'Mientras se monta el vídeo no se puede cambiar: espera a que acabe' }, nodo);
+  };
+  if (trabajo) {
+    caja.appendChild(h('div', { clase: 'pista aviso-montando' },
+      'Mientras se monta, lo de aquí abajo se queda quieto; al acabar se puede tocar otra vez.'));
+  }
+  caja.appendChild(apagadoSiMonta(ajustesEnElVideo()));
 
   /* EL REPASO VA DEBAJO DEL VÍDEO Y SOLO CUANDO HAY VÍDEO. Antes de eso no hay
      nada que comentar, y una caja de texto vacía debajo de una barra de
      progreso invita a escribir sobre algo que todavía no existe. Al lado, la
-     ortografía de los subtítulos («Revisar»); debajo, descargar y publicar. */
-  if (hayMp4Light() && !trabajoVideoLight()) {
+     ortografía de los subtítulos («Revisar»); debajo, descargar y publicar.
+     Mientras se monta un vídeo que ya tenía MP4, se queda, apagado. */
+  if (hayMp4Light()) {
     const revisar = h('div', { clase: 'caja-video revisar-video' },
       h('h3', {}, 'Revisar'), panelOrtografia('subtitulos'));
-    caja.appendChild(h('div', { clase: 'rejilla-video' }, panelRepaso(), revisar));
+    caja.appendChild(apagadoSiMonta(h('div', { clase: 'rejilla-video' }, panelRepaso(), revisar)));
     const descargar = h('div', { clase: 'caja-video descargar-video' },
       h('h3', {}, 'Descargar'),
       h('div', { clase: 'fila' },
@@ -13039,8 +14446,8 @@ function vistaVideoLight() {
         conAyuda('Sin música, sin efectos, sin subtítulos, sin voz… o cada audio suelto, para usarlo en otro sitio. Gratis.',
           h('button', { clase: 'mini', onclick: () => abrirDescargaPorPartes(v.pid) }, 'Por partes…'))),
       h('div', { clase: 'meta' }, 'el MP4 tal y como está ahora mismo, o sin música, sin efectos, sin subtítulos… gratis'));
-    caja.appendChild(h('div', { clase: 'rejilla-video' }, descargar,
-      bloquePublicarEnVideo(v) || h('span', {})));  // Publicar en redes (rama publicar-redes-1)
+    caja.appendChild(apagadoSiMonta(h('div', { clase: 'rejilla-video' }, descargar,
+      bloquePublicarEnVideo(v) || h('span', {}))));  // Publicar en redes (rama publicar-redes-1)
   }
   ponerBarra(barraDelVideo);
   return caja;
@@ -13980,15 +15387,30 @@ function tarjetaNotaImagen(plano, notas, vieja) {
   const conAntes = notas.filter(n => n.antes && estadoDeImagen(plano, n) === 'hecha');
   const antes = conAntes.length ? conAntes[conAntes.length - 1].antes : '';
   const columna = h('div', { clase: 'nota-columna' });
+  /* MIENTRAS SE DIBUJA, EL HUECO YA ESTÁ (arreglos-crear-movil, 21-10-2026):
+     al llegar la nueva se metía «ahora · antes» y la de antes encima del texto
+     y la tarjeta bajaba 154 px de golpe. Ahora, pedida (en cola o dibujándose),
+     arriba va el hueco de la nueva y abajo la de ahora, que es la que quedará
+     como «antes»: al llegar, solo cambia la de arriba. */
+  const pidiendo = !vieja && e && e.imagen && estados.some(s => s === 'corriendo' || s === 'en cola');
   // la imagen de ahora de ese número es de OTRA escena: a una nota vieja no se le pone
-  if (vieja) {
+  if (pidiendo) {
+    columna.appendChild(h('button', { clase: 'nota-mini nota-hueco', title: 'Ver esta imagen en grande arriba', onclick: ir },
+      h('span', { clase: 'meta' }, estados.includes('corriendo') ? 'dibujando la nueva…' : 'la nueva, en cola…')));
+    columna.appendChild(h('div', { clase: 'nota-antes-ahora meta' }, '▲ ahora · antes ▼'));
+    columna.appendChild(h('button', {
+      clase: 'nota-mini nota-antes', title: 'Cómo es ahora, antes de esta nota (pulsa para verla en grande)',
+      onclick: () => lupa(API.archivo(v.pid, e.imagen)),
+    }, h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=512&v=${encodeURIComponent(ultima)}`,
+      alt: `${plano} antes`, loading: 'lazy' })));
+  } else if (vieja) {
     columna.appendChild(h('div', { clase: 'nota-mini' }, h('span', { clase: 'meta' }, 'versión anterior')));
   } else columna.appendChild(h('button', { clase: 'nota-mini', title: 'Ver esta imagen en grande arriba', onclick: ir },
     e && e.imagen
       ? h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=512&v=${encodeURIComponent(ultima)}`,
         alt: plano, loading: 'lazy' })
       : h('span', { clase: 'meta' }, 'sin imagen')));
-  if (!vieja && antes && e && antes !== e.imagen) {
+  if (!pidiendo && !vieja && antes && e && antes !== e.imagen) {
     columna.appendChild(h('div', { clase: 'nota-antes-ahora meta' }, '▲ ahora · antes ▼'));
     columna.appendChild(h('button', {
       clase: 'nota-mini nota-antes', title: 'Cómo era antes de esta nota (pulsa para verla en grande)',
@@ -14480,6 +15902,8 @@ const GUIA_DE_BLOQUE = {
   'El material': 'material',
   'Las indicaciones': 'indicaciones',
   'Las llamadas a la acción': 'cta',
+  'El tipo de relato': 'tipo_relato',
+  '🧭 Tipo de relato': 'tipo_relato',
 };
 
 /* «REVISAR»: lo escrito en el campo, contra su guía (pasos/revisar_campo.py).
@@ -15525,6 +16949,373 @@ function tarjetaReglaLight(regla, i) {
   return tarjeta;
 }
 
+/* EL TIPO DE RELATO POR DEFECTO DEL ESTILO (`estilo.relato`, rama
+   tipo-de-relato). Se guarda al elegirlo (`PUT /presets-light/{id}/relato`) y no
+   toca ningún vídeo: llega a los nuevos al crearlos y a los hechos con «Traer el
+   estilo». Documental es no tenerlo. */
+const RELATO_LIGHT = { id: '', relato: null, cargando: false, estado: '', error: '' };
+
+async function cargarRelatoEstiloLight(id) {
+  RELATO_LIGHT.id = id;
+  RELATO_LIGHT.relato = null;
+  RELATO_LIGHT.error = '';
+  RELATO_LIGHT.estado = '';
+  RELATO_LIGHT.cargando = true;
+  try {
+    const r = await pedir(`${API.presetLight(id)}/relato`);
+    if (RELATO_LIGHT.id !== id) return;
+    RELATO_LIGHT.relato = tipoRelatoDelEncargo(r.relato);
+  } catch (err) {
+    if (RELATO_LIGHT.id === id) RELATO_LIGHT.error = err.message;
+  }
+  RELATO_LIGHT.cargando = false;
+  pintarLight();
+}
+
+async function guardarRelatoEstiloLight() {
+  const id = RELATO_LIGHT.id;
+  const t = RELATO_LIGHT.relato || {};
+  const relato = t.modo && t.modo !== 'documental'
+    ? (t.modo === 'espacio_que_cambia' ? { modo: t.modo, cambia: t.cambia || 'objeto' } : { modo: t.modo })
+    : null;
+  RELATO_LIGHT.estado = 'guardando…';
+  pintarLight();
+  try {
+    const r = await pedir(`${API.presetLight(id)}/relato`, { method: 'PUT', cuerpo: { relato } });
+    if (RELATO_LIGHT.id === id) RELATO_LIGHT.estado = r.cambiado ? 'guardado ✓' : 'sin cambios';
+  } catch (err) {
+    if (RELATO_LIGHT.id === id) RELATO_LIGHT.estado = `no se ha podido guardar: ${err.message}`;
+  }
+  pintarLight();
+}
+
+function bloqueRelatoEstiloLight(ficha) {
+  const caja = h('div', {});
+  // como las reglas: un estilo sin láminas no se puede guardar (el servidor
+  // pide al menos tres fotogramas), así que el selector no se ofrece todavía
+  if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Primero genera el estilo gráfico (las láminas); después podrás elegir su tipo de relato.'));
+    return caja;
+  }
+  if (RELATO_LIGHT.id !== ficha.id) {
+    setTimeout(() => cargarRelatoEstiloLight(ficha.id), 0);
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo el tipo de relato…'));
+    return caja;
+  }
+  if (RELATO_LIGHT.error) {
+    caja.appendChild(cajaError(RELATO_LIGHT.error));
+    caja.appendChild(h('button', { clase: 'mini', onclick: () => cargarRelatoEstiloLight(ficha.id) }, 'Reintentar'));
+    return caja;
+  }
+  if (RELATO_LIGHT.cargando || !RELATO_LIGHT.relato) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo el tipo de relato…'));
+    return caja;
+  }
+  caja.appendChild(selectorTipoRelato(RELATO_LIGHT.relato, guardarRelatoEstiloLight,
+    'Documental (por defecto)'));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Es solo el punto de partida de los vídeos nuevos de '
+    + 'este estilo. Si un vídeo elige otro en su Encargo (o la Parrilla lo trae en la línea «Tipo de '
+    + 'relato:»), manda el del vídeo. «Documental» aquí quiere decir que el estilo no impone ninguno. '
+    + 'A los vídeos ya hechos solo llega con «Traer el estilo», que avisa antes de rehacer nada.'));
+  if (RELATO_LIGHT.estado) caja.appendChild(h('div', { clase: 'meta' }, RELATO_LIGHT.estado));
+  return caja;
+}
+
+/* ============================================ GUION VISUAL (rama guion-visual)
+   «Qué dibujan las imágenes»: lo que dice la voz (como siempre: no se guarda
+   nada) o lo que dice el guion. Con el guion, cada línea del guion visual es un
+   plano, y la frase de la voz no llega al dibujante: solo marca los tiempos.
+   Pintar no escribe nada (regla 1): el editor trabaja sobre una copia y solo
+   guarda al pulsar. */
+const MODOS_IMAGENES = [
+  { valor: '', nombre: 'Lo que dice la voz (por defecto)' },
+  { valor: 'guion', nombre: 'Lo que dice el guion' },
+];
+const AYUDA_IMAGENES = 'Lo que dice la voz: cada imagen ilustra su frase, como siempre. '
+  + 'Lo que dice el guion: cada imagen sigue su línea del guion visual (las líneas «Visual:» '
+  + 'de la Parrilla o un borrador de Claude que tú apruebas) y la voz solo marca los tiempos.';
+
+/* En un vídeo NUEVO: el borrador del Encargo (`e`), sin escribir nada al pintar. */
+function bloqueImagenesLight(e, ficha) {
+  const trae = (e.visuales || []).length;
+  const delEstilo = ((((ficha || {}).datos || {}).estilo || {}).imagenes === 'guion')
+    ? 'lo que dice el guion' : 'lo que dice la voz';
+  const opciones = [
+    { valor: '', nombre: `Lo que diga el estilo (${delEstilo})` },
+    { valor: 'voz', nombre: 'Lo que dice la voz' },
+    { valor: 'guion', nombre: 'Lo que dice el guion' },
+  ];
+  return h('div', { clase: 'guion-visual' },
+    campoSelect('Qué dibujan las imágenes', e.imagenes || '', opciones,
+      v => { e.imagenes = v; pintarLight(); },
+      AYUDA_IMAGENES + (trae ? ` El guion de la Parrilla trae ${trae} escena(s) con líneas «Visual:»: `
+        + 'se guardan con el vídeo y son el guion visual cuando las imágenes siguen el guion.' : '')));
+}
+
+function imagenesParaCrear(e) {
+  const salida = {};
+  if (['guion', 'voz'].includes(e.imagenes)) salida.imagenes = e.imagenes;
+  if ((e.visuales || []).length) salida.visuales = e.visuales.slice(0, 400);
+  return Object.keys(salida).length ? salida : null;
+}
+
+/* En un vídeo HECHO: la ficha del servidor y una copia del guion visual. */
+function gvDelVideoLight() {
+  const v = APP.light.video;
+  if (v.gv && v.gv.pid === v.pid) return v.gv;
+  const pid = v.pid;
+  v.gv = { pid, cargado: false, ficha: null, copia: [], tocado: false, ocupado: false, error: '' };
+  pedir(`${API.proyecto(pid)}/guion_visual`).then(d => {
+    const est = APP.light.video.gv;
+    if (!est || est.pid !== pid) return;
+    leerGvDelServidor(est, d);
+    pintarLight();
+  }).catch(err => {
+    const est = APP.light.video.gv;
+    if (!est || est.pid !== pid) return;
+    est.cargado = true;
+    est.error = err.message;
+    pintarLight();
+  });
+  return v.gv;
+}
+
+function leerGvDelServidor(est, d) {
+  est.cargado = true;
+  est.error = '';
+  est.ficha = d || {};
+  const planos = ((d || {}).guion_visual || {}).planos || [];
+  est.copia = planos.map(p => Object.assign({}, p));
+  est.tocado = false;
+}
+
+async function pedirGv(ruta, metodo, cuerpo, mensaje) {
+  const est = gvDelVideoLight();
+  est.ocupado = true;
+  pintarLight();
+  try {
+    const d = await pedir(`${API.proyecto(est.pid)}/guion_visual${ruta}`, { method: metodo, cuerpo: cuerpo || {} });
+    leerGvDelServidor(est, d);
+    if (mensaje) toast(mensaje);
+    if (d && d.trabajo_id) seguirTrabajoGv(d.trabajo_id, est.pid);
+    /* el estado del vídeo (obsoletos, coste, lo que impide dibujar) cambia
+       con el modo y la aprobación: se vuelve a leer */
+    if (ruta !== '') cargarVideoLight(est.pid).then(() => pintarLight()).catch(() => {});
+  } catch (err) {
+    est.error = err.message;
+  }
+  est.ocupado = false;
+  pintarLight();
+}
+
+function seguirTrabajoGv(trabajoId, pid) {
+  seguirTrabajo(CLAVE_VIDEO_LIGHT, trabajoId, async trabajo => {
+    if (['listo', 'error', 'cancelado'].includes(trabajo.estado)) {
+      const ahora = APP.light.video.gv;
+      if (ahora && ahora.pid === pid) APP.light.video.gv = null;
+    }
+    pintarLight();
+  }, () => refrescarVivosLight(), pid);
+}
+
+function bloqueImagenesDelVideo() {
+  const est = gvDelVideoLight();
+  if (!est.cargado) return h('div', { clase: 'cargando' }, 'cargando…');
+  const f = est.ficha || {};
+  const delEstilo = f.del_estilo === 'guion' ? 'lo que dice el guion' : 'lo que dice la voz';
+  const opciones = [
+    { valor: '', nombre: `Lo que diga el estilo (${delEstilo})` },
+    { valor: 'voz', nombre: 'Lo que dice la voz' },
+    { valor: 'guion', nombre: 'Lo que dice el guion' },
+  ];
+  const caja = h('div', { clase: 'guion-visual' },
+    h('div', { clase: 'meta' }, `Ahora: ${f.modo === 'guion' ? 'lo que dice el guion' : 'lo que dice la voz'}`),
+    campoSelect('Qué dibujan las imágenes', f.del_video || '', opciones,
+      v => pedirGv('/modo', 'PUT', { imagenes: v || null },
+        'guardado: no se dibuja nada; los planos que cambien se ofrecen para rehacer'),
+      AYUDA_IMAGENES));
+  if (f.modo === 'guion') {
+    caja.appendChild(h('div', { clase: 'pista' }, f.aprobado
+      ? '✓ El guion visual está aprobado: está en el paso Imágenes.'
+      : 'El guion visual se revisa y se aprueba en el paso Imágenes, antes de dibujar.'));
+  }
+  if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
+  return caja;
+}
+
+/* EL EDITOR, en el paso Imágenes (encima de la barra): solo en modo guion. */
+function editorGuionVisual() {
+  const v = APP.light.video;
+  if (!v || !v.pid) return null;
+  const est = gvDelVideoLight();
+  if (!est.cargado || (est.ficha || {}).modo !== 'guion') return null;
+  const f = est.ficha || {};
+  const corriendo = !!trabajoVideoLight();
+  const bloques = (f.bloques || []).map(b => ({ valor: b.id, nombre: `${b.id} · ${recortar(b.texto, 50)}` }));
+  const textoDe = {};
+  (f.bloques || []).forEach(b => { textoDe[b.id] = b.texto; });
+  const estados = [{ valor: '', nombre: 'la base (sin cambio)' }, ...(f.estados || []).map(e => ({ valor: e, nombre: e }))];
+  const caja = h('div', { clase: `guion-visual editor-gv${f.aprobado ? ' aprobado' : ''}` },
+    h('h3', {}, 'Guion visual'),
+    h('div', { clase: 'pista' }, 'Cada línea es un plano: lo que se VE, con su cámara y, si lo hay, '
+      + 'el estado del objeto que cambia. La voz de su bloque va al lado solo como referencia: '
+      + 'no llega al dibujante. Es solo texto: guardar, proponer o aprobar no paga imágenes.'));
+  if (!est.copia.length && (f.propuesta || []).length) {
+    caja.appendChild(h('div', { clase: f.aprobado_solo ? 'pista' : 'caja-aviso' },
+      f.aprobado_solo
+        ? `Se dibujan las ${f.propuesta.length} línea(s) «Visual:» que trajo la Parrilla, ya atadas a sus bloques `
+          + '(casan con el guion: valen sin aprobarlas a mano). Para cambiarlas, «Usar estas líneas», edita y aprueba.'
+        : `El guion de la Parrilla trae ${f.propuesta.length} línea(s) «Visual:», ya atadas a sus bloques.`,
+      h('div', { clase: 'fila' }, h('button', { clase: 'mini primario', disabled: est.ocupado || corriendo,
+        onclick: () => { est.copia = f.propuesta.map(p => Object.assign({}, p)); tocarGv(est); } },
+      'Usar estas líneas'))));
+  }
+  (f.avisos || []).forEach(a => caja.appendChild(h('div', { clase: 'meta' }, `⚠ ${a}`)));
+  if ((f.fuera_de_la_voz || []).length) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' }, `El guion cambió: los bloques ${f.fuera_de_la_voz.join(', ')} `
+      + 'ya no están en la voz. Corrige esos planos (o pide otro guion visual) y vuelve a aprobarlo.'));
+  }
+  const avisoDe = {};
+  (f.comprobacion || []).forEach(a => { avisoDe[a.plano] = a.que; });
+  est.copia.forEach((p, i) => {
+    const fila = h('div', { clase: 'plano-gv' },
+      h('div', { clase: 'plano-gv-cabeza' },
+        h('strong', {}, p.id || `nuevo ${i + 1}`),
+        h('span', { clase: 'meta' }, `voz: «${recortar(textoDe[p.bloque] || '', 90)}»`)),
+      campoSelect('Bloque de la voz', p.bloque || '', bloques, val => { p.bloque = val; tocarGv(est); pintarLight(); }),
+      h('label', {}, 'Qué se ve'),
+      h('textarea', { rows: 2, value: p.visual || '', datos: { foco: `gv-visual-${i}` },
+        oninput: ev => { p.visual = ev.target.value; tocarGv(est); } }),
+      h('label', {}, 'Cámara (opcional)'),
+      h('input', { type: 'text', value: p.camara || '', placeholder: 'plano general desde la puerta',
+        datos: { foco: `gv-camara-${i}` }, oninput: ev => { p.camara = ev.target.value; tocarGv(est); } }));
+    if ((f.estados || []).length) {
+      fila.appendChild(campoSelect('Estado del objeto', p.estado || '', estados,
+        val => { p.estado = val; tocarGv(est); }));
+    }
+    if (p.id && avisoDe[p.id]) fila.appendChild(h('div', { clase: 'caja-aviso' }, `Contradice lo fijo: ${avisoDe[p.id]}`));
+    fila.appendChild(h('div', { clase: 'fila' }, h('button', { clase: 'mini fantasma', disabled: est.ocupado,
+      onclick: () => { est.copia.splice(i, 1); tocarGv(est); } }, 'Quitar')));
+    caja.appendChild(fila);
+  });
+  const ultimo = est.copia.length ? est.copia[est.copia.length - 1].bloque : ((f.bloques || [])[0] || {}).id;
+  const fila = h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', disabled: est.ocupado || !bloques.length,
+      onclick: () => { est.copia.push({ bloque: ultimo || '', visual: '' }); tocarGv(est); } },
+    '+ Añadir plano'),
+    h('button', { clase: 'mini', disabled: est.ocupado || corriendo || !est.tocado,
+      onclick: () => pedirGv('', 'PUT', { planos: est.copia.filter(p => String(p.visual || '').trim()) },
+        'guion visual guardado (sin aprobar)') }, 'Guardar'),
+    h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+      onclick: () => proponerGuionVisual(!!est.copia.length) }, 'Proponer con Claude · solo texto'));
+  if (est.copia.length) {
+    fila.appendChild(f.aprobado && !est.tocado
+      ? h('button', { clase: 'mini fantasma', disabled: est.ocupado || corriendo,
+        onclick: () => pedirGv('/aprobar', 'POST', { aprobado: false }, 'aprobación retirada') }, 'Retirar la aprobación')
+      : h('button', { clase: 'mini primario', disabled: est.ocupado || corriendo,
+        onclick: () => aprobarGuionVisual() }, 'Aprobar el guion visual'));
+  }
+  caja.appendChild(fila);
+  caja.appendChild(h('div', { clase: 'meta' }, f.aprobado
+    ? (f.aprobado_solo && !est.copia.length ? '✓ Las líneas de la Parrilla valen: cada plano se dibuja desde su línea.'
+      : '✓ Aprobado: cada plano se dibuja desde su línea.')
+    : (est.tocado ? 'Hay cambios sin guardar.' : 'Sin aprobar: los planos no se dibujan hasta que lo apruebes.')));
+  if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
+  return caja;
+}
+
+/* Algo cambió en la copia: la primera vez se repinta (para que «Guardar» y
+   «Aprobar» digan la verdad); el foco sobrevive por su `data-foco`. */
+function tocarGv(est) {
+  const antes = est.tocado;
+  est.tocado = true;
+  if (!antes) pintarLight();
+}
+
+/* Aprobar lo que se VE: si hay cambios escritos, primero se guardan. */
+async function aprobarGuionVisual() {
+  const est = gvDelVideoLight();
+  if (est.tocado) {
+    await pedirGv('', 'PUT', { planos: est.copia.filter(p => String(p.visual || '').trim()) });
+    if (est.error) return;
+  }
+  await pedirGv('/aprobar', 'POST', { aprobado: true }, 'guion visual aprobado: ya se pueden dibujar los planos');
+}
+
+async function proponerGuionVisual(sustituye) {
+  if (sustituye && !confirm('Claude escribirá un guion visual nuevo leyendo el guion entero y sustituirá '
+    + 'al que hay (sin aprobar). Es solo texto: no se paga ninguna imagen.')) return;
+  const est = gvDelVideoLight();
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const d = await pedir(`${API.proyecto(est.pid)}/guion_visual/proponer`, { method: 'POST', cuerpo: {} });
+    seguirTrabajoGv(d.trabajo_id, est.pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
+/* El defecto del ESTILO, en «Cómo se cuenta». Como el tipo de relato: sin
+   láminas no se ofrece (el servidor no guarda un estilo sin fotogramas). */
+const IMAGENES_LIGHT = { id: '', valor: null, cargando: false, estado: '', error: '' };
+
+async function cargarImagenesEstiloLight(id) {
+  Object.assign(IMAGENES_LIGHT, { id, valor: null, error: '', estado: '', cargando: true });
+  try {
+    const r = await pedir(`${API.presetLight(id)}/imagenes`);
+    if (IMAGENES_LIGHT.id === id) IMAGENES_LIGHT.valor = r.imagenes || '';
+  } catch (err) {
+    if (IMAGENES_LIGHT.id === id) IMAGENES_LIGHT.error = err.message;
+  }
+  IMAGENES_LIGHT.cargando = false;
+  pintarLight();
+}
+
+async function guardarImagenesEstiloLight(valor) {
+  const id = IMAGENES_LIGHT.id;
+  IMAGENES_LIGHT.valor = valor;
+  IMAGENES_LIGHT.estado = 'guardando…';
+  pintarLight();
+  try {
+    const r = await pedir(`${API.presetLight(id)}/imagenes`, { method: 'PUT', cuerpo: { imagenes: valor || null } });
+    if (IMAGENES_LIGHT.id === id) IMAGENES_LIGHT.estado = r.cambiado ? 'guardado ✓' : 'sin cambios';
+  } catch (err) {
+    if (IMAGENES_LIGHT.id === id) IMAGENES_LIGHT.estado = `no se ha podido guardar: ${err.message}`;
+  }
+  pintarLight();
+}
+
+function bloqueImagenesEstiloLight(ficha) {
+  const caja = h('div', {});
+  if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Primero genera el estilo gráfico (las láminas); después podrás elegir qué dibujan sus imágenes.'));
+    return caja;
+  }
+  if (IMAGENES_LIGHT.id !== ficha.id) {
+    setTimeout(() => cargarImagenesEstiloLight(ficha.id), 0);
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    return caja;
+  }
+  if (IMAGENES_LIGHT.error) {
+    caja.appendChild(cajaError(IMAGENES_LIGHT.error));
+    return caja;
+  }
+  if (IMAGENES_LIGHT.cargando || IMAGENES_LIGHT.valor === null) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    return caja;
+  }
+  caja.appendChild(campoSelect('Qué dibujan las imágenes', IMAGENES_LIGHT.valor, MODOS_IMAGENES,
+    v => guardarImagenesEstiloLight(v), AYUDA_IMAGENES));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Es el punto de partida de los vídeos nuevos de este '
+    + 'estilo; cada vídeo puede cambiarlo en su Encargo, y el del vídeo manda.'));
+  if (IMAGENES_LIGHT.estado) caja.appendChild(h('div', { clase: 'meta' }, IMAGENES_LIGHT.estado));
+  return caja;
+}
+
 function bloqueReglasLight(ficha) {
   const caja = h('div', {});
   caja.appendChild(bloqueNegocioDelEstilo(ficha));  // Etapa Foto C
@@ -15716,7 +17507,13 @@ function vistaPresetLight() {
     fuenteDeTonoLight(ficha));
   if (fuenteTonoCambiadaLight(ficha)) fuente.open = true;
   tono.appendChild(fuente);
-  paneles.cuenta = bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué', tono);
+  // 🧭 el tipo de relato por defecto de los vídeos de este estilo (rama tipo-de-relato)
+  paneles.cuenta = h('div', {},
+    bloqueLight('🧭 Tipo de relato', 'cómo se cuentan por defecto los vídeos de este estilo',
+      bloqueRelatoEstiloLight(ficha)),
+    bloqueLight('🎬 Qué dibujan las imágenes', 'la voz o el guion visual, por defecto en sus vídeos',
+      bloqueImagenesEstiloLight(ficha)),
+    bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué', tono));
 
   // ⏱️ el ritmo: se cambia y ya, no rehace nada
   paneles.ritmo = bloqueLight('⏱️ Ritmo', 'cada cuánto corta el vídeo',
@@ -18561,7 +20358,10 @@ function franjaSinAplicar(modo, est) {
   const cambios = cambiosDelMontaje();
   if (!cambios.hay) return null;
   const enMarcha = !!trabajoVideoLight() || !!est.montandoAnimo;
-  return h('div', { clase: 'franja-sin-aplicar' },
+  /* en el móvil es UNA línea (la barra de abajo ya lleva el botón que la
+     resuelve): «se montan con…» se queda en el globo */
+  return h('div', { clase: 'franja-sin-aplicar',
+    title: enMarcha ? null : `Se montan con «${textoMontarCambios(cambios)}», en la barra de abajo` },
     h('span', { clase: 'crece' }, enMarcha ? 'Montando el vídeo con tus cambios…'
       : `Hay ${cambios.n ? `${cambios.n} ${cambios.n === 1 ? 'cambio' : 'cambios'}` : 'cambios'} del montaje sin aplicar`),
     enMarcha ? null : h('span', { clase: 'meta' },
@@ -21302,6 +23102,7 @@ const PORT = {
   pid: '', catalogo: null, diseno: null, planos: [], formatoVideo: '9:16', duracion: 0,
   cambiado: false, vista: '', pidiendo: 0, reloj: null, guias: true, error: '',
   propuestas: null, proponiendo: false, ia: null, abierto: false, fondos: [], cortar: null,
+  aviso: null, ideas: null, pensandoIdeas: false, iaPendiente: null,
 };
 
 function campoPortada(etiqueta, control, ayuda) {
@@ -21313,7 +23114,8 @@ async function abrirEditorPortada(pid) {
   // TODO lo del vídeo anterior fuera: su vista, sus propuestas, lo que pensaba
   if (PORT.vista) URL.revokeObjectURL(PORT.vista);
   Object.assign(PORT, { pid, abierto: true, error: '', propuestas: null, ia: null, cambiado: false,
-    proponiendo: false, vista: '', diseno: null, fondos: [] });
+    proponiendo: false, vista: '', diseno: null, fondos: [], aviso: null, ideas: null, pensandoIdeas: false,
+    iaPendiente: null });
   PORT.pidiendo += 1;
   try {
     if (!PORT.catalogo) PORT.catalogo = await pedir(`${BASE}/api/portadas/catalogo`);
@@ -21400,6 +23202,88 @@ function pintarVistaPortada() {
     PORT.error ? cajaError(PORT.error) : null].filter(Boolean));
 }
 
+/* EL EDITOR, EN TRES CAPAS (portadas-2, 21-10-2026). Antes la plantilla metía
+   efectos en la foto y la paleta y los efectos se mezclaban: «filtro tras
+   filtro». Ahora cada capa hace UNA cosa y tiene su interruptor:
+     1 · Imagen: el fondo y, si se quiere, sus ajustes (lo ÚNICO que toca la foto).
+     2 · Plantilla: dónde va cada texto y cada elemento.
+     3 · Colores: el color de textos y elementos («Sin paleta»: blanco y negro).
+   «Esta imagen lleva: …» dice en todo momento qué hay encima de la foto, con
+   una ✕ para quitar cada cosa. */
+const NOMBRES_AJUSTE_PORTADA = {
+  contraste: 'Contraste', saturacion: 'Color', brillo: 'Brillo', vineta: 'Viñeta', oscurecer: 'Oscurecer abajo',
+};
+const NEUTRO_PORTADA = { contraste: 1, saturacion: 1, brillo: 1, vineta: 0, oscurecer: 0 };
+const NOMBRES_LOOK_PORTADA = { rafaga: 'Rayos de luz', marco: 'Marco' };
+
+function cabecerasPortada(extra) {
+  const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
+  return Object.assign({}, extra || {}, pases ? { 'X-Estudio-Abiertos': pases } : {});
+}
+
+function bajarBlobPortada(blob, nombre) {
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: nombre });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/* EL AVISO, DENTRO DEL EDITOR: el aviso flotante salía DEBAJO de la capa del
+   editor y «Guardar diseño» parecía no hacer nada (notas del 21-10). Ahora va
+   en la cabecera del editor y, además, el flotante por encima de la capa. */
+function avisoPortada(texto, malo) {
+  PORT.aviso = { texto, malo: !!malo, hora: new Date() };
+  toast(texto, !!malo);
+  const sitio = document.querySelector('.capa-portada .aviso-portada');
+  if (sitio) sitio.replaceWith(pintarAvisoPortada());
+}
+
+function pintarAvisoPortada() {
+  const a = PORT.aviso;
+  if (!a) return h('span', { clase: 'aviso-portada meta' }, PORT.cambiado ? 'Cambios sin guardar' : '');
+  const hora = a.hora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+  return h('span', { clase: `aviso-portada${a.malo ? ' malo' : ' bueno'}`, role: 'status' }, `${a.texto} · ${hora}`);
+}
+
+/* QUÉ LLEVA LA IMAGEN ENCIMA, con su ✕. */
+function loQueLlevaPortada(d) {
+  const cat = PORT.catalogo || {};
+  const f = d.fondo || {};
+  const cosas = [];
+  const fondo = { fotograma: 'Fotograma del vídeo montado (trae los subtítulos y rótulos del vídeo)',
+    plano: `Imagen del plano ${(f.planos || []).join(' y ') || '—'}, tal cual se generó`,
+    subida: 'Una imagen tuya', ia: 'Una imagen hecha con IA' }[f.tipo] || 'Sin imagen';
+  cosas.push({ texto: `Fondo: ${fondo}` });
+  if (d.modo === 'ia') {
+    cosas.push({ texto: 'La portada la hizo la IA entera (sin capas encima)',
+      quitar: () => { d.modo = 'capas'; tocarPortada(true); } });
+  }
+  Object.keys(NOMBRES_AJUSTE_PORTADA).forEach(k => {
+    const v = (d.efectos || {})[k];
+    if (v == null || Math.abs(Number(v) - NEUTRO_PORTADA[k]) < 0.001) return;
+    cosas.push({ texto: `${NOMBRES_AJUSTE_PORTADA[k]} ${String(Number(v).toFixed(2)).replace('.', ',')}`,
+      quitar: () => { const e = Object.assign({}, d.efectos); delete e[k]; d.efectos = e; tocarPortada(true); } });
+  });
+  (d.elementos || []).forEach(el => {
+    if (el.rol === 'look' && !el.oculto) {
+      cosas.push({ texto: NOMBRES_LOOK_PORTADA[el.tipo] || el.tipo, quitar: () => { el.oculto = true; tocarPortada(true); } });
+    }
+  });
+  if (d.paleta && d.paleta !== 'ninguna') {
+    const pal = (cat.paletas || []).find(p => p.id === d.paleta) || {};
+    cosas.push({ texto: `Colores de la paleta «${pal.nombre || d.paleta}» en textos y elementos (la foto no)`,
+      quitar: () => cambiarPlantillaPortada({ paleta: 'ninguna' }) });
+  }
+  const caja = h('div', { clase: 'lleva-portada' }, h('b', {}, 'Esta imagen lleva:'));
+  cosas.forEach(c => caja.appendChild(h('span', { clase: 'pastilla-lleva' }, c.texto,
+    c.quitar ? h('button', { clase: 'quitar-lleva', type: 'button', title: 'Quitarlo', 'aria-label': `Quitar: ${c.texto}`,
+      onclick: c.quitar }, '✕') : null)));
+  if (cosas.length === 1 && d.modo !== 'ia') caja.appendChild(h('span', { clase: 'meta' }, 'nada más: la imagen va tal cual.'));
+  return caja;
+}
+
 function pintarEditorPortada() {
   if (!PORT.abierto || !PORT.diseno) return;
   let capa = document.querySelector('.capa-portada');
@@ -21410,27 +23294,44 @@ function pintarEditorPortada() {
   }
   const d = PORT.diseno;
   const cat = PORT.catalogo || {};
+  const capas = cat.capas || {};
   const plantilla = (cat.plantillas || []).find(p => p.id === d.plantilla) || {};
   const mandos = h('div', { clase: 'mandos-portada' });
 
-  // --- formato y plantilla
-  mandos.appendChild(h('div', { clase: 'fila' },
-    campoPortada('Formato', h('select', { onchange: ev => cambiarPlantillaPortada({ formato: ev.target.value }) },
-      ...Object.keys(cat.formatos || {}).map(f => h('option', { value: f, selected: f === d.formato },
-        `${f}${f === PORT.formatoVideo ? ' (el del vídeo)' : ''}`)))),
-    campoPortada('Paleta', h('select', { onchange: ev => cambiarPlantillaPortada({ paleta: ev.target.value }) },
-      ...(cat.paletas || []).map(p => h('option', { value: p.id, selected: p.id === d.paleta }, p.nombre)))),
-    campoPortada('Letra', h('select', { onchange: ev => cambiarPlantillaPortada({ fuente: ev.target.value }) },
-      ...(cat.fuentes || []).map(f => h('option', { value: f.id, selected: f.id === d.fuente },
-        `${f.nombre}${f.lista ? '' : ' (aún no está: se usa una parecida)'}`))))));
+  // --- 1 · la imagen (el fondo y sus ajustes)
+  const imagen = bloqueFondoPortada(d);
+  imagen.prepend(h('div', { clase: 'meta' }, capas.imagen || ''));
+  imagen.querySelector('h4').textContent = '1 · Imagen';
+  mandos.appendChild(imagen);
+  mandos.appendChild(bloqueAjustesPortada(d));
+
+  // --- 2 · la plantilla
   const rejilla = h('div', { clase: 'plantillas-portada' });
   (cat.plantillas || []).forEach(p => rejilla.appendChild(h('button', {
     clase: `mini plantilla-portada${p.id === d.plantilla ? ' elegida' : ''}`, title: p.cuando, type: 'button',
     onclick: () => cambiarPlantillaPortada({ plantilla: p.id }) }, p.nombre)));
-  mandos.appendChild(h('div', { clase: 'bloque' }, h('h4', {}, 'Plantilla'),
+  mandos.appendChild(h('div', { clase: 'bloque' }, h('h4', {}, '2 · Plantilla'),
+    h('div', { clase: 'meta' }, capas.plantilla || ''),
+    campoPortada('Formato', h('select', { onchange: ev => cambiarPlantillaPortada({ formato: ev.target.value }) },
+      ...Object.keys(cat.formatos || {}).map(f => h('option', { value: f, selected: f === d.formato },
+        `${f}${f === PORT.formatoVideo ? ' (el del vídeo)' : ''}`)))),
     h('div', { clase: 'meta' }, plantilla.cuando || ''), rejilla));
 
-  // --- textos de la plantilla
+  // --- 3 · los colores
+  const pal = (cat.paletas || []).find(p => p.id === d.paleta) || {};
+  mandos.appendChild(h('div', { clase: 'bloque' }, h('h4', {}, '3 · Colores y letra'),
+    h('div', { clase: 'meta' }, capas.paleta || ''),
+    h('div', { clase: 'fila' },
+      campoPortada('Paleta', h('select', { onchange: ev => cambiarPlantillaPortada({ paleta: ev.target.value }) },
+        ...(cat.paletas || []).map(p => h('option', { value: p.id, selected: p.id === d.paleta }, p.nombre)))),
+      h('span', { clase: 'muestras-paleta', title: 'texto · resaltado · aviso · borde' },
+        ...['texto', 'acento', 'alerta', 'contorno'].map(k => h('span', { clase: 'muestra-color', title: { texto: 'texto', acento: 'resaltado', alerta: 'aviso', contorno: 'borde' }[k],
+          estilo: /^#[0-9a-f]{6}$/i.test(pal[k] || '') ? `background:${pal[k]}` : '' }))),
+      campoPortada('Letra', h('select', { onchange: ev => cambiarPlantillaPortada({ fuente: ev.target.value }) },
+        ...(cat.fuentes || []).map(f => h('option', { value: f.id, selected: f.id === d.fuente },
+          `${f.nombre}${f.lista ? '' : ' (aún no está: se usa una parecida)'}`)))))));
+
+  // --- los textos de la plantilla
   const textos = h('div', { clase: 'bloque' }, h('h4', {}, 'Textos'),
     h('div', { clase: 'meta' }, 'Pocas palabras: de 1 a 3 por campo se leen en el móvil; más de 4 bajan los clics.'));
   (plantilla.campos || ['titulo']).forEach(campo => {
@@ -21444,19 +23345,6 @@ function pintarEditorPortada() {
   });
   mandos.appendChild(textos);
 
-  // --- el fondo
-  mandos.appendChild(bloqueFondoPortada(d));
-
-  // --- los efectos de la foto
-  const efectos = h('div', { clase: 'bloque' }, h('h4', {}, 'Efectos de la imagen'));
-  [['contraste', 'Contraste', 0.5, 1.8, 1], ['saturacion', 'Color', 0, 2, 1], ['brillo', 'Brillo', 0.5, 1.6, 1],
-    ['vineta', 'Viñeta', 0, 1, 0], ['oscurecer', 'Oscurecer abajo', 0, 1, 0]].forEach(([clave, nombre, min, max, def]) => {
-    const valor = (d.efectos || {})[clave] != null ? d.efectos[clave] : def;
-    efectos.appendChild(campoPortada(nombre, h('input', { type: 'range', min, max, step: 0.05, value: valor,
-      oninput: ev => { d.efectos = Object.assign({}, d.efectos, { [clave]: Number(ev.target.value) }); tocarPortada(false); } })));
-  });
-  mandos.appendChild(efectos);
-
   // --- los elementos, uno a uno
   mandos.appendChild(bloqueElementosPortada(d));
 
@@ -21465,20 +23353,385 @@ function pintarEditorPortada() {
 
   const vista = h('div', { clase: 'columna-vista-portada' },
     h('div', { clase: 'vista-portada-grande' }),
+    loQueLlevaPortada(d),
     h('label', { clase: 'casilla-red' }, h('input', { type: 'checkbox', checked: PORT.guias,
       onchange: ev => { PORT.guias = ev.target.checked; refrescarVistaPortada(true); } }),
     ' Ver lo que tapan las redes (no sale en la portada)'),
     d.modo === 'ia' ? h('div', { clase: 'caja-aviso' }, 'Esta portada la ha hecho la IA con el texto dentro: '
-      + 'revisa que lo haya escrito bien. Para volver a las capas, elige otra plantilla.') : null);
+      + 'revisa que lo haya escrito bien. Mientras esté así, los textos, elementos y ajustes de aquí no se pintan. ',
+    h('button', { clase: 'mini', type: 'button', onclick: () => { d.modo = 'capas'; tocarPortada(true); } }, 'Volver a capas')) : null);
 
   capa.replaceChildren(h('div', { clase: 'panel-portada' },
     h('div', { clase: 'fila cab-portada' }, h('h3', { clase: 'crece' }, 'Diseñar portada'),
+      pintarAvisoPortada(),
       h('button', { clase: 'mini', type: 'button', onclick: () => guardarDisenoPortada() }, 'Guardar diseño'),
+      h('button', { clase: 'mini', type: 'button', title: 'La portada a tamaño real, en PNG, para tenerla de respaldo',
+        onclick: () => descargarPortada() }, '⬇ Descargar portada'),
       h('button', { clase: 'primario', type: 'button', onclick: () => usarPortada() }, 'Usar como portada'),
       h('button', { clase: 'mini fantasma', type: 'button', onclick: () => cerrarEditorPortada() }, 'Cerrar')),
     h('div', { clase: 'cuerpo-portada' }, vista, mandos)));
   pintarVistaPortada();
   mandos.scrollTop = scroll;
+}
+
+/* LOS AJUSTES DE LA IMAGEN: apagados de partida; «Sin ajustes» los quita
+   todos y «Look de la plantilla» pone los que sugiere ella (y sus rayos o su
+   marco), a la vista en los deslizadores. */
+function bloqueAjustesPortada(d) {
+  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Ajustes de la imagen'),
+    h('div', { clase: 'meta' }, 'Opcionales: se aplican una sola vez, sobre la imagen de fondo.'));
+  [['contraste', 0.5, 1.8], ['saturacion', 0, 2], ['brillo', 0.5, 1.6], ['vineta', 0, 1], ['oscurecer', 0, 1]].forEach(([clave, min, max]) => {
+    const valor = (d.efectos || {})[clave] != null ? d.efectos[clave] : NEUTRO_PORTADA[clave];
+    b.appendChild(campoPortada(NOMBRES_AJUSTE_PORTADA[clave], h('input', { type: 'range', min, max, step: 0.05, value: valor,
+      'aria-label': NOMBRES_AJUSTE_PORTADA[clave],
+      oninput: ev => { d.efectos = Object.assign({}, d.efectos, { [clave]: Number(ev.target.value) }); tocarPortada(false); },
+      onchange: () => tocarPortada(true) })));
+  });
+  const look = d.look || {};
+  const hayLook = Object.keys(look).length || (d.elementos || []).some(e => e.rol === 'look');
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', type: 'button', disabled: !Object.keys(d.efectos || {}).length,
+      onclick: () => { d.efectos = {}; tocarPortada(true); } }, 'Sin ajustes (la imagen tal cual)'),
+    hayLook ? h('button', { clase: 'mini fantasma', type: 'button', title: 'Lo que sugiere la plantilla: se ve en los deslizadores y se quita con «Sin ajustes»',
+      onclick: () => {
+        d.efectos = Object.assign({}, look);
+        (d.elementos || []).forEach(e => { if (e.rol === 'look') e.oculto = false; });
+        tocarPortada(true);
+      } }, 'Poner el look de la plantilla') : null));
+  return b;
+}
+
+/* DÓNDE NACE UN ELEMENTO NUEVO: en un hueco libre (antes nacía en el centro,
+   pequeño y encima del título, y parecía que no salía). */
+function sitioLibrePortada(d) {
+  const huecos = [[0.22, 0.78], [0.78, 0.78], [0.5, 0.88], [0.8, 0.14], [0.2, 0.14], [0.5, 0.62], [0.82, 0.45], [0.18, 0.45]];
+  const ocupados = (d.elementos || []).filter(e => !e.oculto && e.x != null && e.y != null);
+  return huecos.find(([x, y]) => !ocupados.some(e => Math.hypot(e.x - x, e.y - y) < 0.16)) || huecos[0];
+}
+
+const NUEVOS_ELEMENTOS_PORTADA = {
+  texto: { texto: 'NUEVO', tam: 0.11, estilos: ['contorno', 'sombra'] },
+  insignia: { texto: 'VS', tam: 0.15, forma: 'circulo' },
+  flecha: { tam: 0.03 },
+  circulo: { tam: 0.2 }, rayo: {}, icono: { icono: 'estrella', tam: 0.13 },
+  etiqueta: { texto: 'GRATIS', tam: 0.08 }, banda: { texto: 'SOLO HOY', y: 0.86 },
+  marco: {}, subrayado: { tam: 0.3 }, estrellas: { tam: 0.08 }, cinta: { texto: 'NUEVO' },
+  rafaga: { opacidad: 0.15 },
+};
+const NOMBRES_ELEMENTO_PORTADA = {
+  texto: 'Texto', insignia: 'Insignia', flecha: 'Flecha', circulo: 'Círculo', rayo: 'Rayo (versus)', icono: 'Icono',
+  etiqueta: 'Etiqueta / precio', banda: 'Banda', marco: 'Marco', subrayado: 'Subrayado', estrellas: 'Estrellas',
+  cinta: 'Cinta', rafaga: 'Rayos de luz',
+};
+
+function bloqueElementosPortada(d) {
+  const cat = PORT.catalogo || {};
+  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Elementos'));
+  (d.elementos || []).forEach((el, i) => {
+    const fila = h('div', { clase: `elemento-portada${el.oculto ? ' escondido-portada' : ''}${el.propio ? ' propio-portada' : ''}` });
+    const nombre = NOMBRES_ELEMENTO_PORTADA[el.tipo] || el.tipo;
+    const cab = h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, `${i + 1}. ${nombre}`
+      + (el.rol && el.rol !== 'look' ? ` · ${(cat.campos || {})[el.rol] || el.rol}` : '')
+      + (el.rol === 'look' ? ' · del look de la plantilla' : '') + (el.propio ? ' · añadido' : '')),
+    el.orig ? h('button', { clase: 'mini fantasma', type: 'button', title: 'Vuelve a como nació (sitio, tamaño, giro y colores; el texto se queda)',
+      onclick: () => {
+        const texto = el.texto;
+        Object.keys(el).forEach(k => { if (!['tipo', 'texto', 'orig', 'propio', 'rol', 'oculto', 'papeles'].includes(k)) delete el[k]; });
+        Object.assign(el, el.orig);
+        if (texto != null) el.texto = texto;
+        tocarPortada(true);
+      } }, 'Restablecer') : null,
+    h('button', { clase: 'mini fantasma', type: 'button', title: el.oculto ? 'Enseñar' : 'Esconder',
+      onclick: () => { el.oculto = !el.oculto; tocarPortada(true); } }, el.oculto ? 'Enseñar' : 'Esconder'),
+    h('button', { clase: 'mini fantasma', type: 'button', title: 'Quitar',
+      onclick: () => { d.elementos.splice(i, 1); tocarPortada(true); } }, 'Quitar'));
+    fila.appendChild(cab);
+    if (['texto', 'insignia', 'etiqueta', 'banda', 'cinta'].includes(el.tipo) && !el.rol) {
+      fila.appendChild(h('input', { type: 'text', value: el.texto || '', maxlength: 80, 'aria-label': 'Texto',
+        oninput: ev => { el.texto = ev.target.value; tocarPortada(false); } }));
+    }
+    if (el.tipo === 'icono') {
+      fila.appendChild(h('select', { 'aria-label': 'Icono', onchange: ev => { el.icono = ev.target.value; tocarPortada(false); } },
+        ...(cat.iconos || []).map(n => h('option', { value: n, selected: n === el.icono }, n))));
+    }
+    if (el.tipo === 'texto') {
+      const estilos = h('div', { clase: 'fila estilos-portada' });
+      Object.entries(cat.estilos_texto || {}).forEach(([id, que]) => estilos.appendChild(h('label', { clase: 'casilla-red', title: que },
+        h('input', { type: 'checkbox', checked: (el.estilos || []).includes(id),
+          onchange: ev => {
+            const lista = new Set(el.estilos || []);
+            if (ev.target.checked) lista.add(id); else lista.delete(id);
+            el.estilos = Array.from(lista);
+            tocarPortada(false);
+          } }), ` ${id}`)));
+      fila.appendChild(estilos);
+    }
+    const deslizadores = h('div', { clase: 'fila deslizadores-portada' });
+    [['x', '↔', 0, 1], ['y', '↕', 0, 1], ['tam', 'tamaño', 0.01, 0.6], ['rot', 'giro', -45, 45]].forEach(([clave, etiqueta, min, max]) => {
+      if (clave === 'tam' && ['rayo', 'rafaga'].includes(el.tipo)) return;
+      deslizadores.appendChild(h('label', { clase: 'deslizador-portada' }, h('span', {}, etiqueta),
+        h('input', { type: 'range', min, max, step: clave === 'rot' ? 1 : 0.005, 'aria-label': `${nombre}: ${etiqueta}`,
+          value: el[clave] != null ? el[clave] : (clave === 'rot' ? 0 : clave === 'tam' ? 0.1 : 0.5),
+          oninput: ev => { el[clave] = Number(ev.target.value); tocarPortada(false); } })));
+    });
+    fila.appendChild(deslizadores);
+    fila.appendChild(h('label', { clase: 'casilla-red' }, 'Color ',
+      h('input', { type: 'color', value: /^#[0-9a-f]{6}$/i.test(el.color || '') ? el.color : '#ffffff',
+        onchange: ev => {
+          el.color = ev.target.value;
+          // un color elegido a mano ya no es de la paleta: no se repinta al cambiarla
+          if (el.papeles) { el.papeles = Object.assign({}, el.papeles); delete el.papeles.color; }
+          tocarPortada(false);
+        } })));
+    b.appendChild(fila);
+  });
+  const elegir = h('select', { 'aria-label': 'Elemento que se añade' },
+    ...Object.entries(cat.elementos || {}).map(([id, que]) => h('option', { value: id }, `${NOMBRES_ELEMENTO_PORTADA[id] || id}: ${que}`)));
+  b.appendChild(h('div', { clase: 'fila' }, elegir,
+    h('button', { clase: 'mini', type: 'button', onclick: () => {
+      const tipo = elegir.value;
+      const pal = ((PORT.catalogo || {}).paletas || []).find(p => p.id === d.paleta) || {};
+      const [x, y] = sitioLibrePortada(d);
+      // un color que se vea: el del aviso de la paleta (en «Sin paleta», blanco)
+      const color = tipo === 'texto' ? (pal.texto || '#ffffff')
+        : (d.paleta === 'ninguna' ? '#ffffff' : (pal.alerta || '#ff2b2b'));
+      const nuevo = Object.assign({ tipo, x, y, fuente: d.fuente, color, contorno: pal.contorno || '#000000',
+        acento: pal.acento, propio: true }, NUEVOS_ELEMENTOS_PORTADA[tipo] || {});
+      // qué papel de la paleta pinta cada color: al cambiar de paleta se repinta
+      nuevo.papeles = { contorno: 'contorno', acento: 'acento' };
+      if (tipo === 'texto') nuevo.papeles.color = 'texto';
+      else if (d.paleta !== 'ninguna') nuevo.papeles.color = 'alerta';
+      if (tipo === 'flecha') Object.assign(nuevo, { x: Math.max(0.08, x - 0.2), y: Math.min(0.92, y + 0.1), x2: x, y2: y });
+      nuevo.orig = Object.assign({}, nuevo);
+      delete nuevo.orig.texto;
+      d.elementos = (d.elementos || []).concat([nuevo]);
+      tocarPortada(true);
+      avisoPortada(`${NOMBRES_ELEMENTO_PORTADA[tipo] || tipo} añadido: está en la lista de elementos (el último)`);
+    } }, 'Añadir')));
+  return b;
+}
+
+function bloqueAyudasPortada() {
+  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Ayuda'));
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', type: 'button', disabled: PORT.proponiendo, onclick: () => proponerPortadas() },
+      PORT.proponiendo ? 'Claude está pensando…' : 'Proponer 3 portadas con Claude'),
+    h('span', { clase: 'meta' }, 'Lee el guion y propone plantilla, textos y colores. No se paga aparte.')));
+  if (PORT.propuestas && PORT.propuestas.length) {
+    const lista = h('div', { clase: 'propuestas-portada' });
+    PORT.propuestas.forEach((p, i) => lista.appendChild(h('div', { clase: 'propuesta-portada' },
+      h('b', {}, `${i + 1}. ${(((PORT.catalogo || {}).plantillas || []).find(x => x.id === p.diseno.plantilla) || {}).nombre || p.diseno.plantilla}`),
+      h('span', { clase: 'meta' }, Object.values(p.diseno.textos || {}).filter(Boolean).join(' · ')),
+      p.por_que ? h('span', { clase: 'meta' }, p.por_que) : null,
+      h('button', { clase: 'mini', type: 'button', onclick: () => {
+        // la propuesta trae su plantilla, textos y colores; la imagen, sus
+        // ajustes y lo añadido a mano se quedan
+        const actual = PORT.diseno;
+        // (lo añadido a mano ya viene dentro: el servidor la hizo sobre este diseño)
+        PORT.diseno = Object.assign({}, p.diseno, {
+          fondo: Object.assign({}, actual.fondo, { disposicion: p.diseno.fondo.disposicion }),
+          efectos: actual.efectos || {} });
+        tocarPortada(true);
+      } }, 'Usar esta'))));
+    b.appendChild(lista);
+  }
+
+  b.appendChild(h('h4', {}, 'Con la IA de imágenes (se paga)'));
+  b.appendChild(h('div', { clase: 'meta' }, 'Recomendado: el FONDO con IA y el texto en capas (exacto y editable). '
+    + 'La portada ENTERA con el texto dentro es más vistosa, pero menos constante y puede escribir mal alguna letra.'));
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.pensandoIdeas, onclick: () => pedirIdeasIA() },
+      PORT.pensandoIdeas ? 'Claude está leyendo el guion…' : 'Ideas de imagen con Claude'),
+    h('span', { clase: 'meta' }, 'Tres escenas pensadas para ESTE vídeo, con su prompt. No se paga aparte.')));
+  (PORT.ideas || []).forEach((idea, i) => {
+    const area = h('textarea', { rows: 3, maxlength: 1500, 'aria-label': `Prompt de la idea ${i + 1}`,
+      oninput: ev => { idea.prompt = ev.target.value; } }, idea.prompt);
+    b.appendChild(h('div', { clase: 'idea-ia-portada' },
+      h('b', {}, `${i + 1}. ${idea.titulo}`), idea.por_que ? h('span', { clase: 'meta' }, idea.por_que) : null,
+      area,
+      h('div', { clase: 'fila' },
+        h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => prepararIA('fondo', idea.prompt) }, 'Fondo con esta idea'),
+        h('button', { clase: 'mini fantasma', type: 'button', disabled: !!PORT.ia, onclick: () => prepararIA('portada', idea.prompt) }, 'Portada entera con esta idea'))));
+  });
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => prepararIA('fondo', '') }, 'Hacer el fondo con IA'),
+    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => prepararIA('portada', '') }, 'Hacer la portada entera con IA')));
+  // ANTES DE PAGAR: el prompt a la vista y editable, y el precio
+  const p = PORT.iaPendiente;
+  if (p) {
+    const calidad = h('select', { 'aria-label': 'Calidad de la imagen', onchange: ev => { p.calidad = ev.target.value; prepararIA(p.que, p.prompt, p.calidad); } },
+      ...[['low', 'Calidad baja'], ['medium', 'Calidad media'], ['high', 'Calidad alta']].map(([v, t]) => h('option', { value: v, selected: v === p.calidad }, t)));
+    const area = h('textarea', { rows: 5, maxlength: 1500, 'aria-label': 'Prompt que se manda a la IA',
+      oninput: ev => { p.prompt = ev.target.value; } }, p.prompt);
+    b.appendChild(h('div', { clase: 'caja-aviso antes-de-pagar' },
+      h('b', {}, p.que === 'portada' ? 'La portada ENTERA con IA' : 'El FONDO con IA (sin texto)'),
+      h('span', { clase: 'meta' }, 'Esto es lo que se le pide a la IA. Cámbialo si quieres:'),
+      area,
+      h('span', { clase: 'meta' }, p.que === 'portada'
+        ? 'Siempre se añade al final: que escriba exactamente tus textos, con tildes, y nada más.'
+        : 'Siempre se añade al final: sin letras ni logotipos, y con sitio para el titular.'),
+      h('div', { clase: 'fila' }, calidad,
+        h('button', { clase: 'primario mini', type: 'button', disabled: !!p.enviando, onclick: () => portadaConIA(p) },
+          `Dibujar (≈ ${Number((p.precio || {}).usd || 0).toFixed(3)} $)`),
+        h('button', { clase: 'mini fantasma', type: 'button', onclick: () => { PORT.iaPendiente = null; pintarEditorPortada(); } }, 'Cancelar'))));
+  }
+  if (PORT.ia) b.appendChild(h('div', { clase: 'cargando' }, PORT.ia));
+  return b;
+}
+
+async function cambiarPlantillaPortada(cambios) {
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/plantilla`), {
+      method: 'POST', cuerpo: Object.assign({ diseno: PORT.diseno }, cambios) });
+    PORT.diseno = r.diseno;
+    tocarPortada(true);
+  } catch (e) { avisoPortada(e.message, true); }
+}
+
+async function guardarDisenoPortada() {
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/diseno`), {
+      method: 'PUT', cuerpo: { diseno: PORT.diseno } });
+    PORT.diseno = r.diseno;
+    PORT.cambiado = false;
+    avisoPortada('Diseño guardado ✓');
+  } catch (e) { avisoPortada(`no se ha guardado: ${e.message}`, true); }
+}
+
+async function descargarPortada() {
+  const pid = PORT.pid;
+  try {
+    avisoPortada('Pintando la portada a tamaño real…');
+    const r = await fetch(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/descargar`), {
+      method: 'POST', headers: cabecerasPortada({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ diseno: PORT.diseno }) });
+    if (!r.ok) {
+      let motivo = `HTTP ${r.status}`;
+      try { const datos = await r.json(); motivo = (datos.error && (datos.error.mensaje || datos.error)) || motivo; } catch (e) { /* no era JSON */ }
+      throw new Error(String(motivo));
+    }
+    // (sin comillas dentro de una expresión regular: parten los analizadores de herramientas/)
+    const nombre = ((r.headers.get('Content-Disposition') || '').split('filename=')[1] || '').replace(/\x22/g, '').trim() || 'portada.png';
+    bajarBlobPortada(await r.blob(), nombre);
+    avisoPortada('Portada descargada ✓');
+  } catch (e) { avisoPortada(`no se ha podido descargar: ${e.message}`, true); }
+}
+
+async function usarPortada() {
+  try {
+    avisoPortada('Pintando la portada a tamaño real…');
+    const ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/usar`), {
+      method: 'POST', cuerpo: { diseno: PORT.diseno } });
+    PORT.cambiado = false;
+    if (PUB.pid === PORT.pid) PUB.ficha = ficha;
+    cerrarEditorPortada();
+    toast('Portada puesta: es la que se mandará a las redes');
+    if (typeof pintarModulo === 'function') pintarModulo();
+  } catch (e) { avisoPortada(`no se ha podido poner la portada: ${e.message}`, true); }
+}
+
+/* Lo que se pide a Claude se sigue preguntando (un minuto pasa del proxy). */
+async function seguirPeticionPortada(ruta, cuerpo) {
+  const lanzada = await pedir(ruta, { method: 'POST', cuerpo });
+  let ficha = { estado: 'pensando' };
+  for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
+    await new Promise(r => setTimeout(r, 1500));
+    ficha = await pedir(`${ruta}/${lanzada.id}`);
+  }
+  if (ficha.estado === 'error') throw new Error(ficha.error);
+  if (ficha.estado !== 'listo') throw new Error('tarda demasiado: vuelve a pedirlo en un momento');
+  return ficha;
+}
+
+async function proponerPortadas() {
+  const pid = PORT.pid;
+  PORT.proponiendo = true;
+  pintarEditorPortada();
+  try {
+    const ficha = await seguirPeticionPortada(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/proponer`), { diseno: PORT.diseno });
+    // SOLO si seguimos en el mismo vídeo: las de A no salen en el editor de B
+    if (PORT.pid !== pid || !PORT.abierto) return;
+    PORT.propuestas = ficha.propuestas || [];
+  } catch (e) {
+    if (PORT.pid === pid) avisoPortada(`no se han podido proponer portadas: ${e.message}`, true);
+  }
+  if (PORT.pid !== pid) return;
+  PORT.proponiendo = false;
+  pintarEditorPortada();
+}
+
+async function pedirIdeasIA() {
+  const pid = PORT.pid;
+  PORT.pensandoIdeas = true;
+  pintarEditorPortada();
+  try {
+    const ficha = await seguirPeticionPortada(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ideas-ia`), { diseno: PORT.diseno });
+    if (PORT.pid !== pid || !PORT.abierto) return;
+    PORT.ideas = ficha.ideas || [];
+  } catch (e) {
+    if (PORT.pid === pid) avisoPortada(`no se han podido pedir ideas: ${e.message}`, true);
+  }
+  if (PORT.pid !== pid) return;
+  PORT.pensandoIdeas = false;
+  pintarEditorPortada();
+}
+
+/* PASO 1 DE LA IA: el prompt y el precio a la vista, SIN gastar nada. */
+async function prepararIA(que, prompt, calidad) {
+  const pid = PORT.pid;
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ia`), { method: 'POST',
+      cuerpo: { diseno: PORT.diseno, que, calidad: calidad || 'low', prompt: prompt || undefined } });
+    if (PORT.pid !== pid) return;
+    PORT.iaPendiente = { que, calidad: r.calidad, prompt: r.prompt, precio: r.precio };
+    pintarEditorPortada();
+    const caja = document.querySelector('.capa-portada .antes-de-pagar');
+    if (caja) caja.scrollIntoView({ block: 'nearest' });
+  } catch (e) { avisoPortada(e.message, true); }
+}
+
+/* PASO 2: se paga y se dibuja con el prompt de la pantalla. */
+async function portadaConIA(p) {
+  const pid = PORT.pid;
+  const ruta = rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ia`);
+  // UN SOLO PAGO: un doble clic en «Dibujar» mandaba dos `confirmado` y se
+  // dibujaban (y se pagaban) dos imágenes
+  if (p.enviando || PORT.ia) return;
+  p.enviando = true;
+  PORT.ia = 'Mandando a la IA…';
+  pintarEditorPortada();
+  try {
+    const lanzado = await pedir(ruta, { method: 'POST',
+      cuerpo: { diseno: PORT.diseno, que: p.que, calidad: p.calidad, prompt: p.prompt, confirmado: true } });
+    PORT.iaPendiente = null;
+    PORT.ia = 'Dibujando con la IA…';
+    pintarEditorPortada();
+    let t = { estado: 'ejecutando' };
+    for (let i = 0; i < 400 && !['listo', 'error', 'cancelado'].includes(t.estado); i += 1) {
+      await new Promise(r => setTimeout(r, 2000));
+      t = await pedir(API.trabajo(lanzado.trabajo_id));
+      if (t.mensaje) PORT.ia = `Dibujando con la IA… ${t.mensaje}`;
+    }
+    if (t.estado !== 'listo') throw new Error(t.error || t.mensaje || `el trabajo ha acabado «${t.estado}»`);
+    const r = t.resultado || {};
+    /* SOLO EN SU VÍDEO. Si entretanto se cerró el editor o se abrió el de
+       otro vídeo, la imagen no se pierde: el servidor la apunta en el diseño
+       guardado y sale en «Fondos ya hechos» al volver a abrirlo. */
+    if (PORT.pid !== pid || !PORT.abierto) return;
+    PORT.fondos = [r.nombre].concat((PORT.fondos || []).filter(x => x !== r.nombre));
+    PORT.diseno.fondo = Object.assign({}, PORT.diseno.fondo, { tipo: 'ia', imagen: r.nombre });
+    if (p.que === 'portada') PORT.diseno.modo = 'ia';
+    PORT.ia = null;
+    tocarPortada(true);
+    avisoPortada(p.que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA ✓');
+    return;
+  } catch (e) {
+    if (PORT.pid === pid) avisoPortada(`no se ha podido hacer con la IA: ${e.message}`, true);
+  }
+  p.enviando = false;
+  if (PORT.pid !== pid || !PORT.abierto) return;
+  PORT.ia = null;
+  pintarEditorPortada();
 }
 
 function bloqueFondoPortada(d) {
@@ -21557,208 +23810,6 @@ function bloqueFondoPortada(d) {
     b.appendChild(lista);
   }
   return b;
-}
-
-const NUEVOS_ELEMENTOS_PORTADA = {
-  texto: { texto: 'NUEVO', tam: 0.09, estilos: ['contorno', 'sombra'] },
-  insignia: { texto: 'VS', tam: 0.09, forma: 'circulo' },
-  flecha: { x: 0.3, y: 0.6, x2: 0.5, y2: 0.5 },
-  circulo: { tam: 0.12 }, rayo: {}, icono: { icono: 'estrella', tam: 0.07 },
-  etiqueta: { texto: 'GRATIS', tam: 0.06 }, banda: { texto: 'SOLO HOY', y: 0.86 },
-  marco: {}, subrayado: { y: 0.4 }, estrellas: { y: 0.6 }, cinta: { texto: 'NUEVO' },
-  rafaga: { opacidad: 0.15 },
-};
-
-function bloqueElementosPortada(d) {
-  const cat = PORT.catalogo || {};
-  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Elementos'));
-  (d.elementos || []).forEach((el, i) => {
-    const fila = h('div', { clase: `elemento-portada${el.oculto ? ' escondido-portada' : ''}` });
-    const cab = h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, `${i + 1}. ${el.tipo}`
-      + (el.rol ? ` · ${(cat.campos || {})[el.rol] || el.rol}` : '')),
-    h('button', { clase: 'mini fantasma', type: 'button', title: el.oculto ? 'Enseñar' : 'Esconder',
-      onclick: () => { el.oculto = !el.oculto; tocarPortada(true); } }, el.oculto ? 'Enseñar' : 'Esconder'),
-    h('button', { clase: 'mini fantasma', type: 'button', title: 'Quitar',
-      onclick: () => { d.elementos.splice(i, 1); tocarPortada(true); } }, 'Quitar'));
-    fila.appendChild(cab);
-    if (['texto', 'insignia', 'etiqueta', 'banda', 'cinta'].includes(el.tipo) && !el.rol) {
-      fila.appendChild(h('input', { type: 'text', value: el.texto || '', maxlength: 80,
-        oninput: ev => { el.texto = ev.target.value; tocarPortada(false); } }));
-    }
-    if (el.tipo === 'icono') {
-      fila.appendChild(h('select', { onchange: ev => { el.icono = ev.target.value; tocarPortada(false); } },
-        ...(cat.iconos || []).map(n => h('option', { value: n, selected: n === el.icono }, n))));
-    }
-    if (el.tipo === 'texto') {
-      const estilos = h('div', { clase: 'fila estilos-portada' });
-      Object.entries(cat.estilos_texto || {}).forEach(([id, que]) => estilos.appendChild(h('label', { clase: 'casilla-red', title: que },
-        h('input', { type: 'checkbox', checked: (el.estilos || []).includes(id),
-          onchange: ev => {
-            const lista = new Set(el.estilos || []);
-            if (ev.target.checked) lista.add(id); else lista.delete(id);
-            el.estilos = Array.from(lista);
-            tocarPortada(false);
-          } }), ` ${id}`)));
-      fila.appendChild(estilos);
-    }
-    const deslizadores = h('div', { clase: 'fila deslizadores-portada' });
-    [['x', '↔', 0, 1], ['y', '↕', 0, 1], ['tam', 'tamaño', 0.01, 0.6], ['rot', 'giro', -45, 45]].forEach(([clave, nombre, min, max]) => {
-      if (clave === 'tam' && ['rayo', 'rafaga'].includes(el.tipo)) return;
-      deslizadores.appendChild(h('label', { clase: 'deslizador-portada' }, h('span', {}, nombre),
-        h('input', { type: 'range', min, max, step: clave === 'rot' ? 1 : 0.005,
-          value: el[clave] != null ? el[clave] : (clave === 'rot' ? 0 : clave === 'tam' ? 0.1 : 0.5),
-          oninput: ev => { el[clave] = Number(ev.target.value); tocarPortada(false); } })));
-    });
-    fila.appendChild(deslizadores);
-    {
-      fila.appendChild(h('label', { clase: 'casilla-red' }, 'Color ',
-        h('input', { type: 'color', value: /^#[0-9a-f]{6}$/i.test(el.color || '') ? el.color : '#ffffff',
-          onchange: ev => { el.color = ev.target.value; tocarPortada(false); } })));
-    }
-    b.appendChild(fila);
-  });
-  const elegir = h('select', { 'aria-label': 'Elemento que se añade' },
-    ...Object.entries(cat.elementos || {}).map(([id, que]) => h('option', { value: id }, `${id}: ${que}`)));
-  b.appendChild(h('div', { clase: 'fila' }, elegir,
-    h('button', { clase: 'mini', type: 'button', onclick: () => {
-      const tipo = elegir.value;
-      const pal = ((PORT.catalogo || {}).paletas || []).find(p => p.id === d.paleta) || {};
-      d.elementos = (d.elementos || []).concat([Object.assign({ tipo, x: 0.5, y: 0.5, fuente: d.fuente,
-        color: tipo === 'texto' ? (pal.texto || '#ffffff') : (pal.acento || '#ffd400'),
-        contorno: pal.contorno || '#000000', acento: pal.acento }, NUEVOS_ELEMENTOS_PORTADA[tipo] || {})]);
-      tocarPortada(true);
-    } }, 'Añadir')));
-  return b;
-}
-
-function bloqueAyudasPortada() {
-  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Ayuda'));
-  b.appendChild(h('div', { clase: 'fila' },
-    h('button', { clase: 'mini', type: 'button', disabled: PORT.proponiendo, onclick: () => proponerPortadas() },
-      PORT.proponiendo ? 'Claude está pensando…' : 'Proponer 3 portadas con Claude'),
-    h('span', { clase: 'meta' }, 'Lee el guion y propone plantilla, textos y colores. No se paga aparte.')));
-  if (PORT.propuestas && PORT.propuestas.length) {
-    const lista = h('div', { clase: 'propuestas-portada' });
-    PORT.propuestas.forEach((p, i) => lista.appendChild(h('div', { clase: 'propuesta-portada' },
-      h('b', {}, `${i + 1}. ${(((PORT.catalogo || {}).plantillas || []).find(x => x.id === p.diseno.plantilla) || {}).nombre || p.diseno.plantilla}`),
-      h('span', { clase: 'meta' }, Object.values(p.diseno.textos || {}).filter(Boolean).join(' · ')),
-      p.por_que ? h('span', { clase: 'meta' }, p.por_que) : null,
-      h('button', { clase: 'mini', type: 'button', onclick: () => {
-        PORT.diseno = Object.assign({}, p.diseno, { fondo: Object.assign({}, PORT.diseno.fondo, { disposicion: p.diseno.fondo.disposicion }) });
-        tocarPortada(true);
-      } }, 'Usar esta'))));
-    b.appendChild(lista);
-  }
-  b.appendChild(h('h4', {}, 'Con la IA de imágenes (se paga)'));
-  b.appendChild(h('div', { clase: 'meta' }, 'Opción 1: solo el FONDO, sin texto; el texto sigue en capas, exacto y editable. '
-    + 'Opción 2: la portada ENTERA con el texto dentro; más vistosa, pero la IA puede escribir mal alguna letra.'));
-  const calidad = h('select', { 'aria-label': 'Calidad de la imagen' },
-    h('option', { value: 'low' }, 'Calidad baja'), h('option', { value: 'medium' }, 'Calidad media'),
-    h('option', { value: 'high' }, 'Calidad alta'));
-  b.appendChild(h('div', { clase: 'fila' }, calidad,
-    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => portadaConIA('fondo', calidad.value) },
-      'Hacer el fondo con IA'),
-    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => portadaConIA('portada', calidad.value) },
-      'Hacer la portada entera con IA')));
-  if (PORT.ia) b.appendChild(h('div', { clase: 'cargando' }, PORT.ia));
-  return b;
-}
-
-async function cambiarPlantillaPortada(cambios) {
-  try {
-    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/plantilla`), {
-      method: 'POST', cuerpo: Object.assign({ diseno: PORT.diseno }, cambios) });
-    PORT.diseno = r.diseno;
-    tocarPortada(true);
-  } catch (e) { toast(e.message, true); }
-}
-
-async function guardarDisenoPortada() {
-  try {
-    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/diseno`), {
-      method: 'PUT', cuerpo: { diseno: PORT.diseno } });
-    PORT.diseno = r.diseno;
-    PORT.cambiado = false;
-    toast('Diseño de la portada guardado');
-  } catch (e) { toast(e.message, true); }
-}
-
-async function usarPortada() {
-  try {
-    toast('Pintando la portada a tamaño real…');
-    const ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/usar`), {
-      method: 'POST', cuerpo: { diseno: PORT.diseno } });
-    PORT.cambiado = false;
-    if (PUB.pid === PORT.pid) PUB.ficha = ficha;
-    toast('Portada puesta: es la que se mandará a las redes');
-    cerrarEditorPortada();
-    if (typeof pintarModulo === 'function') pintarModulo();
-  } catch (e) { toast(`no se ha podido poner la portada: ${e.message}`, true); }
-}
-
-async function proponerPortadas() {
-  const pid = PORT.pid;
-  PORT.proponiendo = true;
-  pintarEditorPortada();
-  const ruta = rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/proponer`);
-  try {
-    const lanzada = await pedir(ruta, { method: 'POST', cuerpo: { diseno: PORT.diseno } });
-    let ficha = { estado: 'pensando' };
-    for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
-      await new Promise(r => setTimeout(r, 1500));
-      ficha = await pedir(`${ruta}/${lanzada.id}`);
-    }
-    if (ficha.estado === 'error') throw new Error(ficha.error);
-    if (ficha.estado !== 'listo') throw new Error('tarda demasiado: vuelve a pedirlo en un momento');
-    // SOLO si seguimos en el mismo vídeo: las de A no salen en el editor de B
-    if (PORT.pid !== pid || !PORT.abierto) return;
-    PORT.propuestas = ficha.propuestas || [];
-  } catch (e) {
-    if (PORT.pid === pid) toast(`no se han podido proponer portadas: ${e.message}`, true);
-  }
-  if (PORT.pid !== pid) return;
-  PORT.proponiendo = false;
-  pintarEditorPortada();
-}
-
-async function portadaConIA(que, calidad) {
-  const pid = PORT.pid;
-  const ruta = rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ia`);
-  try {
-    const precio = await pedir(ruta, { method: 'POST', cuerpo: { diseno: PORT.diseno, que, calidad } });
-    const usd = Number((precio.precio || {}).usd || 0).toFixed(3);
-    const aviso = que === 'portada'
-      ? `La IA hará la portada ENTERA con el texto dentro (puede escribir mal alguna letra). Cuesta unos ${usd} $. ¿Seguimos?`
-      : `La IA hará solo el fondo, sin texto; el texto sigue en capas. Cuesta unos ${usd} $. ¿Seguimos?`;
-    if (!window.confirm(aviso)) return;
-    const lanzado = await pedir(ruta, { method: 'POST', cuerpo: { diseno: PORT.diseno, que, calidad, confirmado: true } });
-    PORT.ia = 'Dibujando con la IA…';
-    pintarEditorPortada();
-    let t = { estado: 'ejecutando' };
-    for (let i = 0; i < 400 && !['listo', 'error', 'cancelado'].includes(t.estado); i += 1) {
-      await new Promise(r => setTimeout(r, 2000));
-      t = await pedir(API.trabajo(lanzado.trabajo_id));
-      if (t.mensaje) PORT.ia = `Dibujando con la IA… ${t.mensaje}`;
-    }
-    if (t.estado !== 'listo') throw new Error(t.error || t.mensaje || `el trabajo ha acabado «${t.estado}»`);
-    const r = t.resultado || {};
-    /* SOLO EN SU VÍDEO. Si entretanto se cerró el editor o se abrió el de
-       otro vídeo, la imagen no se pierde: el servidor la apunta en el diseño
-       guardado y sale en «Fondos ya hechos» al volver a abrirlo. */
-    if (PORT.pid !== pid || !PORT.abierto) return;
-    PORT.fondos = [r.nombre].concat((PORT.fondos || []).filter(x => x !== r.nombre));
-    PORT.diseno.fondo = Object.assign({}, PORT.diseno.fondo, { tipo: 'ia', imagen: r.nombre });
-    if (que === 'portada') PORT.diseno.modo = 'ia';
-    toast(que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA');
-    PORT.ia = null;
-    tocarPortada(true);
-    return;
-  } catch (e) {
-    if (PORT.pid === pid) toast(`no se ha podido hacer con la IA: ${e.message}`, true);
-  }
-  if (PORT.pid !== pid || !PORT.abierto) return;
-  PORT.ia = null;
-  pintarEditorPortada();
 }
 
 /* ================================================================== PUBLICAR
@@ -22008,6 +24059,7 @@ function pintarModulo() {
   sellarHistoriaModulo();
   const foco = document.activeElement && document.activeElement.dataset
     ? document.activeElement.dataset.foco : '';
+  const ancla = anclaDeScroll('modulo', claveScrollModulo);
   vaciar(m);
   const volver = barraVolverModulo();  // «‹ Volver» (diseno-crearia)
   if (volver) m.appendChild(volver);
@@ -22031,6 +24083,7 @@ function pintarModulo() {
     }
   }
   devolverScroll('modulo', claveScrollModulo);
+  volverAlAncla(ancla, claveScrollModulo);
 }
 
 /* -------------------------------------------------------------- INICIO
@@ -22784,6 +24837,8 @@ async function cargarPublicar(silencio) {
           const error = ((PUB.ficha.seo || {}).errores || {})[t];
           if (error) toast(error, true);
           else toast(t === 'optimizar' ? 'Revisión SEO lista: acepta lo que te guste'
+            : t === 'investigar' ? 'Búsquedas investigadas: elige la frase con «Usar»'
+            : t === 'encontraron' ? 'Listo: así te encontraron en YouTube'
             : 'Tres ganchos listos: elige uno');
         });
       }
@@ -23980,8 +26035,10 @@ function bloquePortadaPublicar() {
   const etiqueta = h('span', { clase: 'meta' }, p.imagen ? 'Imagen subida'
     : p.ms != null ? `Fotograma del segundo ${(p.ms / 1000).toFixed(1)}` : 'Cada red elige la suya (no has elegido ninguna)');
   let reloj = null;
+  // con imagen propia el deslizador sigue vivo: es el momento para TikTok,
+  // que sin el permiso «cover_image» solo acepta un fotograma
   const deslizador = h('input', { type: 'range', min: 0, max: dur, step: 100, value: msVista,
-    disabled: !!p.imagen, 'aria-label': 'Momento del vídeo para la portada',
+    'aria-label': p.imagen ? 'Fotograma para TikTok' : 'Momento del vídeo para la portada',
     oninput: ev => {
       PUB.portadaMs = Number(ev.target.value);
       etiqueta.textContent = `Segundo ${(PUB.portadaMs / 1000).toFixed(1)} (sin guardar)`;
@@ -24014,10 +26071,12 @@ function bloquePortadaPublicar() {
       etiqueta,
       deslizador,
       h('div', { clase: 'fila' },
-        h('button', { clase: 'mini', disabled: !!p.imagen, onclick: () => guardarPortada({ ms: Number(deslizador.value) }) },
-          'Usar este fotograma'),
+        h('button', { clase: 'mini', onclick: () => guardarPortada({ ms: Number(deslizador.value) }) },
+          p.imagen ? 'Este fotograma para TikTok' : 'Usar este fotograma'),
         h('label', { clase: 'boton mini', for: `portada-${f.pid}` }, 'Subir una imagen'), entrada,
         h('button', { clase: 'mini primario', onclick: () => abrirEditorPortada(f.pid) }, 'Diseñar portada'),
+        p.imagen ? h('button', { clase: 'mini', title: 'Guardar una copia de la portada (respaldo)',
+          onclick: () => descargarPortadaPublicar(f.pid, p.imagen) }, '⬇ Descargar portada') : null,
         p.imagen ? h('button', { clase: 'mini fantasma', onclick: () => guardarPortada({ quitar_imagen: true }) }, 'Quitar la imagen') : null,
         (p.ms != null || p.imagen) ? h('button', { clase: 'mini fantasma',
           onclick: () => guardarPortada({ ms: null, quitar_imagen: true }) }, 'Que cada red elija') : null),
@@ -24028,9 +26087,75 @@ function bloquePortadaPublicar() {
         p.imagen ? h('label', { clase: 'casilla-red', title: 'TikTok solo acepta una imagen propia si tu cuenta tiene esa función; si no, usa el fotograma' },
           h('input', { type: 'checkbox', checked: !!p.tiktok_imagen, onchange: ev => guardarPortada({ tiktok_imagen: ev.target.checked }) }),
           ' Usar la imagen también en TikTok') : null),
-      h('div', { clase: 'meta' }, 'Instagram y TikTok usan el fotograma elegido; Facebook, solo si sale como vídeo (no como Reel). '
-        + 'Una imagen subida va a Instagram y Facebook (y a YouTube o TikTok si lo marcas).'))));
+      portadaPorRedPublicar(f))));
   return b;
+}
+
+/* RED POR RED, QUÉ PORTADA SE VA A MANDAR (portadas-2, 21-10). Es la misma
+   regla que `publicar.campos_portada`: lo que cada red acepta por Upload-Post.
+   Antes solo había una frase general y no se sabía por qué una red ponía la
+   suya. */
+function portadaPorRedPublicar(f) {
+  const p = f.portada || {};
+  const conPortada = ['instagram', 'tiktok', 'youtube', 'facebook', 'linkedin', 'x', 'pinterest'];
+  const redes = (f.redes || []).filter(r => conPortada.includes(r));
+  const sinPortada = (f.redes || []).filter(r => !conPortada.includes(r));
+  const caja = h('div', { clase: 'portada-por-red' }, h('b', {}, 'Qué portada recibe cada red:'));
+  if (!(f.redes || []).length) {
+    caja.appendChild(h('span', { clase: 'meta' }, 'Marca alguna red arriba para verlo.'));
+    return caja;
+  }
+  const seg = ms => `el fotograma del segundo ${(ms / 1000).toFixed(1).replace('.', ',')}`;
+  const nombres = { instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook',
+    linkedin: 'LinkedIn', x: 'X', pinterest: 'Pinterest' };
+  const tiktokPuede = !!f.tiktok_portada_propia;
+  redes.forEach(red => {
+    let que = '';
+    let ok = true;
+    if (red === 'instagram') {
+      que = p.imagen ? 'tu imagen ✓ (en la cuadrícula del perfil se ve el centro, 3:4)' : p.ms != null ? `${seg(p.ms)} ✓` : 'ninguna: la elige Instagram';
+      ok = !!(p.imagen || p.ms != null);
+    } else if (red === 'tiktok') {
+      if (p.imagen && (p.tiktok_imagen || tiktokPuede)) {
+        que = tiktokPuede ? 'tu imagen ✓ (tu cuenta tiene el permiso «cover_image»)'
+          : 'tu imagen, si tu cuenta tiene el permiso «cover_image» (si no, TikTok la ignora)';
+      } else if (p.ms != null) que = `${seg(p.ms)} ✓ (sin el permiso «cover_image», TikTok solo acepta un fotograma)`;
+      else { que = p.imagen ? 'ninguna: TikTok no acepta tu imagen sin el permiso «cover_image». Elige un fotograma para TikTok' : 'ninguna: la elige TikTok'; ok = false; }
+    } else if (red === 'youtube') {
+      if (!p.youtube) { que = 'ninguna: marca «Mandarla también a YouTube» (necesita el canal verificado)'; ok = false; }
+      else if (p.imagen || p.ms != null) que = 'tu miniatura, si el canal está verificado (en el carrusel de Shorts YouTube suele enseñar un fotograma)';
+      else { que = 'ninguna: elige una imagen o un fotograma'; ok = false; }
+    } else if (red === 'facebook') {
+      const reel = ((f.encaje || {}).facebook || {}).tipo === 'Reel';
+      if (reel) { que = 'ninguna: sale como Reel (vertical de hasta 90 s) y Facebook no admite portada en los Reels'; ok = false; }
+      else if (p.imagen) que = 'tu imagen ✓ (sale como vídeo)';
+      else if (p.ms != null) que = `${seg(p.ms)} ✓`;
+      else { que = 'ninguna: la elige Facebook'; ok = false; }
+    } else if (red === 'linkedin' || red === 'x') {
+      if (p.imagen) que = 'tu imagen ✓';
+      else if (p.ms != null) que = `${seg(p.ms)} ✓`;
+      else { que = `ninguna: la elige ${nombres[red]}`; ok = false; }
+    } else if (red === 'pinterest') {
+      if (p.imagen) que = 'tu imagen ✓';
+      else if (p.ms != null) que = `${seg(p.ms)} ✓`;
+      else { que = 'ninguna: la elige Pinterest'; ok = false; }
+    }
+    caja.appendChild(h('div', { clase: `fila portada-red${ok ? '' : ' sin-portada'}` }, h('b', {}, `${nombres[red]}:`), h('span', {}, que)));
+  });
+  if (sinPortada.length) {
+    caja.appendChild(h('div', { clase: 'fila portada-red sin-portada' },
+      h('span', {}, `${sinPortada.length === 1 ? 'Esta red no admite' : 'Estas redes no admiten'} portada: ${sinPortada.map(r => NOMBRES_RED[r] || r).join(', ')}.`)));
+  }
+  return caja;
+}
+
+async function descargarPortadaPublicar(pid, sello) {
+  try {
+    const r = await fetch(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada.jpg?s=${encodeURIComponent(sello || '')}`),
+      { headers: cabecerasPortada() });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    bajarBlobPortada(await r.blob(), `${slugDeDescarga((PUB.ficha || {}).nombre || pid)}_portada.jpg`);
+  } catch (e) { toast(`no se ha podido descargar la portada: ${e.message}`, true); }
 }
 
 function bloqueCuandoPublicar() {
@@ -24325,6 +26450,9 @@ function filasEnvioFicha(e) {
     pastillaEstadoEnvio(e.estado),
     debioSalirPublicar(e),
     h('span', { clase: 'crece meta motivo-envio' }, e.error || e.nota || ''),
+    // QUÉ PORTADA SE MANDÓ (portadas-2): los envíos de antes no lo saben
+    e.portada != null ? h('span', { clase: 'meta portada-envio' },
+      `Portada: ${e.portada || 'ninguna (la puso la red)'}`) : null,
     botonComprobarPublicar(e),
     e.metricas && textoMetricas(e.metricas)
       ? h('span', { clase: 'metricas-envio', title: `actualizado ${fechaCorta(e.metricas.al)}` },
@@ -25142,6 +27270,133 @@ function seccionClaveUploadPost(ficha) {
         onclick: () => guardarClaves({ uploadpost: { clave: '' } }) }, 'Quitar') : null));
 }
 
+/* LA CLAVE DE LA API DE DATOS DE YOUTUBE (rama seo-real), opcional: con ella
+   «Investigar búsquedas» mide también la competencia. Gratis, con un cupo
+   diario (~100 búsquedas); no caduca. */
+function seccionClaveYouTube(ficha) {
+  const yt = (ficha && ficha.youtube) || {};
+  const puesta = !!yt.puesta;
+  const campo = h('input', { type: 'password', placeholder: puesta ? `puesta (${yt.cola || ''})` : 'sin poner' });
+  const resultado = h('div', { clase: 'meta' });
+  return h('section', { clase: 'bloque-config' },
+    h('h3', {}, 'YouTube (búsquedas SEO)'),
+    h('div', { clase: 'pista' },
+      'Opcional. Una API key de Google Cloud con la «YouTube Data API v3» activada (console.cloud.google.com → '
+      + 'APIs y servicios → Credenciales → Crear credenciales → Clave de API). Con ella, «Investigar búsquedas» en '
+      + 'Publicar mide la competencia de cada frase en YouTube. Es gratis, con unas 100 búsquedas al día; no caduca. '
+      + 'Sin ella se mide igual la demanda (autocompletado) y tu historial.'),
+    h('div', { clase: 'fila' },
+      h('b', {}, 'YouTube Data API'), h('span', { clase: 'crece' }),
+      pastillaEstado(puesta ? 'ok' : 'vacio', puesta ? yt.cola || '' : 'sin poner')),
+    h('div', { clase: 'fila-clave' }, campo,
+      h('button', { clase: 'mini', onclick: () => {
+        if (!campo.value.trim()) { toast('escribe la clave', true); return; }
+        guardarClaves({ youtube: { clave: campo.value.trim() } });
+        campo.value = '';
+      } }, 'Cambiar'),
+      puesta ? h('button', { clase: 'mini', onclick: async () => {
+        resultado.textContent = 'probando…';
+        try {
+          const r = await pedir(rutaPublicar('/youtube/probar'), { method: 'POST' });
+          resultado.textContent = `${r.prueba.estado === 'ok' ? '✓' : '⚠'} ${r.prueba.mensaje}`
+            + (r.cupo ? ` · quedan ~${r.cupo.busquedas} búsquedas hoy` : '');
+        } catch (e) { resultado.textContent = e.message; }
+      } }, 'Probar') : null,
+      puesta ? h('button', { clase: 'mini fantasma peligro',
+        onclick: () => guardarClaves({ youtube: { clave: '' } }) }, 'Quitar') : null),
+    resultado);
+}
+
+/* TU CANAL DE YOUTUBE (rama seo-real-3): YouTube Analytics con OAuth. La
+   persona crea en Google Cloud un «ID de cliente de OAuth» (aplicación web)
+   con la dirección de vuelta que se enseña aquí, pega el ID y el secreto y
+   pulsa «Conectar mi canal». Google se abre en otra pestaña y vuelve a
+   `/api/publicar/youtube/oauth/vuelta`; al volver a esta, Configuración se
+   pone al día sola (al recuperar el foco). */
+function vueltaOAuthYouTube() {
+  return `${location.origin}${BASE}/api/publicar/youtube/oauth/vuelta`;
+}
+
+let ESCUCHA_FOCO_CANAL = false;
+const CANAL_PENDIENTE = { desde: 0 };
+
+function seccionCanalYouTube(ficha) {
+  const yo = (ficha && ficha.youtube_oauth) || {};
+  /* AL VOLVER DE LA PESTAÑA DE GOOGLE: solo mientras hay una conexión a medias,
+     solo las claves, y solo se repinta si el canal cambió (revisión del 21-10:
+     repintar a cada foco borraba lo que se estaba pegando). */
+  if (!ESCUCHA_FOCO_CANAL) {
+    ESCUCHA_FOCO_CANAL = true;
+    window.addEventListener('focus', async () => {
+      const pendiente = CANAL_PENDIENTE.desde && Date.now() - CANAL_PENDIENTE.desde < 15 * 60 * 1000;
+      if (!pendiente) { CANAL_PENDIENTE.desde = 0; return; }
+      try {
+        const r = await pedir(API.claves());
+        const antes = ((estadoConfig().ficha || {}).youtube_oauth) || {};
+        const ahora = r.youtube_oauth || {};
+        if (ahora.conectado !== antes.conectado || ahora.desde !== antes.desde || ahora.caido !== antes.caido) {
+          estadoConfig().ficha = Object.assign({}, estadoConfig().ficha, { youtube_oauth: ahora });
+          CANAL_PENDIENTE.desde = 0;
+          repintarClaves();
+          if (ahora.conectado && !ahora.caido) toast(`Canal conectado: ${ahora.canal || 'tu canal'}`);
+        }
+      } catch (e) { /* se vuelve a mirar en el próximo foco */ }
+    });
+  }
+  const id = h('input', { type: 'text', value: yo.cliente_id || '', placeholder: '…apps.googleusercontent.com' });
+  const secreto = h('input', { type: 'password', placeholder: yo.puesta ? 'puesto (no hace falta volver a escribirlo)' : 'secreto del cliente' });
+  const vuelta = vueltaOAuthYouTube();
+  const conectar = async () => {
+    // la pestaña se abre YA (en el clic): abierta después de un await, Safari
+    // y Firefox la bloquean como ventana emergente
+    const pestana = window.open('', '_blank');
+    try {
+      const r = await pedir(rutaPublicar('/youtube/oauth/empezar'), { method: 'POST', cuerpo: { redireccion: vuelta } });
+      CANAL_PENDIENTE.desde = Date.now();
+      if (pestana) { pestana.opener = null; pestana.location.href = r.url; } else location.href = r.url;
+      toast('Da permiso en la pestaña de Google y vuelve aquí');
+    } catch (e) {
+      if (pestana) pestana.close();
+      toast(e.message, true);
+    }
+  };
+  const estado = yo.conectado
+    ? (yo.caido ? pastillaEstado('error', 'conexión cortada') : pastillaEstado('ok', yo.canal || 'conectado'))
+    : pastillaEstado(yo.puesta ? 'parcial' : 'vacio', yo.puesta ? 'sin conectar' : 'sin poner');
+  return h('section', { clase: 'bloque-config canal-youtube' },
+    h('h3', {}, 'YouTube: tu canal'),
+    h('div', { clase: 'pista' },
+      'Opcional. Conecta tu canal y el SEO aprende de él: qué búsquedas ya te traen vistas en YouTube y, '
+      + 'de cada vídeo publicado, cómo te encontraron y cuánto lo vieron. En console.cloud.google.com, en el '
+      + 'mismo proyecto de la clave de YouTube: activa la «YouTube Analytics API», configura la pantalla de '
+      + 'consentimiento (tipo «Externo», tú como usuario de prueba) y crea Credenciales → «ID de cliente de '
+      + 'OAuth» → «Aplicación web», con esta URI de redireccionamiento autorizada:'),
+    h('div', { clase: 'fila' }, h('code', { clase: 'crece vuelta-oauth' }, vuelta),
+      h('button', { clase: 'mini', onclick: () => { navigator.clipboard && navigator.clipboard.writeText(vuelta); toast('Copiada'); } }, 'Copiar')),
+    h('div', { clase: 'fila' }, h('b', {}, 'Canal'), h('span', { clase: 'crece' }), estado),
+    yo.conectado && yo.desde ? h('div', { clase: 'meta' }, `Conectado el ${String(yo.desde).replace('T', ' ')}.`) : null,
+    yo.caido ? h('div', { clase: 'meta aviso-busquedas' }, 'Google cortó la conexión. Si tu app de Google Cloud está «en prueba», lo hace cada 7 días: vuelve a conectar (o publícala en la pantalla de consentimiento para que no caduque).') : null,
+    h('div', { clase: 'fila-clave' }, id, secreto,
+      h('button', { clase: 'mini', onclick: () => {
+        const cliente = id.value.trim();
+        if (!cliente) { toast('pega el ID de cliente', true); return; }
+        if (!secreto.value.trim() && (!yo.puesta || cliente !== yo.cliente_id)) { toast('pega también el secreto', true); return; }
+        guardarClaves({ youtube_oauth: { cliente_id: cliente, secreto: secreto.value.trim() || CONSERVAR_CLAVE } });
+        secreto.value = '';
+      } }, 'Guardar')),
+    h('div', { clase: 'fila' },
+      yo.puesta ? h('button', { clase: 'mini primario', datos: { accion: 'conectar-canal' }, onclick: conectar },
+        yo.conectado ? 'Volver a conectar' : 'Conectar mi canal') : null,
+      yo.conectado ? h('button', { clase: 'mini fantasma peligro', onclick: async () => {
+        try {
+          estadoConfig().ficha = Object.assign({}, estadoConfig().ficha,
+            await pedir(rutaPublicar('/youtube/oauth/desconectar'), { method: 'POST' }));
+          repintarClaves();
+          toast('Canal desconectado');
+        } catch (e) { toast(e.message, true); }
+      } }, 'Desconectar') : null));
+}
+
 /* ================================================================ PUBLICAR · SEO
  * Rama `publicar-seo` (18-10-2026). Lo que hace que un vídeo se ENCUENTRE:
  * la palabra clave del proyecto y la de cada vídeo, los campos que acepta
@@ -25288,7 +27543,8 @@ function bloqueSeoVideo() {
   b.appendChild(h('div', { clase: 'fila campos-seo' },
     h('label', { clase: 'etiqueta-campo' }, 'Palabra clave de este vídeo',
       h('input', { type: 'text', value: 'palabra_clave' in (PUB.seoBorrador || {}) ? PUB.seoBorrador.palabra_clave : (seo.palabra_propia || ''),
-        placeholder: proyecto || `la del proyecto (${DONDE_SEO_PROYECTO})`, datos: { foco: 'seo-palabra-video' },
+        placeholder: seo.palabra && !seo.palabra_propia ? seo.palabra : (proyecto && !seo.proyecto_fuera ? proyecto : 'la frase que alguien buscaría para encontrar ESTE vídeo'),
+        datos: { foco: 'seo-palabra-video' },
         oninput: ev => { PUB.seoBorrador = Object.assign(PUB.seoBorrador || {}, { palabra_clave: ev.target.value }); },
         onchange: async ev => { await guardarSeoVideoPublicar({ palabra_clave: ev.target.value }); delete PUB.seoBorrador.palabra_clave; } })),
     botonGuia('palabra_clave', campo)));
@@ -25297,14 +27553,143 @@ function bloqueSeoVideo() {
       h('span', { clase: 'meta crece' }, `Claude propone para este vídeo: «${seo.palabra_propuesta}»`),
       h('button', { clase: 'mini', onclick: () => guardarSeoVideoPublicar({ palabra_clave: seo.palabra_propuesta }) }, 'Usarla')));
   }
-  if (!seo.palabra) {
-    b.appendChild(h('div', { clase: 'caja-aviso' }, `Ni este vídeo ni su proyecto tienen palabra clave: sin ella los textos no se posicionan para nada en concreto. Ponla aquí o en ${DONDE_SEO_PROYECTO}.`));
+  if (seo.palabra_origen === 'propuesta') {
+    b.appendChild(h('div', { clase: 'fila' },
+      h('span', { clase: 'meta crece' }, `En uso: «${seo.palabra}», la que propuso Claude para este vídeo (sin confirmar). Confírmala o escribe otra.`),
+      h('button', { clase: 'mini', onclick: () => guardarSeoVideoPublicar({ palabra_clave: seo.palabra }) }, 'Confirmarla')));
   }
+  if (seo.proyecto_fuera) {
+    b.appendChild(h('div', { clase: 'meta' }, `La palabra clave del proyecto («${proyecto}») no se usa aquí: este vídeo no trata de eso, y meterla espanta a quien la busca.`));
+  }
+  if (!seo.palabra) {
+    b.appendChild(h('div', { clase: 'caja-aviso' }, 'Este vídeo no tiene palabra clave: sin ella los textos no se posicionan para nada en concreto. Escríbela o pulsa «Investigar búsquedas» y elige una de las que la gente busca.'));
+  }
+  /* Los dos pueden no tener nada que enseñar (p. ej. «Cómo te encontraron»
+     solo con el vídeo en YouTube) y devuelven null: appendChild(null) rompía
+     la ficha entera de Publicar (22-10-2026). */
+  for (const bloque of [bloqueBusquedasSeo(), bloqueEncontraronSeo()]) if (bloque) b.appendChild(bloque);
   if (seo.nombre_fichero) b.appendChild(h('div', { clase: 'meta' }, `El MP4 se sube como «${seo.nombre_fichero}» (el del proyecto no cambia).`));
   if ((seo.errores || {}).optimizar) b.appendChild(cajaError(seo.errores.optimizar));
   const propuesta = (seo.propuesta || {}).redes || {};
   if (Object.keys(propuesta).length) b.appendChild(propuestaSeoPublicar(propuesta));
   return b;
+}
+
+/* «INVESTIGAR BÚSQUEDAS» (rama seo-real, 20-10): lo que la gente busca de
+   verdad (autocompletado de YouTube y Google, Perú), la competencia en YouTube
+   si hay clave, y cómo le fue a cada frase en tu cuenta. Solo frases que el
+   vídeo trata. «Usar» la deja como palabra clave del vídeo; no cambia ningún
+   texto (para eso, «Optimizar SEO», que ya usa estas búsquedas). */
+function bloqueBusquedasSeo() {
+  const f = PUB.ficha;
+  const seo = f.seo || {};
+  const real = seo.real || {};
+  const trabajando = !!(seo.trabajando || {}).investigar;
+  PUB.busquedasAbiertas = PUB.busquedasAbiertas === undefined ? true : PUB.busquedasAbiertas;
+  const caja = h('details', { clase: 'busquedas-seo', open: !!PUB.busquedasAbiertas,
+    ontoggle: ev => { PUB.busquedasAbiertas = ev.currentTarget.open; } },
+  h('summary', {}, h('b', {}, 'Búsquedas reales'),
+    real.al ? h('span', { clase: 'meta' }, ` · investigado el ${String(real.al).slice(0, 10)}`) : h('span', { clase: 'meta' }, ' · sin investigar')));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('span', { clase: 'meta crece' }, seo.con_youtube
+      ? `Con la competencia de YouTube${seo.cupo_youtube ? ` (quedan ~${seo.cupo_youtube.busquedas} búsquedas hoy)` : ''}.`
+      : 'Sin clave de YouTube: se mide la demanda, no la competencia (la clave es opcional, en Configuración).'),
+    h('button', { clase: 'mini', disabled: trabajando, datos: { accion: 'investigar-busquedas' },
+      title: 'Pregunta al buscador qué frases de este vídeo se buscan de verdad. Gratis y sin Claude.',
+      onclick: () => investigarBusquedasPublicar() }, trabajando ? 'Investigando…' : (real.al ? 'Volver a investigar' : 'Investigar búsquedas'))));
+  if ((seo.errores || {}).investigar) caja.appendChild(cajaError(seo.errores.investigar));
+  // lo de la palabra del proyecto ya lo dice el bloque de arriba
+  (real.avisos || []).filter(a => !(seo.proyecto_fuera && a.includes('(del proyecto)')))
+    .forEach(a => caja.appendChild(h('div', { clase: 'meta aviso-busquedas' }, a)));
+  if (real.sin_corpus) caja.appendChild(h('div', { clase: 'meta' }, 'El vídeo no tiene guion ni material: no se puede comprobar qué frases trata.'));
+  const filas = (real.candidatas || []);
+  if (!filas.length) return caja;
+  const valor = v => (v === null || v === undefined) ? '—' : String(v);
+  const tabla = h('table', { clase: 'tabla tabla-busquedas' },
+    h('thead', {}, h('tr', {}, h('th', {}, 'Frase'), h('th', {}, 'Del vídeo'), h('th', {}, 'Demanda'),
+      h('th', {}, 'Competencia'), h('th', {}, 'Tendencia'), h('th', {}, 'Tu historial'), h('th', {}, 'Total'), h('th', {}, ''))),
+    h('tbody', {}, ...filas.map(c => {
+      const comp = c.competencia || null;
+      const plano = x => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+      const enUso = plano(seo.palabra) === plano(c.frase);
+      return h('tr', { clase: c.recomendada ? 'recomendada' : '' },
+        h('td', {}, h('span', {}, c.frase), h('div', { clase: 'meta' }, `${c.origen || ''}${c.recomendada ? ' · la recomendada' : ''}`)),
+        h('td', {}, valor((c.relevancia || {}).valor)),
+        h('td', { title: ((c.demanda || {}).textos || []).join(' · ') }, (c.demanda || {}).nivel || '—'),
+        h('td', { title: comp && !comp.error ? `mediana ${comp.mediana_vistas} vistas · ${comp.pequenos} canales pequeños` : (comp && comp.texto) || '' },
+          comp ? (comp.error ? 'sin dato' : comp.nivel) : '—'),
+        h('td', { title: (c.tendencia || {}).texto || 'Google Trends (experimental): sin dato' },
+          ({ sube: '↑ sube', baja: '↓ baja', estable: '→ estable' })[(c.tendencia || {}).sentido] || '—'),
+        h('td', { title: (c.historial || {}).texto || '' },
+          (c.historial || {}).veces !== null && (c.historial || {}).veces !== undefined
+            ? `${String(c.historial.veces).replace('.', ',')}×`
+            : ((c.canal || {}).vistas ? `${c.canal.vistas} vistas` : '—')),
+        h('td', {}, h('b', {}, valor(c.puntuacion))),
+        h('td', {}, enUso ? h('span', { clase: 'pastilla ok' }, 'en uso')
+          : h('button', { clase: 'mini', onclick: () => guardarSeoVideoPublicar({ palabra_clave: c.frase }) }, 'Usar')));
+    })));
+  caja.appendChild(h('div', { clase: 'tabla-desliza' }, tabla));
+  caja.appendChild(h('div', { clase: 'meta' }, 'Del vídeo: cuánto de la frase sale en el guion o el material. '
+    + 'Tendencia: si se busca más o menos que hace 3 meses en Perú (Google Trends, experimental). '
+    + 'Tu historial: las vistas de tus publicaciones con esa frase frente a lo normal de tu cuenta (1× = tu media) '
+    + 'o, con tu canal conectado, las vistas que ya te trae esa búsqueda en YouTube. '
+    + 'Total: lo que pesan las tres partes con dato.'));
+  return caja;
+}
+
+/* «CÓMO TE ENCONTRARON» (rama seo-real-3): de un vídeo ya publicado en
+   YouTube, con el canal conectado, las búsquedas que le trajeron vistas y
+   cuánto se vio (YouTube Analytics). Sale solo si está publicado en YouTube. */
+function bloqueEncontraronSeo() {
+  const f = PUB.ficha;
+  const seo = f.seo || {};
+  if (!seo.en_youtube) return null;
+  const canal = seo.canal || {};
+  const res = seo.encontraron || {};
+  const trabajando = !!(seo.trabajando || {}).encontraron;
+  const caja = h('div', { clase: 'encontraron-seo' },
+    h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, 'Cómo te encontraron en YouTube'),
+      canal.conectado ? h('button', { clase: 'mini', disabled: trabajando, datos: { accion: 'encontraron' },
+        title: 'Lo que dice YouTube Analytics de este vídeo: búsquedas que le trajeron vistas y retención',
+        onclick: () => encontraronPublicar() }, trabajando ? 'Preguntando…' : (res.al ? 'Volver a mirar' : 'Mirarlo')) : null));
+  if (!canal.conectado) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Conecta tu canal en Configuración → YouTube: tu canal, y aquí verás con qué búsquedas llegó la gente a este vídeo y cuánto lo vio.'));
+    return caja;
+  }
+  if (canal.caido) caja.appendChild(h('div', { clase: 'meta aviso-busquedas' }, 'Google cortó la conexión con tu canal: vuelve a conectarlo en Configuración.'));
+  if ((seo.errores || {}).encontraron) caja.appendChild(cajaError(seo.errores.encontraron));
+  if (!res.al) return caja;
+  const partes = [`${res.vistas || 0} vistas`];
+  if (res.porcentaje_visto !== undefined && res.porcentaje_visto !== null) partes.push(`${String(res.porcentaje_visto).replace('.', ',')} % visto de media`);
+  if (res.duracion_media_s) partes.push(`${String(res.duracion_media_s).replace('.', ',')} s de media`);
+  caja.appendChild(h('div', { clase: 'meta' }, `${partes.join(' · ')} (desde ${res.desde || '—'})`));
+  const busquedas = res.busquedas || [];
+  if (!busquedas.length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Todavía nadie ha llegado a este vídeo buscando en YouTube (o son tan pocos que YouTube no los cuenta).'));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'meta' }, 'Búsquedas que le trajeron vistas (la primera suele ser la mejor palabra clave para el próximo vídeo así):'));
+  busquedas.slice(0, 10).forEach(x => caja.appendChild(h('div', { clase: 'fila busqueda-encontrada' },
+    h('span', { clase: 'crece' }, x.termino), h('span', { clase: 'meta' }, `${x.vistas} vistas`))));
+  return caja;
+}
+
+async function encontraronPublicar() {
+  try {
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/seo/encontraron`), { method: 'POST' });
+    const f = PUB.ficha;
+    f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { encontraron: {} }) });
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function investigarBusquedasPublicar() {
+  try {
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/seo/investigar`), { method: 'POST' });
+    const f = PUB.ficha;
+    f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { investigar: {} }) });
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
 }
 
 async function guardarSeoVideoPublicar(cambios) {
@@ -25418,6 +27803,10 @@ function campoSeoVideo(campo, etiqueta, ejemplo) {
 
 /* Por red: la nota SEO (sin Claude), el primer comentario, lo de Instagram
    (colaboradores, etiquetas) y «Dame 3 ganchos». */
+/* Los puntos de forma que dicen DÓNDE está la palabra clave: cuentan dentro
+   de Relevancia (los mismos que `seo_real.PUNTOS_DE_SITIO`). */
+const PUNTOS_DE_SITIO_SEO = ['palabra_titulo', 'palabra_primera', 'palabra_descripcion'];
+
 function seoDeRedPublicar(red) {
   const f = PUB.ficha;
   const seo = f.seo || {};
@@ -25426,11 +27815,15 @@ function seoDeRedPublicar(red) {
   const caja = h('div', { clase: 'seo-red' });
   PUB.notaAbierta = PUB.notaAbierta || {};
   const clase = n.nota >= 80 ? 'ok' : n.nota >= 50 ? 'aviso' : 'error';
+  const partes = n.partes || [];
+  const conDato = partes.filter(p => p.valor !== null && p.valor !== undefined).length;
+  const forma = (n.puntos || []).filter(x => !PUNTOS_DE_SITIO_SEO.includes(x.id) && x.id !== 'palabra');
   const detalle = h('details', { clase: 'nota-seo', open: !!PUB.notaAbierta[red],
     ontoggle: ev => { PUB.notaAbierta[red] = ev.currentTarget.open; } },
   h('summary', {}, h('span', { clase: `pastilla ${clase}` }, `SEO ${n.nota}/100`),
-    ` ${(n.puntos || []).filter(x => !x.ok).length} por mejorar`));
-  (n.puntos || []).forEach(x => {
+    partes.length ? ` · ${conDato} de ${partes.length} partes medidas` : '',
+    forma.filter(x => !x.ok).length ? ` · ${forma.filter(x => !x.ok).length} detalles de forma` : ''));
+  const punto = x => {
     detalle.appendChild(h('div', { clase: `punto-seo fila ${x.ok ? 'ok' : 'aviso'}`, datos: { punto: x.id || '' } },
       h('span', { clase: 'crece' }, `${x.ok ? '✓' : '⚠'} ${x.texto}`),
       x.ok ? null : accionPuntoSeoPublicar(red, x)));
@@ -25439,7 +27832,25 @@ function seoDeRedPublicar(red) {
         + 'Facebook de tu zona (por ejemplo, el de «Lima, Perú»), no el nombre. La «Guía» de al lado del campo dice cómo '
         + 'encontrarlo. Vale para todos los vídeos del proyecto.'));
     }
+  };
+  /* LAS TRES PARTES (rama seo-real): lo que de verdad posiciona. Los puntos
+     de dónde está la palabra van dentro de Relevancia, con su botón. */
+  partes.forEach(p => {
+    const sin = p.valor === null || p.valor === undefined;
+    const c = sin ? '' : p.valor >= 70 ? 'ok' : p.valor >= 40 ? 'aviso' : 'error';
+    detalle.appendChild(h('div', { clase: 'parte-seo', datos: { parte: p.id } },
+      h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, p.nombre),
+        h('span', { clase: `pastilla ${c}`.trim() }, sin ? 'sin dato' : `${p.valor}/100`)),
+      ...(p.textos || []).filter(t => t && !(p.id === 'relevancia'
+        && (n.puntos || []).some(x => PUNTOS_DE_SITIO_SEO.includes(x.id) && x.texto === t)))
+        .map(t => h('div', { clase: 'meta' }, t))));
+    if (p.id === 'relevancia') (n.puntos || []).filter(x => PUNTOS_DE_SITIO_SEO.includes(x.id) || x.id === 'palabra').forEach(punto);
   });
+  if (!partes.length) (n.puntos || []).forEach(punto);
+  else if (forma.length) {
+    detalle.appendChild(h('div', { clase: 'titulo-forma-seo' }, 'Detalles de forma (se enseñan, pero no cuentan en la nota)'));
+    forma.forEach(punto);
+  }
   caja.appendChild(detalle);
   caja.appendChild(h('label', { clase: 'etiqueta-campo' },
     red === 'tiktok' && !(f.ajustes || {}).tt_comentarios_puede
@@ -25608,10 +28019,15 @@ function pistaPalabraClaveEncargo(v) {
  */
 const PAR = {
   seccion: 'parrilla', cid: '', proyectos: null, estilos: [], datos: null, guion: null,
-  cargando: false, cargadoAl: 0, maxPedir: 30, error: '', filtro: 'todos', buscar: '', reloj: null, trabajo: null,
+  cargando: false, cargadoAl: 0, maxPedir: 30, error: '', buscar: '', reloj: null, trabajo: null,
   borradorTexto: null, guardando: false, estiloElegido: '', encargoIndice: 0, turno: 0, repintar: false,
+  // rediseno-automatizar (22-10-2026): el tablero, la ficha en un panel lateral
+  // y la ayuda «i». Todo es de la pantalla: nada de esto se guarda en ningún sitio
+  matrizFiltro: 'todas', columna: 'pendiente', fichaAbierta: false, fichaPestana: 'guion', fichaScroll: 0,
+  verAyuda: false,
   form: {
-    origen: 'subir', modo: 'adaptar', matriz: '', nombre: '', red: '', formato: '',
+    // sin origen elegido: «Añadir guiones» enseña primero las tarjetas de dónde salen
+    origen: '', modo: 'adaptar', matriz: '', nombre: '', red: '', formato: '',
     duracion_s: '', notas: '', texto: '', yaFormato: false, peticion: '', cuantos: 5,
     fichero: null,
   },
@@ -25659,7 +28075,7 @@ async function cargarParrilla(silencio) {
     PAR.datos = datos;
     // uno en marcha se sigue (se recargó la página); uno ya acabado no se vuelve a anunciar
     if (PAR.datos.trabajo && PAR.datos.trabajo.estado === 'trabajando' && !PAR.trabajo) PAR.trabajo = PAR.datos.trabajo;
-    if (PAR.seccion === 'ficha' && PAR.guion) {
+    if (PAR.fichaAbierta && PAR.guion) {
       const guion = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(PAR.guion.id)}`));
       if (turno !== PAR.turno) return;
       PAR.guion = guion;
@@ -25667,7 +28083,7 @@ async function cargarParrilla(silencio) {
   } catch (e) {
     if (turno !== PAR.turno) return;
     PAR.error = e.message;
-    if (e.status === 404 && PAR.seccion === 'ficha') { PAR.seccion = 'parrilla'; PAR.guion = null; }
+    if (e.status === 404 && PAR.fichaAbierta) { PAR.fichaAbierta = false; PAR.guion = null; }
   }
   PAR.cargando = false;
   PAR.cargadoAl = Date.now();
@@ -25713,14 +28129,50 @@ function elegirProyectoParrilla(cid) {
     chat: null, chats: null, chatTexto: '', chatCapturas: [], marcaCargando: false,
     resultadosCargando: false, chatScroll: null });
   if (PAR.seccion === 'ficha') PAR.seccion = 'parrilla';
+  PAR.fichaAbierta = false;
+  PAR.matrizFiltro = 'todas';
   try { localStorage.setItem('estudio.parrilla.proyecto', cid); } catch (e) { /* sin almacén */ }
   cargarParrilla();
 }
 
 function irASeccionParrilla(seccion) {
   PAR.seccion = seccion;
+  PAR.fichaAbierta = false;
   subirArriba('modulo');
   pintarModulo();
+}
+
+/* ------------------------------------- EL MÓDULO (rediseno-automatizar, 22-10-2026)
+ *
+ * La maqueta aprobada por el dueño, con el sistema de Crear: el proyecto como
+ * chip en la cabecera con «+ Añadir guiones», cinco pestañas que se pueden
+ * pulsar (Parrilla · Añadir guiones · Conversar con Claude · Cuentas que te
+ * gustan · Marca del cliente), la Parrilla como tablero por estado y la ficha
+ * de un guion en un panel lateral. SOLO cambia dónde está cada cosa: las rutas,
+ * los costes y las confirmaciones son los de antes, y nada de lo de aquí se
+ * guarda (regla 1). Las claves de YouTube, Meta y Apify siguen donde estaban
+ * («Cuentas que te gustan» → Conexiones): van a Configuración en otra rama.
+ */
+const PESTANAS_AUTOMATIZAR = [
+  ['parrilla', 'Parrilla'], ['anadir', 'Añadir guiones'], ['chat', 'Conversar con Claude'],
+  ['cuentas', 'Cuentas que te gustan'], ['marca', 'Marca del cliente'],
+];
+const COLUMNAS_PARRILLA = [
+  ['pendiente', 'Pendientes', 'nadie lo ha usado'],
+  ['usado', 'Usados', 'pasados al Encargo, en Crear'],
+  ['publicado', 'Publicados', 'su vídeo ya salió en Publicar'],
+];
+
+function nombreProyectoParrilla() {
+  if (PAR.cid === '_sin') return '';
+  return ((PAR.proyectos || []).find(p => p.id === PAR.cid) || {}).nombre || '';
+}
+
+/* La marca guardada del proyecto: null mientras no se sabe, false si no hay. */
+function marcaGuardadaParrilla() {
+  if (!PAR.marca || PAR.marca.error) return null;
+  const m = PAR.marca.marca || {};
+  return Object.entries(m).some(([k, v]) => k !== 'al' && String(v || '').trim()) ? m : false;
 }
 
 function vistaParrilla() {
@@ -25734,35 +28186,16 @@ function vistaParrilla() {
   }
   // al volver a Automatizar con una conversión en marcha, se vuelve a preguntar
   if (PAR.trabajo && PAR.trabajo.estado === 'trabajando' && !PAR.reloj) setTimeout(vigilarTrabajoParrilla, 0);
-  const caja = h('div', { clase: 'automatizar parrilla' });
-  const pestanas = h('div', { clase: 'pestanas-publicar', role: 'tablist' });
-  [['parrilla', 'Parrilla'], ['anadir', 'Añadir guiones'], ['cuentas', 'Analizar una cuenta'], ['marca', 'Marca del cliente'],
-    ['ficha', PAR.guion ? recortar(PAR.guion.titulo || PAR.guion.codigo || 'Guion', 26) : 'Ficha de un guion']]
-    .forEach(([id, texto]) => pestanas.appendChild(h('button', {
-      clase: `mini${PAR.seccion === id ? ' activo' : ' fantasma'}`, role: 'tab',
-      'aria-selected': PAR.seccion === id ? 'true' : 'false',
-      disabled: id === 'ficha' && !PAR.guion,
-      title: id === 'ficha' && !PAR.guion ? 'abre un guion de la Parrilla' : '',
-      onclick: () => irASeccionParrilla(id),
-    }, texto)));
-  pestanas.appendChild(h('button', {
-    clase: 'mini fantasma', disabled: true, title: 'Llega en una rama posterior (lala-2)',
-  }, 'Piloto automático · próximamente'));
-  caja.appendChild(h('div', { clase: 'light-cab' }, h('h2', {}, 'Automatizar'), h('span', { clase: 'crece' }), pestanas));
+  // LO DE ANTES SIGUE LLEGANDO: el chat era un origen de «Añadir guiones» y la
+  // ficha una pestaña; quien llegue así acaba en su sitio nuevo
+  if (PAR.seccion === 'anadir' && PAR.form.origen === 'chat') { PAR.seccion = 'chat'; PAR.form.origen = ''; }
+  if (PAR.seccion === 'ficha') { PAR.seccion = 'parrilla'; if (PAR.guion) PAR.fichaAbierta = true; }
+  // la marca se ve siempre (la línea de la Parrilla y el punto de su pestaña): solo se LEE
+  if (PAR.datos && !PAR.marca && !PAR.marcaCargando) setTimeout(cargarMarcaParrilla, 0);
 
-  if (PAR.proyectos && PAR.proyectos.length) {
-    const sel = h('select', { 'aria-label': 'Proyecto', onchange: ev => elegirProyectoParrilla(ev.target.value) },
-      PAR.proyectos.map(p => {
-        const c = p.cuentas || {};
-        const total = (c.pendiente || 0) + (c.usado || 0) + (c.publicado || 0);
-        return h('option', { value: p.id, selected: p.id === PAR.cid ? true : null },
-          `${p.nombre}${total ? ` · ${cuantosGuiones(total)}` : ''}`);
-      }));
-    caja.appendChild(h('div', { clase: 'fila proyecto-parrilla' }, h('b', {}, 'Proyecto'), sel,
-      h('span', { clase: 'meta crece' }, 'Cada proyecto tiene sus matrices de guiones.')));
-  }
-  caja.appendChild(h('div', { clase: 'pista parrilla-opcional' },
-    'La Parrilla es opcional: el Encargo de un vídeo se sigue pudiendo llenar a mano en Crear.'));
+  const caja = h('div', { clase: 'automatizar parrilla' });
+  caja.appendChild(cabeceraAutomatizar());
+  caja.appendChild(pestanasAutomatizar());
   if (PAR.error) {
     caja.appendChild(cajaError(PAR.error));
     caja.appendChild(h('button', { clase: 'mini', onclick: () => cargarParrilla() }, 'Reintentar'));
@@ -25773,11 +28206,53 @@ function vistaParrilla() {
     return caja;
   }
   if (PAR.seccion === 'anadir') caja.appendChild(seccionAnadirParrilla());
+  else if (PAR.seccion === 'chat') caja.appendChild(seccionChatParrilla());
   else if (PAR.seccion === 'marca') caja.appendChild(seccionMarcaParrilla());
   else if (PAR.seccion === 'cuentas') caja.appendChild(seccionCuentasParrilla());
-  else if (PAR.seccion === 'ficha' && PAR.guion) caja.appendChild(seccionFichaParrilla());
   else caja.appendChild(seccionListaParrilla());
+  if (PAR.fichaAbierta && PAR.guion) caja.appendChild(cajonGuionParrilla());
   return caja;
+}
+
+function cabeceraAutomatizar() {
+  const izq = h('div', { clase: 'izq' },
+    h('div', { clase: 'fila titulo-automatizar' }, h('h2', {}, 'Automatizar'),
+      h('button', { type: 'button', clase: `mini fantasma boton-i${PAR.verAyuda ? ' activo' : ''}`,
+        'aria-expanded': PAR.verAyuda ? 'true' : 'false', 'aria-label': 'Qué es la Parrilla',
+        title: 'Qué es la Parrilla', onclick: () => { PAR.verAyuda = !PAR.verAyuda; pintarModulo(); } }, 'i')),
+    PAR.verAyuda ? h('div', { clase: 'pista parrilla-opcional' },
+      'La Parrilla es opcional: el Encargo de un vídeo se sigue pudiendo llenar a mano en Crear. '
+      + 'Cada proyecto tiene sus matrices de guiones.') : null);
+  const acc = h('div', { clase: 'acc' });
+  if (PAR.proyectos && PAR.proyectos.length) {
+    const sel = h('select', { 'aria-label': 'Proyecto', onchange: ev => elegirProyectoParrilla(ev.target.value) },
+      PAR.proyectos.map(p => {
+        const c = p.cuentas || {};
+        const total = (c.pendiente || 0) + (c.usado || 0) + (c.publicado || 0);
+        return h('option', { value: p.id, selected: p.id === PAR.cid ? true : null },
+          `${p.nombre}${total ? ` · ${cuantosGuiones(total)}` : ''}`);
+      }));
+    acc.appendChild(h('label', { clase: 'chip-proyecto-auto', title: 'El proyecto (el cliente): cada uno tiene sus matrices de guiones' },
+      h('span', { 'aria-hidden': 'true' }, '📁'), sel));
+  }
+  acc.appendChild(h('button', { clase: 'primario anadir-cabecera', onclick: () => irASeccionParrilla('anadir') }, '+ Añadir guiones'));
+  return h('div', { clase: 'cab-automatizar' }, izq, acc);
+}
+
+function pestanasAutomatizar() {
+  const sinMarca = marcaGuardadaParrilla() === false;
+  return h('nav', { clase: 'pestanas-crear pestanas-automatizar', role: 'tablist', 'aria-label': 'Automatizar' },
+    PESTANAS_AUTOMATIZAR.map(([id, texto]) => h('button', {
+      type: 'button', role: 'tab', clase: `pestana-crear${PAR.seccion === id ? ' activa' : ''}`,
+      'aria-selected': PAR.seccion === id ? 'true' : 'false',
+      title: id === 'marca' && sinMarca ? 'Este proyecto no tiene marca: Claude escribe sin saber quién es el cliente' : null,
+      onclick: () => irASeccionParrilla(id),
+    }, texto, id === 'marca' && sinMarca ? h('span', { clase: 'punto', 'aria-hidden': 'true' }) : null)));
+}
+
+/* Una pregunta de la casa (en vez de `confirm`), con el MISMO texto de antes. */
+async function preguntarParrilla(titulo, texto, aceptar, peligro) {
+  return !!(await dialogo({ titulo, texto, aceptar, peligro: !!peligro }));
 }
 
 /* ---------------------------------------------------- el trabajo de Claude */
@@ -25824,6 +28299,7 @@ function vigilarTrabajoParrilla() {
           toast(`${cuantosGuiones((nuevo.guiones || []).length)} en la Parrilla`);
           vaciarFormParrilla();
           PAR.seccion = 'parrilla';
+          PAR.matrizFiltro = 'todas';   // que se vean los nuevos, estén en la matriz que estén
         } else {
           toast(nuevo.error || 'no se han podido convertir', true);
         }
@@ -25866,90 +28342,170 @@ function datosGuionCorto(g) {
   return trozos.join(' · ');
 }
 
+function origenMatrizParrilla(m) {
+  const origen = m.origen || {};
+  return { subir: origen.fichero ? `de «${origen.fichero}»` : 'de un documento', pegar: 'pegada',
+    pedir: 'escrita por Claude', escribir: 'escrita a mano', vacia: '',
+    chat: 'de una conversación con Claude', resultados: 'desde tus resultados',
+    cuenta: origen.cuenta ? `con lo que le funciona a ${origen.cuenta}` : 'desde una cuenta analizada' }[origen.tipo] || '';
+}
+
+function datosMatrizParrilla(m) {
+  const deDonde = origenMatrizParrilla(m);
+  return `${cuantosGuiones((m.guiones || []).length)}${deDonde ? ` · ${deDonde}` : ''}`
+    + `${m.creada ? ` · ${m.creada.slice(0, 10)}` : ''}`;
+}
+
+/* LA MARCA SE VE SIEMPRE (Claude la usa en todo): una línea arriba de la
+   Parrilla, guardada o no, con el camino a su pestaña. */
+function reintentarMarcaParrilla() {
+  PAR.marca = null;
+  PAR.marcaBorrador = null;
+  cargarMarcaParrilla();
+}
+
+function lineaMarcaParrilla() {
+  // si no se pudo leer, no se dice «Sin marca» (no se sabe): se dice eso y se puede reintentar
+  if (PAR.marca && PAR.marca.error) {
+    return h('div', { clase: 'caja-error fila linea-marca' },
+      h('span', { clase: 'crece' }, 'No se pudo leer la marca del proyecto.'),
+      h('button', { clase: 'mini', onclick: () => reintentarMarcaParrilla() }, 'Reintentar'));
+  }
+  const m = marcaGuardadaParrilla();
+  if (m === null) return null;
+  const nombre = nombreProyectoParrilla();
+  if (!m) {
+    return h('div', { clase: 'caja-aviso fila linea-marca' },
+      h('span', { clase: 'crece' }, h('b', {}, nombre ? `Sin marca de ${nombre}:` : 'Sin marca:'),
+        ' Claude escribirá sin saber quién es el cliente, qué mostrar ni qué evitar.'),
+      h('button', { clase: 'mini', onclick: () => irASeccionParrilla('marca') }, 'Apuntarla ›'));
+  }
+  return h('div', { clase: 'caja-info fila linea-marca' },
+    h('span', { clase: 'crece' }, `${nombre ? `Marca de ${nombre}` : 'Marca'}: ✓ guardada`
+      + `${m.al ? ` el ${m.al.replace('T', ' ').slice(0, 16)}` : ''} — Claude la usa en todo lo que escribe para este proyecto.`),
+    h('button', { clase: 'mini fantasma', onclick: () => irASeccionParrilla('marca') }, 'Editar ›'));
+}
+
+function tarjetaPilotoParrilla() {
+  return h('div', { clase: 'bloque fila piloto-parrilla' },
+    h('b', {}, '🤖 Piloto automático'), h('span', { clase: 'pastilla' }, 'próximamente'),
+    h('span', { clase: 'meta crece' }, 'Llega en una rama posterior (lala-2). No ocupa una pestaña hasta que exista.'));
+}
+
+/* EL TABLERO: tres columnas por estado (en el móvil, una a la vista y las
+   otras con su botón), con el buscador y las matrices como filtro arriba. */
 function seccionListaParrilla() {
-  const caja = h('div', { clase: 'seccion-parrilla' });
+  const caja = h('div', { clase: 'seccion-parrilla tablero-parrilla' });
   const d = PAR.datos;
   if (!d) return caja;
-  const c = d.cuentas || {};
-  const total = (c.pendiente || 0) + (c.usado || 0) + (c.publicado || 0);
-  if (!(d.matrices || []).length) {
+  const linea = lineaMarcaParrilla();
+  if (linea) caja.appendChild(linea);
+  const matrices = d.matrices || [];
+  if (!matrices.length) {
     caja.appendChild(h('div', { clase: 'bloque vacio-parrilla' },
       h('h3', {}, 'Todavía no hay guiones en este proyecto'),
       h('p', { clase: 'meta' }, 'Sube una matriz (Word, PDF o Excel), pídele guiones a Claude o pega uno. '
         + 'Todo se convierte al formato del Studio y queda aquí, listo para pasar al Encargo.'),
       h('button', { clase: 'primario', onclick: () => irASeccionParrilla('anadir') }, 'Añadir guiones')));
+    caja.appendChild(tarjetaPilotoParrilla());
     return caja;
   }
-  const filtros = h('div', { clase: 'fila filtros-parrilla' });
-  [['todos', `Todos (${total})`], ['pendiente', `Pendientes (${c.pendiente || 0})`],
-    ['usado', `Usados (${c.usado || 0})`], ['publicado', `Publicados (${c.publicado || 0})`]]
-    .forEach(([id, texto]) => filtros.appendChild(h('button', {
-      clase: `mini${PAR.filtro === id ? ' activo' : ' fantasma'}`,
-      onclick: () => { PAR.filtro = id; pintarModulo(); },
-    }, texto)));
+  if (PAR.matrizFiltro !== 'todas' && !matrices.some(m => m.id === PAR.matrizFiltro)) PAR.matrizFiltro = 'todas';
+  const elegida = matrices.find(m => m.id === PAR.matrizFiltro) || null;
+  const total = matrices.reduce((n, m) => n + (m.guiones || []).length, 0);
+
   const buscar = h('input', {
-    type: 'search', clase: 'buscar-parrilla', placeholder: 'Buscar por título o ID',
+    type: 'search', clase: 'buscar-parrilla', placeholder: 'Buscar por título o ID', 'aria-label': 'Buscar por título o ID',
     value: PAR.buscar, oninput: ev => { PAR.buscar = ev.target.value; pintarModulo(); },
   });
   buscar.dataset.foco = 'parrilla-buscar';
-  filtros.appendChild(buscar);
-  filtros.appendChild(h('button', { clase: 'mini primario', onclick: () => irASeccionParrilla('anadir') }, '+ Añadir guiones'));
-  caja.appendChild(filtros);
+  const chip = (id, texto, ayuda) => h('button', {
+    type: 'button', clase: `chip-matriz${PAR.matrizFiltro === id ? ' activa' : ''}`,
+    'aria-pressed': PAR.matrizFiltro === id ? 'true' : 'false', title: ayuda || null,
+    onclick: () => { PAR.matrizFiltro = id; pintarModulo(); },
+  }, texto);
+  caja.appendChild(h('div', { clase: 'fila filtros-parrilla' }, buscar,
+    h('div', { clase: 'chips-matrices', role: 'group', 'aria-label': 'Matrices' },
+      chip('todas', `Todas las matrices (${total})`),
+      matrices.map(m => chip(m.id, `${m.nombre} (${(m.guiones || []).length})`, datosMatrizParrilla(m))))));
+  if (elegida) {
+    caja.appendChild(h('div', { clase: 'fila cab-matriz' },
+      h('h3', {}, elegida.nombre), h('span', { clase: 'meta crece' }, datosMatrizParrilla(elegida)),
+      h('button', { clase: 'mini fantasma', onclick: () => renombrarMatrizParrilla(elegida) }, 'Renombrar'),
+      h('button', { clase: 'mini fantasma peligro', onclick: () => borrarMatrizParrilla(elegida) }, 'Borrar')));
+    if (!(elegida.guiones || []).length) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'Vacía: añade guiones desde «Añadir guiones».'));
+    }
+  }
 
   const texto = PAR.buscar.trim().toLowerCase();
-  (d.matrices || []).forEach(m => {
-    const guiones = (m.guiones || []).filter(g => (PAR.filtro === 'todos' || g.estado === PAR.filtro)
-      && (!texto || `${g.codigo} ${g.titulo}`.toLowerCase().includes(texto)));
-    const bloque = h('div', { clase: 'bloque matriz-parrilla' });
-    const origen = m.origen || {};
-    const deDonde = { subir: origen.fichero ? `de «${origen.fichero}»` : 'de un documento', pegar: 'pegada',
-      pedir: 'escrita por Claude', escribir: 'escrita a mano', vacia: '',
-      chat: 'de una conversación con Claude', resultados: 'desde tus resultados',
-      cuenta: origen.cuenta ? `con lo que le funciona a ${origen.cuenta}` : 'desde una cuenta analizada' }[origen.tipo] || '';
-    bloque.appendChild(h('div', { clase: 'fila cab-matriz' },
-      h('h3', {}, m.nombre),
-      h('span', { clase: 'meta' }, `${cuantosGuiones((m.guiones || []).length)}${deDonde ? ` · ${deDonde}` : ''}`
-        + `${m.creada ? ` · ${m.creada.slice(0, 10)}` : ''}`),
-      h('span', { clase: 'crece' }),
-      h('button', { clase: 'mini fantasma', onclick: () => renombrarMatrizParrilla(m) }, 'Renombrar'),
-      h('button', { clase: 'mini fantasma peligro', onclick: () => borrarMatrizParrilla(m) }, 'Borrar')));
-    if (!guiones.length) {
-      bloque.appendChild(h('div', { clase: 'meta' }, (m.guiones || []).length
-        ? 'Ninguno con este filtro.' : 'Vacía: añade guiones desde «Añadir guiones».'));
-    }
-    guiones.forEach(g => bloque.appendChild(filaGuionParrilla(g)));
-    caja.appendChild(bloque);
+  const lista = [];
+  matrices.forEach(m => {
+    if (elegida && m.id !== elegida.id) return;
+    (m.guiones || []).forEach(g => {
+      if (!texto || `${g.codigo} ${g.titulo}`.toLowerCase().includes(texto)) lista.push({ g, m });
+    });
   });
+  const de = estado => lista.filter(x => (x.g.estado || 'pendiente') === estado);
+  if (!COLUMNAS_PARRILLA.some(([id]) => id === PAR.columna)) PAR.columna = 'pendiente';
+  // en el móvil: un botón por columna (con su número) y una columna a la vista
+  caja.appendChild(h('div', { clase: 'selector-columnas', role: 'tablist', 'aria-label': 'Columna' },
+    COLUMNAS_PARRILLA.map(([id, nombre]) => h('button', {
+      type: 'button', role: 'tab', clase: PAR.columna === id ? 'activa' : '',
+      'aria-selected': PAR.columna === id ? 'true' : 'false',
+      onclick: () => { PAR.columna = id; pintarModulo(); },
+    }, nombre, h('span', { clase: 'cuenta-columna' }, String(de(id).length))))));
+  caja.appendChild(h('div', { clase: 'tablero-guiones' }, COLUMNAS_PARRILLA.map(([id, nombre, explica]) => {
+    const suyos = de(id);
+    return h('section', { clase: `columna-tablero${PAR.columna === id ? '' : ' fuera-movil'}`, datos: { columna: id } },
+      h('div', { clase: 'cab-columna' }, h('b', {}, nombre),
+        h('span', { clase: `pastilla ${CLASE_GUION[id] || ''}`.trim() }, String(suyos.length)),
+        h('span', { clase: 'meta' }, explica)),
+      suyos.length ? suyos.map(x => tarjetaGuionParrilla(x.g, x.m, !elegida))
+        : h('p', { clase: 'meta vacia-columna' }, texto ? 'Ninguno con este filtro.' : 'Ninguno.'));
+  })));
+  caja.appendChild(tarjetaPilotoParrilla());
   return caja;
 }
 
-function filaGuionParrilla(g) {
-  return h('div', { clase: 'fila fila-guion' },
-    h('button', { clase: 'mini fantasma titulo-guion', title: 'Abrir la ficha de este guion', onclick: () => abrirGuionParrilla(g.id) },
-      [g.codigo, g.titulo].filter(Boolean).join(' — ') || 'Guion sin título'),
-    h('span', { clase: 'meta datos-guion' }, datosGuionCorto(g)),
-    g.avisos ? h('span', { clase: 'pastilla obsoleto', title: 'Avisos ⚠ del guion: míralos en la ficha' }, `⚠ ${g.avisos}`) : null,
-    g.video_nombre ? h('span', { clase: 'meta video-guion', title: 'El vídeo que se hizo con este guion' }, `▸ ${g.video_nombre}`) : null,
-    h('span', { clase: 'crece' }),
-    pastillaGuion(g.estado),
-    h('button', { clase: 'mini', onclick: () => abrirGuionParrilla(g.id) }, 'Abrir'));
+function tarjetaGuionParrilla(g, m, conMatriz) {
+  const abierta = PAR.fichaAbierta && PAR.guion && PAR.guion.id === g.id;
+  return h('button', {
+    type: 'button', clase: `tarjeta-guion${abierta ? ' abierta' : ''}`, title: 'Abrir la ficha de este guion',
+    onclick: () => abrirGuionParrilla(g.id),
+  },
+  h('span', { clase: 'fila cab-tarjeta-guion' },
+    h('b', { clase: 'titulo-guion' }, [g.codigo, g.titulo].filter(Boolean).join(' — ') || 'Guion sin título'),
+    g.avisos ? h('span', { clase: 'pastilla obsoleto', title: 'Avisos ⚠ del guion: míralos en la ficha' }, `⚠ ${g.avisos}`) : null),
+  h('span', { clase: 'meta datos-guion' }, datosGuionCorto(g)),
+  conMatriz || g.video_nombre ? h('span', { clase: 'fila pie-tarjeta-guion' },
+    conMatriz ? h('span', { clase: 'chip-enlace' }, m.nombre) : null,
+    g.video_nombre ? h('span', { clase: 'meta video-guion', title: 'El vídeo que se hizo con este guion' }, `▸ ${g.video_nombre}`) : null) : null);
 }
 
 async function abrirGuionParrilla(gid) {
   try {
+    const mismo = PAR.guion && PAR.guion.id === gid;
     PAR.guion = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(gid)}`));
-    PAR.borradorTexto = null;
+    // EL MISMO GUION SE REABRE CON LO QUE SE ESTABA ESCRIBIENDO (revisión 22-10)
+    if (!mismo) PAR.borradorTexto = null;
     PAR.encargoIndice = 0;
     PAR.estiloElegido = PAR.guion.estilo || '';
-    irASeccionParrilla('ficha');
+    PAR.fichaAbierta = true;
+    PAR.fichaPestana = 'guion';
+    PAR.fichaScroll = 0;
+    pintarModulo();
+    setTimeout(() => { const x = document.querySelector('#modulo .cajon-guion .cerrar-cajon'); if (x) x.focus({ preventScroll: true }); }, 0);
   } catch (e) {
     toast(`no se ha podido abrir el guion: ${e.message}`, true);
   }
 }
 
 async function renombrarMatrizParrilla(m) {
-  const nombre = prompt('Nombre de la matriz', m.nombre);
-  if (nombre === null || !nombre.trim() || nombre.trim() === m.nombre) return;
+  const r = await dialogo({ titulo: 'Renombrar la matriz',
+    campos: [{ clave: 'nombre', etiqueta: 'Nombre de la matriz', valor: m.nombre }], aceptar: 'Guardar' });
+  const nombre = r ? String(r.nombre || '') : '';
+  if (!nombre.trim() || nombre.trim() === m.nombre) return;
   try {
     await pedir(rutaProyectoParrilla(`/matrices/${encodeURIComponent(m.id)}`), { method: 'PUT', cuerpo: { nombre } });
     await cargarParrilla(true);
@@ -25958,11 +28514,12 @@ async function renombrarMatrizParrilla(m) {
 
 async function borrarMatrizParrilla(m) {
   const n = (m.guiones || []).length;
-  if (!confirm(`¿Borrar la matriz «${m.nombre}»${n ? ` y sus ${cuantosGuiones(n)}` : ''}? No se puede deshacer `
-    + '(los vídeos que ya se hicieron con ellos no se tocan).')) return;
+  if (!await preguntarParrilla('Borrar la matriz', `¿Borrar la matriz «${m.nombre}»${n ? ` y sus ${cuantosGuiones(n)}` : ''}? `
+    + 'No se puede deshacer (los vídeos que ya se hicieron con ellos no se tocan).', 'Borrar la matriz', true)) return;
   try {
     await pedir(rutaProyectoParrilla(`/matrices/${encodeURIComponent(m.id)}`), { method: 'DELETE' });
-    if (PAR.guion && PAR.guion.matriz === m.id) PAR.guion = null;
+    if (PAR.guion && PAR.guion.matriz === m.id) { PAR.guion = null; PAR.fichaAbierta = false; }
+    PAR.matrizFiltro = 'todas';
     toast('matriz borrada');
     await cargarParrilla(true);
   } catch (e) { toast(`no se ha podido borrar: ${e.message}`, true); }
@@ -25970,28 +28527,50 @@ async function borrarMatrizParrilla(m) {
 
 /* ------------------------------------------------------- añadir guiones */
 
+/* DE DÓNDE SALEN: una tarjeta por camino, con lo que cuesta (rediseno-
+   automatizar). Las dos últimas llevan a su pestaña: la cuenta que te gusta
+   (que puede pasar por Apify, de pago, y PREGUNTA antes con el precio) y el
+   chat. El coste de cada botón es el mismo de antes y se repite en la barra. */
+const ORIGENES_PARRILLA = [
+  ['subir', '📄', 'Subir un documento', 'Una matriz en Word, PDF o Excel', 'Claude · sin coste en dólares'],
+  ['pedir', '✍️', 'Pedir a Claude', 'Claude escribe guiones nuevos de una vez', 'Claude · sin coste en dólares'],
+  ['resultados', '📊', 'Desde mis resultados', 'Guiones nuevos a partir de tus vídeos que mejor funcionaron',
+    'Claude · sin coste en dólares'],
+  ['pegar', '📋', 'Escribir o pegar', 'Un guion (o varios) escrito o pegado', 'sin Claude si ya está en el formato'],
+  ['cuenta', '📈', 'Desde una cuenta que te guste', 'Lo que le funciona a otra cuenta, para tu marca',
+    'gratis o Apify: céntimos, y pregunta antes'],
+  ['chat', '💬', 'Conversar con Claude', 'Un chat para preparar guiones hablando, con capturas y, si quieres, internet',
+    'Claude · sin coste en dólares'],
+];
+
+function tarjetasOrigenParrilla() {
+  const f = PAR.form;
+  return h('div', { clase: 'origenes-parrilla origen-parrilla', role: 'group', 'aria-label': 'De dónde salen' },
+    ORIGENES_PARRILLA.map(([id, icono, nombre, explica, coste]) => h('button', {
+      type: 'button', clase: `tarjeta-origen${f.origen === id ? ' activa' : ''}`, 'aria-pressed': f.origen === id ? 'true' : 'false',
+      title: explica,
+      onclick: () => {
+        if (id === 'cuenta') { irASeccionParrilla('cuentas'); return; }
+        if (id === 'chat') { irASeccionParrilla('chat'); return; }
+        f.origen = id;
+        pintarModulo();
+      },
+    }, h('span', { clase: 'icono-origen', 'aria-hidden': 'true' }, icono), h('b', {}, nombre),
+    h('span', { clase: 'meta' }, explica), h('span', { clase: 'pastilla coste-origen' }, coste))));
+}
+
 function seccionAnadirParrilla() {
   const f = PAR.form;
   const caja = h('div', { clase: 'seccion-parrilla anadir-parrilla' });
   const enMarcha = PAR.trabajo && PAR.trabajo.estado === 'trabajando' && PAR.trabajo.cid === PAR.cid;
-
-  const origenes = h('div', { clase: 'tira-modos origen-parrilla' });
-  [['subir', 'Subir un documento', 'Una matriz en Word, PDF o Excel'],
-    ['pedir', 'Pedir a Claude', 'Claude escribe guiones nuevos de una vez'],
-    ['chat', 'Conversar con Claude', 'Un chat para preparar guiones hablando, con capturas y, si quieres, internet'],
-    ['resultados', 'Desde mis resultados', 'Guiones nuevos a partir de tus vídeos que mejor funcionaron'],
-    ['pegar', 'Escribir o pegar', 'Un guion (o varios) escrito o pegado']]
-    .forEach(([id, texto, ayuda]) => origenes.appendChild(h('button', {
-      clase: `mini${f.origen === id ? ' activo' : ''}`, title: ayuda,
-      onclick: () => { f.origen = id; pintarModulo(); },
-    }, texto)));
-  caja.appendChild(h('div', { clase: 'bloque' }, h('h3', {}, 'De dónde salen'), origenes));
-  // EL CHAT ocupa la sección entera: sus guiones se guardan uno a uno desde
-  // cada respuesta, así que no lleva «Cómo se usa» ni «Dónde se guardan»
-  if (f.origen === 'chat') {
-    caja.appendChild(panelChatParrilla());
+  if (!ORIGENES_PARRILLA.some(([id]) => id === f.origen) || f.origen === 'cuenta' || f.origen === 'chat') f.origen = '';
+  if (!f.origen) {
+    caja.appendChild(h('div', { clase: 'cab-anadir' }, h('h3', {}, '¿De dónde salen los guiones?'),
+      h('div', { clase: 'pista' }, 'Todo se convierte al formato del Studio y queda en la Parrilla, listo para pasar al Encargo.')));
+    caja.appendChild(tarjetasOrigenParrilla());
     return caja;
   }
+  caja.appendChild(tarjetasOrigenParrilla());
 
   const bloque = h('div', { clase: 'bloque' });
   if (f.origen === 'resultados') {
@@ -26094,10 +28673,13 @@ function seccionAnadirParrilla() {
   const etiqueta = f.origen === 'subir' ? 'Subir y convertir'
     : f.origen === 'pedir' ? 'Pedir a Claude'
       : f.origen === 'resultados' ? 'Escribir desde mis resultados' : sinClaude ? 'Guardar en la Parrilla' : 'Convertir con Claude';
-  caja.appendChild(h('div', { clase: 'fila cierre' },
-    h('button', { clase: 'primario', disabled: enMarcha ? true : null, onclick: () => lanzarParrilla() }, etiqueta),
-    h('span', { clase: 'pista' }, enMarcha ? 'Espera a que acabe la conversión en marcha.'
-      : sinClaude ? 'No usa Claude.' : 'Usa Claude (tokens de la suscripción, sin coste en dólares).')));
+  const coste = enMarcha ? 'Espera a que acabe la conversión en marcha.'
+    : sinClaude ? 'No usa Claude.' : 'Usa Claude (tokens de la suscripción, sin coste en dólares).';
+  const elegido = ORIGENES_PARRILLA.find(([id]) => id === f.origen) || [];
+  const lanzar = h('button', { disabled: enMarcha ? true : null, onclick: () => lanzarParrilla() }, `${etiqueta} ›`);
+  lanzar.className = 'primario principal lanzar-parrilla';
+  caja.appendChild(barraAutomatizar({ estado: { e: enMarcha ? 'curso' : 'actual', texto: `${elegido[1] || ''} ${elegido[2] || ''}`.trim() },
+    plan: coste, botones: [lanzar] }));
   return caja;
 }
 
@@ -26110,7 +28692,8 @@ function vaciarFormParrilla() {
 }
 
 async function usarPlantillaParrilla() {
-  if (PAR.form.texto.trim() && !confirm('El campo ya tiene texto. ¿Lo reemplazo por la plantilla?')) return;
+  if (PAR.form.texto.trim() && !await preguntarParrilla('Escribir uno con la plantilla',
+    'El campo ya tiene texto. ¿Lo reemplazo por la plantilla?', 'Reemplazarlo')) return;
   try {
     const r = await pedir(`${rutaParrilla('/plantilla')}?${consulta({ proyecto: PAR.cid })}`);
     PAR.form.texto = r.texto || '';
@@ -26132,6 +28715,7 @@ async function lanzarParrilla() {
       toast(`${cuantosGuiones((r.guiones || []).length)} guardados`);
       vaciarFormParrilla();
       PAR.seccion = 'parrilla';
+      PAR.matrizFiltro = 'todas';
       await cargarParrilla(true);
       return;
     }
@@ -26165,19 +28749,159 @@ async function lanzarParrilla() {
   }
 }
 
-/* ------------------------------------------------------ la ficha de un guion */
+/* ------------------------------------------------------ la ficha de un guion
+ *
+ * UN PANEL LATERAL (rediseno-automatizar): la Parrilla no se pierde de vista.
+ * Tres pestañas (Guion · Al Encargo · Estado) y abajo, siempre a la vista, la
+ * barra con «Pasar al Encargo ›» y el motivo cuando no se puede. En el móvil,
+ * a pantalla completa. Se cierra con «×», con Escape o pulsando fuera.
+ */
+const PESTANAS_FICHA = [['guion', 'Guion'], ['encargo', 'Al Encargo'], ['estado', 'Estado']];
 
-function seccionFichaParrilla() {
+/* CERRAR NO PIERDE LO ESCRITO (revisión independiente, 22-10): con el texto
+   del guion a medio cambiar, se pregunta antes: Guardar (lo mismo que «Guardar
+   el texto»), Descartar (lo mismo que «Descartar cambios») o Seguir editando. */
+function textoSinGuardarParrilla() {
+  return !!(PAR.guion && PAR.borradorTexto !== null && PAR.borradorTexto !== PAR.guion.texto);
+}
+
+function preguntarCambiosGuionParrilla(titulo) {
+  return new Promise(resolver => {
+    const capa = h('div', { clase: 'capa-dialogo cambios-guion' });
+    const teclas = ev => { if (ev.key === 'Escape') { ev.stopPropagation(); cerrar('seguir'); } };
+    const cerrar = valor => {
+      capa.remove();
+      document.removeEventListener('keydown', teclas, true);
+      resolver(valor);
+    };
+    capa.appendChild(h('div', { clase: 'dialogo', role: 'dialog', 'aria-modal': 'true' },
+      h('h3', {}, 'Cambios sin guardar'),
+      h('div', { clase: 'meta' }, `Tienes cambios sin guardar en «${titulo}».`),
+      h('div', { clase: 'dialogo-botones' },
+        h('button', { type: 'button', clase: 'mini fantasma', onclick: () => cerrar('seguir') }, 'Seguir editando'),
+        h('button', { type: 'button', clase: 'mini peligro', onclick: () => cerrar('descartar') }, 'Descartar'),
+        h('button', { type: 'button', clase: 'mini primario', onclick: () => cerrar('guardar') }, 'Guardar'))));
+    capa.addEventListener('click', ev => { if (ev.target === capa) cerrar('seguir'); });
+    document.addEventListener('keydown', teclas, true);
+    document.body.appendChild(capa);
+    setTimeout(() => { const b = capa.querySelector('button.primario'); if (b) b.focus(); }, 0);
+  });
+}
+
+async function cerrarFichaParrilla() {
+  if (textoSinGuardarParrilla()) {
+    const g = PAR.guion;
+    const que = await preguntarCambiosGuionParrilla([g.codigo, g.titulo].filter(Boolean).join(' — ') || 'este guion');
+    if (que === 'seguir') return;
+    if (que === 'guardar') {
+      await guardarGuionParrilla({ texto: PAR.borradorTexto });
+      if (textoSinGuardarParrilla()) return;   // no se pudo guardar: se queda abierto (el aviso ya lo dice)
+    } else {
+      PAR.borradorTexto = null;
+    }
+  }
+  PAR.fichaAbierta = false;
+  pintarModulo();
+}
+
+/* Escape cierra el panel, salvo que haya otra cosa abierta encima (una guía,
+   una pregunta) o que se esté escribiendo en un campo del panel. */
+window.addEventListener('keydown', ev => {
+  if (ev.key !== 'Escape' || typeof MODULOS === 'undefined' || MODULOS.actual !== 'automatizar' || !PAR.fichaAbierta) return;
+  if (document.querySelector('.capa-dialogo, #ventana-guia, .velo-guia, #lupa')) return;
+  const foco = document.activeElement;
+  if (foco && foco.closest && foco.closest('.cajon-guion') && /^(TEXTAREA|INPUT|SELECT)$/.test(foco.tagName)) return;
+  cerrarFichaParrilla();
+}, true);
+
+/* Los estilos con los que se puede pasar: los del proyecto primero; si no
+   tiene, todos. Elige el primero si no hay ninguno elegido (es de la página). */
+function estilosParaPasarParrilla() {
+  const propios = PAR.estilos.filter(x => x.cliente === PAR.cid);
+  const lista = propios.length ? propios : PAR.estilos;
+  if (!PAR.estiloElegido || !lista.some(x => x.id === PAR.estiloElegido)) {
+    PAR.estiloElegido = (lista[0] || {}).id || '';
+  }
+  return lista;
+}
+
+/* La barra de una pestaña de Automatizar: la de Crear. Su «⋯» del móvil se
+   repinta con el módulo (la de Crear se repinta sola, con su panel). */
+function barraAutomatizar(op) {
+  const barra = barraDeAccion(op);
+  barra.querySelectorAll('.boton-mas-barra, .estado').forEach(b => b.addEventListener('click', () => {
+    if (esMovilCrear()) setTimeout(pintarModulo, 0);
+  }));
+  return barra;
+}
+
+function cajonGuionParrilla() {
   const g = PAR.guion;
-  const caja = h('div', { clase: 'seccion-parrilla ficha-parrilla' });
-  caja.appendChild(h('div', { clase: 'fila cab-ficha-parrilla' },
-    h('button', { clase: 'mini fantasma', onclick: () => irASeccionParrilla('parrilla') }, '‹ Parrilla'),
-    h('h3', { clase: 'crece' }, [g.codigo, g.titulo].filter(Boolean).join(' — ') || 'Guion sin título'),
-    pastillaGuion(g.estado)));
-  caja.appendChild(h('div', { clase: 'meta' }, `En «${g.matriz_nombre}»`
-    + (g.video_nombre ? ` · vídeo: ${g.video_nombre}` : '')
-    + (g.usado_al ? ` · pasado al Encargo el ${g.usado_al.replace('T', ' ').slice(0, 16)}` : '')));
+  const titulo = [g.codigo, g.titulo].filter(Boolean).join(' — ') || 'Guion sin título';
+  const cambiado = PAR.borradorTexto !== null && PAR.borradorTexto !== g.texto;
+  if (!PESTANAS_FICHA.some(([id]) => id === PAR.fichaPestana)) PAR.fichaPestana = 'guion';
+  const cajon = h('aside', { clase: 'cajon-guion ficha-parrilla', role: 'dialog', 'aria-modal': 'true', 'aria-label': titulo });
+  cajon.appendChild(h('div', { clase: 'cab-cajon' },
+    h('div', { clase: 'datos-cajon' }, h('h3', {}, titulo),
+      h('div', { clase: 'meta' }, `En «${g.matriz_nombre}»`
+        + (g.video_nombre ? ` · vídeo: ${g.video_nombre}` : '')
+        + (g.usado_al ? ` · pasado al Encargo el ${g.usado_al.replace('T', ' ').slice(0, 16)}` : ''))),
+    pastillaGuion(g.estado),
+    h('button', { type: 'button', clase: 'mini fantasma cerrar-cajon', title: 'Cerrar (vuelve a la Parrilla)',
+      'aria-label': 'Cerrar', onclick: () => cerrarFichaParrilla() }, '×')));
+  const avisos = ((g.leido || {}).avisos || []).length;
+  cajon.appendChild(h('nav', { clase: 'pestanas-crear pestanas-cajon', role: 'tablist' },
+    PESTANAS_FICHA.map(([id, texto]) => h('button', {
+      type: 'button', role: 'tab', clase: `pestana-crear${PAR.fichaPestana === id ? ' activa' : ''}`,
+      'aria-selected': PAR.fichaPestana === id ? 'true' : 'false',
+      onclick: () => { PAR.fichaPestana = id; PAR.fichaScroll = 0; pintarModulo(); },
+    }, texto, id === 'guion' && avisos ? h('span', { clase: 'punto', title: 'Avisos del guion', 'aria-hidden': 'true' }) : null))));
+  const cuerpo = h('div', { clase: 'cuerpo-cajon' });
+  if (PAR.fichaPestana === 'encargo') cuerpo.appendChild(bloqueEncargoParrilla(g));
+  else if (PAR.fichaPestana === 'estado') cuerpo.appendChild(bloqueEstadoGuionParrilla(g));
+  else cuerpo.appendChild(bloqueTextoGuionParrilla(g));
+  cuerpo.addEventListener('scroll', () => { PAR.fichaScroll = cuerpo.scrollTop; }, { passive: true });
+  cajon.appendChild(cuerpo);
+  cajon.appendChild(pieCajonParrilla(g, cambiado));
+  // el sitio en el que se estaba, al repintar (la Parrilla se recarga sola)
+  const arriba = PAR.fichaScroll || 0;
+  if (arriba) setTimeout(() => { if (cuerpo.isConnected) cuerpo.scrollTop = arriba; }, 0);
+  const capa = h('div', { clase: 'capa-cajon-guion', onclick: ev => { if (ev.target === capa) cerrarFichaParrilla(); } }, cajon);
+  return capa;
+}
 
+/* El motivo que se ve en la barra cuando «Pasar al Encargo» no se puede. */
+function motivoPasarParrilla(g, sinGuardar) {
+  const encargos = g.encargo || [];
+  const i = Math.min(PAR.encargoIndice || 0, Math.max(0, encargos.length - 1));
+  const e = encargos[i] || {};
+  const lista = estilosParaPasarParrilla();
+  if (sinGuardar) return { e: 'aviso', texto: 'Guarda antes el texto' };
+  if (!lista.length) return { e: 'aviso', texto: 'No hay ningún estilo: crea uno en Crear.' };
+  if (!e.material) return { e: 'aviso', texto: 'El guion no tiene material' };
+  return { e: 'pend', texto: `Rellena el Encargo de «Un vídeo nuevo» en Crear${encargos.length > 1 ? ` (vídeo ${i + 1} de ${encargos.length})` : ''}` };
+}
+
+function pieCajonParrilla(g, sinGuardar) {
+  const encargos = g.encargo || [];
+  const i = Math.min(PAR.encargoIndice || 0, Math.max(0, encargos.length - 1));
+  const e = encargos[i] || {};
+  const lista = estilosParaPasarParrilla();
+  const estilo = lista.find(x => x.id === PAR.estiloElegido);
+  const sinMaterial = !lista.length || !e.material;
+  const boton = h('button', {
+    disabled: sinMaterial || sinGuardar ? true : null, datos: { sinMaterial: sinMaterial ? '1' : '0' },
+    title: sinGuardar ? 'Guarda antes el texto' : !e.material ? 'El guion no tiene material' : '',
+    onclick: () => pasarAlEncargoParrilla(g, i, PAR.estiloElegido),
+  }, estilo ? `Pasar al Encargo con «${recortar(estilo.nombre, 30)}» ›` : 'Pasar al Encargo ›');
+  boton.className = 'primario principal boton-pasar-encargo';
+  return barraAutomatizar({ clase: 'pie-cajon', estado: motivoPasarParrilla(g, sinGuardar), botones: [boton] });
+}
+
+/* «Guion»: uso, formato y duración (cambian su línea del texto), el texto
+   entero, su ortografía, guardar o descartar, y los avisos. */
+function bloqueTextoGuionParrilla(g) {
+  const caja = h('div', { clase: 'ficha-texto-guion' });
   // Lo rápido: uso, formato y duración (cambian la línea del texto). Con el
   // texto a medio editar se apagan: se aplicarían al texto GUARDADO y «Guardar
   // el texto» los desharía después sin decir nada.
@@ -26194,20 +28918,19 @@ function seccionFichaParrilla() {
     disabled: borradorPendiente ? true : null, value: g.duracion_s || '',
     placeholder: 'en el Encargo', onchange: ev => guardarGuionParrilla({ duracion_s: ev.target.value ? Number(ev.target.value) : null }) });
   duracion.dataset.foco = 'parrilla-ficha-duracion';
-  caja.appendChild(h('div', { clase: 'bloque' },
-    h('div', { clase: 'rejilla-parrilla' }, h('label', {}, 'Uso', uso), h('label', {}, 'Formato', formato),
-      h('label', {}, 'Duración (s)', duracion)),
-    h('div', { clase: 'pista' }, borradorPendiente
-      ? 'Guarda o descarta antes los cambios del texto.'
-      : 'Cambiar esto cambia su línea en el texto de abajo (y en «Para el Encargo» si hay uno solo).')));
+  caja.appendChild(h('div', { clase: 'rejilla-parrilla' }, h('label', {}, 'Uso', uso), h('label', {}, 'Formato', formato),
+    h('label', {}, 'Duración (s)', duracion)));
+  caja.appendChild(h('div', { clase: 'pista' }, borradorPendiente
+    ? 'Guarda o descarta antes los cambios del texto.'
+    : 'Cambiar esto cambia su línea en el texto de abajo (y en «Para el Encargo» si hay uno solo).'));
 
   // El texto entero: es la verdad del guion
   const texto = PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto;
   const cambiado = PAR.borradorTexto !== null && PAR.borradorTexto !== g.texto;
-  const area = h('textarea', { rows: 18, clase: 'texto-guion',
+  const area = h('textarea', { rows: 16, clase: 'texto-guion',
     /* SIN REPINTAR mientras se escribe (se llevaría el cursor): solo se
        encienden «Guardar» y «Descartar», y se apaga «Pasar al Encargo», que
-       pasaría el texto GUARDADO y no el que se ve. */
+       pasaría el texto GUARDADO y no el que se ve (con su motivo en la barra). */
     oninput: ev => {
       PAR.borradorTexto = ev.target.value;
       const sinCambios = PAR.borradorTexto === g.texto;
@@ -26219,32 +28942,34 @@ function seccionFichaParrilla() {
         pasar.disabled = !sinCambios || pasar.dataset.sinMaterial === '1';
         pasar.title = sinCambios ? '' : 'Guarda antes el texto';
       }
+      const motivo = document.querySelector('#modulo .pie-cajon .texto-estado');
+      if (motivo) motivo.textContent = motivoPasarParrilla(g, !sinCambios).texto;
     } });
   area.value = texto;
   area.dataset.foco = 'parrilla-texto';
-  caja.appendChild(h('div', { clase: 'bloque' },
-    h('div', { clase: 'fila' }, h('h3', {}, 'El guion'), h('span', { clase: 'crece' }),
-      botonGuia('guion_parrilla', () => document.querySelector('#modulo [data-foco="parrilla-texto"]')),
-      h('button', { clase: 'mini', onclick: () => copiarTexto(PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto) }, 'Copiar')),
-    area,
-    ortografiaDeCampo(`parrilla-${g.id || g.codigo || ''}`, {
-      leer: () => (PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto),
-      poner: nuevo => { PAR.borradorTexto = nuevo; pintarModulo(); } }),
-    h('div', { clase: 'fila' },
-      h('button', { clase: 'primario mini guardar-texto-guion', disabled: cambiado ? null : true,
-        onclick: () => guardarGuionParrilla({ texto: PAR.borradorTexto }) }, 'Guardar el texto'),
-      h('button', { clase: 'mini fantasma descartar-texto-guion', disabled: cambiado ? null : true,
-        onclick: () => { PAR.borradorTexto = null; pintarModulo(); } }, 'Descartar cambios'),
-      h('span', { clase: 'pista' }, 'En el formato del Studio. Lo que va al Encargo se lee de «PARA EL ENCARGO».'))));
-
+  caja.appendChild(h('div', { clase: 'fila' }, h('h4', {}, 'El guion'), h('span', { clase: 'crece' }),
+    botonGuia('guion_parrilla', () => document.querySelector('#modulo [data-foco="parrilla-texto"]')),
+    h('button', { clase: 'mini', onclick: () => copiarTexto(PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto) }, 'Copiar')));
+  caja.appendChild(area);
+  caja.appendChild(ortografiaDeCampo(`parrilla-${g.id || g.codigo || ''}`, {
+    leer: () => (PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto),
+    poner: nuevo => { PAR.borradorTexto = nuevo; pintarModulo(); } }));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'primario mini guardar-texto-guion', disabled: cambiado ? null : true,
+      onclick: () => guardarGuionParrilla({ texto: PAR.borradorTexto }) }, 'Guardar el texto'),
+    h('button', { clase: 'mini fantasma descartar-texto-guion', disabled: cambiado ? null : true,
+      onclick: () => { PAR.borradorTexto = null; pintarModulo(); } }, 'Descartar cambios'),
+    h('span', { clase: 'pista' }, 'En el formato del Studio. Lo que va al Encargo se lee de «PARA EL ENCARGO».')));
   const avisos = (g.leido || {}).avisos || [];
   if (avisos.length) {
     caja.appendChild(h('div', { clase: 'caja-aviso avisos-guion' }, h('b', {}, 'Avisos del guion'),
       h('ul', {}, avisos.map(a => h('li', {}, a)))));
   }
+  return caja;
+}
 
-  caja.appendChild(bloqueEncargoParrilla(g, cambiado));
-
+/* «Estado»: pendiente → usado → publicado, a mano, y borrar el guion. */
+function bloqueEstadoGuionParrilla(g) {
   const estados = h('div', { clase: 'fila' });
   if (g.estado !== 'pendiente') {
     estados.appendChild(h('button', { clase: 'mini', onclick: () => guardarGuionParrilla({ estado: 'pendiente' }) }, 'Volver a pendiente'));
@@ -26258,19 +28983,20 @@ function seccionFichaParrilla() {
     estados.appendChild(h('button', { clase: 'mini fantasma', title: 'Copia su MARCA DEL CLIENTE, su tono y su CTA a la marca '
       + 'del proyecto (solo lo que esté vacío)', onclick: () => marcaDesdeGuionParrilla(g) }, 'Usar su marca para el proyecto'));
   }
-  estados.appendChild(h('span', { clase: 'crece' }));
-  estados.appendChild(h('button', { clase: 'mini fantasma peligro', onclick: () => borrarGuionParrilla(g) }, 'Borrar el guion'));
-  caja.appendChild(h('div', { clase: 'bloque' }, h('h3', {}, 'Estado'),
+  return h('div', { clase: 'ficha-estado-guion' },
     h('div', { clase: 'pista' }, 'Pendiente: nadie lo ha usado. Usado: se pasó al Encargo (y se enlaza solo con el vídeo '
-      + 'que se cree con él). Publicado: ese vídeo ya salió en Publicar.'), estados));
-  return caja;
+      + 'que se cree con él). Publicado: ese vídeo ya salió en Publicar.'), estados,
+    h('div', { clase: 'fila borrar-guion' },
+      h('button', { clase: 'mini fantasma peligro', onclick: () => borrarGuionParrilla(g) }, 'Borrar el guion')));
 }
 
-function bloqueEncargoParrilla(g, sinGuardar) {
+/* «Al Encargo»: lo que irá a «Un vídeo nuevo» y con qué estilo. El botón
+   está en la barra de abajo, a la vista desde las tres pestañas. */
+function bloqueEncargoParrilla(g) {
   const encargos = g.encargo || [];
   const i = Math.min(PAR.encargoIndice || 0, Math.max(0, encargos.length - 1));
   const e = encargos[i] || {};
-  const bloque = h('div', { clase: 'bloque encargo-parrilla' }, h('h3', {}, 'Lo que irá al Encargo'));
+  const bloque = h('div', { clase: 'encargo-parrilla' }, h('h4', {}, 'Lo que irá al Encargo'));
   if (encargos.length > 1) {
     const tira = h('div', { clase: 'tira-modos' });
     encargos.forEach((x, n) => tira.appendChild(h('button', {
@@ -26293,20 +29019,11 @@ function bloqueEncargoParrilla(g, sinGuardar) {
     bloque.appendChild(h('ul', { clase: 'avisos-encargo' }, e.avisos.map(a => h('li', { clase: 'meta' }, a))));
   }
   // con qué estilo: los del proyecto primero; si no tiene, todos
-  const propios = PAR.estilos.filter(x => x.cliente === PAR.cid);
-  const lista = propios.length ? propios : PAR.estilos;
-  if (!PAR.estiloElegido || !lista.some(x => x.id === PAR.estiloElegido)) {
-    PAR.estiloElegido = (lista[0] || {}).id || '';
-  }
-  const estilo = h('select', { onchange: ev => { PAR.estiloElegido = ev.target.value; } },
+  const lista = estilosParaPasarParrilla();
+  const estilo = h('select', { onchange: ev => { PAR.estiloElegido = ev.target.value; pintarModulo(); } },
     lista.map(x => h('option', { value: x.id, selected: x.id === PAR.estiloElegido ? true : null }, x.nombre)));
   bloque.appendChild(h('div', { clase: 'fila pasar-encargo' },
-    lista.length ? h('label', {}, 'Con el estilo ', estilo) : h('span', { clase: 'meta' }, 'No hay ningún estilo: crea uno en Crear.'),
-    h('span', { clase: 'crece' }),
-    h('button', { clase: 'primario boton-pasar-encargo', disabled: !lista.length || !e.material || sinGuardar ? true : null,
-      datos: { sinMaterial: !lista.length || !e.material ? '1' : '0' },
-      title: sinGuardar ? 'Guarda antes el texto' : !e.material ? 'El guion no tiene material' : '',
-      onclick: () => pasarAlEncargoParrilla(g, i, PAR.estiloElegido) }, 'Pasar al Encargo')));
+    lista.length ? h('label', {}, 'Con el estilo ', estilo) : h('span', { clase: 'meta' }, 'No hay ningún estilo: crea uno en Crear.')));
   bloque.appendChild(h('div', { clase: 'pista' }, 'Llena «Un vídeo nuevo» en Crear (nombre, material, indicaciones, llamadas '
     + 'a la acción, duración y formato) y marca el guion como usado. No se crea nada ni se gasta nada hasta que pulses '
     + '«Generar el guion» allí.'));
@@ -26323,7 +29040,8 @@ async function guardarGuionParrilla(cambios) {
   PAR.guardando = true;
   try {
     if ('estado' in cambios && cambios.estado === 'pendiente' && PAR.guion.video
-      && !confirm('Vuelve a pendiente y se olvida el vídeo con el que se enlazó (el vídeo no se toca). ¿Sigo?')) return;
+      && !await preguntarParrilla('Volver a pendiente', 'Vuelve a pendiente y se olvida el vídeo con el que se enlazó '
+        + '(el vídeo no se toca). ¿Sigo?', 'Volver a pendiente')) return;
     PAR.guion = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(PAR.guion.id)}`),
       { method: 'PUT', cuerpo: cambios });
     if ('texto' in cambios) PAR.borradorTexto = null;
@@ -26337,10 +29055,12 @@ async function guardarGuionParrilla(cambios) {
 }
 
 async function borrarGuionParrilla(g) {
-  if (!confirm(`¿Borrar «${[g.codigo, g.titulo].filter(Boolean).join(' — ') || 'este guion'}»? No se puede deshacer.`)) return;
+  if (!await preguntarParrilla('Borrar el guion', `¿Borrar «${[g.codigo, g.titulo].filter(Boolean).join(' — ') || 'este guion'}»? `
+    + 'No se puede deshacer.', 'Borrar el guion', true)) return;
   try {
     await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(g.id)}`), { method: 'DELETE' });
     PAR.guion = null;
+    PAR.fichaAbierta = false;
     PAR.seccion = 'parrilla';
     toast('guion borrado');
     await cargarParrilla(true);
@@ -26364,7 +29084,8 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   if (!ficha) { toast('ese estilo no está en Crear: recarga la página', true); return; }
   const actual = APP.light.video.encargo;
   if (actual && (String(actual.material || '').trim() || String(actual.indicaciones || '').trim())
-    && !confirm('Ya tienes un vídeo nuevo a medio escribir en Crear. ¿Lo reemplazo por este guion?')) return;
+    && !await preguntarParrilla('Pasar al Encargo', 'Ya tienes un vídeo nuevo a medio escribir en Crear. '
+      + '¿Lo reemplazo por este guion?', 'Reemplazarlo')) return;
   let datos;
   try {
     datos = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(g.id)}/encargo`),
@@ -26386,7 +29107,13 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   if (r.formato === 'vertical' || r.formato === 'horizontal') e.formato = r.formato;
   /* el espacio fijo es del guion: uno sin él deja el campo vacío */
   e.espacio_fijo = espacioFijoDelEncargo(r.espacio_fijo);
+  /* y el tipo de relato, si el guion lo trae («Tipo de relato:»); si no, sin elegir */
+  e.tipo_relato = tipoRelatoDelEncargo(r.tipo_relato);
+  /* qué dibujan las imágenes y las líneas «Visual:» (rama guion-visual) */
+  e.imagenes = ['guion', 'voz'].includes(r.imagenes) ? r.imagenes : '';
+  e.visuales = Array.isArray(r.visuales) ? r.visuales : [];
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
+  PAR.fichaAbierta = false;
   PAR.datos = null;
   irAModulo('crear');
   elegirEstiloLight(ficha);
@@ -26417,11 +29144,12 @@ async function cargarMarcaParrilla() {
   } catch (e) {
     if (cid !== PAR.cid) return;
     toast(`no se ha podido leer la marca: ${e.message}`, true);
-    PAR.marca = { marca: {}, campos: [] };
+    PAR.marca = { marca: {}, campos: [], error: e.message };
     PAR.marcaBorrador = {};
   }
   PAR.marcaCargando = false;
-  if (MODULOS.actual === 'automatizar' && PAR.seccion === 'marca') repintarParrillaSinPisar();
+  // la línea de la marca de la Parrilla y el punto de su pestaña también la enseñan
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
 }
 
 function seccionMarcaParrilla() {
@@ -26431,32 +29159,42 @@ function seccionMarcaParrilla() {
     caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…'));
     return caja;
   }
+  if (PAR.marca.error) {
+    caja.appendChild(cajaError(`No se pudo leer la marca: ${PAR.marca.error}`));
+    caja.appendChild(h('button', { clase: 'mini', onclick: () => reintentarMarcaParrilla() }, 'Reintentar'));
+    return caja;
+  }
   const b = PAR.marcaBorrador || {};
   const guardada = PAR.marca.marca || {};
-  const cambiada = (PAR.marca.campos || []).some(c => (b[c.id] || '') !== (guardada[c.id] || ''));
-  const bloque = h('div', { clase: 'bloque' },
+  const hayCambios = () => (PAR.marca.campos || []).some(x => (b[x.id] || '') !== (guardada[x.id] || ''));
+  const cambiada = hayCambios();
+  caja.appendChild(h('div', { clase: 'cab-anadir' },
     h('div', { clase: 'fila' }, h('h3', {}, 'La marca del cliente'), h('span', { clase: 'crece' }),
       botonGuia('marca_cliente', null)),
     h('div', { clase: 'pista' }, 'Se apunta una vez para todo el proyecto y Claude la usa en todo lo que escribe '
       + 'o convierte para él: subir, pegar, pedir, «Desde mis resultados» y la conversación. Así no hay que repetirla '
-      + 'en cada guion.'));
+      + 'en cada guion.')));
+  const campos = h('div', { clase: 'campos-marca' });
   (PAR.marca.campos || []).forEach(c => {
-    const area = h('textarea', { rows: c.id === 'quien' || c.id === 'otras' ? 3 : 2, placeholder: c.ayuda,
+    const area = h('textarea', { rows: c.id === 'quien' || c.id === 'otras' ? 4 : 3, placeholder: c.ayuda,
       oninput: ev => {
         b[c.id] = ev.target.value;
         const boton = document.querySelector('#modulo .guardar-marca');
-        if (boton) boton.disabled = !(PAR.marca.campos || []).some(x => (b[x.id] || '') !== (guardada[x.id] || ''));
+        if (boton) boton.disabled = !hayCambios();
+        const plan = document.querySelector('#modulo .marca-parrilla .barra-accion .plan');
+        if (plan) plan.textContent = hayCambios() ? 'Hay cambios sin guardar' : '';
       } });
     area.value = b[c.id] || '';
     area.dataset.foco = `marca-${c.id}`;
-    bloque.appendChild(h('label', { clase: 'campo-marca' }, h('span', { clase: 'meta' }, c.nombre), area));
+    campos.appendChild(h('label', { clase: 'campo-marca' }, h('span', { clase: 'meta' }, c.nombre), area));
   });
-  bloque.appendChild(h('div', { clase: 'fila cierre' },
-    h('button', { clase: 'primario guardar-marca', disabled: cambiada ? null : true,
-      onclick: () => guardarMarcaParrilla() }, 'Guardar la marca'),
-    h('span', { clase: 'pista' }, guardada.al ? `guardada el ${guardada.al.replace('T', ' ').slice(0, 16)}`
-      : 'todavía sin guardar')));
-  caja.appendChild(bloque);
+  caja.appendChild(campos);
+  const guardar = h('button', { disabled: cambiada ? null : true, onclick: () => guardarMarcaParrilla() }, 'Guardar la marca');
+  guardar.className = 'primario principal guardar-marca';
+  caja.appendChild(barraAutomatizar({
+    estado: { e: guardada.al ? 'hecho' : 'pend',
+      texto: guardada.al ? `guardada el ${guardada.al.replace('T', ' ').slice(0, 16)}` : 'todavía sin guardar' },
+    plan: cambiada ? 'Hay cambios sin guardar' : '', botones: [guardar] }));
   return caja;
 }
 
@@ -26592,27 +29330,45 @@ async function cargarChatsParrilla() {
   vigilarChatParrilla();
 }
 
+/* «CONVERSAR CON CLAUDE», EN SU PESTAÑA (rediseno-automatizar): a la izquierda
+   las conversaciones y a la derecha el hilo, como un chat. Es lo mismo de
+   antes (las mismas rutas y los mismos mandos), con la lista a la vista. */
+function seccionChatParrilla() {
+  return h('div', { clase: 'seccion-parrilla chat-seccion' }, panelChatParrilla());
+}
+
 function panelChatParrilla() {
-  const caja = h('div', { clase: 'bloque chat-parrilla' });
+  const caja = h('div', { clase: 'chat-parrilla' });
   if (PAR.chats === null) {
     PAR.chats = [];
     setTimeout(cargarChatsParrilla, 0);
   }
   if (PAR.chat && PAR.chat.ocupada && !PAR.chatReloj) setTimeout(vigilarChatParrilla, 0);
-  const lista = h('select', { 'aria-label': 'Conversaciones', onchange: ev => abrirChatParrilla(ev.target.value) },
-    [h('option', { value: '' }, PAR.chat && !PAR.chats.some(c => c.id === PAR.chat.id)
-      ? 'Conversación nueva' : 'Elige una conversación')]
-      .concat((PAR.chats || []).map(c => h('option', { value: c.id, selected: PAR.chat && PAR.chat.id === c.id ? true : null },
-        `${c.titulo} · ${c.tocada}`))));
-  caja.appendChild(h('div', { clase: 'fila cab-chat' },
-    h('h3', {}, 'Conversar con Claude'), h('span', { clase: 'crece' }),
-    (PAR.chats || []).length ? lista : null,
-    h('button', { clase: 'mini', onclick: () => nuevoChatParrilla() }, '+ Nueva'),
+  const lista = h('aside', { clase: 'lista-chats' },
+    h('div', { clase: 'fila cab-chat' }, h('h3', {}, 'Conversaciones'), h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini', onclick: () => nuevoChatParrilla() }, '+ Nueva')));
+  const nueva = PAR.chat && !(PAR.chats || []).some(c => c.id === PAR.chat.id);
+  const conversaciones = h('div', { clase: 'conversaciones-chat' });
+  if (nueva) {
+    conversaciones.appendChild(h('div', { clase: 'conv-chat activa', 'aria-current': 'true' },
+      h('b', {}, 'Conversación nueva'), h('span', { clase: 'meta' }, 'sin mensajes todavía')));
+  }
+  (PAR.chats || []).forEach(c => {
+    const activa = PAR.chat && PAR.chat.id === c.id;
+    conversaciones.appendChild(h('button', {
+      type: 'button', clase: `conv-chat${activa ? ' activa' : ''}`, 'aria-current': activa ? 'true' : null,
+      title: c.titulo, onclick: () => abrirChatParrilla(c.id),
+    }, h('b', {}, recortar(c.titulo || 'Conversación', 48)), h('span', { clase: 'meta' }, c.tocada || '')));
+  });
+  if (!nueva && !(PAR.chats || []).length) conversaciones.appendChild(h('div', { clase: 'meta' }, 'Ninguna todavía.'));
+  lista.appendChild(conversaciones);
+  lista.appendChild(h('div', { clase: 'fila pie-lista-chats' },
     PAR.chat && (PAR.chat.turnos || []).length
-      ? h('button', { clase: 'mini fantasma peligro', onclick: () => borrarChatParrilla() }, 'Borrar') : null,
+      ? h('button', { clase: 'mini fantasma peligro', onclick: () => borrarChatParrilla() }, 'Borrar esta conversación') : null,
+    h('span', { clase: 'crece' }),
     botonGuia('chat_guiones', () => document.querySelector('#modulo [data-foco="parrilla-chat"]'))));
-  caja.appendChild(mensajesChatParrilla());
-  caja.appendChild(entradaChatParrilla());
+  caja.appendChild(lista);
+  caja.appendChild(h('section', { clase: 'hilo-chat' }, mensajesChatParrilla(), entradaChatParrilla()));
   return caja;
 }
 
@@ -26722,7 +29478,7 @@ function entradaChatParrilla() {
   const capturas = h('div', { clase: 'fila capturas-chat' }, PAR.chatCapturas.map((c, i) => h('span', { clase: 'pastilla' },
     `📎 ${recortar(c.name || 'captura', 24)}`,
     h('button', { clase: 'mini fantasma', title: 'Quitar', onclick: () => { PAR.chatCapturas.splice(i, 1); pintarModulo(); } }, '×'))));
-  const interruptor = (clave, texto, ayuda) => h('label', { clase: 'plano interruptor-chat', title: ayuda },
+  const interruptor = (clave, texto, ayuda) => h('label', { clase: 'plano interruptor-chat chip-interruptor', title: ayuda },
     h('input', { type: 'checkbox', checked: PAR[clave] ? true : null, onchange: ev => { PAR[clave] = ev.target.checked; } }),
     h('span', {}, texto));
   const modelos = h('select', { 'aria-label': 'Modelo', onchange: ev => { PAR.chatModelo = ev.target.value; } },
@@ -26862,7 +29618,8 @@ async function guardarGuionesChatParrilla(turno, indices) {
 }
 
 async function borrarChatParrilla() {
-  if (!PAR.chat || !confirm('¿Borrar esta conversación? Los guiones que guardaste en la Parrilla se quedan.')) return;
+  if (!PAR.chat || !await preguntarParrilla('Borrar la conversación',
+    '¿Borrar esta conversación? Los guiones que guardaste en la Parrilla se quedan.', 'Borrar', true)) return;
   const id = PAR.chat.id;
   pararChatParrilla();
   try {
@@ -26909,13 +29666,17 @@ function seccionCuentasParrilla() {
   if (PAR.cuentaTrabajo && PAR.cuentaTrabajo.estado === 'trabajando' && !PAR.cuentaReloj) {
     setTimeout(vigilarCuentaParrilla, 0);
   }
+  // claves de analizar cuentas: las mueve rediseno-publicar (a Configuración). Se pintan SOLO desde aquí
   caja.appendChild(bloqueConexionesCuentas());
   caja.appendChild(bloqueTraerCuenta());
   if (PAR.cuentaAbierta) caja.appendChild(bloqueCuentaAbierta(PAR.cuentaAbierta));
   return caja;
 }
 
-/* ------------------------------------------------------------ conexiones */
+/* ------------------------------------------------------------ conexiones
+ * claves de analizar cuentas: las mueve rediseno-publicar. Un bloque aislado,
+ * igual que antes de rediseno-automatizar, y pintado desde un único sitio
+ * (`seccionCuentasParrilla`): la otra rama solo cambia esa línea. */
 
 function bloqueConexionesCuentas() {
   const c = PAR.cuentas.conexiones || {};
@@ -27032,13 +29793,22 @@ function bloqueTraerCuenta() {
     bloque.appendChild(h('div', { clase: 'caja-error texto-error-cuenta' }, t.error));
   }
   const lista = (PAR.cuentas.cuentas || []);
-  if (lista.length) {
-    bloque.appendChild(h('div', { clase: 'fila cuentas-guardadas' }, h('span', { clase: 'meta' }, 'Ya leídas:'),
-      lista.slice(0, 20).map(c => h('button', { clase: `mini${PAR.cuentaAbierta && PAR.cuentaAbierta.usuario === c.usuario
-        && PAR.cuentaAbierta.red === c.red ? ' activo' : ' fantasma'}`, title: `${c.videos} vídeos · ${c.traida.replace('T', ' ').slice(0, 16)}`,
-      onclick: () => abrirCuentaParrilla(c.red, c.usuario) }, `${NOMBRE_RED_CUENTA[c.red] || c.red} · @${c.usuario}${c.analizada ? ' ✓' : ''}`))));
-  }
-  return bloque;
+  if (!lista.length) return bloque;
+  /* LAS YA LEÍDAS, COMO TARJETAS (rediseno-automatizar): red, cuántos vídeos,
+     cuándo se leyó y si Claude ya la analizó. Abrir una no paga nada. */
+  return h('div', { clase: 'cuentas-y-leidas' }, bloque,
+    h('div', { clase: 'leidas-cuentas' }, h('h3', {}, 'Ya leídas'),
+      h('div', { clase: 'cuentas-guardadas' }, lista.slice(0, 20).map(c => {
+        const abierta = PAR.cuentaAbierta && PAR.cuentaAbierta.usuario === c.usuario && PAR.cuentaAbierta.red === c.red;
+        return h('button', { type: 'button', clase: `tarjeta-cuenta${abierta ? ' activa' : ''}`,
+          'aria-pressed': abierta ? 'true' : 'false',
+          title: `${c.videos} vídeos · ${String(c.traida || '').replace('T', ' ').slice(0, 16)}`,
+          onclick: () => abrirCuentaParrilla(c.red, c.usuario) },
+        h('b', {}, `@${c.usuario}`),
+        h('span', { clase: 'meta' }, `${NOMBRE_RED_CUENTA[c.red] || c.red} · ${c.videos} vídeos · leída el `
+          + `${String(c.traida || '').replace('T', ' ').slice(0, 10)}`),
+        h('span', { clase: `pastilla${c.analizada ? ' ok' : ''}` }, c.analizada ? '✓ analizada' : 'sin analizar'));
+      }))));
 }
 
 async function traerCuentaParrilla(forzar, pagar, pedida) {
@@ -27182,7 +29952,6 @@ function bloqueCuentaAbierta(d) {
   } else {
     analisis.appendChild(h('div', { clase: 'pista' }, 'Claude compara sus vídeos con más y con menos vistas: temas, ganchos, duración, cuándo publica e ideas para ti.'));
   }
-  bloque.appendChild(analisis);
 
   const g = PAR.cuentaGuiones;
   const cuantos = h('input', { type: 'number', min: 1, max: PAR.maxPedir || 30, value: g.cuantos, clase: 'numero-corto',
@@ -27193,12 +29962,13 @@ function bloqueCuentaAbierta(d) {
   peticion.dataset.foco = 'cuenta-peticion';
   const uso = h('select', { 'aria-label': 'Uso', onchange: ev => { g.modo = ev.target.value; } },
     [['adaptar', 'adaptar'], ['exacto', 'exacto']].map(([v, t]) => h('option', { value: v, selected: g.modo === v ? true : null }, t)));
-  bloque.appendChild(h('div', { clase: 'guiones-cuenta' }, h('h4', {}, 'Para tu proyecto'),
+  // en dos columnas: «Qué le funciona» y «Para tu proyecto»
+  bloque.appendChild(h('div', { clase: 'dos-columnas-cuenta' }, analisis, h('div', { clase: 'guiones-cuenta' }, h('h4', {}, 'Para tu proyecto'),
     h('div', { clase: 'fila' }, h('label', {}, 'Guiones'), cuantos, h('label', {}, 'Uso'), uso, peticion),
     h('div', { clase: 'fila' },
       h('button', { clase: 'primario', onclick: () => guionesDesdeCuentaParrilla(d) }, 'Escribir guiones con lo que le funciona'),
       h('button', { clase: 'mini', onclick: () => chatConCuentaParrilla(d) }, 'Hablar de ella en el chat'),
-      h('span', { clase: 'pista' }, `Van a la Parrilla de ${((PAR.proyectos || []).find(p => p.id === PAR.cid) || {}).nombre || 'este proyecto'}, con tu marca. Se inspiran, no copian.`))));
+      h('span', { clase: 'pista' }, `Van a la Parrilla de ${((PAR.proyectos || []).find(p => p.id === PAR.cid) || {}).nombre || 'este proyecto'}, con tu marca. Se inspiran, no copian.`)))));
 
   const tabla = h('div', { clase: 'videos-cuenta' });
   (d.videos || []).forEach((v, i) => {
@@ -27224,7 +29994,8 @@ async function analizarCuentaParrilla(d) {
 }
 
 async function borrarCuentaParrilla(d) {
-  if (!confirm(`¿Olvidar @${d.usuario}? Se borran sus vídeos leídos y su análisis (los guiones que ya escribiste se quedan).`)) return;
+  if (!await preguntarParrilla('Olvidar la cuenta', `¿Olvidar @${d.usuario}? Se borran sus vídeos leídos y su análisis `
+    + '(los guiones que ya escribiste se quedan).', 'Olvidar', true)) return;
   try {
     await pedir(rutaCuentas(`/${encodeURIComponent(d.red)}/${encodeURIComponent(d.usuario)}`), { method: 'DELETE' });
     PAR.cuentaAbierta = null;
@@ -27249,9 +30020,8 @@ async function guionesDesdeCuentaParrilla(d) {
 
 function chatConCuentaParrilla(d) {
   PAR.chatCuenta = `${d.red}:${d.usuario}`;
-  PAR.form.origen = 'chat';
   if (!PAR.chatTexto.trim()) PAR.chatTexto = `¿Qué le funciona a @${d.usuario} y qué podría hacer yo con eso?`;
-  irASeccionParrilla('anadir');
+  irASeccionParrilla('chat');
 }
 
 /* En el chat: «📈 Con una cuenta analizada». Las cuentas se piden una vez. */
@@ -27562,8 +30332,9 @@ function bloqueMejoresPublicar() {
  * Todos los estilos del proyecto la usan solos; en la pestaña «Reglas» de cada
  * estilo se ve, sin editarla, encima de las reglas propias del estilo.
  *
- * DOS SITIOS: el botón «Ficha del negocio» dentro del proyecto (abre el panel
- * para llenarla, como el del logo) y `bloqueNegocioDelEstilo` en «Reglas».
+ * DOS SITIOS: la sección «Ficha del negocio» del cajón «⚙ Ajustes del proyecto»
+ * (`SECCIONES_AJUSTES_PROYECTO`, junto al logo) y `bloqueNegocioDelEstilo` en
+ * «Reglas», cuyo «✎ Editar la ficha» abre ese cajón.
  *
  * El editor NO se guarda solo, a diferencia de las reglas del estilo: cambiar la
  * ficha de un proyecto con vídeos de foto deja sus imágenes para rehacer, así
@@ -27605,18 +30376,6 @@ function borradorDeNegocio(negocio) {
     equipo: (n.revisor || {}).equipo || '',
     orientacion: (n.revisor || {}).orientacion || '',
   };
-}
-
-function abrirPanelNegocio(cid) {
-  const abierto = APP.light.negocioProyecto === cid;
-  APP.light.negocioProyecto = abierto ? '' : cid;
-  if (!abierto) {
-    APP.light.logoProyecto = '';
-    // el borrador se siembra en el panel CUANDO la ficha esté leída, nunca antes
-    NEGOCIOS.deCliente = '';
-    NEGOCIOS.borrador = null;
-  }
-  pintarLight();
 }
 
 function separarPalabras(texto) {
@@ -27786,8 +30545,8 @@ function panelNegocioProyecto(cliente) {
     NEGOCIOS.borrador = borradorDeNegocio(actual);
   }
   const b = NEGOCIOS.borrador;
+  // el título lo pone la sección del cajón «⚙ Ajustes del proyecto»
   caja.appendChild(h('div', { clase: 'fila' },
-    h('h3', {}, 'Ficha del negocio'),
     botonGuia('tipo_negocio', null),
     h('span', { clase: 'crece' }),
     actual ? pastillaEstado('ok', 'la usan sus estilos') : pastillaEstado('', 'sin ficha: lo general')));
@@ -27843,7 +30602,7 @@ function bloqueNegocioDelEstilo(ficha) {
   const caja = h('div', { clase: 'negocio-del-estilo' });
   const ir = () => {
     if (!cliente) return;
-    APP.light.negocioProyecto = cid;
+    APP.light.ajustesProyecto = cid;
     NEGOCIOS.deCliente = '';
     NEGOCIOS.borrador = null;
     apuntarCliente(cid);

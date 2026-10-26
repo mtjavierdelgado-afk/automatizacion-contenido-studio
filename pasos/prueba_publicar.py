@@ -811,6 +811,26 @@ def prueba_studio():
               "«Dame 3 ganchos» se lanza")
         r = s.post(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/palabras")
         igual(r.status_code, 202, "«Proponer palabras clave» se lanza")
+        # rama seo-real: «Investigar búsquedas» (simulado: sin salir a internet)
+        r = s.post(base + "/api/publicar/videos/fiesta/seo/investigar")
+        igual(r.status_code, 202, "«Investigar búsquedas» se lanza")
+        f = _esperar(s, base + "/api/publicar/videos/fiesta",
+                     lambda d: not d["seo"]["trabajando"].get("investigar"))
+        ok((f["seo"].get("real") or {}).get("candidatas"), "y deja las frases investigadas en la ficha")
+        ok(all(n.get("partes") for n in f["seo"]["notas"].values() if n.get("nota")),
+           "la nota de cada red viene en tres partes")
+        r = s.post(base + "/api/publicar/youtube/probar")
+        ok(r.status_code == 200 and r.json()["prueba"]["estado"] == "sin_clave",
+           "«Probar» la clave de YouTube sin clave puesta: lo dice")
+        # rama seo-real-3: el canal con OAuth
+        r = s.post(base + "/api/publicar/youtube/oauth/empezar",
+                   json={"redireccion": base + "/api/publicar/youtube/oauth/vuelta"})
+        igual(r.status_code, 409, "«Conectar mi canal» sin el cliente de Google: lo pide antes")
+        r = s.get(base + "/api/publicar/youtube/oauth/vuelta", params={"state": "inventado", "code": "x"})
+        ok(r.status_code == 200 and "No se ha conectado" in r.text and "<script" not in r.text,
+           "una vuelta de Google que no es de un intento: una página que lo dice (sin scripts)")
+        igual(s.post(base + "/api/publicar/videos/fiesta/seo/encontraron").status_code, 409,
+              "«Cómo te encontraron» sin canal conectado: lo dice")
 
         # --- proyecto con clave
         r = s.post(base + "/api/clientes", json={"nombre": "Cliente secreto"})
@@ -1852,6 +1872,18 @@ def prueba_portada():
     vertical = dict(info, formato="vertical", duracion_s=3)
     _c, ficheros = P.campos_portada(raiz, vertical, datos, ["facebook"])
     igual(ficheros, [], "un Reel de Facebook no lleva miniatura")
+    largo = dict(info, formato="vertical", duracion_s=180)
+    _c, ficheros = P.campos_portada(raiz, largo, datos, ["facebook"])
+    igual([c for c, _r in ficheros], ["facebook_thumbnail"], "un vídeo largo de Facebook (no Reel) sí lleva portada")
+    # portadas-2 (21-10): LinkedIn, X y Pinterest también; las demás, nada
+    campos, ficheros = P.campos_portada(raiz, info, {"portada": {"ms": 2000}}, ["linkedin", "x", "pinterest", "threads"])
+    igual([c for c, _r in ficheros], ["thumbnail"], "LinkedIn y X reciben la miniatura (una sola vez)")
+    igual(campos, {"pinterest_cover_image_key_frame_time": "2"}, "Pinterest, el momento en segundos; Threads, nada")
+    _c, ficheros = P.campos_portada(raiz, info, {"portada": {"ms": 2000, "youtube": False}}, ["youtube", "linkedin"])
+    igual(ficheros, [], "con YouTube sin marcar en la misma subida, la miniatura de LinkedIn no se cuela en YouTube")
+    ok(P.tiktok_puede_portada({"cuentas": {"tiktok": {"capacidades": ["comments", "cover_image"]}}})
+       and not P.tiktok_puede_portada({"cuentas": {"tiktok": {"capacidades": []}}}) and not P.tiktok_puede_portada({}),
+       "se sabe si la cuenta de TikTok tiene el permiso «cover_image»")
     for contenido, que in ((b"#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\nfile:///etc/passwd\n", "una lista HLS"),
                            (b"no soy una imagen", "texto")):
         try:
@@ -2275,7 +2307,7 @@ def prueba_notas_19oct():
        "y los demás puntos también llevan el suyo")
     ok(all("Lo fijo" not in x["texto"] for x in n["puntos"])
        and "Cuentas y ajustes → SEO de este proyecto" in ids["ubicacion"]["texto"]
-       and "Cuentas y ajustes → SEO de este proyecto" in ids["palabra"]["texto"],
+       and "Investigar búsquedas" in ids["palabra"]["texto"],
        "dónde se pone la ubicación y la palabra clave, con el nombre real de la pantalla")
     con = S.nota("youtube", dict(textos, titulo="Fiesta"), {}, P.AJUSTES_DEFECTO, {}, INFO, "consolas en Lima")
     ok({"palabra_titulo", "palabra_primera", "palabra_descripcion", "titulo_largo"} <=
@@ -2318,8 +2350,10 @@ def prueba_notas_19oct():
               "la palabra clave que propone la revisión queda para «Usar»")
         nuevos = dict(f["textos"]["instagram"], **{c: v["despues"] for c, v in prop["campos"].items()})
         datos = P._leer_video(raiz, "n19")
-        esperada = S.nota("instagram", nuevos, P.componer("instagram", nuevos, ajustes, info, None, datos),
-                          ajustes, datos, info, S.palabra_del_video(datos, ajustes))["nota"]
+        # LA nota es la de tres partes (rama seo-real), con la palabra que
+        # manda en ESTE vídeo
+        esperada = P.nota_seo("instagram", nuevos, P.componer("instagram", nuevos, ajustes, info, None, datos),
+                              ajustes, datos, info, S.palabra_del_video(datos, ajustes, info))["nota"]
         igual(f["seo"].get("notas_con_propuesta", {}).get("instagram"), esperada,
               "«con estos cambios»: la nota del Studio sobre los textos propuestos")
         ok(esperada > f["seo"]["notas"]["instagram"]["nota"],
@@ -2604,6 +2638,30 @@ def prueba_20oct_programado():
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 
 
+def prueba_portada_mandada():
+    """portadas-2 (21-10): el envío dice qué portada se mandó a cada red, para
+    saber si la que no salió es cosa de aquí o de la red."""
+    seccion("4g] qué portada se mandó a cada red (portadas-2)")
+    import publicar as P
+    ok(P.portada_mandada("instagram", {}, [("cover_image", "/x.jpg")]) == "tu imagen de portada",
+       "Instagram con imagen: «tu imagen de portada»")
+    ok("segundo 3,5" in P.portada_mandada("instagram", {"thumb_offset": "3500"}, []), "o el fotograma, en segundos")
+    ok("cover_image" in P.portada_mandada("tiktok", {}, [("tiktok_cover_image", "/x.jpg")]),
+       "TikTok con imagen avisa de que necesita el permiso «cover_image»")
+    ok("verificado" in P.portada_mandada("youtube", {}, [("thumbnail", "/x.jpg")]), "YouTube, del canal verificado")
+    ok(P.portada_mandada("youtube", {}, []) == "" and P.portada_mandada("facebook", {}, []) == "",
+       "sin nada, vacío: la puso la red")
+    ok(P.portada_mandada("threads", {}, []) is None, "una red sin portada no dice «ninguna»: no dice nada")
+    ok(P.portada_mandada("linkedin", {}, [("thumbnail", "/x")]) == "tu miniatura"
+       and "segundo 2" in P.portada_mandada("pinterest", {"pinterest_cover_image_key_frame_time": "2"}, []),
+       "LinkedIn y Pinterest dicen lo que se les mandó")
+    ok(UP._capacidades(["cover_image", "comments"]) == ["comments", "cover_image"]
+       and UP._capacidades({"cover_image": True, "x": False}) == ["cover_image"] and UP._capacidades(None) == [],
+       "las capacidades de una cuenta se leen como lista o como {nombre: sí/no}")
+    ok("portada" in P._envio_publico_campos({"portada": "tu imagen de portada"}),
+       "y la ficha del envío lo enseña")
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
@@ -2623,6 +2681,7 @@ def main():
     prueba_20oct_idioma()
     prueba_20oct_short()
     prueba_20oct_programado()
+    prueba_portada_mandada()
     if shutil.which("ffmpeg"):
         prueba_portada()
     if shutil.which("ffmpeg"):

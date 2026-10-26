@@ -168,7 +168,9 @@ def prueba_plantillas():
        and otro["formato"] == "1:1", "cambiar paleta, letra o formato deja lo hecho a mano (añadido y escondido)")
     ok(otro["elementos"][-1]["color"] == portadas.PALETAS["oferta"]["acento"] and otro["paleta"] == "oferta",
        "y los colores de la paleta vieja pasan a los de la nueva")
-    ok(all(e.get("fuente") in (None, "bangers") for e in otro["elementos"] if e["tipo"] == "texto"),
+    # (el texto pequeño de arriba va a propósito en otra letra, de contraste)
+    ok(all(e.get("fuente") in (None, "bangers") for e in otro["elementos"]
+           if e["tipo"] == "texto" and e.get("rol") != "antetitulo"),
        "y la letra, a la nueva")
     cat = portadas.catalogo()
     ok(len(cat["plantillas"]) == len(portadas.PLANTILLAS) and cat["formatos"]["9:16"]["zonas"],
@@ -235,14 +237,74 @@ def prueba_render():
 
 
 def prueba_ia():
-    seccion("5] las dos opciones con IA")
+    seccion("5] las dos opciones con IA (el prompt se ve y se puede cambiar)")
     d = portadas.de_plantilla("versus", {"izquierda": "Diseño", "derecha": "Función"}, "calido", "anton", "9:16")
-    fondo = portadas.prompt_fondo_ia(d, {"resumen": "cocina con islas de madera"})
-    ok("NO text" in fondo and "cocina" in fondo, "el fondo con IA se pide SIN texto y con el tema del vídeo")
-    entera = portadas.prompt_portada_ia(d, {"resumen": "cocina"})
-    ok('"Diseño"' in entera and '"Función"' in entera and "accents" in entera,
+    fondo = portadas.prompt_final("fondo", "", d, {"resumen": "cocina con islas de madera"})
+    ok("SIN texto" in fondo and "cocina" in fondo, "el fondo con IA se pide SIN texto y con el tema del vídeo")
+    entera = portadas.prompt_final("portada", "", d, {"resumen": "cocina"})
+    ok("«Diseño»" in entera and "«Función»" in entera and "tildes" in entera,
        "la portada entera con IA lleva el texto exacto, con tildes")
+    propio = portadas.prompt_final("fondo", "Una isla de cocina de roble al atardecer", d, {})
+    ok(propio.startswith("Una isla de cocina de roble") and "SIN texto" in propio,
+       "un prompt escrito a mano se respeta, y las reglas del final van siempre")
+    ok(len(portadas.prompt_final("fondo", "x" * 9000, d, {})) < 1800, "un prompt enorme se recorta")
     ok(set(portadas.TAMANO_IA) == set(portadas.FORMATOS), "cada formato tiene su tamaño de imagen")
+    ideas = portadas.leer_ideas_ia({"ideas": [{"titulo": "Sala", "prompt": "una sala llena de pantallas y niños jugando"},
+                                              {"titulo": "corta", "prompt": "x"}, "basura",
+                                              {"prompt": "unas manos con un mando de consola en primer plano"}]})
+    ok(len(ideas) == 2 and ideas[1]["titulo"] == "Idea", f"las ideas de Claude se validan ({len(ideas)})")
+    instruccion = portadas.instruccion_ideas_ia({"guion": "palabra " * 3000 + "FINAL"}, d)
+    ok("ideas DISTINTAS de imagen" in instruccion and "«Diseño»" in instruccion,
+       "a Claude le llegan los textos de la portada y el guion")
+
+
+def prueba_capas_limpias():
+    seccion("6] portadas-2: la imagen limpia y las tres capas")
+    for pid in portadas.PLANTILLAS:
+        d = portadas.de_plantilla(pid, {}, "gamer", "anton", "9:16")
+        if d["efectos"] or any(e.get("rol") == "look" and not e.get("oculto") for e in d["elementos"]):
+            ok(False, f"la plantilla {pid} mete efectos en la foto")
+            break
+    else:
+        ok(True, "ninguna de las 21 plantillas toca la foto al elegirla")
+    oferta = portadas.de_plantilla("oferta", {}, "gamer", "anton", "9:16")
+    ok(oferta["look"] and any(e.get("rol") == "look" and e.get("oculto") for e in oferta["elementos"]),
+       "su look (efectos y rayos) queda como opción, escondido")
+    titular = portadas.de_plantilla("titular", {"titulo": "HOLA"}, "gamer", "anton", "9:16")
+    con_ante = portadas.aplicar_textos(titular, {"antetitulo": "SOLO HOY"})
+    ok(any(e.get("rol") == "antetitulo" and e.get("texto") == "SOLO HOY" for e in con_ante["elementos"]),
+       "el texto pequeño de arriba sale al escribirlo aunque estuviera vacío al elegir la plantilla")
+    ok(grafismo.elemento({"tipo": "texto", "texto": "", "x": 0.5, "y": 0.2}, 1080, 1920) == "",
+       "vacío no pinta nada")
+    titular["elementos"].append({"tipo": "icono", "icono": "fuego", "x": 0.2, "y": 0.8, "propio": True,
+                                 "orig": {"x": 0.2, "y": 0.8, "orig": {"x": 9}}})
+    titular["efectos"] = {"contraste": 1.3}
+    otra = portadas.de_plantilla("versus", None, "gamer", "anton", "9:16", base=titular)
+    propios = [e for e in otra["elementos"] if e.get("propio")]
+    ok(len(propios) == 1 and propios[0]["tipo"] == "icono", "cambiar de plantilla conserva lo añadido a mano")
+    ok(otra["efectos"] == {"contraste": 1.3}, "y los ajustes de imagen que puso la persona")
+    ok("orig" not in (propios[0].get("orig") or {}), "un «orig» no lleva otro dentro")
+    ok(all(e.get("orig") for e in otra["elementos"]), "cada elemento recuerda cómo nació (Restablecer)")
+    ok("ninguna" in portadas.PALETAS and portadas.catalogo().get("capas"), "hay «Sin paleta» y la pantalla explica cada capa")
+    ida = portadas.cambiar_estilo(otra, paleta="ninguna")
+    vuelta = portadas.cambiar_estilo(ida, paleta="gamer")
+    ok([e.get("acento") for e in vuelta["elementos"]] == [e.get("acento") for e in otra["elementos"]],
+       "pasar a «Sin paleta» y volver no pierde el color del resaltado")
+    ok([e.get("orig", {}).get("color") for e in ida["elementos"]] != [e.get("orig", {}).get("color") for e in otra["elementos"]],
+       "y «Restablecer» devuelve los colores de la paleta que está puesta")
+    campos = ("color", "contorno", "acento", "color_texto")
+    rotas = []
+    for plantilla in portadas.PLANTILLAS:
+        for paleta in portadas.PALETAS:
+            d = portadas.de_plantilla(plantilla, {}, paleta, "anton", "9:16")
+            v = portadas.cambiar_estilo(portadas.cambiar_estilo(d, paleta="ninguna"), paleta=paleta)
+            colores = lambda x: [[e.get(c) for c in campos] + [(e.get("orig") or {}).get(c) for c in campos]
+                                 for e in x["elementos"]]
+            if colores(d) != colores(v):
+                rotas.append(f"{plantilla}/{paleta}")
+    ok(not rotas, f"ida y vuelta por «Sin paleta» deja TODOS los colores como estaban, en las 21 × 8 ({rotas[:4]})")
+    ok(all("oculto" not in (e.get("orig") or {}) for e in oferta["elementos"]),
+       "«Restablecer» no vuelve a esconder los rayos que se enseñaron")
 
 
 def main():
@@ -252,6 +314,7 @@ def main():
         prueba_claude()
         prueba_render()
         prueba_ia()
+        prueba_capas_limpias()
     finally:
         shutil.rmtree(CARPETA, ignore_errors=True)
     print()

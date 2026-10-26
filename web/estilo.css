@@ -485,6 +485,11 @@ button.peligro:hover:not(:disabled) { border-color: var(--aviso); }
 button.mini { padding: 3px 8px; font-size: 12px; border-radius: 6px; }
 button.fantasma { background: transparent; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--acento); }
+/* LAS OPCIONES DE UN DESPLEGABLE llevan su propio fondo (arreglo urgente,
+   22-10-2026): un <select> con fondo transparente (el chip del proyecto de
+   Automatizar) dejaba la lista nativa en blanco con la letra clara encima. */
+select option, select optgroup { background-color: var(--panel); color: var(--texto); }
+select option:disabled { color: var(--tenue2); }
 textarea { width: 100%; resize: vertical; line-height: 1.55; }
 input[type=range] { padding: 0; background: none; border: none; accent-color: var(--acento); }
 input[type=checkbox] { accent-color: var(--acento); width: 15px; height: 15px; }
@@ -1100,7 +1105,7 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
 #toast {
   position: fixed; right: 18px; bottom: 18px; background: var(--ok); color: var(--sobre-ok);
   font-weight: 600; padding: 10px 16px; border-radius: 9px; opacity: 0;
-  transition: opacity .25s; pointer-events: none; z-index: 70; max-width: 460px;
+  transition: opacity .25s; pointer-events: none; z-index: 100; max-width: 460px;
 }
 #toast.ver { opacity: 1; }
 #toast.malo { background: var(--aviso); color: var(--blanco); }
@@ -1663,23 +1668,6 @@ body.modo-light #coste { display: none; }
   background: none; color: inherit; font: inherit; cursor: pointer;
 }
 .galeria-estilos .cara-y-cuerpo:hover { border-color: transparent; }
-.galeria-estilos .esquina { position: absolute; top: 6px; right: 6px; }
-.galeria-estilos .puntos {
-  padding: 1px 7px; line-height: 1.2; border-radius: 7px;
-  background: var(--velo-imagen); color: var(--texto);
-  border: 1px solid var(--linea);
-}
-.galeria-estilos .menu-estilo {
-  position: absolute; right: 0; top: 26px; z-index: 3;
-  display: flex; flex-direction: column; align-items: stretch;
-  background: var(--panel); border: 1px solid var(--linea); border-radius: 9px;
-  overflow: hidden; min-width: 108px;
-}
-.galeria-estilos .menu-estilo.plegado { display: none; }
-.galeria-estilos .menu-estilo button {
-  border: none; border-radius: 0; text-align: left; padding: 7px 12px;
-}
-.galeria-estilos .menu-estilo button:hover { background: var(--hover); }
 /* La caja se reserva aunque no haya imagen: sin ella, la rejilla salta al cargar
    las miniaturas y lo que estabas a punto de pulsar se mueve.
 
@@ -2134,39 +2122,6 @@ input.duracion-num { width: 84px; flex: 0 0 auto; }
 .fila.cierre .pista { max-width: 62ch; }
 button.primario.grande { padding: 9px 18px; font-size: 14px; }
 
-/* Los vídeos hechos con el modo light, debajo de los estilos. Una lista y no
-   una parrilla: lo que se busca aquí es EL que estabas haciendo, no elegir
-   entre varios mirándolos. */
-.videos-light { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
-.video-light {
-  display: flex; align-items: center; gap: 10px;
-  border: 1px solid var(--linea); border-radius: 9px; padding: 7px 11px;
-  background: var(--hueco);
-}
-.video-light .abrir {
-  flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px;
-  text-align: left; border: none; background: none; color: inherit;
-  font: inherit; cursor: pointer; padding: 0;
-}
-.video-light:hover { border-color: var(--acento); }
-.video-light .nombre { font-size: 14px; font-weight: 600; }
-
-/* EL LAPIZ. Cuadrado y del alto de la fila para que no la estire, y con el
-   emoji centrado: sin `line-height: 1` el glifo arrastra su propio interlineado
-   y la fila crece tres pixeles solo donde hay lapiz. */
-.video-light .renombrar {
-  flex: 0 0 auto; padding: 5px 9px; line-height: 1; font-size: 14px;
-}
-/* EN EL MOVIL SE TOCA CON EL PULGAR, no con un raton: 44 px es el minimo que
-   se acierta sin ampliar, y aqui el boton esta pegado a «Apartar», que borra. */
-@media (max-width: 560px) {
-  .video-light { gap: 6px; flex-wrap: wrap; }
-  .video-light .renombrar { min-width: 44px; min-height: 40px; }
-  /* el nombre arriba y los botones debajo, a la izquierda: en una sola fila
-     «Apartar» quedaba en el borde derecho, debajo de la burbuja del asistente */
-  .video-light .abrir { flex-basis: 100%; flex-wrap: wrap; }
-}
-
 /* ---- volver, en la cabecera de una pantalla de dentro */
 
 /* VA DELANTE DEL TITULO Y EN SU LINEA. `.light-cab` alinea por `baseline`, que
@@ -2180,7 +2135,6 @@ button.primario.grande { padding: 9px 18px; font-size: 14px; }
    fila, a 375 px la barra se queda en 57 px y la línea que dice lo que va a
    hacer y lo que cuesta —que es la mitad de por qué existe— no se puede leer.
    Los botones arriba y la barra debajo, a todo el ancho. */
-}
 
 /* ==========================================================================
    EL REPASO: las notas escritas sobre el vídeo montado
@@ -3181,16 +3135,10 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 .tarjeta-proyecto.nuevo { border-style: dashed; background: transparent; }
 .tarjeta-proyecto.es-oculto { opacity: .65; border-style: dashed; }
 .icono-proyecto { font-size: 30px; line-height: 1; margin-bottom: 6px; }
-.logo-proyecto { max-height: 44px; max-width: 140px; object-fit: contain; margin-bottom: 6px; }
-.logo-proyecto.pequeno { max-height: 32px; margin: 0; }
-.migas { margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
 .cab-proyecto { gap: 12px; }
-.mandos-proyecto { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 18px; }
-.mandos-proyecto .mini.activo { border-color: var(--acento); color: var(--acento); }
 .panel-logo-proyecto { border: 1px solid var(--linea); border-radius: 12px; padding: 12px 14px;
   margin-bottom: 18px; display: flex; flex-direction: column; gap: 8px; }
 .chip-proyecto { font-size: 12px; color: var(--tenue); margin: 2px 0 4px; }
-.aviso-perdidos { margin-bottom: 18px; }
 /* el dialogo de la casa (en vez de los prompt del navegador) */
 .capa-dialogo { position: fixed; inset: 0; z-index: 90; background: var(--velo);
   display: flex; align-items: center; justify-content: center; padding: 16px; }
@@ -3490,6 +3438,26 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .propuesta-portada { display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--linea);
   border-radius: 8px; padding: 8px; }
 .propuesta-portada button { align-self: flex-start; }
+/* portadas-2 (21-10): el aviso dentro del editor, «Esta imagen lleva», las
+   muestras de la paleta, las ideas de la IA y el «antes de pagar» */
+.aviso-portada { font-size: 13px; padding: 3px 10px; border-radius: 999px; }
+.aviso-portada.bueno { background: var(--ok); color: var(--sobre-ok); }
+.aviso-portada.malo { background: var(--aviso); color: var(--blanco); }
+.lleva-portada { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
+.pastilla-lleva { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px;
+  border: 1px solid var(--linea); border-radius: 999px; background: var(--hueco); }
+.quitar-lleva { padding: 0 7px; min-height: 0; line-height: 1.6; border-radius: 999px; }
+.muestras-paleta { display: inline-flex; gap: 4px; align-self: center; }
+.muestra-color { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--linea); display: inline-block; }
+.elemento-portada.propio-portada { border-top-style: solid; }
+.idea-ia-portada { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--linea);
+  border-radius: 8px; padding: 8px; }
+.idea-ia-portada textarea, .antes-de-pagar textarea { width: 100%; font: inherit; font-size: 13px; }
+.antes-de-pagar { display: flex; flex-direction: column; gap: 6px; }
+.portada-por-red { display: flex; flex-direction: column; gap: 3px; font-size: 13px; margin-top: 4px; }
+.portada-red { gap: 6px; flex-wrap: wrap; }
+.portada-red.sin-portada { color: var(--tenue); }
+.portada-envio { white-space: normal; }
 @media (max-width: 760px) {
   .capa-portada { padding: 0; }
   .panel-portada { border-radius: 0; }
@@ -3529,6 +3497,21 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
   text-transform: none; letter-spacing: normal; }
 .fila-espacio-fijo .crece { min-width: 0; overflow-wrap: anywhere; }
 .fila-espacio-fijo .id { font-family: var(--mono, monospace); flex: 0 0 auto; }
+
+/* ---- tipo-de-relato: el tipo de relato y la imagen base que se edita (rama tipo-de-relato) */
+.tipo-relato { display: flex; flex-direction: column; gap: 4px; }
+.imagen-base-relato { display: flex; flex-direction: column; gap: 6px; margin-top: 10px;
+  padding: 10px; border: 1px solid var(--linea); border-radius: 8px; min-width: 0; }
+.imagen-base-relato.aprobada { border-color: var(--ok-borde); }
+.miniatura-imagen-base { display: block; max-width: 260px; max-height: 200px; width: auto;
+  border-radius: 8px; border: 1px solid var(--linea); object-fit: contain; }
+.pedido-sitios { display: flex; flex-direction: column; gap: 4px; }
+.estados-relato { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; min-width: 0; }
+.estado-relato { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start;
+  padding: 8px; border: 1px solid var(--linea); border-radius: 8px; min-width: 0; }
+.estado-relato.aprobada { border-color: var(--ok-borde); }
+.estado-relato .miniatura-imagen-base { max-width: 160px; max-height: 160px; }
+.estado-relato-texto { display: flex; flex-direction: column; gap: 4px; flex: 1 1 180px; min-width: 0; }
 
 /* ================================== ARREGLOS DEL 19-10 (segunda tanda)
    Rama `arreglos-19oct`. */
@@ -4070,18 +4053,12 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 
 /* ================================================= AUTOMATIZAR → PARRILLA
    (rama `parrilla`, 17-10-2026). Todo lo de la Parrilla, aquí al final. */
-.proyecto-parrilla { gap: 8px; flex-wrap: wrap; margin: 4px 0 6px; }
-.proyecto-parrilla select { max-width: 320px; min-width: 0; flex: 0 1 auto; }
 .parrilla-opcional { margin: 0 0 10px; }
 .trabajo-parrilla { gap: 8px; margin: 8px 0; align-items: center; min-width: 0; overflow-wrap: anywhere; }
 .filtros-parrilla { gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
 .filtros-parrilla .buscar-parrilla { flex: 1 1 180px; min-width: 0; }
-.matriz-parrilla { margin-bottom: 12px; }
 .cab-matriz { gap: 8px; flex-wrap: wrap; align-items: baseline; }
 .cab-matriz h3 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.fila-guion { gap: 8px; padding: 6px 0; border-top: 1px solid var(--linea-suave); flex-wrap: wrap; min-width: 0; }
-.fila-guion .titulo-guion { max-width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; font-weight: 600; }
-.fila-guion .datos-guion, .fila-guion .video-guion { min-width: 0; overflow-wrap: anywhere; }
 .vacio-parrilla p { margin: 6px 0 12px; }
 .origen-parrilla { flex-wrap: wrap; }
 .anadir-parrilla textarea, .ficha-parrilla textarea { width: 100%; box-sizing: border-box; }
@@ -4091,8 +4068,6 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .rejilla-parrilla label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--tenue); min-width: 0; }
 .rejilla-parrilla label.ancha { grid-column: 1 / -1; }
 .rejilla-parrilla select, .rejilla-parrilla input { min-width: 0; max-width: 100%; }
-.cab-ficha-parrilla { gap: 8px; align-items: center; flex-wrap: wrap; }
-.cab-ficha-parrilla h3 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .avisos-guion ul, .avisos-encargo { margin: 6px 0 0; padding-left: 18px; }
 .encargo-parrilla .dato-encargo { display: flex; flex-direction: column; gap: 2px; margin: 8px 0; min-width: 0; }
 .encargo-parrilla .dato-encargo .valor { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -4104,8 +4079,7 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .pasar-encargo label { display: flex; gap: 6px; align-items: center; min-width: 0; flex-wrap: wrap; }
 .pasar-encargo select { max-width: 260px; min-width: 0; }
 @media (max-width: 600px) {
-  .proyecto-parrilla select, .pasar-encargo select { max-width: 100%; flex: 1 1 100%; }
-  .fila-guion .crece { display: none; }
+  .pasar-encargo select { max-width: 100%; flex: 1 1 100%; }
 }
 
 /* ================================================================ PUBLICAR · SEO
@@ -4136,6 +4110,24 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .punto-seo.ok { color: var(--ok); }
 .punto-seo.aviso { color: var(--aviso); }
 .gancho-seo { gap: 8px; padding: 4px 8px; border: 1px solid var(--linea); border-radius: 7px; background: var(--hueco); }
+/* SEO de verdad (rama seo-real): las tres partes de la nota y las búsquedas */
+.parte-seo { padding: 4px 6px; border-left: 2px solid var(--linea); margin: 4px 0; min-width: 0; }
+.parte-seo > .fila { gap: 8px; align-items: center; }
+.parte-seo .meta { overflow-wrap: anywhere; }
+.titulo-forma-seo { font-size: 12px; color: var(--tenue); margin-top: 8px; }
+.busquedas-seo { margin: 8px 0; padding: 6px 8px; border: 1px solid var(--linea); border-radius: 8px; background: var(--hueco); }
+.busquedas-seo > summary { cursor: pointer; }
+.busquedas-seo > .fila { gap: 8px; align-items: center; flex-wrap: wrap; }
+.tabla-busquedas td, .tabla-busquedas th { font-size: 12px; padding: 4px 6px; vertical-align: top; }
+.tabla-busquedas tr.recomendada td { background: var(--panel); }
+.tabla-busquedas tr.recomendada td:first-child { border-left: 2px solid var(--ok); }
+.aviso-busquedas { color: var(--aviso); }
+/* SEO fase 3 (rama seo-real-3): «Cómo te encontraron» y el canal en Configuración */
+.encontraron-seo { margin: 8px 0; padding: 6px 8px; border: 1px solid var(--linea); border-radius: 8px; background: var(--hueco); display: flex; flex-direction: column; gap: 4px; }
+.encontraron-seo > .fila { gap: 8px; align-items: center; flex-wrap: wrap; }
+.busqueda-encontrada { gap: 8px; font-size: 12px; padding: 2px 4px; border-bottom: 1px solid var(--linea-suave); }
+.busqueda-encontrada > .crece { min-width: 0; overflow-wrap: anywhere; }
+.canal-youtube .vuelta-oauth { font-size: 11px; overflow-wrap: anywhere; min-width: 0; }
 .pista-palabra-clave:empty { display: none; }
 .pista-palabra-clave { margin: 8px 0; }
 @media (max-width: 600px) {
@@ -4372,7 +4364,6 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 button.chip-enlace:hover { border-color: var(--acento); color: var(--texto); }
 .pastilla.borrador { background: var(--info-fondo); color: var(--acento); }
 .cab-video .coste-light { margin-left: auto; }
-.video-light.renombrando { padding: 6px 8px; }
 
 /* ---- la cabecera de cada paso */
 .cab-paso { align-items: baseline; gap: 10px; margin-bottom: 0; }
@@ -4467,9 +4458,6 @@ button.chip-enlace:hover { border-color: var(--acento); color: var(--texto); }
 
 /* ---- la tarjeta de estilo: «✎ Editar» a la vista y «⋯» con lo demás */
 .galeria-estilos .pie-tarjeta { display: flex; gap: 6px; align-items: center; padding: 0 12px 11px; }
-.galeria-estilos .pie-tarjeta .esquina { position: relative; top: auto; right: auto; }
-.galeria-estilos .pie-tarjeta .puntos { background: var(--boton); }
-.galeria-estilos .pie-tarjeta .menu-estilo { top: auto; bottom: 30px; right: auto; left: 0; min-width: 170px; }
 
 /* ---- la ficha del estilo */
 .cab-ficha { align-items: flex-start; gap: 8px; flex-wrap: wrap; }
@@ -4536,3 +4524,563 @@ button.aviso-falta { background: none; border: none; padding: 0; min-height: 0; 
   border-radius: 8px; background: var(--boton); color: var(--texto); text-decoration: none; font-size: 13px;
 }
 .descargar-video a.boton:hover { border-color: var(--acento); }
+
+/* ---- arreglos-crear-movil (21-10-2026): el Crear nuevo en el móvil
+ * Sigue siendo el bloque CREAR · CARRIL. Colores, solo con variables. */
+
+/* la barra: «⋯» y lo que abre. En pantalla ancha no existen para la
+   maquetación (los secundarios quedan a la izquierda del principal) */
+.barra-accion .mas-de-la-barra, .barra-accion .secundarios-barra { display: contents; }
+.barra-accion .mas-texto, .barra-accion .boton-mas-barra { display: none; }
+.barra-accion .estado .texto-estado { min-width: 0; }
+/* el progreso de una tanda, en UNA línea: con dos o tres la barra cambiaba de
+   alto a cada tic y la burbuja subía y bajaba con ella */
+.barra-accion .progreso .meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+@media (max-width: 700px) {
+  .barra-accion { padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px)); }
+  .barra-accion .dentro, .barra-accion .dentro.corriendo {
+    grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; min-height: 46px;
+  }
+  .barra-accion .plan { display: none; }
+  /* «Un estilo nuevo» (pieDeCreacion) no pasa por barraDeAccion ni tiene «⋯»:
+     su plan es LO QUE FALTA para poder generar, y tiene que verse. */
+  .barra-accion.pie-creacion .plan { display: block; grid-column: 1 / -1; white-space: normal; }
+  .barra-accion .estado { font-size: 13px; cursor: pointer; }
+  .barra-accion .estado .texto-estado { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .barra-accion .derecha { flex-wrap: nowrap; min-width: 0; gap: 6px; }
+  .barra-accion .principal {
+    max-width: 58vw; padding: 6px 12px; font-size: 13.5px; line-height: 1.2;
+    white-space: normal; text-align: center; min-height: 44px;
+  }
+  .barra-accion .boton-mas-barra {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 40px; min-height: 40px; padding: 0 8px; font-size: 18px; line-height: 1;
+  }
+  .barra-accion .boton-mas-barra[aria-expanded="true"] { border-color: var(--acento); color: var(--acento); }
+  .barra-accion .mas-de-la-barra { display: none; }
+  /* ABIERTO: encima de la barra, sin cambiarle el alto */
+  .barra-accion.abierta .mas-de-la-barra {
+    display: flex; flex-direction: column; gap: 10px;
+    position: absolute; left: 8px; right: 8px; bottom: calc(100% + 6px); z-index: 9;
+    padding: 12px; border: 1px solid var(--linea); border-radius: 12px;
+    background: var(--panel); color: var(--texto); box-shadow: var(--sombra);
+  }
+  .barra-accion.abierta .mas-texto { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+  .barra-accion.abierta .mas-texto .meta { font-family: var(--letra-cifra); }
+  .barra-accion.abierta .secundarios-barra { display: flex; flex-wrap: wrap; gap: 8px; }
+  .barra-accion.abierta .secundarios-barra .secundario-barra { white-space: normal; }
+  body:has(.barra-accion.abierta) .burbuja-asistente,
+  body:has(.barra-accion.abierta) .minimizar-burbuja { visibility: hidden; }
+
+  /* la cabecera del vídeo: el nombre en una línea y el gasto en una pastilla
+     (el desglose, al pulsarla, como siempre) */
+  .cab-video { flex-wrap: nowrap; gap: 10px; padding: 8px 10px; }
+  .cab-video .datos { flex: 1 1 auto; gap: 2px; }
+  .nombre-video { flex-wrap: nowrap; }
+  .nombre-video b {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    overflow-wrap: normal; font-size: 16px;
+  }
+  .chips-video { flex-wrap: nowrap; overflow: hidden; }
+  .chips-video .chip-enlace { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+  .cab-video .coste-light { flex: 0 0 auto; margin-left: 0; padding: 4px 10px; border-radius: 999px; gap: 6px; }
+  .cab-video .coste-light .prov:not(.total), .cab-video .coste-light .presupuesto,
+  .cab-video .coste-light .prov.total b { display: none; }
+
+  /* «hay cambios del montaje sin aplicar», en una línea */
+  .franja-sin-aplicar { flex-wrap: nowrap; padding: 6px 12px; }
+  .franja-sin-aplicar .crece { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .franja-sin-aplicar .meta { display: none; }
+
+  /* ESCRIBIENDO CON EL TECLADO ABIERTO (`mirarTecladoMovil`): fuera lo fijo */
+  body.escribiendo-movil .barra-accion,
+  body.escribiendo-movil #cabecera, body.escribiendo-movil #barra-modulos,
+  body.escribiendo-movil .burbuja-asistente, body.escribiendo-movil .minimizar-burbuja,
+  body.escribiendo-movil .pestana-asistente { display: none; }
+}
+
+/* el aviso plegable: en el móvil, una línea que se abre (`avisoPlegable`) */
+.caja-aviso.aviso-plegable { padding-top: 8px; padding-bottom: 8px; }
+.aviso-plegable > summary { cursor: pointer; list-style: none; display: flex; gap: 6px; align-items: center; min-width: 0; }
+.aviso-plegable > summary::-webkit-details-marker { display: none; }
+.aviso-plegable > summary::before { content: 'ⓘ'; flex: none; }
+.aviso-plegable > summary::after { content: '▾'; flex: none; margin-left: auto; }
+.aviso-plegable[open] > summary::after { content: '▴'; }
+.aviso-plegable .resumen-aviso { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-weight: 600; }
+.aviso-plegable[open] .resumen-aviso { white-space: normal; }
+.aviso-plegable .detalle-aviso { margin-top: 6px; }
+
+/* el paso Vídeo mientras se monta: todo en su sitio, apagado */
+.apagado-montando { display: flex; flex-direction: column; gap: 14px; opacity: .55; }
+.apagado-montando > * { margin-top: 0; margin-bottom: 0; }
+.marco-video .sello-montando { top: 9px; bottom: auto; }
+
+/* la tarjeta de una nota mientras se dibuja: el hueco de la nueva */
+.nota-imagen .nota-hueco { display: grid; place-items: center; width: 100%; border: 1px dashed var(--linea-fuerte); }
+
+/* Imágenes en el móvil: los mandos de mirar, encima de la imagen */
+.previa-mandos.en-la-pagina {
+  position: static; margin: 0; padding: 4px 0; box-shadow: none; border-top: none; background: none;
+}
+
+/* EL AVISO FLOTANTE, ENCIMA DE LA BARRA Y AL LADO DE LA BURBUJA
+   (`apartarAvisoDeLaBarra` publica cuánto ocupa la barra). Regla aparte y más
+   específica: la capa de `#toast` es de otra rama. */
+body.con-barra-accion #toast { bottom: calc(var(--alto-barra-accion, 62px) + 12px); right: 82px; }
+@media (max-width: 620px) {
+  body.con-barra-accion #toast { left: 12px; right: 76px; bottom: calc(var(--alto-barra-accion, 62px) + 10px); }
+}
+#toast .linea-aviso + .linea-aviso { margin-top: 4px; padding-top: 4px; border-top: 1px solid currentColor; }
+
+/* ===================================================== PROYECTOS · TARJETAS
+ *
+ * Tus proyectos y la pantalla de un proyecto (rama `rediseno-proyectos`,
+ * maqueta aprobada el 22-10-2026): cabecera con «+ Nuevo vídeo», buscador,
+ * «Te necesitan», tarjetas de vídeo con su estado, tarjetas de proyecto, el
+ * menú de una tarjeta, el cajón «⚙ Ajustes del proyecto» y el panel «¿con qué
+ * estilo?». Los colores, SOLO con las variables del tema: valen en las cuatro
+ * paletas y en claro y oscuro. */
+.tus-proyectos { display: flex; flex-direction: column; gap: 14px; }
+.tus-proyectos > * { margin-top: 0; margin-bottom: 0; }
+.tus-proyectos > .light-cab { margin-top: 8px; align-items: center; }
+.tus-proyectos > .light-cab h3 { font-family: var(--letra-titulo); font-size: 19px; }
+.tus-proyectos .salida-crear { align-self: flex-start; }
+.solo-lector { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---- la cabecera de la página y la de un proyecto */
+.cab-tus-proyectos { display: flex; gap: 10px 16px; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; }
+.cab-tus-proyectos .izq { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.cab-tus-proyectos .izq.con-insignia { flex-direction: row; align-items: center; gap: 14px; }
+.cab-tus-proyectos h2 { font-family: var(--letra-titulo); font-size: 30px; line-height: 1.15; overflow-wrap: anywhere; }
+.cab-tus-proyectos .acc { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.cab-tus-proyectos .nuevo-video { padding: 9px 18px; font-size: 14px; border-radius: 12px; min-height: 40px; }
+.titulo-proyecto { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.chips-proyecto { display: flex; gap: 6px; flex-wrap: wrap; }
+.chips-proyecto .pastilla { white-space: nowrap; text-transform: none; letter-spacing: normal; font-size: 11.5px; }
+
+/* el logo o la inicial de un proyecto */
+.insignia-proyecto {
+  flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px;
+  font-family: var(--letra-titulo); font-weight: 800; font-size: 17px; line-height: 1;
+}
+.insignia-proyecto.grande { width: 56px; height: 56px; font-size: 26px; border-radius: 14px; }
+.insignia-proyecto.con-logo { object-fit: contain; background: var(--papel); border: 1px solid var(--linea); padding: 3px; }
+.insignia-proyecto.sin { background: var(--hueco); border: 1px solid var(--linea); }
+.tono-0 { background: var(--relleno); color: var(--sobre-acento); }
+.tono-1 { background: var(--coral-fondo); color: var(--coral-texto); }
+.tono-2 { background: var(--info-fondo); color: var(--acento); }
+.tono-3 { background: var(--marcado); color: var(--texto); }
+
+/* ---- el buscador */
+.buscador-proyectos {
+  display: flex; align-items: center; gap: 8px; padding: 0 12px; margin: 0;
+  border: 1px solid var(--linea); border-radius: 12px; background: var(--panel);
+  text-transform: none; letter-spacing: normal; color: var(--tenue); font-size: 14px;
+}
+.buscador-proyectos:focus-within { border-color: var(--acento); }
+.buscador-proyectos input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 10px 0; box-shadow: none; }
+.buscador-proyectos input:focus { outline: none; box-shadow: none; }
+
+/* ---- «Te necesitan» */
+.te-necesitan {
+  display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; border-radius: 12px;
+  border: 1px solid var(--aviso-borde); background: var(--aviso-fondo); color: var(--aviso-texto);
+}
+.te-necesitan .titulo-te-necesitan { color: var(--aviso); }
+.te-necesitan .meta { color: var(--aviso-texto); opacity: .85; }
+.grupo-te-necesitan { display: flex; flex-direction: column; gap: 6px; }
+.grupo-te-necesitan > .fila { gap: 8px; align-items: center; flex-wrap: wrap; }
+.grupo-te-necesitan .crece { flex: 1; min-width: 160px; }
+
+/* ---- las tarjetas de vídeo */
+.tarjetas-video { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+.tarjetas-video.en-lista { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.tarjetas-video > .pista { grid-column: 1 / -1; margin: 0; }
+.tarjeta-video {
+  position: relative; display: flex; gap: 6px; align-items: flex-start; min-width: 0;
+  padding: 8px; border-radius: 14px; border: 1px solid var(--linea); background: var(--panel);
+}
+.tarjeta-video:hover { border-color: var(--linea-fuerte); }
+.tarjeta-video.con-menu { z-index: 6; border-color: var(--acento); }
+.tarjeta-video.renombrando { padding: 10px 12px; }
+.tarjeta-video .abrir-video {
+  flex: 1; min-width: 0; display: flex; gap: 11px; align-items: flex-start; text-align: left;
+  padding: 4px; border: 0; border-radius: 10px; background: transparent; color: var(--texto);
+}
+.tarjeta-video .abrir-video:hover { background: var(--hover); }
+.cuerpo-video { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cuerpo-video .nombre { font-weight: 700; font-size: 14.5px; line-height: 1.3; overflow-wrap: anywhere; }
+.cuerpo-video .meta { overflow-wrap: anywhere; }
+.estados-video { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 2px; }
+.acciones-video { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; flex: none; }
+.acciones-video .chip-publicar { border-radius: 999px; padding: 3px 10px; }
+.acciones-video .mas-video { min-width: 34px; font-size: 15px; line-height: 1; }
+.acciones-video .mas-video[aria-expanded="true"] { border-color: var(--acento); color: var(--acento); }
+.miniatura-tarjeta {
+  flex: none; width: 76px; aspect-ratio: 16 / 9; border-radius: 8px; object-fit: cover;
+  background: var(--hueco); display: grid; place-items: center;
+  font-family: var(--letra-titulo); font-weight: 800; font-size: 20px;
+}
+.tarjeta-video.en-lista .miniatura-tarjeta { width: 56px; }
+.tarjeta-video.en-lista .abrir-video { align-items: center; }
+.tarjeta-video.en-lista .acciones-video { flex-direction: row; align-items: center; align-self: center; }
+
+/* el estado del vídeo, con las marcas del carril de Crear */
+.estado-tarjeta {
+  display: inline-flex; gap: 5px; align-items: center; max-width: 100%; padding: 1px 8px 1px 6px;
+  border-radius: 999px; border: 1px solid var(--linea-fuerte); color: var(--tenue);
+  font-size: 12px; font-weight: 600; line-height: 1.5;
+}
+.estado-tarjeta i { font-style: normal; font-weight: 800; }
+.estado-tarjeta.e-hecho { color: var(--ok); border-color: var(--ok-borde); }
+.estado-tarjeta.e-aviso { color: var(--aviso); border-color: var(--aviso-borde); background: var(--aviso-fondo); }
+.estado-tarjeta.e-curso { color: var(--acento); border-color: var(--acento-borde); background: var(--info-fondo); }
+.estado-tarjeta.e-pend { color: var(--tenue); }
+
+/* ---- el menú de una tarjeta («⋯» de un vídeo, pulsar un estilo) */
+.menu-tarjeta {
+  position: absolute; z-index: 12; top: calc(100% - 4px); right: 8px;
+  width: min(300px, calc(100vw - 48px)); padding: 8px; border-radius: 13px;
+  display: flex; flex-direction: column; gap: 5px;
+  background: var(--panel); border: 1px solid var(--acento); box-shadow: var(--sombra);
+}
+.menu-tarjeta button { text-align: left; justify-content: flex-start; white-space: normal; }
+.menu-tarjeta .fila { display: flex; gap: 5px; }
+.menu-tarjeta .fila button { flex: 1; }
+.menu-tarjeta .peligro .meta { color: inherit; opacity: .75; }
+.menu-tarjeta button.primario { padding: 8px 12px; }
+.galeria-estilos .ficha-estilo { overflow: visible; }
+.galeria-estilos .ficha-estilo .cara { border-radius: 12px 12px 0 0; overflow: hidden; }
+.galeria-estilos .ficha-estilo.con-menu { z-index: 6; border-color: var(--acento); }
+.galeria-estilos .ficha-estilo .menu-de-estilo { top: calc(100% - 40px); left: 8px; right: 8px; width: auto; }
+.seccion-ajustes .pastilla { text-transform: none; letter-spacing: normal; font-size: 12px; }
+.galeria-estilos .cara.sin-muestras { aspect-ratio: 32 / 9; }
+.galeria-estilos .cara.sin-muestras .sin-cara { color: inherit; opacity: .8; }
+.galeria-estilos .ficha-estilo.nuevo { display: flex; align-items: center; min-height: 120px; }
+.galeria-estilos .ficha-estilo.nuevo .cuerpo { padding: 18px; }
+.galeria-estilos .ficha-estilo.nuevo .nombre { font-size: 15px; }
+
+/* ---- los vídeos de un proyecto: filtros y tarjetas / lista */
+.cab-videos { align-items: center; }
+.conmutador-vista { display: inline-flex; gap: 2px; padding: 3px; border-radius: 11px; border: 1px solid var(--linea); background: var(--panel); }
+.conmutador-vista .mini { border-color: transparent; }
+.conmutador-vista .mini.activo { background: var(--acento-relleno); color: var(--sobre-acento); }
+.chips-filtro-videos { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip-filtro { border-radius: 999px; padding: 4px 12px; }
+.chip-filtro.activo { border-color: var(--acento); color: var(--acento); background: var(--marcado); }
+
+/* ---- las tarjetas de proyecto */
+.galeria-proyectos { grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); margin-bottom: 0; }
+.tarjeta-proyecto { padding: 0; min-height: 0; gap: 0; overflow: hidden; background: var(--panel); }
+.tarjeta-proyecto .abrir-proyecto {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; width: 100%; min-width: 0;
+  padding: 14px; border: 0; background: transparent; color: var(--texto); text-align: left; border-radius: 0;
+}
+.tarjeta-proyecto .abrir-proyecto:hover { background: var(--hover); }
+.tarjeta-proyecto .fila-nombre { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tarjeta-proyecto .nombre { overflow-wrap: anywhere; }
+.tira-miniaturas { display: flex; gap: 4px; width: 100%; }
+.tira-miniaturas .miniatura-tarjeta { width: 31%; max-width: 80px; font-size: 14px; }
+.pie-proyecto { padding: 0 14px 14px; }
+button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-height: 120px; gap: 6px; }
+.tarjeta-proyecto.nuevo { background: transparent; }
+
+/* ---- el cajón «⚙ Ajustes del proyecto» */
+.capa-ajustes-proyecto { position: fixed; inset: 0; z-index: 80; background: var(--velo-suave); display: flex; justify-content: flex-end; }
+.cajon-proyecto {
+  width: min(430px, 100%); height: 100%; overflow-y: auto; display: flex; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--linea); box-shadow: var(--sombra); outline: none;
+}
+.cab-ajustes {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
+  padding: 14px 16px; border-bottom: 1px solid var(--linea); background: var(--panel);
+}
+.cab-ajustes b { font-family: var(--letra-titulo); font-size: 16px; overflow-wrap: anywhere; min-width: 0; }
+.cab-ajustes .crece { flex: 1; }
+.cuerpo-ajustes { display: flex; flex-direction: column; padding: 4px 16px 24px; }
+.seccion-ajustes { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--linea-suave); }
+.seccion-ajustes:last-child { border-bottom: 0; }
+.titulo-ajustes { font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--tenue); font-weight: 700; }
+.seccion-ajustes .panel-logo-proyecto { margin: 0; }
+.seccion-ajustes .fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.nombre-proyecto input { flex: 1; min-width: 0; }
+.col-ajustes { display: flex; flex-direction: column; gap: 8px; }
+.col-ajustes .pista { margin: 0; }
+.zona-peligro { padding: 12px; border-radius: 12px; border: 1px solid var(--malo-borde); background: var(--malo-fondo); }
+
+/* ---- «+ Nuevo vídeo»: ¿con qué estilo? */
+.dialogo.dialogo-nuevo-video { width: min(720px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; }
+.dialogo-nuevo-video > .fila { display: flex; gap: 10px; align-items: flex-start; }
+.cuerpo-nuevo-video { display: flex; flex-direction: column; gap: 14px; }
+.grupo-nuevo-video { display: flex; flex-direction: column; gap: 8px; }
+.rejilla-nuevo-video { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); }
+.elige-estilo {
+  display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 8px; border-radius: 12px;
+  border: 1px solid var(--linea-fuerte); background: var(--hueco); color: var(--texto);
+}
+.elige-estilo:hover { border-color: var(--acento); }
+.elige-estilo .cara { aspect-ratio: 16 / 7; border-radius: 8px; overflow: hidden; display: grid; place-items: center; font-size: 12px; }
+.elige-estilo .cara img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ---- en el móvil: una columna y el cajón a pantalla completa */
+@media (max-width: 700px) {
+  .cab-tus-proyectos { align-items: stretch; }
+  .cab-tus-proyectos .acc { width: 100%; }
+  .cab-tus-proyectos h2 { font-size: 25px; }
+  .tarjeta-video { flex-wrap: wrap; }
+  .tarjeta-video .abrir-video { flex-basis: 100%; }
+  .acciones-video, .tarjeta-video.en-lista .acciones-video { flex-direction: row; align-items: center; width: 100%; justify-content: flex-end; }
+  .tarjeta-video.en-lista { flex-wrap: nowrap; }
+  .tarjeta-video.en-lista .abrir-video { flex-basis: auto; }
+  .tarjeta-video.en-lista .acciones-video { width: auto; }
+  .menu-tarjeta { left: 0; right: 0; width: auto; }
+  .cajon-proyecto { width: 100%; border-left: 0; }
+  .cab-videos .crece { display: none; }
+  .acciones-video .mini { min-height: 40px; }
+  .acciones-video .mas-video { min-width: 44px; }
+}
+
+/* ======================================================= AUTOMATIZAR · TABLERO
+ *
+ * La nueva cara de Automatizar (rama `rediseno-automatizar`, 22-10-2026, con
+ * la maqueta aprobada por el dueño): el proyecto como chip en la cabecera, las
+ * pestañas de Crear, la Parrilla en tablero por estado, la ficha de un guion en
+ * un panel lateral (a pantalla completa en el móvil), las tarjetas de «De dónde
+ * salen» con su coste y la barra de acción de Crear. Colores, SOLO con las
+ * variables del tema: valen en las cuatro paletas y en claro y oscuro. */
+
+/* ---- la cabecera: título con su «i», el proyecto y «+ Añadir guiones» */
+.cab-automatizar {
+  display: flex; gap: 10px 16px; flex-wrap: wrap; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.cab-automatizar .izq { min-width: 0; display: flex; flex-direction: column; gap: 4px; flex: 1 1 260px; }
+.titulo-automatizar { gap: 8px; flex-wrap: nowrap; }
+.titulo-automatizar h2 { margin: 0; font-size: 28px; }
+.boton-i {
+  width: 24px; height: 24px; min-height: 0; padding: 0; border-radius: 50%;
+  display: inline-grid; place-items: center; font-size: 12px; font-weight: 700; font-style: italic;
+}
+.boton-i.activo { border-color: var(--acento); color: var(--acento); }
+.cab-automatizar .parrilla-opcional { margin: 0; max-width: 70ch; }
+.cab-automatizar .acc { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 0; }
+.chip-proyecto-auto {
+  display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%;
+  border: 1px solid var(--acento-borde); background: var(--marcado); border-radius: 999px;
+  padding: 2px 4px 2px 12px; color: var(--texto); font-weight: 600;
+}
+.chip-proyecto-auto select {
+  border: 0; background: transparent; color: var(--texto); font-weight: 600;
+  padding: 6px 4px; min-width: 0; max-width: 300px;
+}
+.cab-automatizar .anadir-cabecera { padding: 9px 16px; border-radius: 12px; }
+.pestanas-automatizar { margin: 4px 0 12px; }
+
+/* ---- la Parrilla: la marca, los filtros y el tablero */
+.linea-marca { gap: 8px 12px; margin: 0 0 12px; white-space: normal; align-items: center; }
+.linea-marca .crece { min-width: 0; overflow-wrap: anywhere; }
+.tablero-parrilla .filtros-parrilla { align-items: center; gap: 8px; margin: 0 0 10px; }
+.tablero-parrilla .filtros-parrilla .buscar-parrilla { flex: 0 1 260px; }
+.chips-matrices { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.chip-matriz {
+  border: 1px solid var(--linea); background: var(--panel); color: var(--texto); border-radius: 999px;
+  padding: 5px 12px; font-size: 13px; min-height: 0; max-width: 100%; overflow-wrap: anywhere; text-align: left;
+}
+.chip-matriz.activa { border-color: var(--acento); background: var(--marcado); font-weight: 600; }
+.tablero-parrilla .cab-matriz { margin: 0 0 10px; }
+.selector-columnas { display: none; }
+.tablero-guiones {
+  display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start;
+  margin-bottom: 14px;
+}
+.columna-tablero {
+  min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px;
+  border: 1px solid var(--linea); border-radius: 14px; background: var(--hueco);
+}
+.cab-columna {
+  display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center;
+  padding: 2px 2px 8px; border-bottom: 1px solid var(--linea);
+}
+.cab-columna .meta { flex-basis: 100%; }
+.vacia-columna { margin: 4px 2px; }
+.tarjeta-guion {
+  display: flex; flex-direction: column; align-items: stretch; gap: 5px; width: 100%; min-width: 0;
+  padding: 9px 11px; border: 1px solid var(--linea); border-radius: 11px; background: var(--panel);
+  color: var(--texto); text-align: left; white-space: normal;
+}
+.tarjeta-guion:hover:not(:disabled) { border-color: var(--acento); background: var(--hover); }
+.tarjeta-guion.abierta { border-color: var(--acento); box-shadow: 0 0 0 1px var(--acento) inset; }
+.cab-tarjeta-guion { gap: 6px; flex-wrap: nowrap; align-items: flex-start; justify-content: space-between; }
+.cab-tarjeta-guion .titulo-guion { font-size: 13.5px; line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
+.tarjeta-guion .datos-guion, .tarjeta-guion .video-guion { overflow-wrap: anywhere; min-width: 0; }
+.pie-tarjeta-guion { gap: 6px 8px; }
+.pie-tarjeta-guion .chip-enlace { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.piloto-parrilla { border-style: dashed; gap: 8px 10px; }
+.piloto-parrilla .meta { min-width: 0; }
+
+/* ---- la ficha de un guion: un panel a la derecha */
+.capa-cajon-guion {
+  /* encima de la burbuja y su «–» (65-67), debajo del aviso (70) y de las preguntas (90) */
+  position: fixed; inset: 0; z-index: 68; background: var(--velo);
+  display: flex; justify-content: flex-end;
+}
+.cajon-guion {
+  width: min(680px, 100%); height: 100%; display: flex; flex-direction: column; min-width: 0;
+  background: var(--bg); border-left: 1px solid var(--linea); box-shadow: var(--sombra);
+}
+.cab-cajon {
+  display: flex; gap: 10px; align-items: flex-start; padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--linea-suave);
+}
+.datos-cajon { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.datos-cajon h3 { margin: 0; font-size: 17px; line-height: 1.3; overflow-wrap: anywhere; }
+.datos-cajon .meta { overflow-wrap: anywhere; }
+.cerrar-cajon { font-size: 20px; line-height: 1; min-width: 36px; min-height: 36px; padding: 0 8px; }
+.pestanas-cajon { padding: 0 12px; flex: none; }
+.cuerpo-cajon {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.cuerpo-cajon > div { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.cuerpo-cajon h4 { margin: 0; }
+.cuerpo-cajon .rejilla-parrilla { margin: 0; }
+.cuerpo-cajon .fila { min-width: 0; }
+.cuerpo-cajon textarea { width: 100%; box-sizing: border-box; }
+.borrar-guion { border-top: 1px solid var(--linea-suave); padding-top: 12px; margin-top: 6px; }
+.cajon-guion .barra-accion.pie-cajon {
+  position: relative; margin: 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+}
+.cajon-guion .pie-cajon .dentro { grid-template-columns: minmax(0, 1fr) auto; }
+.cajon-guion .pie-cajon .plan { display: none; }
+.cajon-guion .pie-cajon .principal { white-space: normal; text-align: center; }
+
+/* ---- añadir guiones: las tarjetas de dónde salen, con su coste */
+.cab-anadir { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+.cab-anadir h3 { margin: 0; }
+.origenes-parrilla {
+  display: grid; gap: 10px; margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+}
+.tarjeta-origen {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0;
+  padding: 12px 14px; border: 1px solid var(--linea); border-radius: 14px; background: var(--panel);
+  color: var(--texto); text-align: left; white-space: normal;
+}
+.tarjeta-origen:hover:not(:disabled) { border-color: var(--acento); background: var(--hover); }
+.tarjeta-origen.activa { border-color: var(--acento); background: var(--marcado); }
+.tarjeta-origen b { font-size: 14.5px; }
+.tarjeta-origen .meta { line-height: 1.4; }
+.icono-origen { font-size: 22px; line-height: 1; }
+.coste-origen { text-transform: none; letter-spacing: 0; font-size: 11.5px; white-space: normal; text-align: left; }
+/* LA BARRA, PEGADA ABAJO DEL TODO: `#modulo` lleva 60 px de relleno abajo y
+   lo pegado se queda por encima de ese relleno; así la burbuja del asistente
+   (que se coloca encima de una barra de --alto-pie) no tapa su botón */
+.anadir-parrilla > .barra-accion, .marca-parrilla > .barra-accion { margin-top: 4px; bottom: -60px; }
+
+/* ---- conversar con Claude: la lista a la izquierda, el hilo a la derecha */
+.chat-seccion .chat-parrilla {
+  display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 14px; align-items: start;
+}
+.lista-chats {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px;
+  border: 1px solid var(--linea); border-radius: 14px; background: var(--panel);
+}
+.conversaciones-chat { display: flex; flex-direction: column; gap: 4px; max-height: 52vh; overflow-y: auto; }
+.conv-chat {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: left; white-space: normal;
+  padding: 7px 9px; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--texto);
+}
+.conv-chat b { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.conv-chat.activa { border-color: var(--acento); background: var(--marcado); }
+.pie-lista-chats { gap: 6px; }
+.hilo-chat {
+  display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 10px;
+  border: 1px solid var(--linea); border-radius: 14px; background: var(--panel);
+}
+.hilo-chat .chat-mensajes { min-height: 260px; }
+.chip-interruptor {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--linea); background: var(--hueco); font-size: 13px; cursor: pointer;
+  text-transform: none; letter-spacing: normal; color: var(--texto); font-weight: 500;
+}
+.chip-interruptor:has(input:checked) { border-color: var(--acento); background: var(--marcado); }
+
+/* ---- la marca del cliente: dos columnas */
+.campos-marca { display: grid; gap: 10px 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 8px; }
+.campos-marca .campo-marca { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.campos-marca textarea { width: 100%; box-sizing: border-box; }
+
+/* ---- cuentas que te gustan: las ya leídas como tarjetas, la abierta en dos columnas */
+.leidas-cuentas h3 { margin: 4px 0 8px; }
+.leidas-cuentas .cuentas-guardadas {
+  display: grid; gap: 8px; margin: 0 0 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+}
+.tarjeta-cuenta {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; white-space: normal;
+  padding: 10px 12px; border: 1px solid var(--linea); border-radius: 12px; background: var(--panel);
+  color: var(--texto); text-align: left;
+}
+.tarjeta-cuenta b { overflow-wrap: anywhere; }
+.tarjeta-cuenta.activa { border-color: var(--acento); background: var(--marcado); }
+.dos-columnas-cuenta { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.dos-columnas-cuenta > .analisis-cuenta, .dos-columnas-cuenta > .guiones-cuenta { min-width: 0; }
+
+/* ---- la tableta: el chat en una columna */
+@media (max-width: 900px) {
+  .chat-seccion .chat-parrilla { grid-template-columns: minmax(0, 1fr); }
+  .conversaciones-chat { max-height: 180px; }
+  .dos-columnas-cuenta { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---- el móvil: una columna del tablero a la vista, el panel a pantalla
+   completa y la barra en una fila (la de Crear tras `arreglos-crear-movil`) */
+@media (max-width: 700px) {
+  .titulo-automatizar h2 { font-size: 24px; }
+  .cab-automatizar .acc { width: 100%; flex-wrap: nowrap; }
+  .chip-proyecto-auto { flex: 1 1 auto; }
+  .chip-proyecto-auto select { max-width: none; width: 100%; }
+  .cab-automatizar .anadir-cabecera { flex: none; white-space: nowrap; }
+  .tablero-parrilla .filtros-parrilla .buscar-parrilla { flex: 1 1 100%; }
+  .chips-matrices { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; width: 100%; padding-bottom: 2px; }
+  .chips-matrices::-webkit-scrollbar { display: none; }
+  .chip-matriz { flex: none; white-space: nowrap; }
+  .selector-columnas {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin-bottom: 10px;
+    padding: 3px; border: 1px solid var(--linea); border-radius: 12px; background: var(--hueco);
+  }
+  .selector-columnas button {
+    display: flex; gap: 6px; align-items: center; justify-content: center; min-width: 0;
+    border: 0; background: none; border-radius: 9px; padding: 7px 4px; color: var(--tenue); font-size: 13px;
+  }
+  .selector-columnas button.activa { background: var(--marcado); color: var(--texto); font-weight: 700; }
+  .cuenta-columna { font-family: var(--letra-cifra); font-size: 12px; }
+  .tablero-guiones { grid-template-columns: minmax(0, 1fr); }
+  .columna-tablero.fuera-movil { display: none; }
+  /* el nombre y el número ya están en el botón de la columna */
+  .columna-tablero .cab-columna > b, .columna-tablero .cab-columna > .pastilla { display: none; }
+  .cab-columna { padding-bottom: 6px; }
+  .cajon-guion { width: 100%; border-left: 0; }
+  .cab-cajon { padding: 10px 12px 8px; }
+  .cuerpo-cajon { padding: 12px; }
+  .cajon-guion .barra-accion.pie-cajon { padding-left: 12px; padding-right: 12px; }
+  .campos-marca { grid-template-columns: minmax(0, 1fr); }
+  /* las tarjetas de dónde salen, de dos en dos y sin la explicación (va en su globo) */
+  .origenes-parrilla { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tarjeta-origen { padding: 10px; gap: 4px; }
+  .tarjeta-origen > .meta { display: none; }
+  .tarjeta-origen b { font-size: 13.5px; line-height: 1.25; }
+  .icono-origen { font-size: 18px; }
+  .coste-origen { font-size: 10.5px; padding: 1px 7px; }
+}
+
+/* ============================================ GUION VISUAL (rama guion-visual) */
+.guion-visual { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.editor-gv { padding: 12px; border: 1px solid var(--linea); border-radius: 10px; margin-top: 10px; }
+.editor-gv.aprobado { border-color: var(--ok-borde); }
+.plano-gv { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--linea);
+  border-radius: 8px; min-width: 0; }
+.plano-gv textarea, .plano-gv input[type="text"] { width: 100%; box-sizing: border-box; }
+.plano-gv-cabeza { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; min-width: 0; }
+.plano-gv-cabeza .meta { overflow-wrap: anywhere; }

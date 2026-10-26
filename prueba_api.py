@@ -290,6 +290,49 @@ def probar_salud_y_proyectos(cliente):
     return pid, (gemelo.get("proyecto") or {}).get("id")
 
 
+def probar_resumen_de_tarjetas(cliente, carpeta, pid, virgen):
+    """GET /api/proyectos/_resumen (rediseño de Tus proyectos, 22-10-2026): lo
+    mismo que dice abrir el vídeo, y DE SOLO LECTURA de verdad: llamarla no
+    cambia la fecha de ningún fichero de los vídeos ni crea un estado.json."""
+    seccion("EL RESUMEN DE LAS TARJETAS (solo lectura)")
+    suelto = os.path.join(carpeta, "sin_estado_todavia")
+    os.makedirs(suelto, exist_ok=True)
+    with open(os.path.join(suelto, "proyecto.json"), "w", encoding="utf-8") as fh:
+        json.dump({"id": "sin_estado_todavia", "nombre": "Sin estado"}, fh)
+
+    def fechas():
+        vistas = {}
+        for raiz, _dirs, ficheros in os.walk(carpeta):
+            for nombre in ficheros:
+                ruta = os.path.join(raiz, nombre)
+                try:
+                    vistas[ruta] = os.stat(ruta).st_mtime_ns
+                except OSError:
+                    pass
+        return vistas
+    antes = fechas()
+    time.sleep(0.05)
+    r, d = cliente.get(f"/api/proyectos/_resumen?ids={pid},{virgen},sin_estado_todavia,no_existe,_sistema")
+    despues = fechas()
+    igual(r.status_code, 200, "GET /api/proyectos/_resumen responde 200")
+    videos = d.get("videos") or {}
+    ok(pid in videos and virgen in videos, f"resume los vídeos pedidos ({sorted(videos)})")
+    ok("sin_estado_todavia" not in videos and "no_existe" not in videos and "_sistema" not in videos,
+       "y salta los que no tienen estado.json, los que no existen y las carpetas del sistema")
+    cambiados = sorted(x for x in set(antes) | set(despues) if antes.get(x) != despues.get(x))
+    ok(not cambiados, f"llamarla no cambia ni crea ningún fichero de los vídeos -- {cambiados[:5]}")
+    ok(not os.path.exists(os.path.join(suelto, "estado.json")), "ni crea el estado.json de un vídeo que no lo tiene")
+    _r, ficha = cliente.get(f"/api/proyectos/{pid}")
+    reales = {p.get("id"): p.get("estado") for p in ficha.get("pasos") or []}
+    igual(videos.get(pid, {}).get("pasos"), {k: reales.get(k) for k in ("guion", "voz", "assets", "render")},
+          "y dice lo mismo que abrir el vídeo (estado de guion, voz, imágenes y montaje)")
+    muchos = ",".join(f"falso_{i}" for i in range(130)) + f",{pid}"
+    r, d = cliente.get(f"/api/proyectos/_resumen?ids={muchos}")
+    ok(r.status_code == 200 and pid not in (d.get("videos") or {}),
+       "con más de 120 ids solo mira los 120 primeros (la pantalla pide de 40 en 40)")
+    shutil.rmtree(suelto, ignore_errors=True)
+
+
 def probar_renombrar(cliente, pid):
     """Cambiar el nombre de un proyecto cambia la ETIQUETA, no la carpeta."""
     seccion("RENOMBRAR UN PROYECTO")
@@ -2202,7 +2245,7 @@ def probar_sistema(cliente):
     respuesta, datos = cliente.get("/api/sistema/guias")
     igual(respuesta.status_code, 200, "GET /api/sistema/guias responde 200")
     ids = [g.get("id") for g in datos.get("guias") or []]
-    igual(ids, ["estilo_grafico", "tipo_negocio", "tono", "voz", "material", "indicaciones", "cta",
+    igual(ids, ["estilo_grafico", "tipo_negocio", "tono", "voz", "material", "indicaciones", "tipo_relato", "cta",
                 "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
                 "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente", "chat_guiones",
                 "analizar_cuenta", "conexiones_cuentas",
@@ -6182,6 +6225,20 @@ def probar_portadas(cliente, pid):
     igual(r.status_code, 404, "un plano que no existe: 404")
     r, _d = cliente.get(f"/api/publicar/videos/{pid}/portada/proponer/noexiste")
     igual(r.status_code, 404, "una propuesta que no existe: 404")
+    # portadas-2 (21-10): el prompt se ve antes de pagar y se puede cambiar
+    ok(precio.get("prompt") and "«A»" in (precio.get("prompt_final") or ""),
+       "sin confirmar, enseña el prompt y el que se mandaría (con los textos exactos)")
+    r, propio = cliente.post(f"/api/publicar/videos/{pid}/portada/ia",
+                             {"diseno": p["diseno"], "que": "fondo", "prompt": "Una sala con diez pantallas"})
+    ok(r.status_code == 202 and propio.get("prompt") == "Una sala con diez pantallas"
+       and "SIN texto" in (propio.get("prompt_final") or "") and "trabajo_id" not in propio,
+       "un prompt escrito a mano se respeta y lleva siempre las reglas del final")
+    r, _d = cliente.post(f"/api/publicar/videos/{pid}/portada/ideas-ia", {"diseno": "no"})
+    igual(r.status_code, 400, "pedir ideas sin diseño: 400 (y no llama a Claude)")
+    r, _d = cliente.get(f"/api/publicar/videos/{pid}/portada/ideas-ia/noexiste")
+    igual(r.status_code, 404, "unas ideas que no existen: 404")
+    r, _d = cliente.post(f"/api/publicar/videos/{pid}/portada/descargar", {"diseno": "no"})
+    igual(r.status_code, 400, "descargar sin diseño: 400")
 
 
 def probar_ortografia_de_campos(cliente, pid):
@@ -7150,6 +7207,237 @@ def probar_espacio_fijo():
         for nombre, valor in reales.items():
             setattr(servidor, nombre, valor)
 
+def probar_tipo_relato():
+    """Rama tipo-de-relato (20-10-2026): el tipo de relato del Encargo, el
+    catalogo con «un espacio que cambia», aplicarlo a un video hecho, la imagen
+    base (usar la subida, aprobar, servirla) y el pedido del reparto de sitios.
+
+    En este proceso y sin el CLI: `_llamar_claude` del catalogo es un doble que
+    apunta la instruccion y corta. Nada se paga: ninguna ruta de aqui genera.
+    """
+    seccion("TIPO DE RELATO: ENCARGO, CATÁLOGO, APLICAR E IMAGEN BASE")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    catalogo = servidor.PASOS_MODULOS.catalogo_visual
+
+    class _Cortar(Exception):
+        pass
+
+    vistas = []
+
+    def claude_falso(instruccion, *_a, **_k):
+        vistas.append(instruccion)
+        raise _Cortar()
+
+    bloques = [{"id": "B001", "texto": "La mampara choca con el inodoro.", "personaje": False},
+               {"id": "B002", "texto": "La corrediza ya no choca.", "personaje": False}]
+    base = tempfile.mkdtemp(prefix="estudio_relato_")
+    servidor.fijar_raiz_proyectos(base)
+    reales = {"_bloques_del_guion": servidor._bloques_del_guion}
+    real_claude = catalogo._llamar_claude
+    servidor._bloques_del_guion = lambda _ctx: bloques
+    catalogo._llamar_claude = claude_falso
+    try:
+        pid = Proyecto.crear(base, "tipo de relato").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+
+        def proponer():
+            vistas.clear()
+            try:
+                servidor._correr_catalogo(lambda *_a, **_k: None, ctx,
+                                          {"modelo": "sonnet", "esfuerzo": "medium"}, "")
+            except _Cortar:
+                pass
+            return vistas[0] if vistas else ""
+
+        sin_nada = proponer()
+        firma_antes = ctx.estado.firma("assets")
+        for nada in ({}, {"tipo_relato": None}, {"tipo_relato": {}}, {"tipo_relato": {"modo": ""}}):
+            servidor._opciones_al_crear(ctx, "", nada)
+        ok("tipo_relato" not in (ctx.estado.params("assets") or {}),
+           "TIPO DE RELATO: sin elegir, no se escribe nada en assets (regla 1)")
+        igual(ctx.estado.firma("assets"), firma_antes, "TIPO DE RELATO: y la firma no se mueve")
+        igual(proponer(), sin_nada, "TIPO DE RELATO: y el prompt del catálogo es el de siempre")
+        for malo in ("producto", {"modo": "culebron"}, {"modo": "espacio_que_cambia", "cambia": "x"}):
+            codigo, mensaje = _llamar(servidor._opciones_al_crear, ctx, "", {"tipo_relato": malo})
+            igual(codigo, 400, f"TIPO DE RELATO: {str(malo)[:30]!r} da 400 ({mensaje})")
+        espacio = {"sitio": "Baño", "descripcion": "a small bathroom, toilet on the left",
+                   "luz": "day", "secundarios": []}
+        servidor._opciones_al_crear(ctx, "", {"espacio_fijo": espacio,
+                                             "tipo_relato": {"modo": "Un espacio que cambia",
+                                                             "cambia": "objeto"}})
+        igual((ctx.estado.params("assets") or {}).get("tipo_relato"),
+              {"modo": "espacio_que_cambia", "cambia": "objeto"},
+              "TIPO DE RELATO: elegido en el encargo, se guarda por clave")
+        prompt = proponer()
+        ok("UN ESPACIO QUE CAMBIA" in prompt and "ESTE VIDEO TIENE UN ESPACIO FIJO" in prompt,
+           "CATÁLOGO: _correr_catalogo le pasa el tipo de relato al catálogo")
+
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        igual(codigo, 200, "LEER: 200")
+        if codigo == 200:
+            igual((ficha["resuelto"]["modo"], ficha["resuelto"]["origen"], ficha["edita"]),
+                  ("espacio_que_cambia", "video", True), "LEER: rige el del vídeo y edita")
+            ok(not ficha["base_aprobada"] and ficha["sitio"] == "bano",
+               "LEER: sin base aprobada, y el sitio es el del espacio fijo")
+
+        codigo, _m = _llamar(servidor.usar_subida_como_base, pid)
+        igual(codigo, 400, f"BASE: sin imagen subida, «usar la subida» da 400 ({_m})")
+        codigo, _m = _llamar(servidor.generar_base_relato, pid, {})
+        igual(codigo, 400, f"BASE: generar sin el coste que se vio da 400 ({_m})")
+        ok(not ctx.gestor.listar(activos=True), "BASE: y no lanza nada")
+
+        # con una imagen subida del espacio: «usar la subida» la aprueba gratis
+        from PIL import Image as _Imagen                      # noqa: PLC0415
+        os.makedirs(ctx.proyecto.ruta("espacio_fijo"), exist_ok=True)
+        _Imagen.new("RGB", (64, 40), (200, 200, 200)).save(
+            ctx.proyecto.ruta("espacio_fijo", "0123456789abcdef.png"))
+        ctx.estado.actualizar_params("assets", {"espacio_fijo": dict(
+            espacio, imagen="espacio_fijo/0123456789abcdef.png")})
+        codigo, ficha = _llamar(servidor.usar_subida_como_base, pid)
+        igual(codigo, 200, f"BASE: usar la subida, 200 ({ficha if codigo != 200 else ''})")
+        if codigo == 200:
+            ok(ficha["base_aprobada"], "BASE: y queda aprobada")
+        codigo, ficha = _llamar(servidor.aprobar_base_relato, pid, {"aprobada": False})
+        ok(codigo == 200 and not ficha["base_aprobada"], "BASE: se puede retirar la aprobación")
+        codigo, _r = _llamar(servidor.imagen_base_relato, pid, "bano")
+        igual(codigo, 200, "BASE: la imagen base se sirve")
+        codigo, _m = _llamar(servidor.aprobar_base_relato, pid, {"sitio": "otro"})
+        igual(codigo, 404, "BASE: aprobar un sitio sin base da 404")
+
+        # UN ESTADO, UNA IMAGEN (prueba real del 21-10): cada cambio del guion
+        # se dibuja una vez sobre la base y se aprueba como ella
+        abierta = "the hinged door opened outward until it touches the toilet"
+        ctx.estado.actualizar_params("assets", {"catalogo": {
+            "sets": {"bano": {"descripcion": "a small bathroom"}}, "reparto": {},
+            "beats": [{"desde": "B001", "hasta": "B001", "set": "bano", "cambio": "",
+                       "estado": "antes"},
+                      {"desde": "B002", "hasta": "B002", "set": "bano", "cambio": abierta,
+                       "estado": "abierta"}]}})
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        if codigo == 200:
+            igual([(e["estado"], e["cambio"], e["imagen_url"]) for e in ficha["estados"]],
+                  [("abierta", abierta, None)], "ESTADOS: el guion pide uno, sin imagen todavía")
+            ok(not ficha["listo"], "ESTADOS: y sin él, no está listo para dibujar planos")
+        codigo, _m = _llamar(servidor.generar_base_relato, pid,
+                             {"usd": servidor._usd_por_imagen(ctx), "estado": "abierta"})
+        igual(codigo, 409, f"ESTADOS: sin la base aprobada, no se dibuja ninguno ({_m})")
+        _llamar(servidor.aprobar_base_relato, pid, {"aprobada": True})
+        codigo, _m = _llamar(servidor.generar_base_relato, pid,
+                             {"usd": servidor._usd_por_imagen(ctx), "estado": "volando"})
+        igual(codigo, 404, f"ESTADOS: un estado que no pide el guion da 404 ({_m})")
+        ok(not ctx.gestor.listar(activos=True), "ESTADOS: y no se lanza nada")
+        codigo, _m = _llamar(servidor.aprobar_base_relato, pid, {"estado": "abierta"})
+        igual(codigo, 404, "ESTADOS: aprobar un estado sin imagen da 404")
+        # la imagen del estado, como si se hubiera dibujado (aqui no se paga)
+        _Imagen.new("RGB", (64, 40), (90, 90, 90)).save(
+            ctx.proyecto.ruta("espacio_fijo", "fedcba9876543210.png"))
+        guardado = dict((ctx.estado.params("assets") or {}).get("tipo_relato") or {})
+        guardado["bases"]["bano"]["estados"] = {"abierta": {
+            "imagen": "espacio_fijo/fedcba9876543210.png", "aprobada": False, "cambio": abierta}}
+        ctx.estado.actualizar_params("assets", {"tipo_relato": guardado})
+        codigo, ficha = _llamar(servidor.aprobar_base_relato, pid,
+                                {"estado": "abierta", "aprobada": True})
+        ok(codigo == 200 and ficha["listo"] and ficha["estados"][0]["aprobada"],
+           "ESTADOS: aprobado el estado, todo listo")
+        codigo, _r = _llamar(servidor.imagen_base_relato, pid, "bano", "abierta")
+        igual(codigo, 200, "ESTADOS: la imagen del estado se sirve")
+        bases = servidor.PASOS_MODULOS.p6_assets.rutas_de_bases(
+            ctx.proyecto, ctx.estado.params("assets") or {})
+        ok("bano#abierta" in bases, "ESTADOS: y entra en las bases que editan los planos")
+        ctx.estado.actualizar_params("assets", {"catalogo": dict(
+            (ctx.estado.params("assets") or {})["catalogo"],
+            beats=[{"desde": "B002", "hasta": "B002", "set": "bano",
+                    "cambio": "a curtain instead", "estado": "abierta"}])})
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        ok(codigo == 200 and not ficha["estados"][0]["vigente"] and not ficha["listo"],
+           "ESTADOS: si se reescribe el cambio, su imagen deja de valer")
+
+        # EL AVISO FALSO DEL 21-10: «3 planos cambiarían con el espacio fijo»
+        # en los que el revisor acababa de rehacer (editados desde su estado,
+        # con el prompt reescrito por el corrector). Solo el que de verdad no
+        # lleva la descripcion se ofrece.
+        desc = "a narrow bathroom, toilet on the left"
+        ctx.estado.actualizar_params("assets", {
+            "espacio_fijo": {"sitio": "Baño", "descripcion": desc, "luz": "day",
+                             "secundarios": []},
+            "catalogo": {"sets": {"bano": {"descripcion": desc}}, "reparto": {}, "beats": []}})
+        carpeta = tempfile.mkdtemp(prefix="cambios_espacio_")
+        os.makedirs(os.path.join(carpeta, "escenas"))
+        fichas = {"S001": {"prompt": "a bathroom"},
+                  "S002": {"prompt": "a bathroom", "referencias": [{"papel": "base"}]},
+                  "S003": {"prompt": "rewritten", "corrector": {"alcance": "retoque"}}}
+        for sid, f in fichas.items():
+            _Imagen.new("RGB", (8, 8)).save(os.path.join(carpeta, "escenas", f"{sid}.png"))
+            with open(os.path.join(carpeta, "escenas", f"{sid}.json"), "w", encoding="utf-8") as fh:
+                json.dump(f, fh)
+        p6 = servidor.PASOS_MODULOS.p6_assets
+        guardados = (p6.plan_actual, p6.sitios_previstos, servidor._carpetas_de_assets,
+                     servidor._escenas_que_pagan)
+        try:
+            p6.plan_actual = lambda *_a, **_k: {"escenas": [
+                {"id": sid, "set": "bano", "prompt": f"{desc}. something"} for sid in fichas]}
+            p6.sitios_previstos = lambda _p, _params, escenas: ["bano" for _ in escenas]
+            servidor._carpetas_de_assets = lambda _ctx: [carpeta]
+            servidor._escenas_que_pagan = lambda plan: plan["escenas"]
+            cambios = servidor._cambios_del_espacio(ctx)
+        finally:
+            (p6.plan_actual, p6.sitios_previstos, servidor._carpetas_de_assets,
+             servidor._escenas_que_pagan) = guardados
+        igual([x["id"] for x in cambios["planos"]], ["S001"],
+              "AVISO FALSO: ni el editado desde la base ni el rehecho con nota se ofrecen otra vez")
+
+        # aplicar a un video (sin imagenes): guarda, no dibuja, nada que rehacer
+        codigo, ficha = _llamar(servidor.aplicar_tipo_relato, pid,
+                                {"tipo_relato": {"modo": "recorrido"}})
+        igual(codigo, 200, f"APLICAR: 200 ({ficha if codigo != 200 else ''})")
+        if codigo == 200:
+            igual(ficha["resuelto"]["modo"], "recorrido", "APLICAR: rige el nuevo modo")
+            igual((ficha["cambios"] or {}).get("imagenes"), 0, "APLICAR: sin imágenes, nada que rehacer")
+        bases = ((ctx.estado.params("assets") or {}).get("tipo_relato") or {}).get("bases") or {}
+        ok("bano" in bases, "APLICAR: cambiar de modo conserva la imagen base")
+        codigo, _m = _llamar(servidor.aplicar_tipo_relato, pid, {"tipo_relato": "producto"})
+        igual(codigo, 400, "APLICAR: un tipo de relato que no es un objeto da 400")
+        codigo, ficha = _llamar(servidor.aplicar_tipo_relato, pid, {"tipo_relato": None})
+        ok(codigo == 200 and ficha["resuelto"]["modo"] == "escenario_y_apoyos",
+           "APLICAR: null vuelve a lo que diga el estilo (aquí, el espacio fijo implícito)")
+        codigo, _m = _llamar(servidor.escribir_cambios_relato, pid, {})
+        igual(codigo, 400, "CAMBIOS: fuera de «un espacio que cambia», 400")
+        for cuerpo, esperado in (({}, 400), ({"planos": ["S001"]}, 400),
+                                 ({"planos": ["S001"], "imagenes": 2}, 400),
+                                 ({"planos": ["S001"], "imagenes": 1}, 409)):
+            codigo, _m = _llamar(servidor.rehacer_planos_del_relato, pid, cuerpo)
+            igual(codigo, esperado, f"REHACER: {cuerpo} da {esperado} ({_m})")
+        ok(not ctx.gestor.listar(activos=True), "REHACER: y ninguno lanza nada")
+
+        # el pedido del reparto de sitios vuelve a leer el guion aunque no cambie
+        ctx.estado.actualizar_params("assets", {"catalogo": {
+            "sets": {"bano": {"descripcion": "x"}}, "reparto": {}, "beats": [],
+            "reales": [], "_firma_guion": "lo que sea"}})
+        vistas.clear()
+        try:
+            servidor._correr_escenarios(lambda *_a, **_k: None, ctx,
+                                        {"modelo": "sonnet", "esfuerzo": "medium"}, "", False)
+        except _Cortar:
+            pass
+        ok(not vistas, "PEDIDO: sin pedido y con catálogo, no se vuelve a leer el guion")
+        try:
+            servidor._correr_escenarios(lambda *_a, **_k: None, ctx,
+                                        {"modelo": "sonnet", "esfuerzo": "medium"},
+                                        "todo en el baño", False)
+        except _Cortar:
+            pass
+        ok(vistas and "todo en el baño" in vistas[0],
+           "PEDIDO: con un pedido escrito se vuelve a repartir y el pedido llega a Claude")
+    finally:
+        catalogo._llamar_claude = real_claude
+        for nombre, valor in reales.items():
+            setattr(servidor, nombre, valor)
+
+
 def probar_dominios():
     """Rama dominio-negocio (21-10-2026): listar los dominios y fijar el de un estilo."""
     seccion("DOMINIOS: EL NEGOCIO DE UN ESTILO")
@@ -7284,6 +7572,88 @@ def probar_tipos_de_negocio():
             os.environ.pop("ESTUDIO_DOMINIOS", None)
         else:
             os.environ["ESTUDIO_DOMINIOS"] = antes_env
+def probar_guion_visual():
+    """Rama guion-visual (22-10-2026): qué dibujan las imágenes y el guion visual.
+
+    En este proceso y sin el CLI: nada se paga y ninguna ruta de aquí llama a
+    Claude (proponer y comprobar se prueban en su suite con el CLI falso)."""
+    seccion("GUION VISUAL: QUÉ DIBUJAN LAS IMÁGENES")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    bloques = [{"id": "B001", "texto": "Este error de mampara te deja sin espacio.", "personaje": False},
+               {"id": "B002", "texto": "Una corrediza te devuelve el espacio.", "personaje": False}]
+    base = tempfile.mkdtemp(prefix="estudio_gv_")
+    servidor.fijar_raiz_proyectos(base)
+    real = servidor._bloques_del_guion
+    servidor._bloques_del_guion = lambda _ctx: bloques
+    try:
+        pid = Proyecto.crear(base, "guion visual").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        firma = ctx.estado.firma("assets")
+        for nada in ({}, {"imagenes": None}, {"imagenes": ""}, {"visuales": "no es una lista"}):
+            servidor._opciones_al_crear(ctx, "", nada)
+        ok("imagenes" not in (ctx.estado.params("assets") or {})
+           and "guion_visual" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: sin elegir nada, no se escribe nada (regla 1)")
+        codigo, _m = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": False})
+        ok("guion_visual" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: retirar la aprobación de nada no escribe nada")
+        igual(ctx.estado.firma("assets"), firma, "GUION VISUAL: y la firma no se mueve")
+        codigo, _m = _llamar(servidor._opciones_al_crear, ctx, "", {"imagenes": "telenovela"})
+        igual(codigo, 400, "GUION VISUAL: un modo que no existe da 400")
+        servidor._opciones_al_crear(ctx, "", {"imagenes": "guion", "visuales": [
+            {"voz": "Este error de mampara te deja sin espacio.", "visual": ["la batiente choca"]},
+            {"voz": "Una corrediza te devuelve el espacio.", "visual": ["la corrediza", "el riel"]}]})
+        codigo, f = _llamar(servidor.leer_guion_visual, pid)
+        ok(codigo == 200 and f["modo"] == "guion" and f["aprobado"] and f["aprobado_solo"],
+           "GUION VISUAL: elegido al crear, rige, y las líneas de la Parrilla valen solas (decisión B)")
+        igual([(p["bloque"], p["visual"]) for p in f["propuesta"]],
+              [("B001", "la batiente choca"), ("B002", "la corrediza"), ("B002", "el riel")],
+              "GUION VISUAL: las líneas de la Parrilla, casadas con el guion (sin guardarlas)")
+        igual(((ctx.estado.params("assets") or {}).get("guion_visual") or {}).get("planos"), [],
+              "GUION VISUAL: leer la ficha no escribe nada")
+        imp = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+        ok(not any("guion visual" in (x.get("que") or "") for x in imp),
+           "GUION VISUAL: con las líneas de la Parrilla, generar no se para a esperar")
+        igual(servidor._planos_previstos(ctx)["con_imagen"], 3,
+              "GUION VISUAL: el precio cuenta una imagen por línea")
+        codigo, _m = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": True})
+        igual(codigo, 409, "GUION VISUAL: no se aprueba uno vacío")
+        codigo, _m = _llamar(servidor.guardar_guion_visual, pid,
+                             {"planos": [{"bloque": "B009", "visual": "x"}]})
+        igual(codigo, 400, "GUION VISUAL: un bloque que no existe da 400")
+        codigo, f = _llamar(servidor.guardar_guion_visual, pid, {"planos": f["propuesta"]})
+        ok(codigo == 200 and len(f["guion_visual"]["planos"]) == 3 and not f["aprobado"],
+           "GUION VISUAL: guardarlo lo deja sin aprobar")
+        imp = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+        ok(any("guion visual" in (x.get("que") or "") for x in imp),
+           "GUION VISUAL: guardado a mano y sin aprobar, generar dice que falta aprobarlo")
+        real_listo = servidor._asistente_listo
+        servidor._asistente_listo = lambda: (False, "", None, [], False)  # sin Claude aquí
+        try:
+            codigo, f = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": True})
+        finally:
+            servidor._asistente_listo = real_listo
+        ok(codigo == 200 and f["aprobado"], "GUION VISUAL: aprobado")
+        imp = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+        ok(not any("guion visual" in (x.get("que") or "") for x in imp),
+           "GUION VISUAL: aprobado, ya no lo pide")
+        codigo, f = _llamar(servidor.guardar_modo_guion_visual, pid, {"imagenes": None})
+        ok(codigo == 200 and f["modo"] == "voz" and "imagenes" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: null vuelve a lo del estilo y quita la clave")
+        codigo, f = _llamar(servidor.guardar_modo_guion_visual, pid, {"imagenes": "voz"})
+        ok(codigo == 200 and "imagenes" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: «voz» con un estilo que no dice guion no escribe nada (regla 1)")
+        ctx.estado.actualizar_params("assets", {"estilo": {"imagenes": "guion"}})
+        codigo, f = _llamar(servidor.guardar_modo_guion_visual, pid, {"imagenes": "voz"})
+        ok(codigo == 200 and (ctx.estado.params("assets") or {}).get("imagenes") == "voz",
+           "GUION VISUAL: con un estilo que dice guion, «voz» explícito se guarda y manda")
+        codigo, _m = _llamar(servidor.guardar_imagenes_estilo, "no-existe", {"imagenes": "guion"})
+        ok(codigo in (400, 404), f"GUION VISUAL: el estilo que no existe da error ({codigo})")
+    finally:
+        servidor._bloques_del_guion = real
 
 
 def _video_montado_de_prueba(servidor, base, nombre):
@@ -7434,6 +7804,7 @@ def main():
 
         sembrar(os.path.join(carpeta, pid))
         tid, salidas = probar_ejecucion(cliente, base, pid)
+        probar_resumen_de_tarjetas(cliente, carpeta, pid, virgen)
         probar_versiones(cliente, pid)
         probar_archivos(cliente, pid, salidas)
         probar_feedback(cliente, pid)
@@ -7514,8 +7885,10 @@ def main():
         probar_mas_emojis(cliente, carpeta, pid)
         probar_publicar_20oct(cliente, pid)
         probar_espacio_fijo()
+        probar_tipo_relato()
         probar_dominios()
         probar_tipos_de_negocio()
+        probar_guion_visual()
     finally:
         parar(proceso)
         if not argumentos.conservar:

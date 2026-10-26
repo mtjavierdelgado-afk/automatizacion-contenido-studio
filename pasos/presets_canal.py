@@ -142,11 +142,18 @@ TIPOS = {
         # "foto". Un estilo sin el es de ilustracion, como todos los de antes.
         # 'reglas' son las reglas del estilo (pasos/reglas_estilo.py): solo se
         # guardan si hay alguna, igual que 'modo'.
+        # 'relato' es el tipo de relato por defecto (rama tipo-de-relato,
+        # pasos/tipo_relato.py): {modo, cambia?}, y solo se guarda si NO es
+        # documental, igual que 'modo' solo si es foto.
         "claves": ("referencias", "guia", "url", "moodboard",
                    "calidad", "min_s", "max_s", "min_s_rotulos", "modo", "reglas",
+                   "relato",
                    # el negocio (rama dominio-negocio): id de uno de fabrica de
                    # pasos/dominios.py; solo se guarda si no es automatico
-                   "dominio"),
+                   "dominio",
+                   # que dibujan las imagenes (rama guion-visual): solo "guion"
+                   # se guarda; la voz es no tenerlo
+                   "imagenes"),
         "pasos": ("assets",),
     },
     # El id se queda en 'rotulos' aunque ya no haya rotulos: es la clave con la
@@ -246,6 +253,22 @@ def _reglas_estilo():
     return reglas_estilo
 
 
+def _guion_visual():
+    try:
+        from . import guion_visual                                # noqa: PLC0415
+    except ImportError:                                           # pragma: no cover
+        import guion_visual                                       # noqa: PLC0415
+    return guion_visual
+
+
+def _tipo_relato():
+    try:
+        from . import tipo_relato                                 # noqa: PLC0415
+    except ImportError:                                           # pragma: no cover
+        import tipo_relato                                        # noqa: PLC0415
+    return tipo_relato
+
+
 def _dominios():
     try:
         from . import dominios                                    # noqa: PLC0415
@@ -278,6 +301,15 @@ def _limpiar_datos(tipo, datos):
             limpios["reglas"] = reglas
         else:
             limpios.pop("reglas")
+    if tipo == "estilo" and "relato" in limpios:
+        try:
+            relato = _tipo_relato().normalizar_de_estilo(limpios["relato"])
+        except ValueError as fallo:
+            raise ErrorPreset(f"tipo de relato: {fallo}") from None
+        if relato:
+            limpios["relato"] = relato
+        else:
+            limpios.pop("relato")
     if tipo == "estilo" and "dominio" in limpios:
         try:
             dominio = _dominios().normalizar(limpios["dominio"])
@@ -287,6 +319,15 @@ def _limpiar_datos(tipo, datos):
             limpios["dominio"] = dominio
         else:
             limpios.pop("dominio")
+    if tipo == "estilo" and "imagenes" in limpios:
+        try:
+            imagenes = _guion_visual().normalizar_modo(limpios["imagenes"])
+        except ValueError as fallo:
+            raise ErrorPreset(f"qué dibujan las imágenes: {fallo}") from None
+        if imagenes:
+            limpios["imagenes"] = imagenes
+        else:
+            limpios.pop("imagenes")
     if tipo == "canal":
         # un canal es un paquete de los otros tipos: cada bloque se valida con
         # las reglas de SU tipo, o el paquete se convierte en el agujero por
@@ -468,6 +509,11 @@ def resumen_de(ficha):
         trozos = [f"{cuantas} fotograma(s)"]
         if datos.get("modo") == "foto":
             trozos.append("foto realista")
+        if (datos.get("relato") or {}).get("modo"):
+            trozos.append(_tipo_relato().nombre(datos["relato"]["modo"],
+                                                datos["relato"].get("cambia")).lower())
+        if datos.get("imagenes") == "guion":
+            trozos.append("las imágenes siguen el guion")
         trozos.append(f"guía de {guia.get('palabras', '?')} palabras" if guia
                       else "sin guía escrita")
         dibujadas = len((datos.get("moodboard") or {}).get("ejes") or [])
@@ -1150,12 +1196,24 @@ def cambios_para(ficha, params_actuales=None):
             estilo["reglas"] = copy.deepcopy(datos["reglas"])
         else:
             estilo.pop("reglas", None)
+        # EL TIPO DE RELATO POR DEFECTO, igual: lo pone un estilo que lo trae y
+        # lo QUITA uno que no (rama tipo-de-relato). Un video sin el y un estilo
+        # sin el no reciben nada, y su firma no se mueve.
+        if (datos.get("relato") or {}).get("modo"):
+            estilo["relato"] = copy.deepcopy(datos["relato"])
+        else:
+            estilo.pop("relato", None)
         # EL NEGOCIO, igual: lo pone un estilo que lo fija y lo QUITA uno que no
         # (rama dominio-negocio). Un video y un estilo sin el no reciben nada.
         if datos.get("dominio"):
             estilo["dominio"] = datos["dominio"]
         else:
             estilo.pop("dominio", None)
+        # QUE DIBUJAN LAS IMAGENES, igual (rama guion-visual)
+        if datos.get("imagenes") == "guion":
+            estilo["imagenes"] = "guion"
+        else:
+            estilo.pop("imagenes", None)
         cambios["assets"] = {"estilo": estilo}
         # la calidad y la duracion de plano son params sueltos de assets, no van
         # dentro del diccionario 'estilo'
@@ -1247,8 +1305,12 @@ def datos_de_params(params_por_paso, incluir=ORDEN):
             bloque["modo"] = "foto"
         if estilo.get("reglas"):
             bloque["reglas"] = copy.deepcopy(estilo["reglas"])
+        if (estilo.get("relato") or {}).get("modo"):
+            bloque["relato"] = copy.deepcopy(estilo["relato"])
         if estilo.get("dominio"):
             bloque["dominio"] = estilo["dominio"]
+        if estilo.get("imagenes") == "guion":
+            bloque["imagenes"] = "guion"
         for clave in ("calidad", "min_s", "max_s", "min_s_rotulos"):
             if assets.get(clave) not in (None, ""):
                 bloque[clave] = copy.deepcopy(assets[clave])

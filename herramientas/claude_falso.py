@@ -81,6 +81,15 @@ def responder(entrada):
                                     "entrada": "dibuja", "color": "alerta"})
         planos["NOEXISTE"] = [{"tipo": "texto", "texto": "x", "palabra": 0}]
         return {"planos": planos}
+    if "ideas DISTINTAS de imagen" in entrada:
+        # las ideas de imagen para la IA (portadas-2): cada una con su prompt
+        return {"ideas": [
+            {"titulo": "La sala llena", "prompt": "Una sala de fiesta con diez pantallas encendidas y "
+             "niños jugando con mandos, luz azul de neón, plano general desde la puerta", "por_que": "se ve la escala"},
+            {"titulo": "El mando en primer plano", "prompt": "Primer plano de unas manos sujetando un mando "
+             "de consola, fondo desenfocado con luces de colores, mucho contraste", "por_que": "se entiende en un segundo"},
+            {"titulo": "Cara de sorpresa", "prompt": "Un adulto sorprendido delante de una pantalla gigante "
+             "con un videojuego, boca abierta, luz cálida", "por_que": "las caras atraen clics"}]}
     if "director de arte de miniaturas" in entrada:
         # las portadas propuestas (pasos/portadas.py): tres distintas
         return {"propuestas": [
@@ -114,6 +123,25 @@ def responder(entrada):
                     "sugerida": limpio + " (revisado)"}
         return {"veredicto": "sirve", "resumen": "Cumple la guía.", "problemas": [],
                 "sugerida": ""}
+    if "Escribe el GUION VISUAL" in entrada:
+        # el borrador del guion visual (rama guion-visual): un plano por bloque
+        bloques = re.findall(r"^\[([A-Z0-9_]+)\]", entrada, re.M)
+        return {"planos": [{"bloque": b, "visual": f"wide shot of the room while {b} is heard",
+                            "camara": "wide shot, eye level", "estado": "", "personajes": []}
+                           for b in bloques]}
+    if "script supervisor" in entrada:
+        # la comprobacion del guion visual contra lo fijo: nada que decir
+        return {"avisos": []}
+    if "LOS TRAMOS (no los cambies" in entrada:
+        # el «qué cambia en cada tramo» de un espacio que cambia (rama
+        # tipo-de-relato): un cambio por tramo, con su estado
+        tramos = re.findall(r"^- ([A-Z0-9_]+)-([A-Z0-9_]+):", entrada, re.M)
+        # (con un solo tramo, ese cambia: si no, no habria ningun estado que ver)
+        return {"beats": [{"desde": d, "hasta": h,
+                           "cambio": "" if i == 0 and len(tramos) > 1
+                           else "the hinged shower door is a sliding door",
+                           "estado": "antes" if i == 0 and len(tramos) > 1 else "despues"}
+                          for i, (d, h) in enumerate(tramos)]}
     if "<nota>" in entrada:
         nota = _entre(entrada, "nota")
         nuevo = re.sub(r"mario\s*kart", "un juego de carreras de karts de dibujos", nota, flags=re.I)

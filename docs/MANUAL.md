@@ -67,29 +67,66 @@ nada.
 
 ## Proyectos (clientes)
 
-La primera pantalla de Crear es **Tus proyectos**: una tarjeta por proyecto
-(un cliente, con sus estilos y sus vídeos separados).
+La primera pantalla de Crear es **Tus proyectos**. Arriba, **+ Nuevo vídeo**,
+**+ Nuevo proyecto** y la **🗑 Papelera · N** (con cuántas cosas tiene), y un
+**buscador** («Buscar un vídeo, un estilo o un proyecto…») que filtra lo que se
+ve en la página.
 
-- **+ Nuevo proyecto** (la última tarjeta) crea uno. Pulsar una tarjeta entra
-  en él; los estilos que crees dentro quedan en ese proyecto, y los vídeos van
-  con su estilo. **🗂️ Sin proyecto** reúne lo que no está en ninguno.
-- Dentro de un proyecto: **Renombrar**, **Logo** (lo llevan solos los vídeos
-  nuevos de sus estilos), **Ocultar** (no sale en la portada hasta pulsar «Ver
-  los ocultos (N)»), **Poner clave** (se pide para entrar), **Traer un estilo**
-  y **Borrar** (sus estilos y vídeos no se borran: quedan sin proyecto).
-- **Ver los ocultos (N)** los enseña; **Dejar de ocultar** los devuelve a la
-  portada para siempre. **🔒 Cerrar los abiertos** vuelve a pedir la clave.
-- **Últimos vídeos**: los cinco últimos, con su estilo (🎨) y su proyecto (📁).
-  **✏️** les cambia el nombre ahí mismo (Enter guarda, Escape lo deja), **📁**
-  los mueve de proyecto y **Apartar** los manda a la papelera.
-- La clave y ocultar son privacidad de pantalla; la seguridad de verdad es la
-  contraseña de acceso al Estudio.
+- **+ Nuevo vídeo** pregunta **¿con qué estilo?** (los estilos de cada
+  proyecto, agrupados) y abre el Encargo de un vídeo nuevo con el que elijas:
+  es lo mismo que «▶ Nuevo vídeo con este estilo» en la tarjeta de un estilo.
+  No gasta nada hasta que generas el guion.
+- **⚠ Te necesitan** (solo si hay algo): los vídeos que perdieron sus imágenes
+  de estilo (**Reparar**, gratis) y los estilos que se quedaron a medias
+  (**Retomar** sigue sin volver a pagar lo hecho; **Descartar** lo manda a la
+  papelera).
+- **Sigue donde lo dejaste**: los cinco últimos vídeos en tarjetas, con su
+  proyecto (📁), su estilo (🎨), la fecha («hoy 17:31», «ayer», «lun 19/10») y
+  **cómo van**: en Crear («✓ Montado», «⚠ 1 imagen obsoleta», «● En el Guion»,
+  «⟳ 42 % · Dibujando los planos») y en Publicar («○ Listo para publicar»,
+  «◷ jue 22/10 12:00 · 4 redes», «✓ Publicado en 2 redes», «⚠ Un envío
+  falló»). Pulsar la tarjeta abre el vídeo; **Publicar ›** (si está montado)
+  abre su ficha en Publicar; **⋯** tiene **✏️ Renombrar** (ahí mismo: Enter
+  guarda, Escape lo deja), **📁 Mover a otro proyecto** y **Apartar** (a la
+  papelera: se puede devolver).
+- **Proyectos**: una tarjeta por cliente con su logo (o su inicial), cuántos
+  estilos y vídeos tiene, sus tres últimos vídeos y sus marcas («🔒 con
+  clave», «oculto», «2 listos para publicar»). **🗂️ Sin proyecto** reúne lo que
+  no está en ninguno y **+ Nuevo proyecto** crea otro. **Ver ocultos (N)**
+  enseña los ocultos, y cada uno trae su **Dejar de ocultar**; **🔒 Cerrar los
+  abiertos** vuelve a pedir la clave.
+
+**Dentro de un proyecto**: **‹ Tus proyectos** para salir; arriba su logo, su
+nombre y sus marcas, **+ Nuevo vídeo** (con los estilos de este proyecto) y
+**⚙ Ajustes del proyecto**, un panel a la derecha (a pantalla completa en el
+móvil) con:
+
+- **Nombre** (escríbelo y **Guardar**),
+- **Logo** (subir, pegar con Ctrl+V, quitar, esquina y tamaño; lo llevan solos
+  los vídeos NUEVOS de sus estilos),
+- **Visibilidad** («Oculto en la portada»: sale solo con «Ver ocultos»),
+- **Clave** (**Poner clave** / **Cambiar o quitar la clave**; se pide para
+  entrar en cada pestaña nueva),
+- **Publicar** (el perfil de Upload-Post, el tono y el SEO del proyecto viven en
+  Publicar: el botón te lleva),
+- y abajo, en la zona de peligro, **Borrar el proyecto** (sus estilos y vídeos
+  NO se borran: quedan en «Sin proyecto»; lo pregunta antes).
+
+Debajo, sus **estilos** y sus **vídeos**. Los vídeos se filtran con los chips
+**Todos · En curso · Listos · Programados · Publicados** y se ven en **▦
+Tarjetas** o en **☰ Lista** (se acuerda en este navegador).
+
+La clave y ocultar son privacidad de pantalla; la seguridad de verdad es la
+contraseña de acceso al Estudio.
 
 ## Estilos
 
-Cada tarjeta es un estilo. **Pulsar la tarjeta** empieza un vídeo nuevo con
-él; **✎ Editar** abre su ficha, y **⋯** tiene **Duplicar** y **Mover a otro
-proyecto**. La última tarjeta, **+ Nuevo estilo**, crea otro.
+Cada tarjeta es un estilo. **Pulsar la tarjeta** abre un menú pequeño: **▶
+Nuevo vídeo con este estilo** (el Encargo de un vídeo nuevo), **✎ Editar el
+estilo** (su ficha), **Duplicar**, **Mover a otro proyecto** y **Apartar** (a
+la papelera). **✎ Editar** sigue también a la vista en la tarjeta. Al final,
+**+ Nuevo estilo** crea otro y, dentro de un proyecto, **⇄ Traer un estilo de
+otro proyecto** lo mueve aquí con sus vídeos.
 
 Lo que borras o apartas (un estilo, un vídeo) va a la **🗑 Papelera**, arriba
 en la portada y dentro de cada proyecto: desde ahí se **devuelve** cuando
@@ -264,6 +301,54 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
 - **Las indicaciones** (opcional): cómo quieres que se cuente este vídeo.
 - **Las llamadas a la acción**: qué se pide al espectador y dónde.
 - **El espacio fijo** (opcional): si todo el vídeo pasa en un mismo sitio.
+- **El tipo de relato** (opcional): cómo se cuenta en imágenes. **Documental**
+  reparte el guion en sitios; **Un espacio que cambia** es un solo sitio en el
+  que cambia solo lo que dice la voz (un objeto, los acabados, el estado o la
+  hora): cada plano se genera editando una **imagen base** del sitio, que se
+  aprueba en el vídeo antes de generar las imágenes (la subida en «El espacio
+  fijo», gratis, o una generada, que se paga). **Recorrido**, **Escenario y
+  apoyos**, **Producto** y **Clase** completan la lista. En un vídeo hecho,
+  «Aplicar el tipo de relato» enseña qué planos cambian y cuánto cuesta, y
+  eliges cuáles rehacer.
+
+  **Quién manda, de más a menos:** (1) el que elige el vídeo en su Encargo (o
+  la línea «Tipo de relato:» de la Parrilla, que va al Encargo); (2) el del
+  estilo, que es solo el punto de partida de sus vídeos nuevos; (3) si ninguno
+  dice nada y el vídeo tiene espacio fijo, «Escenario y apoyos»; (4) si no,
+  «Documental». Por eso un estilo puede decir «Documental (por defecto)» y su
+  vídeo ser «Un espacio que cambia»: en el estilo, «Documental» quiere decir
+  «no impongo ninguno», y el vídeo eligió el suyo. El Encargo enseña cuál rige
+  y de dónde sale («elegido para este vídeo», «el que trae el estilo»…).
+
+  **El espacio fijo y la imagen base no son lo mismo:** «El espacio fijo» es
+  el TEXTO del sitio (qué hay en cada pared, medidas, materiales, luz) y,
+  opcional, una foto tuya del sitio. La **imagen base** es ese sitio DIBUJADO
+  una vez, vacío y entero, y aprobado por ti: vive en «El tipo de relato». En
+  «Un espacio que cambia» y «Producto» no hace falta subir foto: la base se
+  dibuja de la descripción; si subiste una, puedes usarla como base, gratis.
+  Escribe el espacio fijo de forma que haga verdad lo que cuenta la voz, con
+  distancias: si la mampara choca con el inodoro, que el inodoro esté a menos
+  de lo que mide la hoja.
+
+  **Cada estado, dibujado una vez:** en «Un espacio que cambia», cada cambio
+  que pide el guion (la mampara abierta contra el inodoro, la corrediza…) se
+  dibuja UNA vez editando la base aprobada, y también se aprueba (se ve su
+  coste antes). Los planos de ese estado editan su imagen, así que el objeto
+  sale igual en todos. Sin la base y sus estados aprobados no se paga ningún
+  plano que los edite.
+- **Qué dibujan las imágenes** (opcional): **lo que dice la voz** (por defecto:
+  cada imagen ilustra su frase) o **lo que dice el guion**: cada imagen sigue su
+  línea del **guion visual** y la voz solo marca los tiempos. El guion visual
+  sale de las líneas «Visual:» de la Parrilla o de «Proponer con Claude», y se
+  revisa y se aprueba en el paso **Imágenes** (bloque «Guion visual»): por plano,
+  el bloque de la voz durante el que se ve, qué se ve, la cámara y, en «Un
+  espacio que cambia», el estado del objeto. Sin aprobar no se dibuja nada. Al
+  aprobar, Claude avisa de los planos que contradicen lo fijo (el sitio, el
+  reparto, los estados): manda lo fijo. Quién manda: el vídeo, luego el estilo
+  («🎬 Qué dibujan las imágenes» en «Cómo se cuenta»), luego la voz.
+- **El reparto y los sitios** (en un vídeo hecho): «Pedido para el reparto de
+  sitios» es una frase para Claude al repartir; «Volver a repartir con este
+  pedido» no paga imágenes.
 - **Generar el guion** (barra): crea el vídeo y redacta el guion; no dibuja nada.
 
 ## Guion
@@ -537,6 +622,39 @@ Business no dan cifras por post, así que no se preguntan.
   el **primer comentario**, **Dame 3 ganchos** (tres primeras líneas para
   elegir) y, en Instagram, **colaboradores** y **etiquetas**.
 
+**El SEO de verdad** (20-10):
+- **La palabra clave tiene que ser del vídeo.** Si la del proyecto no sale en
+  el guion ni en el material, no se usa en ese vídeo, y la ficha te lo dice.
+  Si el vídeo no tiene ninguna, escríbela o usa una de «Búsquedas reales».
+- **Búsquedas reales → Investigar búsquedas**: el Studio pregunta al
+  autocompletado de YouTube y Google (Perú) qué frases de tu vídeo busca la
+  gente. La tabla dice de cada una **Del vídeo** (cuánto la trata), **Demanda**,
+  **Competencia** (solo con la clave de YouTube), **Tu historial** (1× es tu
+  media; 2× es el doble de vistas que lo normal en tu cuenta) y el **Total**.
+  **Usar** la pone como palabra clave del vídeo. No cuesta nada ni usa Claude.
+- **La nota de cada red** tiene tres partes: Relevancia, Demanda y Tu
+  historial. La nota es la media de las que tienen dato («2 de 3 partes
+  medidas»). Debajo, los **detalles de forma**, que se arreglan con su botón
+  pero no suben ni bajan la nota.
+- **La clave de YouTube** (opcional) va en **Configuración → YouTube
+  (búsquedas SEO)**: en console.cloud.google.com, activa la «YouTube Data
+  API v3» y crea una «Clave de API». Unas 100 búsquedas gratis al día.
+- **Tu canal** (opcional, **Configuración → YouTube: tu canal**). En el mismo
+  proyecto de Google Cloud:
+  1. Activa la «YouTube Analytics API».
+  2. En «Pantalla de consentimiento de OAuth», tipo «Externo», y añádete como
+     usuario de prueba.
+  3. En «Credenciales → Crear credenciales → ID de cliente de OAuth», tipo
+     «Aplicación web», con la **URI de redireccionamiento autorizada** que te
+     enseña el Studio (botón «Copiar»).
+  4. Pega el ID de cliente y el secreto, **Guardar** y **Conectar mi canal**.
+
+  Con el canal, «Investigar búsquedas» suma lo que ya te trae vistas en
+  YouTube, y en un vídeo publicado sale **Cómo te encontraron en YouTube**. Si
+  la app sigue «en prueba», Google corta cada 7 días: **Volver a conectar**.
+- La columna **Tendencia** (Google Trends, experimental) dice si la frase sube
+  o baja en Perú. Si Trends no contesta, queda en «—».
+
 **Después de publicar** la ficha se queda donde estaba, para seguir con las
 otras redes: arriba dice **Ya publicado en** (con el enlace a cada post) y
 **En camino** (lo programado o subiendo), y al lado de cada red su último
@@ -602,43 +720,92 @@ Más abajo:
 
 ### Diseñar la portada
 
-En el bloque **Portada** de un vídeo, **Diseñar portada** abre el editor:
+En el bloque **Portada** de un vídeo, **Diseñar portada** abre el editor. Va
+por capas, y cada una hace UNA cosa:
 
-1. **Plantilla**: elige una de las 21 (Versus, Top N, Oferta…). Cada una
-   coloca sus textos y su grafismo; cambiar de plantilla conserva lo escrito.
-2. **Textos**: de 1 a 3 palabras por campo. Más de 4 bajan los clics.
-3. **Fondo**: un fotograma, un plano, una imagen tuya o una hecha con IA. Las
-   plantillas partidas (Versus, Antes / Después, Mito) usan dos.
-4. **Elementos**: muévelos, agrándalos, gíralos, cámbiales el color o
-   escóndelos; «Añadir» pone más (flecha, círculo, insignia, icono…).
-5. **Proponer 3 portadas con Claude** si no sabes por dónde empezar.
-6. **Usar como portada**: la deja como la imagen que va a las redes.
+1. **Imagen**: el fondo (un plano, que va tal cual; un fotograma del vídeo, que
+   trae los subtítulos; una imagen tuya o una hecha con IA). Los **ajustes**
+   (contraste, color, brillo, viñeta, oscurecer) empiezan apagados; **«Sin
+   ajustes»** los quita y **«Poner el look de la plantilla»** pone los que ella
+   sugiere. Es lo único que toca la foto.
+2. **Plantilla**: una de las 21 (Versus, Top N, Oferta…). Coloca los textos y
+   el grafismo; cambiarla conserva lo escrito y lo que añadiste.
+3. **Colores y letra**: la paleta pinta textos y elementos, nunca la foto.
+   **«Sin paleta»**: blanco con borde negro.
 
-Lo de la IA de imágenes se paga y te dice el precio antes: solo el fondo (el
-texto sigue en capas, exacto) o la portada entera con el texto dentro.
+Debajo de la vista, **«Esta imagen lleva: …»** dice qué hay encima de la foto;
+la ✕ lo quita. **Textos**: de 1 a 3 palabras por campo. **Elementos**:
+muévelos, agrándalos, gíralos, cámbiales el color, escóndelos o
+**«Restablecer»**; «Añadir» pone más en un hueco libre.
+
+**Proponer 3 portadas con Claude** (plantilla, textos y colores) e **Ideas de
+imagen con Claude** (tres escenas con su prompt) no se pagan aparte. La IA de
+imágenes sí: antes de pagar ves el prompt, puedes cambiarlo, y el precio va en
+el botón **«Dibujar»**. Recomendado: el fondo con IA y el texto en capas.
+
+**Guardar diseño** (para retocarla otro día), **⬇ Descargar portada** (PNG, de
+respaldo) y **Usar como portada** (la que va a las redes). En el bloque Portada
+se ve **qué portada recibe cada red** y, en cada envío, cuál se mandó.
+
 ## Automatizar
 
-Lo que prepara los vídeos antes de crearlos. Dos pestañas grandes:
+Lo que prepara los vídeos antes de crearlos. Arriba, el **proyecto** (el
+cliente) como un chip que se cambia al pulsarlo, y **«+ Añadir guiones»**, que
+está siempre a mano. La **«i»** junto al título recuerda que la Parrilla es
+opcional: el Encargo de un vídeo se sigue pudiendo llenar a mano en Crear.
+Debajo, cinco pestañas: **Parrilla · Añadir guiones · Conversar con Claude ·
+Cuentas que te gustan · Marca del cliente**.
 
 ### Parrilla
 
-Cada proyecto tiene sus **matrices de guiones**, y cada guion su estado:
-**pendiente**, **usado** (se pasó al Encargo) o **publicado** (su vídeo ya
-salió en Publicar; cambia solo).
+Cada proyecto tiene sus **matrices de guiones**, y la Parrilla es un
+**tablero** con una columna por estado: **Pendientes** (nadie lo ha usado),
+**Usados** (se pasaron al Encargo) y **Publicados** (su vídeo ya salió en
+Publicar; cambia solo). En el móvil se ve una columna y las otras están en sus
+botones, con cuántos guiones tiene cada una.
 
-- **Añadir guiones**: subir una matriz (Word, Excel, PDF o texto), pedírselos a
-  Claude (de 1 a 30, sin repetir ideas), escribirlos o pegarlos, **Desde mis
-  resultados** (guiones que repiten lo que mejor te funcionó) o **Conversar con
-  Claude**, un chat para prepararlos hablando, con capturas, búsqueda en
-  internet opcional y tus resultados. Todo se convierte al formato único del
-  guion.
-- **La marca del cliente**: quién es, qué mostrar, qué evitar, el tono y el CTA,
-  una vez por proyecto. Claude la usa en todo lo que escribe para él.
-- **Pasar al Encargo**: abre Crear con el encargo del vídeo relleno con ese
-  guion. Revísalo y pulsa «Generar el guion».
-- Escribir guiones va con tu suscripción de Claude: no cuesta dinero aparte.
+- **Arriba, la marca del cliente**: «Marca de X: ✓ guardada» o, si falta,
+  «Sin marca: Claude escribirá sin saber quién es el cliente…» con
+  **«Apuntarla ›»**.
+- **Buscar por título o ID** y las **matrices como filtro**. Con una matriz
+  elegida se ve de dónde salió y puedes **Renombrarla** o **Borrarla** (te
+  pregunta antes; los vídeos ya hechos con ella no se tocan).
+- **Pulsar una tarjeta abre su ficha** en un panel a la derecha (a pantalla
+  completa en el móvil), sin perder la Parrilla de vista:
+  - **Guion**: uso, formato y duración, el texto entero, Copiar, Revisar
+    ortografía, Guardar el texto / Descartar cambios y sus avisos.
+  - **Al Encargo**: lo que irá a «Un vídeo nuevo» y **con qué estilo**.
+  - **Estado**: volver a pendiente, marcar como publicado, usar su marca para
+    el proyecto y borrar el guion (pregunta antes).
+  - Abajo, siempre a la vista, **«Pasar al Encargo con «estilo» ›»**: abre
+    Crear con el encargo relleno con ese guion. Revísalo y pulsa «Generar el
+    guion» (antes no se crea ni se gasta nada). Si no se puede (el texto está a
+    medio cambiar, no hay estilo…), la barra dice por qué.
+  - Se cierra con «×», con Escape o pulsando fuera.
+- El **piloto automático** llegará más adelante: sale como «próximamente».
 
-### Analizar cuentas
+### Añadir guiones
+
+Primero eliges **de dónde salen**, con una tarjeta por camino y **lo que
+cuesta**: subir un documento (Word, Excel, PDF o texto), pedírselos a Claude
+(de 1 a 30, sin repetir ideas), **Desde mis resultados** (guiones que repiten
+lo que mejor te funcionó), escribirlos o pegarlos (sin Claude si ya están en el
+formato), **desde una cuenta que te guste** (te lleva a «Cuentas que te
+gustan») o **conversando con Claude** (te lleva al chat). Debajo, su
+formulario, «Cómo se usa» y «Dónde se guardan», y abajo la **barra** con el
+botón («Subir y convertir», «Pedir a Claude», «Escribir desde mis resultados»,
+«Convertir con Claude» o «Guardar en la Parrilla») y lo que gasta. Escribir
+guiones va con tu suscripción de Claude: no cuesta dinero aparte.
+
+### Conversar con Claude
+
+Un chat para preparar guiones hablando: a la izquierda tus conversaciones
+(«+ Nueva», «Borrar esta conversación») y a la derecha la conversación, con
+capturas, **🌐 Buscar en internet**, **📊 Con mis resultados**, una cuenta
+analizada como referencia y el modelo. Cada guion que escriba en el formato del
+Studio sale con su **«Guardar en la Parrilla»**.
+
+### Cuentas que te gustan
 
 Escribe el @usuario o pega el enlace de un perfil de **TikTok, Instagram o
 YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
@@ -646,11 +813,19 @@ YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
 - **Primero gratis** (YouTube y la vía oficial de Meta); si no sirve, por
   **Apify**, de pago (unos céntimos por cuenta). **Antes de pagar siempre
   pregunta**, con el precio, y hay un tope al mes.
-- **«Que Claude la analice»**: qué temas, ganchos, duración y horarios le
-  funcionan. **«Escribir guiones con lo que le funciona»**: guiones para tu
-  proyecto, inspirados y sin copiar, que van a la Parrilla.
-- Las claves (Google, Meta, Apify) van en **Conexiones**, dentro de esa
+- Las ya leídas salen como **tarjetas** (red, cuántos vídeos, cuándo y si está
+  analizada). Abierta una, en dos columnas: **«Qué le funciona»** («Que Claude
+  la analice»: temas, ganchos, duración y horarios) y **«Para tu proyecto»**
+  («Escribir guiones con lo que le funciona», inspirados y sin copiar, que van
+  a la Parrilla, o «Hablar de ella en el chat»), y debajo **Sus vídeos**.
+- Las claves (Google, Meta, Apify) siguen en **Conexiones**, arriba de esa
   pestaña, con su guía.
+
+### Marca del cliente
+
+Quién es, qué mostrar, qué evitar, el tono, el CTA y otras reglas, una vez por
+proyecto, en dos columnas, con **«Guardar la marca»** en la barra de abajo.
+Claude la usa en todo lo que escribe para él.
 
 ## Configuración (⚙)
 

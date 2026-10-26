@@ -4564,6 +4564,20 @@ def probar_coste_en_detalle(cliente, pid):
     img = d.get("imagenes") or {}
     ok(all(k in img for k in ("nuevas", "rehechas", "personajes")),
        "las imágenes separadas en nuevas, rehechas y personajes")
+    ok(all(k in img for k in ("base", "portadas")),
+       "y aparte la imagen base del tipo de relato y las portadas (notas del dueño, 24-10)")
+    import app as servidor                                    # noqa: PLC0415
+    falsos = [{"proveedor": "openai", "unidad": u, "usd": usd, "paso": paso,
+               "cantidad": {"imagenes": 1}}
+              for u, usd, paso in (("escena:S001", 0.05, "assets"), ("escena:S001", 0.05, "assets"),
+                                   ("asset:base_sala", 0.08, "assets"),
+                                   ("asset:estado_sala_despues", 0.08, "assets"),
+                                   ("asset:rosa", 0.04, "assets"), ("portada", 0.2, "publicar"),
+                                   ("", 0.01, "estilo"))]
+    partes = servidor._desglose_de_eventos(falsos)["imagenes"]
+    igual({k: v["cuantas"] for k, v in partes.items()},
+          {"nuevas": 1, "rehechas": 1, "base": 2, "personajes": 1, "portadas": 1, "otras": 1},
+          "cada imagen va a su tipo: plano nuevo, rehecho, base y estados, reparto, portada, otra")
     _r, total = cliente.get(f"/api/proyectos/{pid}/coste")
     ok(abs(float(d.get("total_usd") or 0) - float(total.get("total_usd") or 0)) < 0.01,
        f"y el total cuadra con el de la cabecera ({d.get('total_usd')} / {total.get('total_usd')})")

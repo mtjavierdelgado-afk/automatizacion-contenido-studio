@@ -7530,16 +7530,18 @@ def probar_guion_visual():
             {"voz": "Este error de mampara te deja sin espacio.", "visual": ["la batiente choca"]},
             {"voz": "Una corrediza te devuelve el espacio.", "visual": ["la corrediza", "el riel"]}]})
         codigo, f = _llamar(servidor.leer_guion_visual, pid)
-        ok(codigo == 200 and f["modo"] == "guion" and not f["aprobado"],
-           "GUION VISUAL: elegido al crear, rige y está sin aprobar")
+        ok(codigo == 200 and f["modo"] == "guion" and f["aprobado"] and f["aprobado_solo"],
+           "GUION VISUAL: elegido al crear, rige, y las líneas de la Parrilla valen solas (decisión B)")
         igual([(p["bloque"], p["visual"]) for p in f["propuesta"]],
               [("B001", "la batiente choca"), ("B002", "la corrediza"), ("B002", "el riel")],
               "GUION VISUAL: las líneas de la Parrilla, casadas con el guion (sin guardarlas)")
         igual(((ctx.estado.params("assets") or {}).get("guion_visual") or {}).get("planos"), [],
               "GUION VISUAL: leer la ficha no escribe nada")
         imp = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
-        ok(any("guion visual" in (x.get("que") or "") for x in imp),
-           "GUION VISUAL: sin aprobar, generar las imágenes dice que falta aprobarlo")
+        ok(not any("guion visual" in (x.get("que") or "") for x in imp),
+           "GUION VISUAL: con las líneas de la Parrilla, generar no se para a esperar")
+        igual(servidor._planos_previstos(ctx)["con_imagen"], 3,
+              "GUION VISUAL: el precio cuenta una imagen por línea")
         codigo, _m = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": True})
         igual(codigo, 409, "GUION VISUAL: no se aprueba uno vacío")
         codigo, _m = _llamar(servidor.guardar_guion_visual, pid,
@@ -7548,6 +7550,9 @@ def probar_guion_visual():
         codigo, f = _llamar(servidor.guardar_guion_visual, pid, {"planos": f["propuesta"]})
         ok(codigo == 200 and len(f["guion_visual"]["planos"]) == 3 and not f["aprobado"],
            "GUION VISUAL: guardarlo lo deja sin aprobar")
+        imp = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+        ok(any("guion visual" in (x.get("que") or "") for x in imp),
+           "GUION VISUAL: guardado a mano y sin aprobar, generar dice que falta aprobarlo")
         real_listo = servidor._asistente_listo
         servidor._asistente_listo = lambda: (False, "", None, [], False)  # sin Claude aquí
         try:

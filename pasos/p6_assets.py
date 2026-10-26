@@ -805,7 +805,11 @@ def _inventario_para_nota(escena, plan, dirs, p, trabajo, notas, proyecto):
                   f"el plano {vecino['id']}, {abs(j - i)} {donde} a este; sitio "
                   f"'{vecino.get('set') or '-'}'; personajes "
                   f"{', '.join(vecino.get('personajes') or []) or 'nadie'}; "
-                  f"dice: {' '.join(str(vecino.get('narracion') or '').split())[:160]}",
+                  # en modo guion, lo que SE VE en el vecino (su linea), no lo
+                  # que dice la voz (rama guion-visual-2)
+                  + (f"se ve: {' '.join(str(vecino['linea_gv'].get('visual') or '').split())[:160]}"
+                   if vecino.get("linea_gv") else
+                   f"dice: {' '.join(str(vecino.get('narracion') or '').split())[:160]}"),
                   "vecino", "continuidad",
                   mismo_set=bool(vecino.get("set")
                                  and vecino.get("set") == escena.get("set")),
@@ -1182,7 +1186,9 @@ def _aplicar_lineas_gv(escenas, catalogo):
             continue
         if linea.get("camara"):
             escena["encuadre"] = linea["camara"]
-            escena.pop("abstracta", None)
+        # la linea dice lo que SE VE: una carta abstracta («not a physical
+        # location») le llevaria la contraria (guion-visual-2)
+        escena.pop("abstracta", None)
         if linea.get("personajes"):
             gente = [q for q in linea["personajes"] if q in reparto]
             escena["personajes"] = gente
@@ -1293,7 +1299,10 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # EL GUION VISUAL MANDA EN EL CORTE (rama guion-visual): con «lo que dice el
     # guion» y el guion visual aprobado, un plano por linea visual, sobre el
     # reloj de la voz. Sin el, `lineas_gv` es None y el corte es el de siempre.
-    lineas_gv = guion_visual.activo(p)
+    # aprobado a mano, o las lineas de la Parrilla que casan limpias (guion-visual-2)
+    lineas_gv, origen_gv = guion_visual.efectivo(
+        p, [{"id": b.get("id"), "texto": b.get("texto")}
+            for b in ((meta or {}).get("bloques") or []) if isinstance(b, dict)])
     avisos_gv = []
     if lineas_gv:
         tramos_b = tramos_de_bloque(meta)
@@ -1372,7 +1381,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
                                 reparto=reparto_corte)
     informe["camaras"] = camaras
     if lineas_gv or avisos_gv:
-        informe["guion_visual"] = {"planos": len(lineas_gv or []), "avisos": avisos_gv}
+        informe["guion_visual"] = {"planos": len(lineas_gv or []), "avisos": avisos_gv,
+                                   "origen": origen_gv if lineas_gv else ""}
     # Las marcas de palabra viajan con el plano: son lo que permite que un
     # rotulo entre cuando se dice lo que rotula y no al empezar el plano. Van
     # ANTES de repartir las cartelas porque ahora las cartelas tambien las usan:
@@ -2118,7 +2128,10 @@ def _prompt_visual(escena, beat, catalogo, modo="ilustracion"):
         base = _con_narracion(redactado, escena)
         return (f"{base} SHOT TYPE, and this is not optional: "
                 f"{escena['encuadre']}." if _con_encuadre(escena) else base)
-    if beat.get("prompt"):
+    # EN MODO GUION EL PROMPT DEL BEAT NO ENTRA (rama guion-visual-2): lo escribe
+    # el catalogo desde la VOZ del tramo, y delante de la linea visual le decia
+    # al dibujante lo que la voz cuenta. Sin linea, como siempre.
+    if beat.get("prompt") and not escena.get("linea_gv"):
         base = _con_direccion(beat["prompt"], escena)
         return _con_narracion(base, escena)
     if escena.get("abstracta"):

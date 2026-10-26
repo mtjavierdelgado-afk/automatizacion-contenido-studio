@@ -57,12 +57,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/ortografia/descartar` | Lo que se deja SIN marcar al aplicar: {rid, ids: [...]}. Esos textos se |
 | `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
 | `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
+| `POST` | `/api/proyectos/{pid}/planos/devolver` | Deshace «Quitar esta imagen». {narracion: lo que decía la imagen quitada} |
 | `GET` | `/api/proyectos/{pid}/planos/elementos` | {planos: {sid: [elementos]}, no_aplica, tipos, entradas, intensidades, |
 | `GET` | `/api/proyectos/{pid}/planos/montaje` | {video, planos: {sid: {movimiento?, profundidad?}}, no_aplica, niveles, profundidad} |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/elementos` | {elementos: [...]} de UN plano (vacia, los quita). Deja pendientes ese |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/nota-ia` | LA OTRA OPCION (se paga al aplicarla): una nota de imagen que pide |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/vista` | La imagen del plano con sus elementos encima, quietos (todos a la vez), |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | {movimiento?: quieto|sobrio|vivo|dinamico|null, profundidad?: true|false|null} |
+| `POST` | `/api/proyectos/{pid}/planos/{sid}/quitar` | Quita la imagen `sid`: su voz pasa a la de antes o a la de después. |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
 | `GET` | `/api/proyectos/{pid}/previsualizacion` | Las piezas para ver el video sin montarlo. -> {escenas, audio, ...} |
 | `PUT` | `/api/proyectos/{pid}/redactor` | Guarda el prompt escrito de cada plano. Un prompt vacío lo quita. |
@@ -111,9 +113,6 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/trabajos/{tid}` | Estado y progreso de un trabajo. |
 | `POST` | `/api/trabajos/{tid}/cancelar` | Pide la cancelacion cooperativa de un trabajo. |
 | `GET` | `/api/trabajos/{tid}/eventos` | Progreso del trabajo en vivo por Server-Sent Events. |
-| `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee): `imagenes` y `montaje` con `ahora` (quién tiene el turno) y `fila` (quién espera, por orden de llegada), y `trabajando` (todo lo que está en marcha en los vídeos abiertos). Un vídeo de un proyecto con clave sin abrir sale sin nombre ni enlace. |
-| `GET` | `/api/claude/consumo` | El medidor de Claude (solo lee): `cupo` de cada cuenta (las `ventanas` five_hour y seven_day con `uso` 0–1 y `reinicia` en epoch, tal como las da el CLI), `avisos` (≥ 70 % «ojo», ≥ 90 % «malo»), `resumen` de los últimos 7 días (hoy, semana, por día, tarea, vídeo y cuenta). Si han pasado más de 15 min y ha habido llamadas, lanza una medida en segundo plano (nunca con `ESTUDIO_SIMULAR`). |
-| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: una llamada mínima por cuenta (haiku, una palabra, `stream-json`) para leer su cupo; devuelve lo mismo que el GET. Con `ESTUDIO_SIMULAR`, un cupo simulado. |
 
 ## Recetas y pestañas
 
@@ -354,6 +353,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
+| `GET` | `/api/claude/consumo` | El medidor de Claude (solo lee): el cupo de cada cuenta, los avisos al |
+| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: una llamada mínima por cuenta (haiku, una palabra) para |
 | `GET` | `/api/clientes` | Los proyectos (clientes) y a cual pertenece cada estilo. |
 | `POST` | `/api/clientes` | Un proyecto nuevo: {nombre}. |
 | `PUT` | `/api/clientes/estilos/{preset_id}` | Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca). |
@@ -361,6 +362,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
 | `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
+| `GET` | `/api/cola_studio` | La cola de todo el Studio: imágenes, montaje y lo demás que trabaja. |
 | `GET` | `/api/dominios` | Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico} |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
@@ -492,4 +494,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**375 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**380 endpoints.** Escrito por `generar_api.py` desde `app.py`.

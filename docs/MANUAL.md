@@ -421,6 +421,15 @@ cuánto tardarán. Se dibujan **una detrás de otra** en el servidor: puedes
 cerrar o recargar la página y sigue. Si escribes **varias notas para la misma
 imagen**, se juntan y se paga **una**.
 
+**Ajustar esta imagen** (cuando dos imágenes seguidas no casan):
+**Igualar con la anterior / la siguiente** te escribe la nota para rehacerla
+con la de al lado como referencia (se paga al rehacerla). **Quitar esta
+imagen…** pasa lo que se oye en ella a la de antes o a la de después, que se
+alarga y conserva su dibujo: gratis, sin cambiar los números de las demás.
+Después hay que **volver a montar** el vídeo (gratis). La imagen que se lleva la
+voz lo dice («Lleva también la voz de S002») con su botón **Deshacer**, que la
+devuelve con su misma imagen. Las cartelas no se quitan ni reciben voz.
+
 **Retocar o dibujar desde cero.** «Rehacer esta imagen» **retoca** la de ahora:
 es lo mejor para cambios pequeños («que lleve gafas», «más luz»). Para un
 cambio grande usa **Desde cero**. Si una ya hecha salió casi igual, pulsa

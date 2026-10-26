@@ -23,6 +23,18 @@ vídeos, estilos, claves y contraseña no se tocan.
   imagen (y de cuántos planos suyos quedarán para rehacer); no se dibuja nada
   solo.
 
+**«Lo que dice el guion», sin que se cuele la voz (24 de octubre)**
+- **Las líneas «Visual:» de la Parrilla valen solas.** Si casan con el guion
+  (cada una con su bloque y en orden), se dibujan sin tener que aprobarlas a
+  mano: un lote de la Parrilla ya no se para en cada vídeo. Si no casan, o si
+  el guion visual lo escribe Claude, se espera a que lo apruebes, como antes.
+  Si lo cambias y lo guardas, vuelve a pedir tu aprobación.
+- **La voz ya no llega por la puerta de atrás:** la nota que acompaña a la
+  imagen del plano vecino dice lo que SE VE en él (su línea), no lo que dice
+  la voz, y la plantilla de escena escrita desde la voz ya no entra delante de
+  tu línea. Tampoco sale una composición «abstracta»: la línea dice lo que se ve.
+- **El precio cuenta una imagen por línea** del guion visual (antes podía
+  prometer otra cifra: «8 imágenes» y salían 6).
 
 **El negocio de cada estilo (21 de octubre)**
 - **Lo de EstadoPlay ya no está escrito a mano en el Studio.** Los servicios
@@ -42,6 +54,77 @@ vídeos, estilos, claves y contraseña no se tocan.
 **Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
+
+**Publicar, nuevo (22 de octubre)** — la interfaz que aprobaste en la maqueta.
+Solo cambia cómo se ve y dónde está cada cosa: nada que hacía Publicar deja de
+estar, nada nuevo se paga y las preguntas dicen lo mismo de siempre.
+- **Cuatro pestañas**: **Calendario · Por publicar · Resultados · Ajustes** (la
+  ficha de un vídeo ya no es una pestaña apagada). **⚠ Te necesitan** sale arriba
+  en todas, y dentro de un vídeo, plegada («1 fallo · 1 espera tu OK») y con
+  **Ver**; desde ahí también se da **el OK**. El aviso de Upload-Post, arriba.
+- **El calendario, forma B**: una línea por publicación (hora · red y el vídeo
+  debajo, con el color y la marca de su estado), **6 por día y «+N más»**, que
+  abre el día entero en un panel a la derecha, por horas y con sus botones. El
+  jueves de 26 publicaciones ya no es una columna de 1.800 px. En el **móvil**,
+  los siete días arriba (con cuántas lleva cada uno) y el elegido a todo lo
+  ancho. Mes con 3 por día, y una **Agenda**.
+- **Por publicar**: los vídeos listos, con miniatura, proyecto y estilo, y los
+  **filtros** (que ya no están encima del calendario, que no filtraban).
+- **Un vídeo, en seis pasos** como en Crear: Redes · Textos · SEO · Portada ·
+  Cuándo · Envíos, cada uno con su estado, y **una barra abajo** con el botón de
+  lo elegido («**Programar para jue 22/10 19:00 ›**», «Publicar ahora ›», «Ya lo
+  subí… ›») y, si falta algo, por qué. Los textos van **en pestañas por red**
+  (con ✓/⚠ y su nota SEO) y «**Así sale**» al lado, en un marco de teléfono. El
+  SEO del vídeo y la nota de cada red, juntos en el paso SEO
+  (con «Búsquedas reales» y «Cómo te encontraron en YouTube»). **‹ Publicar**
+  vuelve a donde estabas; al programar, al Calendario en la semana de ese día.
+- **Las confirmaciones**, en un panel de la casa (no la ventanita del
+  navegador), con las mismas frases y botones que dicen lo que hacen
+  («Enviar solo a TikTok», «No enviar nada»). «Ya lo subí a…» pide el enlace ahí.
+  El panel se lleva el foco (Enter es aceptar) y, mientras pregunta, el botón de
+  la barra se apaga: un Enter o un doble clic ya no abren otra pregunta encima
+  ni publican dos veces.
+- **Resultados**: periodo en **7 · 30 · 90 días**, cifras grandes y los bloques
+  en dos columnas. **Ajustes** (antes «Cuentas y ajustes»): a la izquierda
+  General y cada proyecto con su estado; a la derecha sus pestañas **Conexión ·
+  Redes · Textos · SEO** (se acabó la pared de tarjetas con tres plegables).
+- **Las claves de Analizar cuentas (YouTube, Instagram y Apify) están en
+  Configuración**, con las demás y como las de Música y efectos; «Probar todas
+  las claves» también las prueba. En Automatizar queda su estado y
+  **Configurar ›**.
+- El **editor de portadas** no se rediseña aquí: «Diseñar portada» (paso
+  Portada) abre el de «Portadas, segunda vuelta», con su «Qué portada recibe
+  cada red» debajo.
+
+**Tus proyectos y la pantalla de un proyecto, nuevas (22 de octubre)**
+- **«+ Nuevo vídeo» en Crear**, arriba en la portada y en cada proyecto: pregunta
+  **¿con qué estilo?** y abre el Encargo de un vídeo nuevo (lo mismo que pulsar
+  un estilo). Al lado, **+ Nuevo proyecto** y la **🗑 Papelera · N**.
+- **Un buscador** que filtra vídeos, estilos y proyectos de la página.
+- **⚠ Te necesitan** junta arriba lo que antes iba suelto: los vídeos que
+  perdieron imágenes (**Reparar**) y los estilos a medias (**Retomar** /
+  **Descartar**).
+- **«Sigue donde lo dejaste»** (antes «Últimos vídeos») en tarjetas que dicen
+  **cómo va cada vídeo** en Crear («✓ Montado», «⚠ Vídeo obsoleto», «● En el
+  Guion», «⟳ 42 % · Dibujando los planos») y en Publicar («○ Listo para
+  publicar», «◷ jue 22/10 12:00 · 4 redes», «✓ Publicado en 2 redes»), con la
+  fecha legible («hoy 17:31»), **Publicar ›** si está montado y **⋯** con
+  Renombrar, Mover a otro proyecto y Apartar. Se acaba el «Apartar» rojo en
+  cada fila.
+- **Tarjetas de proyecto** con su logo o su inicial, sus tres últimos vídeos y
+  sus marcas («🔒 con clave», «oculto», «2 listos para publicar»). **Ver ocultos
+  (N)** es un interruptor, y cada oculto trae su «Dejar de ocultar».
+- **Dentro de un proyecto**, los mandos (nombre, logo, ocultar, clave, borrar)
+  pasan a **⚙ Ajustes del proyecto**, un panel a la derecha; **Borrar el
+  proyecto** queda abajo, en la zona de peligro, con su explicación.
+- **Tocar un estilo abre su menú**: **▶ Nuevo vídeo con este estilo**, **✎
+  Editar el estilo**, Duplicar, Mover y Apartar («✎ Editar» sigue en la
+  tarjeta). **⇄ Traer un estilo de otro proyecto** es una tarjeta más.
+- **Los vídeos del proyecto se filtran** por estado (Todos · En curso · Listos ·
+  Programados · Publicados) y se ven en tarjetas o en lista.
+- **«Apartar»** manda un vídeo o un estilo a la papelera; se puede devolver.
+- Nada de esto gasta ni cambia ningún vídeo: el estado de cada tarjeta lo lee
+  el Studio de lo que ya sabe (una consulta nueva de solo lectura).
 
 **Arreglos urgentes (22 de octubre, tarde)**
 - **La imagen base, también en «Imágenes».** Con un tipo de relato que edita
@@ -73,7 +156,9 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   izquierda. Las cuentas ya leídas salen como tarjetas y la abierta en dos
   columnas.
 - Nada cambia de lo que hace: las mismas confirmaciones (también la de pagar
-  a Apify) y las claves de YouTube, Meta y Apify donde estaban.
+  a Apify). Las claves de YouTube, Meta y Apify pasan a Configuración con
+  «Publicar, nuevo» (arriba): en «Cuentas que te gustan» sale su estado y
+  «Configurar ›».
 
 **Publicar: SEO con tu canal y Google Trends (21 de octubre)**
 - **Conecta tu canal de YouTube** en **Configuración → YouTube: tu canal**
@@ -124,6 +209,32 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   API v3». Es gratis, da unas 100 búsquedas al día (el Studio lleva la cuenta)
   y no caduca. Sin ella todo funciona igual, salvo la competencia. Los datos
   de YouTube se guardan 30 días como mucho, como pide su política.
+
+**Qué dibujan las imágenes: la voz o el guion (22 de octubre)**
+- **Nuevo, en el Encargo: «Qué dibujan las imágenes».** «Lo que dice la voz» es
+  lo de siempre (cada imagen ilustra su frase) y es lo que tienen todos los
+  vídeos si no eliges nada. Con **«Lo que dice el guion»**, cada imagen sigue su
+  línea del **guion visual** y la frase de la voz ya no llega al dibujante: la
+  voz solo marca cuándo entra cada plano. Es lo que faltaba para la mampara: la
+  voz puede hablar de la corrediza sin que se dibuje la corrediza.
+- **El guion visual** es la lista de planos: qué se ve, la cámara («plano general
+  desde la puerta») y, en «Un espacio que cambia», el estado del objeto (la
+  mampara abierta, la corrediza). Sale de las líneas «Visual:» de tu guion de la
+  Parrilla (ya no se pierden) o de **«Proponer con Claude»**, que lo escribe
+  leyendo el guion entero. Se revisa, se corrige y **se aprueba en el paso
+  Imágenes** antes de dibujar: sin aprobar no se paga ningún plano. Escribirlo,
+  proponerlo y aprobarlo es solo texto.
+- **Antes de la primera tanda**, el guion visual y la imagen base salen en el paso
+  **Voz**, encima de «Generar las imágenes» (el paso Imágenes sigue cerrado hasta
+  que hay planos).
+- **Sin gente si la línea no la nombra:** en modo guion, una persona solo sale
+  en el plano cuya línea la pide.
+- **Lo fijo manda:** al aprobar, Claude comprueba cada línea contra el sitio, el
+  reparto y los estados aprobados, y avisa del plano que pide algo que no existe
+  (se dibujará lo fijo).
+- En la Parrilla, la línea de cabecera **«Imágenes: guion»** lo elige; en el
+  estilo, «🎬 Qué dibujan las imágenes» (pestaña «Cómo se cuenta») es el punto de
+  partida de sus vídeos nuevos. El del vídeo manda.
 
 **Portadas, segunda vuelta (21 de octubre)**
 - **La imagen sale limpia.** Las plantillas ya no meten efectos en la foto

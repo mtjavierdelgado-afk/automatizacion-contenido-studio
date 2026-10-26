@@ -7786,7 +7786,8 @@ def probar_quitar_imagen():
         if codigo == 200:
             igual((ficha.get("trabajo"), ficha.get("hacia")), ("t1", "S001"), "QUITAR: dice el trabajo y a quién va")
         igual(qp.leer(ctx.proyecto.raiz),
-              [{"texto": p6._texto_clave(plan["escenas"][1]), "hacia": "anterior", "id": "S002", "n": 0}],
+              [{"texto": p6._texto_clave(plan["escenas"][1]), "hacia": "anterior", "id": "S002", "n": 0,
+                "fresca": True}],
               "QUITAR: va al fichero del proyecto, por su texto")
         igual(ctx.estado.firma("assets"), firma, "QUITAR: la firma de assets NO se mueve")
         igual(ctx.estado.params("assets") or {}, params, "QUITAR: ni un param cambia (regla 1)")
@@ -7806,6 +7807,26 @@ def probar_quitar_imagen():
         igual((qp.leer(ctx.proyecto.raiz), lanzadas[-1]), ([], "devolver_imagen"),
               "DESHACER: sale del fichero y vuelve a cortar")
         igual(ctx.estado.firma("assets"), firma, "DESHACER: la firma sigue igual")
+        # UNA FRASE REPETIDA CON UNA YA QUITADA (revisión del 26-10): S002 dice
+        # lo mismo que S004 y ya está quitada (vive en S001): S004 es la
+        # SEGUNDA vez que se dice, no la primera
+        plan_rep = {"escenas": [
+            {"id": "S001", "narracion": "Este baño era el más feo. Con baldosas grises.",
+             "narracion_imagen": "Este baño era el más feo.",
+             "absorbe": [{"id": "S002", "lado": "despues", "narracion": "Con baldosas grises.", "n": 0}]},
+            {"id": "S003", "narracion": "Y llega el cambio."},
+            {"id": "S004", "narracion": "Con baldosas grises."},
+            {"id": "S005", "narracion": "El más bonito."}]}
+        p6.plan_actual = lambda *_a, **_k: plan_rep
+        qp.reponer(ctx.proyecto.raiz, [{"texto": "con baldosas grises", "hacia": "anterior",
+                                        "id": "S002", "n": 0}])
+        codigo, _m = _llamar(servidor.quitar_imagen, pid, "S004", {"hacia": "anterior"})
+        igual(codigo, 200, f"REPETIDA: quitar S004, 200 ({_m if codigo != 200 else ''})")
+        igual(sorted((e["id"], e["n"]) for e in qp.leer(ctx.proyecto.raiz)),
+              [("S002", 0), ("S004", 1)],
+              "REPETIDA: S004 se apunta como la segunda vez (n=1), sin pisar a S002")
+        qp.reponer(ctx.proyecto.raiz, [])
+        p6.plan_actual = lambda *_a, **_k: plan
         # lo apuntado que el plan no refleja sale en la previa, con su deshacer
         qp.quitar(ctx.proyecto.raiz, "así quedó", "anterior", "S004")
         igual([x["id"] for x in servidor._quitados_sin_aplicar(ctx, plan)], ["S004"],

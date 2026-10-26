@@ -80,6 +80,8 @@ def leer(raiz):
             limpia = {"texto": texto, "hacia": hacia, "id": str(entrada.get("id") or ""), "n": n}
             if isinstance(entrada.get("unidad"), dict):
                 limpia["unidad"] = entrada["unidad"]
+            if entrada.get("fresca"):
+                limpia["fresca"] = True
             salida.append(limpia)
     return salida
 
@@ -105,7 +107,7 @@ def _escribir(raiz, entradas):
         raise
 
 
-def quitar(raiz, texto, hacia, sid="", n=0, unidad=None):
+def quitar(raiz, texto, hacia, sid="", n=0, unidad=None, fresca=False):
     """Apunta que el plano que dice `texto` se quita y su voz va `hacia`.
 
     `n`: cuantos planos ANTES que el dicen exactamente lo mismo (una frase
@@ -120,6 +122,8 @@ def quitar(raiz, texto, hacia, sid="", n=0, unidad=None):
     entrada = {"texto": texto, "hacia": hacia, "id": str(sid or ""), "n": max(0, int(n or 0))}
     if isinstance(unidad, dict) and unidad:
         entrada["unidad"] = unidad
+    if fresca:
+        entrada["fresca"] = True
     with _LOCK:
         entradas = [e for e in leer(raiz) if (e["texto"], e["n"]) != (texto, entrada["n"])]
         entradas.append(entrada)

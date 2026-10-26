@@ -5349,14 +5349,22 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     # dibujada para ESA frase y se conserva, pero al retirarla el estado
     # olvido su registro. Se sella aqui --por su frase, nunca por su numero--
     # para que no salga «por rehacer» y nadie la vuelva a pagar.
+    # `restaurar` = [{"uid", "texto"}]: SOLO esa unidad, SOLO si dice esa
+    # frase y SOLO si su imagen conservada no esta marcada obsoleta. Quien la
+    # pide (app.py) ya ha comprobado que estaba al dia cuando se quito.
     if solo_cortar and restaurar:
-        textos = {medios.normalizar_texto(t) for t in restaurar}
-        for escena in escenas:
-            uid = f"escena:{escena.get('id')}"
-            if (uid in resultados and uid not in rehechas
-                    and _texto_clave(escena) in textos
-                    and (resultados[uid] or {}).get("origen") == "conservado"):
-                rehechas[uid] = resultados[uid]
+        por_id = {f"escena:{e.get('id')}": e for e in escenas}
+        for pedido_r in restaurar:
+            if not isinstance(pedido_r, dict):
+                continue
+            uid = str(pedido_r.get("uid") or "")
+            escena = por_id.get(uid)
+            ficha_r = resultados.get(uid) or {}
+            if (escena is not None and uid not in rehechas
+                    and _texto_clave(escena) == medios.normalizar_texto(pedido_r.get("texto"))
+                    and ficha_r.get("origen") == "conservado"
+                    and not ficha_r.get("obsoleta")):
+                rehechas[uid] = ficha_r
     conservadas = sorted(uid for uid in resultados if uid not in rehechas)
 
     generadas = sum(1 for r in resultados.values() if r.get("origen") == "generada")

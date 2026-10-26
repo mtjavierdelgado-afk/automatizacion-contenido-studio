@@ -7311,8 +7311,9 @@ def _sin_nada_en_marcha(ctx, que):
 def _pasada_sin_dibujar(ctx, nombre, restaurar=None):
     """La pasada de imágenes que solo vuelve a cortar (`solo_cortar`): ninguna
     unidad pedida, sin hojas ni planos nuevos, sin esperar turno de imágenes.
-    No se dibuja ni se paga nada. `restaurar`: frases de planos devueltos, que
-    se sellan con su imagen de siempre. -> {trabajo, trabajo_id}"""
+    No se dibuja ni se paga nada. `restaurar`: [{uid, texto}] del plano devuelto,
+    que se sella con su imagen de siempre si sigue diciendo eso y su imagen no
+    está obsoleta. -> {trabajo, trabajo_id}"""
     opciones = {"solo_cortar": True}
     if restaurar:
         opciones["restaurar"] = list(restaurar)
@@ -7359,9 +7360,21 @@ def quitar_imagen(pid: str, sid: str, cuerpo: dict = Body(default=None)):
         qp = _quitar_planos()
         unidad = ((ctx.estado.params("assets") or {}).get("unidades") or {}).get(f"escena:{sid}")
         antes = qp.leer(ctx.proyecto.raiz)
-        qp.quitar(ctx.proyecto.raiz, p6._texto_clave(escenas[i]), hacia, sid,
-                  n=qp.ocurrencia(escenas, i, p6._texto_clave),
-                  unidad=unidad if isinstance(unidad, dict) else None)
+        texto = p6._texto_clave(escenas[i])
+        # LA OCURRENCIA EN EL CORTE ORIGINAL, como la cuenta `aplicar`: los
+        # planos de antes que dicen lo mismo, tambien los ya quitados (viven
+        # en el `absorbe` de su vecino; los de `sid` mismo, solo los de antes)
+        def quitados_iguales(escena, solo_antes=False):
+            return sum(1 for a in escena.get("absorbe") or []
+                       if isinstance(a, dict) and (not solo_antes or a.get("lado") == "antes")
+                       and p6._texto_clave({"narracion": a.get("narracion")}) == texto)
+        n = (qp.ocurrencia(escenas, i, p6._texto_clave)
+             + sum(quitados_iguales(e) for e in escenas[:i])
+             + quitados_iguales(escenas[i], solo_antes=True))
+        # si estaba al dia al quitarla: solo entonces se sella al deshacer
+        fresca = f"escena:{sid}" not in set(ctx.estado.unidades_obsoletas("assets") or [])
+        qp.quitar(ctx.proyecto.raiz, texto, hacia, sid, n=n,
+                  unidad=unidad if isinstance(unidad, dict) else None, fresca=fresca)
         try:
             ficha = _pasada_sin_dibujar(ctx, "quitar_imagen")
         except Exception:
@@ -7410,8 +7423,10 @@ def devolver_imagen(pid: str, cuerpo: dict = Body(default=None)):
             if uid not in unidades:
                 ctx.estado.actualizar_params("assets", {"unidades": {uid: entrada["unidad"]}})
                 repuso = True
+        restaurar = ([{"uid": uid, "texto": texto}]
+                     if en_su_sitio and entrada["id"] and entrada.get("fresca") else None)
         try:
-            ficha = _pasada_sin_dibujar(ctx, "devolver_imagen", restaurar=[texto])
+            ficha = _pasada_sin_dibujar(ctx, "devolver_imagen", restaurar=restaurar)
         except Exception:
             qp.restaurar(ctx.proyecto.raiz, entrada)
             if repuso:

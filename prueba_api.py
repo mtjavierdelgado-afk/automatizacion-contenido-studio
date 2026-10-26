@@ -4594,6 +4594,115 @@ def probar_coste_en_detalle(cliente, pid):
     ok(r.status_code in (404, 400), f"y no se sale de la carpeta de exportes ({r.status_code})")
 
 
+def probar_cola_de_montaje(cliente):
+    """Rama cola-montaje (25-10-2026): montar va de uno en uno en todo el
+    Studio y por orden de llegada, «Solo montar» no espera, y
+    GET /api/cola_studio enseña quién trabaja y quién espera."""
+    seccion("LA COLA DE MONTAJE Y LA COLA DEL STUDIO (25-10)")
+    import threading                                          # noqa: PLC0415
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo.trabajos import Cancelado                     # noqa: PLC0415
+
+    class _Bitacora:
+        def anotar(self, *_a, **_k):
+            pass
+
+    class _Ctx:
+        def __init__(self, nombre):
+            self.id = nombre.lower().replace(" ", "_")
+            self.proyecto = type("P", (), {"config": {"nombre": nombre}})()
+            self.bitacora = _Bitacora()
+
+    turno = servidor._TURNO_MONTAJE
+    orden, mensajes = [], {}
+    suelta = threading.Event()
+
+    def montar(nombre, funcion):
+        mensajes[nombre] = []
+        servidor._con_turno_de_montaje(
+            lambda v, m="", publico="": mensajes[nombre].append(m), _Ctx(nombre), funcion)
+
+    hilos = [threading.Thread(target=montar, args=("Vídeo A", lambda: (suelta.wait(20), orden.append("A"))))]
+    hilos[0].start()
+    time.sleep(0.4)
+    for nombre in ("Vídeo B", "Vídeo C"):
+        hilos.append(threading.Thread(target=montar, args=(nombre, lambda n=nombre[-1]: orden.append(n))))
+        hilos[-1].start()
+        time.sleep(0.4)
+    time.sleep(2.5)
+    # el servidor de las pruebas es OTRO proceso (con sus turnos vacíos): por
+    # HTTP se mira la forma, y lo de estos turnos, llamando a la ruta aquí
+    respuesta, por_http = cliente.get("/api/cola_studio")
+    igual(respuesta.status_code, 200, "GET /api/cola_studio responde 200")
+    ok({"imagenes", "montaje", "trabajando"} <= set(por_http or {}),
+       "con imágenes, montaje y lo que está en marcha")
+    cola = servidor.cola_del_studio(type("Peticion", (), {"headers": {}})())
+    m = (cola or {}).get("montaje") or {}
+    igual(((m.get("ahora") or {}).get("nombre")), "Vídeo A", "la cola dice quién se está montando")
+    igual([x.get("nombre") for x in m.get("fila") or []], ["Vídeo B", "Vídeo C"],
+          "y quién espera, por orden de llegada")
+    ok(isinstance((cola or {}).get("trabajando"), list) and not (m.get("ahora") or {}).get("video"),
+       "un turno de algo que no es un vídeo abierto no ofrece «Abrir»")
+    ok(not orden, "con otro vídeo montándose, los demás esperan su turno")
+    ok(any("se está montando «Vídeo A»" in x for x in mensajes.get("Vídeo B", [])),
+       f"la barra dice a quién espera ({(mensajes.get('Vídeo B') or [''])[:1]})")
+    ok(any("2.º en la fila" in x for x in mensajes.get("Vídeo C", [])),
+       f"y en qué puesto va ({(mensajes.get('Vídeo C') or [''])[:1]})")
+    suelta.set()
+    for hilo in hilos:
+        hilo.join(20)
+    igual(orden, ["A", "B", "C"], "se montan de uno en uno y por orden de llegada")
+    ok(not turno["cerrojo"].locked() and not turno["fila"] and not turno["quien"],
+       "y al acabar el turno queda libre")
+
+    def _cancelado(*_a, **_k):
+        raise Cancelado("parado")
+    turno["cerrojo"].acquire()
+    turno["quien"] = "Otro"
+    try:
+        servidor._con_turno_de_montaje(_cancelado, _Ctx("Vídeo D"), lambda: "no")
+        ok(False, "parar mientras espera el montaje corta la espera")
+    except Cancelado:
+        ok(True, "parar mientras espera el montaje corta la espera")
+    finally:
+        turno["quien"] = ""
+        turno["cerrojo"].release()
+    ok(not turno["fila"], "y sale de la fila")
+
+    # CANCELAR ES EN EL ACTO: con `al_cancelar`, la espera no aguanta al latido
+    turno["cerrojo"].acquire()
+    turno["quien"] = "Otro"
+    pedido = {"si": False, "fn": None}
+
+    def _avisar(*_a, **_k):
+        if pedido["si"]:
+            raise Cancelado("parado")
+    _avisar.al_cancelar = lambda fn: (pedido.update(fn=fn), (lambda: None))[1]
+
+    def _pedir_cancelar():
+        time.sleep(1.5)
+        pedido["si"] = True
+        pedido["fn"]()
+    threading.Thread(target=_pedir_cancelar).start()
+    empezo = time.time()
+    try:
+        servidor._con_turno_de_montaje(_avisar, _Ctx("Vídeo E"), lambda: "no")
+        ok(False, "cancelar en el acto")
+    except Cancelado:
+        tardo = time.time() - empezo - 1.5
+        ok(tardo < 1.2, f"cancelar mientras espera es en el acto ({tardo:.1f} s)")
+    finally:
+        turno["quien"] = ""
+        turno["cerrojo"].release()
+
+    # «Solo montar» no espera: se mira en _correr_paso_marcado
+    import inspect                                            # noqa: PLC0415
+    fuente = inspect.getsource(servidor._correr_paso_marcado)
+    ok('paso_id == "render" and not extra.get("solo_montar")' in fuente,
+       "«Solo montar» (remezclar, segundos) no hace cola; montar entero sí")
+
+
 def probar_turno_y_notas_de_otro_texto():
     """Dos arreglos del 11-10-2026 que no se ven desde la API.
 
@@ -7936,6 +8045,7 @@ def main():
         probar_la_foto_del_asistente(cliente, pid)
         probar_onboarding(cliente)
         probar_turno_y_notas_de_otro_texto()
+        probar_cola_de_montaje(cliente)
         probar_coste_en_detalle(cliente, pid)
         probar_sistema(cliente)
         probar_lo_que_lleva(cliente)

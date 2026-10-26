@@ -111,6 +111,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/trabajos/{tid}` | Estado y progreso de un trabajo. |
 | `POST` | `/api/trabajos/{tid}/cancelar` | Pide la cancelacion cooperativa de un trabajo. |
 | `GET` | `/api/trabajos/{tid}/eventos` | Progreso del trabajo en vivo por Server-Sent Events. |
+| `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee): `imagenes` y `montaje` con `ahora` (quién tiene el turno) y `fila` (quién espera, por orden de llegada), y `trabajando` (todo lo que está en marcha en los vídeos abiertos). Un vídeo de un proyecto con clave sin abrir sale sin nombre ni enlace. |
 
 ## Recetas y pestañas
 

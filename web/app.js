@@ -23336,6 +23336,7 @@ const PORT = {
   cambiado: false, vista: '', pidiendo: 0, reloj: null, guias: true, error: '',
   propuestas: null, proponiendo: false, ia: null, abierto: false, fondos: [], cortar: null,
   aviso: null, ideas: null, pensandoIdeas: false, iaPendiente: null,
+  avisos: [], verAvisos: false, relojAviso: null,
 };
 
 function campoPortada(etiqueta, control, ayuda) {
@@ -23346,9 +23347,12 @@ function campoPortada(etiqueta, control, ayuda) {
 async function abrirEditorPortada(pid) {
   // TODO lo del vídeo anterior fuera: su vista, sus propuestas, lo que pensaba
   if (PORT.vista) URL.revokeObjectURL(PORT.vista);
+  // «Avisos» se guarda mientras sea el mismo vídeo; con otro, empieza vacío
+  const avisosPrevios = PORT.pid === pid ? (PORT.avisos || []) : [];
   Object.assign(PORT, { pid, abierto: true, error: '', propuestas: null, ia: null, cambiado: false,
     proponiendo: false, vista: '', diseno: null, fondos: [], aviso: null, ideas: null, pensandoIdeas: false,
-    iaPendiente: null });
+    iaPendiente: null, avisos: avisosPrevios, verAvisos: false, detallesAbiertos: {} });
+  clearTimeout(PORT.relojAviso);
   PORT.pidiendo += 1;
   try {
     if (!PORT.catalogo) PORT.catalogo = await pedir(`${BASE}/api/portadas/catalogo`);
@@ -23463,21 +23467,112 @@ function bajarBlobPortada(blob, nombre) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-/* EL AVISO, DENTRO DEL EDITOR: el aviso flotante salía DEBAJO de la capa del
-   editor y «Guardar diseño» parecía no hacer nada (notas del 21-10). Ahora va
-   en la cabecera del editor y, además, el flotante por encima de la capa. */
-function avisoPortada(texto, malo) {
-  PORT.aviso = { texto, malo: !!malo, hora: new Date() };
-  toast(texto, !!malo);
-  const sitio = document.querySelector('.capa-portada .aviso-portada');
+/* EL AVISO, DENTRO DEL EDITOR (portadas-2, 21-10) Y QUE SE PUEDE CERRAR
+   (avisos-portada, 25-10, pedido del dueño: un error largo tapaba la cabecera
+   y no se iba).
+   - Lo que sale bien se va solo a los 6 s.
+   - Un error se queda hasta su ✕ o hasta que LO MISMO (`clave`: guardar,
+     descargar, ia…) sale bien: entonces lo sustituye el aviso bueno.
+   - Una línea con qué pasó y qué hacer; el texto técnico, plegado en «Ver
+     detalle».
+   - «Avisos (N)» guarda los últimos 10 de la sesión del editor: cerrar uno no
+     lo borra de ahí. Se vacía al abrir el editor de otro vídeo. */
+const MAX_AVISOS_PORTADA = 10;
+
+/* El error de la máquina, dicho en una línea que se entienda y con qué hacer.
+   Se conserva QUÉ falló («No se ha guardado», «No se ha podido descargar»):
+   lo de antes de los primeros dos puntos, si es corto. */
+function resumenErrorPortada(texto) {
+  const t = String(texto || '').trim();
+  const corte = t.indexOf(': ');
+  const pre = corte > 0 && corte <= 60 ? t.slice(0, corte) : '';
+  const resto = pre ? t.slice(corte + 2) : t;
+  let que = '';
+  if (/RechazoSeguridad|filtro de seguridad|safety|moderation/i.test(resto)) {
+    que = 'OpenAI rechazó la imagen por su filtro de seguridad. Elige de fondo un plano sin personas con poca ropa, '
+      + 'marcas, logos ni personajes conocidos, o usa el texto en capas sin IA.';
+  } else if (/HTTP 5\d\d|no he podido pintar|Failed to fetch|NetworkError/i.test(resto)) {
+    que = 'El servidor no ha podido terminarlo. Vuelve a intentarlo en un momento.';
+  } else if (/sesión de Claude|cupo|quota|rate limit/i.test(resto)) {
+    que = 'Claude no ha contestado (sesión o cupo). Vuelve a pedirlo en un minuto.';
+  } else {
+    // lo demás: la primera frase, corta (sin «lookbehind»: un Safari viejo no lo
+    // entiende y se pararía todo el fichero)
+    const primera = (resto.match(/^[\s\S]*?[.!?](?=\s|$)/) || [resto])[0];
+    que = primera.length > 160 ? `${primera.slice(0, 157)}…` : primera;
+  }
+  return pre ? `${pre.charAt(0).toUpperCase()}${pre.slice(1)}. ${que}` : que;
+}
+
+function avisoPortada(texto, malo, clave) {
+  const ahora = new Date();
+  const original = String(texto || '');
+  // «Pintando…»: algo a medias. Ni se guarda en «Avisos» ni se va solo
+  const aMedias = !malo && /…$/.test(original);
+  const corto = malo ? resumenErrorPortada(original) : original;
+  const aviso = { texto: corto, detalle: malo && corto !== original ? original : '', malo: !!malo,
+    hora: ahora, clave: clave || '', id: `${ahora.getTime()}-${Math.random().toString(36).slice(2, 6)}` };
+  // SIN EL EDITOR A LA VISTA (se cerró mientras la IA o Claude trabajaban):
+  // el aviso flotante de siempre, para que no se pierda
+  if (!PORT.abierto || !document.querySelector('.capa-portada')) toast(corto, !!malo);
+  const actual = PORT.aviso;
+  // solo lo que está a medias, de OTRA cosa, no tapa un error a la vista; lo
+  // que acaba bien sí se enseña («Diseño guardado ✓»), y el error queda en «Avisos»
+  const tapaError = actual && actual.malo && aMedias && !(clave && actual.clave === clave);
+  if (!aMedias) PORT.avisos = [aviso].concat(PORT.avisos || []).slice(0, MAX_AVISOS_PORTADA);
+  if (!tapaError) PORT.aviso = aviso;
+  clearTimeout(PORT.relojAviso);
+  if (!malo && !aMedias && !tapaError) {
+    PORT.relojAviso = setTimeout(() => {
+      if (PORT.aviso && PORT.aviso.id === aviso.id) { PORT.aviso = null; repintarAvisoPortada(); }
+    }, 6000);
+  }
+  repintarAvisoPortada();
+}
+
+function cerrarAvisoPortada() {
+  clearTimeout(PORT.relojAviso);
+  PORT.aviso = null;
+  repintarAvisoPortada();
+}
+
+function repintarAvisoPortada() {
+  const sitio = document.querySelector('.capa-portada .avisos-portada');
   if (sitio) sitio.replaceWith(pintarAvisoPortada());
+}
+
+function horaPortada(fecha) {
+  return fecha.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
 }
 
 function pintarAvisoPortada() {
   const a = PORT.aviso;
-  if (!a) return h('span', { clase: 'aviso-portada meta' }, PORT.cambiado ? 'Cambios sin guardar' : '');
-  const hora = a.hora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
-  return h('span', { clase: `aviso-portada${a.malo ? ' malo' : ' bueno'}`, role: 'status' }, `${a.texto} · ${hora}`);
+  const lista = PORT.avisos || [];
+  const caja = h('div', { clase: 'avisos-portada' });
+  if (a) {
+    caja.appendChild(h('div', { clase: `aviso-portada${a.malo ? ' malo' : ' bueno'}`, role: a.malo ? 'alert' : 'status' },
+      h('span', { clase: 'crece' }, `${a.texto} · ${horaPortada(a.hora)}`),
+      a.detalle ? h('details', { clase: 'detalle-aviso-portada', open: !!(PORT.detallesAbiertos || {})[a.id],
+        ontoggle: ev => { PORT.detallesAbiertos = Object.assign({}, PORT.detallesAbiertos, { [a.id]: ev.currentTarget.open }); } },
+      h('summary', {}, 'Ver detalle'), h('span', {}, a.detalle)) : null,
+      h('button', { clase: 'cerrar-aviso-portada', type: 'button', title: 'Cerrar este aviso (sigue en «Avisos»)',
+        'aria-label': 'Cerrar el aviso', onclick: () => cerrarAvisoPortada() }, '✕')));
+  } else if (PORT.cambiado) {
+    caja.appendChild(h('span', { clase: 'meta' }, 'Cambios sin guardar'));
+  }
+  if (lista.length) {
+    const historial = h('details', { clase: 'historial-avisos-portada', open: !!PORT.verAvisos,
+      ontoggle: ev => { PORT.verAvisos = ev.currentTarget.open; } },
+    h('summary', {}, `Avisos (${lista.length})`));
+    lista.forEach(x => historial.appendChild(h('div', { clase: `fila linea-aviso-portada${x.malo ? ' malo' : ''}` },
+      h('span', { clase: 'meta' }, horaPortada(x.hora)),
+      h('span', { clase: 'crece' }, `${x.malo ? '⚠ ' : '✓ '}${x.texto}`),
+      x.detalle ? h('details', { open: !!(PORT.detallesAbiertos || {})[`h-${x.id}`],
+        ontoggle: ev => { PORT.detallesAbiertos = Object.assign({}, PORT.detallesAbiertos, { [`h-${x.id}`]: ev.currentTarget.open }); } },
+      h('summary', {}, 'detalle'), h('span', { clase: 'meta' }, x.detalle)) : null)));
+    caja.appendChild(historial);
+  }
+  return caja;
 }
 
 /* QUÉ LLEVA LA IMAGEN ENCIMA, con su ✕. */
@@ -23596,12 +23691,12 @@ function pintarEditorPortada() {
 
   capa.replaceChildren(h('div', { clase: 'panel-portada' },
     h('div', { clase: 'fila cab-portada' }, h('h3', { clase: 'crece' }, 'Diseñar portada'),
-      pintarAvisoPortada(),
       h('button', { clase: 'mini', type: 'button', onclick: () => guardarDisenoPortada() }, 'Guardar diseño'),
       h('button', { clase: 'mini', type: 'button', title: 'La portada a tamaño real, en PNG, para tenerla de respaldo',
         onclick: () => descargarPortada() }, '⬇ Descargar portada'),
       h('button', { clase: 'primario', type: 'button', onclick: () => usarPortada() }, 'Usar como portada'),
       h('button', { clase: 'mini fantasma', type: 'button', onclick: () => cerrarEditorPortada() }, 'Cerrar')),
+    pintarAvisoPortada(),
     h('div', { clase: 'cuerpo-portada' }, vista, mandos)));
   pintarVistaPortada();
   mandos.scrollTop = scroll;
@@ -23818,7 +23913,7 @@ async function cambiarPlantillaPortada(cambios) {
       method: 'POST', cuerpo: Object.assign({ diseno: PORT.diseno }, cambios) });
     PORT.diseno = r.diseno;
     tocarPortada(true);
-  } catch (e) { avisoPortada(e.message, true); }
+  } catch (e) { avisoPortada(e.message, true, 'plantilla'); }
 }
 
 async function guardarDisenoPortada() {
@@ -23827,14 +23922,14 @@ async function guardarDisenoPortada() {
       method: 'PUT', cuerpo: { diseno: PORT.diseno } });
     PORT.diseno = r.diseno;
     PORT.cambiado = false;
-    avisoPortada('Diseño guardado ✓');
-  } catch (e) { avisoPortada(`no se ha guardado: ${e.message}`, true); }
+    avisoPortada('Diseño guardado ✓', false, 'guardar');
+  } catch (e) { avisoPortada(`no se ha guardado: ${e.message}`, true, 'guardar'); }
 }
 
 async function descargarPortada() {
   const pid = PORT.pid;
   try {
-    avisoPortada('Pintando la portada a tamaño real…');
+    avisoPortada('Pintando la portada a tamaño real…', false, 'descargar');
     const r = await fetch(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/descargar`), {
       method: 'POST', headers: cabecerasPortada({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ diseno: PORT.diseno }) });
@@ -23846,13 +23941,13 @@ async function descargarPortada() {
     // (sin comillas dentro de una expresión regular: parten los analizadores de herramientas/)
     const nombre = ((r.headers.get('Content-Disposition') || '').split('filename=')[1] || '').replace(/\x22/g, '').trim() || 'portada.png';
     bajarBlobPortada(await r.blob(), nombre);
-    avisoPortada('Portada descargada ✓');
-  } catch (e) { avisoPortada(`no se ha podido descargar: ${e.message}`, true); }
+    avisoPortada('Portada descargada ✓', false, 'descargar');
+  } catch (e) { avisoPortada(`no se ha podido descargar: ${e.message}`, true, 'descargar'); }
 }
 
 async function usarPortada() {
   try {
-    avisoPortada('Pintando la portada a tamaño real…');
+    avisoPortada('Pintando la portada a tamaño real…', false, 'usar');
     const ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/usar`), {
       method: 'POST', cuerpo: { diseno: PORT.diseno } });
     PORT.cambiado = false;
@@ -23860,7 +23955,7 @@ async function usarPortada() {
     cerrarEditorPortada();
     toast('Portada puesta: es la que se mandará a las redes');
     if (typeof pintarModulo === 'function') pintarModulo();
-  } catch (e) { avisoPortada(`no se ha podido poner la portada: ${e.message}`, true); }
+  } catch (e) { avisoPortada(`no se ha podido poner la portada: ${e.message}`, true, 'usar'); }
 }
 
 /* Lo que se pide a Claude se sigue preguntando (un minuto pasa del proxy). */
@@ -23886,7 +23981,7 @@ async function proponerPortadas() {
     if (PORT.pid !== pid || !PORT.abierto) return;
     PORT.propuestas = ficha.propuestas || [];
   } catch (e) {
-    if (PORT.pid === pid) avisoPortada(`no se han podido proponer portadas: ${e.message}`, true);
+    if (PORT.pid === pid) avisoPortada(`no se han podido proponer portadas: ${e.message}`, true, 'proponer');
   }
   if (PORT.pid !== pid) return;
   PORT.proponiendo = false;
@@ -23902,7 +23997,7 @@ async function pedirIdeasIA() {
     if (PORT.pid !== pid || !PORT.abierto) return;
     PORT.ideas = ficha.ideas || [];
   } catch (e) {
-    if (PORT.pid === pid) avisoPortada(`no se han podido pedir ideas: ${e.message}`, true);
+    if (PORT.pid === pid) avisoPortada(`no se han podido pedir ideas: ${e.message}`, true, 'ideas');
   }
   if (PORT.pid !== pid) return;
   PORT.pensandoIdeas = false;
@@ -23920,7 +24015,7 @@ async function prepararIA(que, prompt, calidad) {
     pintarEditorPortada();
     const caja = document.querySelector('.capa-portada .antes-de-pagar');
     if (caja) caja.scrollIntoView({ block: 'nearest' });
-  } catch (e) { avisoPortada(e.message, true); }
+  } catch (e) { avisoPortada(e.message, true, 'ia'); }
 }
 
 /* PASO 2: se paga y se dibuja con el prompt de la pantalla. */
@@ -23956,10 +24051,10 @@ async function portadaConIA(p) {
     if (p.que === 'portada') PORT.diseno.modo = 'ia';
     PORT.ia = null;
     tocarPortada(true);
-    avisoPortada(p.que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA ✓');
+    avisoPortada(p.que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA ✓', false, 'ia');
     return;
   } catch (e) {
-    if (PORT.pid === pid) avisoPortada(`no se ha podido hacer con la IA: ${e.message}`, true);
+    if (PORT.pid === pid) avisoPortada(`no se ha podido hacer con la IA: ${e.message}`, true, 'ia');
   }
   p.enviando = false;
   if (PORT.pid !== pid || !PORT.abierto) return;
@@ -24162,6 +24257,7 @@ function pintarBarraModulos() {
     }, texto, id === 'publicar' && PUB.avisos
       ? h('span', { clase: 'aviso-modulo', title: 'Envíos que fallaron o esperan tu OK' }, String(PUB.avisos))
       : null)));
+  enlaces.appendChild(botonColaDelMenu());
   enlaces.appendChild(h('a', {
     href: '#', clase: 'boton-modulo modulo-config', title: 'Claves, cuentas, la paleta, novedades y notas',
     onclick: ev => { ev.preventDefault(); conmutarConfig(true); },
@@ -24206,6 +24302,215 @@ function gastoDelMenu() {
     caja.appendChild(h('span', { clase: 'meta' }, 'sin tope (ponlo en Inicio → Personalizar)'));
   }
   return caja;
+}
+
+/* ============================================================ COLA DEL STUDIO
+ *
+ * Rama cola-montaje (25-10-2026). Con varios vídeos a la vez, lo que se
+ * dibuja y lo que se monta van de uno en uno en todo el Studio (cada uno con
+ * su fila, por orden de llegada: `_TURNO_IMAGENES` y `_TURNO_MONTAJE` en
+ * app.py). Aquí se ve todo junto, sin entrar vídeo por vídeo: el botón «Cola»
+ * de la barra de módulos lleva cuántos vídeos tienen algo en marcha, y abre un
+ * panel lateral con quién dibuja, quién se monta, quién espera y en qué orden,
+ * y lo demás que trabaja (guion, voz…), con «Abrir» y «Cancelar».
+ *
+ * Solo lee (`GET /api/cola_studio`) salvo «Cancelar», que es el mismo
+ * `POST /api/trabajos/{id}/cancelar` de siempre y pregunta antes. El panel
+ * vive fuera de `pintarLight` (una capa propia en <body>): abrirlo no repinta
+ * ni toca el vídeo que haya abierto. Se pregunta cada 4 s con el panel abierto
+ * y cada 15 s si no, y nada con la pestaña escondida.
+ */
+const COLA_STUDIO = { datos: null, abierto: false, reloj: null, huella: '', pidiendo: false };
+
+function cuentaColaStudio() {
+  const d = COLA_STUDIO.datos;
+  if (!d) return 0;
+  // los de un proyecto con clave llegan sin pid: cada trabajo cuenta como uno
+  const videos = new Set((d.trabajando || []).map((t, i) => t.pid || `sin-pid-${i}`));
+  return videos.size;
+}
+
+function botonColaDelMenu() {
+  arrancarColaStudio();
+  const n = cuentaColaStudio();
+  return h('a', {
+    href: '#', clase: 'boton-modulo modulo-cola',
+    title: 'Qué se dibuja, qué se monta y quién espera, en todo el Studio',
+    datos: { modulo: 'cola' },
+    onclick: ev => { ev.preventDefault(); abrirColaStudio(); },
+    'aria-label': n ? `Cola del Studio: ${n} trabajando` : 'Cola del Studio',
+  }, h('span', { 'aria-hidden': 'true' }, '⏳'), h('span', { clase: 'nombre-cola' }, 'Cola'),
+  n ? h('span', { clase: 'aviso-modulo aviso-cola', title: `${n} ${n === 1 ? 'vídeo trabajando' : 'vídeos trabajando'}` }, String(n)) : null);
+}
+
+function arrancarColaStudio() {
+  if (COLA_STUDIO.reloj) return;
+  const vuelta = async () => {
+    if (!document.hidden) await refrescarColaStudio();
+    COLA_STUDIO.reloj = setTimeout(vuelta, COLA_STUDIO.abierto ? 4000 : 15000);
+  };
+  COLA_STUDIO.reloj = setTimeout(vuelta, 0);
+}
+
+async function refrescarColaStudio() {
+  if (COLA_STUDIO.pidiendo) return;
+  COLA_STUDIO.pidiendo = true;
+  try {
+    const datos = await pedir(`${BASE}/api/cola_studio`);
+    const { ahora, ...resto } = datos || {};
+    const huella = JSON.stringify(resto, (k, v) => (k === 'segundos' || k === 'progreso' ? undefined : v));
+    COLA_STUDIO.datos = datos;
+    if (huella !== COLA_STUDIO.huella) {
+      COLA_STUDIO.huella = huella;
+      repintarBotonCola();
+    }
+    if (COLA_STUDIO.abierto) pintarColaStudio();
+  } catch (e) {
+    /* sin la cola no se rompe nada: el botón se queda como estaba */
+  } finally {
+    COLA_STUDIO.pidiendo = false;
+  }
+}
+
+function repintarBotonCola() {
+  const viejo = document.querySelector('#barra-modulos .modulo-cola');
+  if (viejo) viejo.replaceWith(botonColaDelMenu());
+}
+
+function abrirColaStudio() {
+  COLA_STUDIO.abierto = true;
+  pintarColaStudio();
+  // al ritmo de 4 s desde YA, no cuando venza la vuelta de 15 s que había
+  clearTimeout(COLA_STUDIO.reloj);
+  COLA_STUDIO.reloj = null;
+  arrancarColaStudio();
+  setTimeout(() => {
+    const cajon = document.querySelector('.cajon-cola');
+    if (cajon) cajon.focus({ preventScroll: true });
+  }, 0);
+}
+
+function cerrarColaStudio() {
+  COLA_STUDIO.abierto = false;
+  const capa = document.getElementById('capa-cola-studio');
+  if (capa) capa.remove();
+}
+
+function hacePocoCola(desde, ahora) {
+  if (!desde) return '';
+  const s = Math.max(0, Math.round((Number(ahora) || Date.now() / 1000) - Number(desde)));
+  return s < 60 ? 'hace un momento' : `hace ${duracionCorta(s)}`;
+}
+
+function abrirVideoDeLaCola(pid) {
+  cerrarColaStudio();
+  irAModulo('crear');
+  abrirVideoLight(pid);
+}
+
+async function cancelarDesdeLaCola(t) {
+  if (!t.trabajo) return;
+  const si = await dialogo({ titulo: 'Cancelar', peligro: true, aceptar: 'Cancelar el trabajo', cancelar: 'No',
+    texto: `¿Cancelar «${legibleCorto(t.nombre)}»? Lo ya hecho y pagado se queda; lo que falte no se hace.` });
+  if (!si) return;
+  try {
+    await pedir(API.cancelar(t.trabajo), { method: 'POST' });
+    toast('cancelación pedida');
+  } catch (e) {
+    toast(`no se ha podido cancelar: ${e.message}`, true);
+  }
+  refrescarColaStudio();
+}
+
+function filaDeLaCola(plaza, puesto, ahora, extra) {
+  const fila = h('div', { clase: `fila-cola${puesto ? ' en-espera' : ' trabajando'}` });
+  fila.appendChild(h('span', { clase: 'puesto-cola' }, puesto ? `${puesto}.º` : '▶'));
+  const textos = h('div', { clase: 'textos-cola' },
+    h('b', {}, legibleCorto(plaza.nombre || 'otro vídeo')),
+    h('span', { clase: 'meta' }, (puesto ? 'esperando, ' : 'empezó ') + hacePocoCola(plaza.desde, ahora)));
+  if (extra) textos.appendChild(extra);
+  fila.appendChild(textos);
+  if (plaza.video && plaza.pid) {
+    fila.appendChild(h('button', { clase: 'mini', title: 'Abrir este vídeo', onclick: () => abrirVideoDeLaCola(plaza.pid) }, 'Abrir'));
+  }
+  return fila;
+}
+
+function seccionTurnoCola(titulo, turno, vacio, ahora) {
+  const t = turno || {};
+  const caja = h('section', { clase: 'seccion-ajustes seccion-cola' },
+    h('h3', { clase: 'titulo-ajustes' }, titulo));
+  if (!t.ahora && !(t.fila || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' }, vacio));
+    return caja;
+  }
+  if (t.ahora) caja.appendChild(filaDeLaCola(t.ahora, 0, ahora));
+  (t.fila || []).forEach((plaza, i) => caja.appendChild(filaDeLaCola(plaza, i + 1, ahora)));
+  return caja;
+}
+
+function seccionTrabajandoCola(lista, ahora) {
+  const caja = h('section', { clase: 'seccion-ajustes seccion-cola' },
+    h('h3', { clase: 'titulo-ajustes' }, 'Todo lo que está en marcha'));
+  if (!lista.length) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Nada trabajando ahora mismo.'));
+    return caja;
+  }
+  lista.forEach(t => {
+    const extra = h('div', { clase: 'avance-cola' },
+      barraDeProgreso(t.progreso || 0),
+      h('span', { clase: 'meta' }, `${Math.round((t.progreso || 0) * 100)} %`
+        + (t.mensaje ? ` · ${legibleCorto(t.mensaje)}` : '')
+        + (t.cancelando ? ' · cancelando…' : '')));
+    const fila = filaDeLaCola({ nombre: t.nombre, pid: t.pid, video: t.video,
+      desde: (Number(ahora) || 0) - (Number(t.segundos) || 0) }, 0, ahora, extra);
+    if (t.trabajo && !t.cancelando) {
+      fila.appendChild(h('button', { clase: 'mini fantasma', title: 'Cancelar este trabajo',
+        onclick: () => cancelarDesdeLaCola(t) }, 'Cancelar'));
+    }
+    caja.appendChild(fila);
+  });
+  return caja;
+}
+
+function pintarColaStudio() {
+  if (!COLA_STUDIO.abierto) return;
+  const d = COLA_STUDIO.datos;
+  const cuerpo = h('div', { clase: 'cuerpo-ajustes' });
+  if (!d) {
+    cuerpo.appendChild(h('div', { clase: 'cargando' }, 'mirando…'));
+  } else {
+    cuerpo.appendChild(h('div', { clase: 'pista' },
+      'Las imágenes y el montaje van de uno en uno en todo el Studio, por orden de llegada: '
+      + 'puedes lanzar varios vídeos y cada uno espera su turno solo. El guion y la voz no esperan.'));
+    cuerpo.appendChild(seccionTurnoCola('🎨 Imágenes', d.imagenes, 'Nada dibujándose.', d.ahora));
+    cuerpo.appendChild(seccionTurnoCola('🎬 Montaje', d.montaje, 'Nada montándose.', d.ahora));
+    cuerpo.appendChild(seccionTrabajandoCola(d.trabajando || [], d.ahora));
+  }
+  const capa = h('div', { id: 'capa-cola-studio', clase: 'capa-ajustes-proyecto capa-cola',
+    onclick: ev => { if (ev.target === capa) cerrarColaStudio(); },
+    onkeydown: ev => { if (ev.key === 'Escape') cerrarColaStudio(); } },
+  h('aside', { clase: 'cajon-proyecto cajon-cola', role: 'dialog', 'aria-label': 'Cola del Studio', tabindex: '-1' },
+    h('div', { clase: 'cab-ajustes' },
+      h('b', {}, '⏳ Cola del Studio'),
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini fantasma', title: 'Cerrar', 'aria-label': 'Cerrar', onclick: cerrarColaStudio }, '×')),
+    cuerpo));
+  const vieja = document.getElementById('capa-cola-studio');
+  if (vieja) {
+    /* repintar cada 4 s no salta arriba ni roba el foco: solo lo devuelve al
+       cajón si estaba dentro (un diálogo de «Cancelar» abierto se lo queda) */
+    const scroll = (vieja.querySelector('.cajon-cola') || {}).scrollTop || 0;
+    const teniaFoco = vieja.contains(document.activeElement);
+    vieja.replaceWith(capa);
+    const cajon = capa.querySelector('.cajon-cola');
+    if (cajon) {
+      cajon.scrollTop = scroll;
+      if (teniaFoco) cajon.focus({ preventScroll: true });
+    }
+  } else {
+    document.body.appendChild(capa);
+  }
 }
 
 function dolares(n, redondo) {
@@ -30230,6 +30535,57 @@ async function borrarGuionParrilla(g) {
   } catch (e) { toast(`no se ha podido borrar: ${e.message}`, true); }
 }
 
+/* SOLTAR EL VÍDEO ABIERTO (rama `encargo-limpio`, 22-10-2026). Crear tiene UN
+   vídeo abierto (`APP.light.video.pid`) y el formulario de «Un vídeo nuevo»
+   solo se pinta con `pid` vacío (`nuevo = !v.pid`). «Pasar al Encargo» llenaba
+   el borrador pero dejaba abierto el vídeo de antes: la pantalla enseñaba el
+   texto del que se estaba montando y no se sabía de quién eran los botones
+   del carril (lo vio el dueño, 22-10).
+
+   Soltar es solo de la PANTALLA: no se cancela ni se toca nada en el servidor.
+   El trabajo que corra sigue allí; su seguimiento ya no repinta ni recarga
+   este vídeo porque `seguirTrabajo` solo llama a su `alTerminar` si su vídeo
+   sigue abierto, y al reabrirlo `reengancharTandaLight` lo vuelve a enganchar.
+   Es lo mismo que hace `volverAlSitio` al ir a un vídeo nuevo, y el resto de
+   lo de ese vídeo lo rehace `cargarVideoLight` al abrirlo.
+   -> {nombre, ocupado} del vídeo soltado, o null si no había ninguno. */
+function soltarVideoAbiertoLight() {
+  const v = APP.light.video;
+  if (!v.pid) return null;
+  const pid = v.pid;
+  const nombre = v.nombre || pid;
+  // ¿ESTABA HACIENDO ALGO? Solo para el aviso: soltar no lo cambia
+  const ranura = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
+  const ocupado = (ranura.estado === 'ejecutando' && ranura.pid === pid)
+    || (COLA_IMG.pid === pid && !!(COLA_IMG.actual || COLA_IMG.cola.length));
+  /* reiniciarPrevia y no solo pararPrevia: `formatoDelVideo` lee primero
+     `PREVIA.ficha.formato`, y un vídeo vertical soltado dejaba vertical la
+     cabecera del borrador. Recuerda la escena para cuando se reabra. */
+  reiniciarPrevia();
+  /* LA COLA DE IMÁGENES de ese vídeo se deja de mirar (sigue en el servidor):
+     su vigilante no para con pid vacío y repintaba el formulario mientras se
+     escribe. Al reabrirlo la retoma `retomarColaDeImagenes`. */
+  if (COLA_IMG.pid === pid) olvidarCola();
+  recordarVideoLight('');
+  /* LA VISTA, YA LA DEL BORRADOR: con la de antes («guion», «previa»…) la
+     entrada de historial que apunta `irAModulo` la guardaba, y «atrás»
+     pintaba el guion del vídeo soltado sin vídeo. Lo que era de él se tira:
+     `cargarVideoLight` lo rehace al reabrirlo. */
+  v.vista = 'encargo';
+  v.pedido = null;
+  v.error = '';
+  v.guion = null;
+  v.audio = null;
+  v.fichas = {};
+  v.planos = [];
+  v.plan = null;
+  v.planDe = '';
+  v.planes = {};
+  v.coste = null;
+  v.cargadoDe = '';
+  return { nombre, ocupado };
+}
+
 /* PASAR AL ENCARGO: se pregunta ANTES de marcar nada si el formulario de «Un
    vídeo nuevo» ya tiene un borrador (sería pisar un vídeo a medio escribir), y
    se rellena con lo que dice el servidor. Lo demás del formulario (qué lleva,
@@ -30278,9 +30634,26 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.fichaAbierta = false;
   PAR.datos = null;
+  const soltado = soltarVideoAbiertoLight();
+  /* La pantalla de Crear se pone ANTES de entrar, como en `entrarEnCrear`:
+     así la entrada de historial que abre `irAModulo` ya es la del borrador
+     con este estilo, y «atrás» no cae en el vídeo soltado. */
+  try { localStorage.setItem('estudio.light.estilo', ficha.id); } catch (err) { /* sin almacén */ }
+  APP.light.vista = 'elegido';
+  APP.light.abierto = ficha.id;
+  APP.light.desdeVideo = '';
+  APP.light.video.vista = 'encargo';
+  /* Sin `elegirEstiloLight` detrás: hace lo mismo pero con un segundo
+     pintado, que apilaba otra entrada y pedía dos «atrás» para salir. */
+  subirArriba('panel');
   irAModulo('crear');
-  elegirEstiloLight(ficha);
   toast(`Encargo lleno con «${recortar(r.nombre || 'el guion', 40)}»: revísalo y pulsa «Generar el guion»`);
+  if (soltado) {
+    const quien = `«${recortar(soltado.nombre, 40)}»`;
+    setTimeout(() => toast(soltado.ocupado
+      ? `${quien} sigue trabajando por su cuenta: lo abres cuando quieras desde Tus proyectos`
+      : `${quien} queda en Tus proyectos, tal como estaba`), 1600);
+  }
   (r.avisos || []).slice(0, 2).forEach(a => setTimeout(() => toast(a, true), 3200));
 }
 

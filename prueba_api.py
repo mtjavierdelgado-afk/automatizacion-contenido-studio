@@ -7942,6 +7942,8 @@ def probar_descripcion_planos():
                             "S003": "ES The same bathroom, renovated",
                             "S004": "ES The same bathroom, renovated"}),
               "LEER: todas descritas, también la continuación")
+        igual(ficha.get("prompts", {}).get("S003"), "The same bathroom, renovated",
+              "LEER: cada descripción viaja con el prompt para el que se escribió")
         ok(os.path.exists(os.path.join(ctx.proyecto.raiz, "descripciones.json")),
            "DESCRIBIR: van a descripciones.json del proyecto")
         igual(ctx.estado.firma("assets"), firma, "DESCRIBIR: la firma de assets NO se mueve")

@@ -13609,15 +13609,22 @@ function textoDelPlano(e) {
  * `DESCRIBIR.autoDe` es la ficha de la previa para la que ya se pidieron solas:
  * una ficha nueva (otro corte, otra versión) las vuelve a pedir, y el servidor
  * no relanza un «auto» tras un error. */
-const DESCRIBIR = { pid: '', estado: '', error: '', siguiendo: false, autoDe: null };
+const DESCRIBIR = { pid: '', estado: '', error: '', siguiendo: false, autoDe: null, vuelta: 0 };
 
 function aplicarDescripciones(pid, ficha) {
   if (!PREVIA.ficha || PREVIA.pid !== pid) return;
   DESCRIBIR.pid = pid;
   DESCRIBIR.estado = ficha.estado || '';
   DESCRIBIR.error = ficha.error || '';
+  /* CON SU PROMPT: la descripción va junto al prompt para el que se escribió.
+     Si el del plano cambió sin recargar la previa, se ponen los dos nuevos. */
   const dadas = ficha.descripciones || {};
-  (PREVIA.ficha.escenas || []).forEach(x => { if (dadas[x.id]) x.descripcion = dadas[x.id]; });
+  const prompts = ficha.prompts || {};
+  (PREVIA.ficha.escenas || []).forEach(x => {
+    if (!(x.id in prompts)) return;
+    x.prompt = prompts[x.id];
+    x.descripcion = dadas[x.id] || '';
+  });
 }
 
 async function describirPlanos(auto) {
@@ -13641,16 +13648,23 @@ async function describirPlanos(auto) {
 function seguirDescripciones(pid) {
   if (DESCRIBIR.siguiendo) return;
   DESCRIBIR.siguiendo = true;
+  /* UNA SOLA VUELTA VIVA: cambiar de vídeo sube el turno y la de antes se
+     para sola, aunque se vuelva al mismo vídeo antes de su siguiente pregunta */
+  DESCRIBIR.vuelta += 1;
+  const turno = DESCRIBIR.vuelta;
   let fallos = 0;
   const vuelta = async () => {
+    if (turno !== DESCRIBIR.vuelta) return;
     if (PREVIA.pid !== pid || videoAbierto().pid !== pid) { DESCRIBIR.siguiendo = false; return; }
     try {
       const ficha = await pedir(`${API.proyecto(pid)}/planos/descripciones`);
+      if (turno !== DESCRIBIR.vuelta) return;
       fallos = 0;
       aplicarDescripciones(pid, ficha);
       if (ficha.estado === 'pensando') { setTimeout(vuelta, 2500); return; }
       DESCRIBIR.siguiendo = false;
     } catch (_err) {
+      if (turno !== DESCRIBIR.vuelta) return;
       fallos += 1;
       if (fallos < 6 && PREVIA.pid === pid) { setTimeout(vuelta, 2500 * fallos); return; }
       DESCRIBIR.siguiendo = false;
@@ -13664,16 +13678,18 @@ function seguirDescripciones(pid) {
 }
 
 function descripcionDelPlano(e) {
-  if (!e || !e.prompt) return null;
   const escenas = (PREVIA.ficha || {}).escenas || [];
   if (DESCRIBIR.pid !== PREVIA.pid) {
     DESCRIBIR.pid = PREVIA.pid; DESCRIBIR.estado = ''; DESCRIBIR.error = ''; DESCRIBIR.siguiendo = false;
+    DESCRIBIR.vuelta += 1; // la vuelta del otro vídeo se para
   }
-  // SOLAS, UNA VEZ POR FICHA: se piden después de pintar, no en mitad
-  if (DESCRIBIR.autoDe !== PREVIA.ficha && escenas.some(x => x.prompt && !x.descripcion)) {
+  // SOLAS, UNA VEZ POR FICHA, aunque se esté mirando una cartela: se piden
+  // después de pintar, no en mitad
+  if (PREVIA.ficha && DESCRIBIR.autoDe !== PREVIA.ficha && escenas.some(x => x.prompt && !x.descripcion)) {
     DESCRIBIR.autoDe = PREVIA.ficha;
     setTimeout(() => describirPlanos(true), 0);
   }
+  if (!e || !e.prompt) return null;
   const caja = h('div', { clase: 'plano-descripcion', datos: { plano: e.id } },
     h('span', { clase: 'meta' }, 'Lo que se pidió dibujar'));
   if (e.descripcion) {

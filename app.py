@@ -7585,6 +7585,9 @@ def _ficha_descripciones(ctx, plan=None):
     with _LOCK_DESCRIBIENDO:
         marcha = dict(_DESCRIBIENDO.get(ctx.id) or {})
     ficha = {"descripciones": {s: d for s, d in descripciones.items() if d},
+             # el prompt de cada plano: la pantalla pone la descripción junto
+             # al prompt para el que se escribió, nunca junto a otro
+             "prompts": dict(pares),
              "faltan": len({p for s, p in pares if not descripciones.get(s)}),
              "total": len({p for _s, p in pares}),
              "estado": marcha.get("estado") or "quieto"}

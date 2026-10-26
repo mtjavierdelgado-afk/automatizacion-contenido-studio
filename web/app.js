@@ -30001,6 +30001,57 @@ async function borrarGuionParrilla(g) {
   } catch (e) { toast(`no se ha podido borrar: ${e.message}`, true); }
 }
 
+/* SOLTAR EL VÍDEO ABIERTO (rama `encargo-limpio`, 22-10-2026). Crear tiene UN
+   vídeo abierto (`APP.light.video.pid`) y el formulario de «Un vídeo nuevo»
+   solo se pinta con `pid` vacío (`nuevo = !v.pid`). «Pasar al Encargo» llenaba
+   el borrador pero dejaba abierto el vídeo de antes: la pantalla enseñaba el
+   texto del que se estaba montando y no se sabía de quién eran los botones
+   del carril (lo vio el dueño, 22-10).
+
+   Soltar es solo de la PANTALLA: no se cancela ni se toca nada en el servidor.
+   El trabajo que corra sigue allí; su seguimiento ya no repinta ni recarga
+   este vídeo porque `seguirTrabajo` solo llama a su `alTerminar` si su vídeo
+   sigue abierto, y al reabrirlo `reengancharTandaLight` lo vuelve a enganchar.
+   Es lo mismo que hace `volverAlSitio` al ir a un vídeo nuevo, y el resto de
+   lo de ese vídeo lo rehace `cargarVideoLight` al abrirlo.
+   -> {nombre, ocupado} del vídeo soltado, o null si no había ninguno. */
+function soltarVideoAbiertoLight() {
+  const v = APP.light.video;
+  if (!v.pid) return null;
+  const pid = v.pid;
+  const nombre = v.nombre || pid;
+  // ¿ESTABA HACIENDO ALGO? Solo para el aviso: soltar no lo cambia
+  const ranura = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
+  const ocupado = (ranura.estado === 'ejecutando' && ranura.pid === pid)
+    || (COLA_IMG.pid === pid && !!(COLA_IMG.actual || COLA_IMG.cola.length));
+  /* reiniciarPrevia y no solo pararPrevia: `formatoDelVideo` lee primero
+     `PREVIA.ficha.formato`, y un vídeo vertical soltado dejaba vertical la
+     cabecera del borrador. Recuerda la escena para cuando se reabra. */
+  reiniciarPrevia();
+  /* LA COLA DE IMÁGENES de ese vídeo se deja de mirar (sigue en el servidor):
+     su vigilante no para con pid vacío y repintaba el formulario mientras se
+     escribe. Al reabrirlo la retoma `retomarColaDeImagenes`. */
+  if (COLA_IMG.pid === pid) olvidarCola();
+  recordarVideoLight('');
+  /* LA VISTA, YA LA DEL BORRADOR: con la de antes («guion», «previa»…) la
+     entrada de historial que apunta `irAModulo` la guardaba, y «atrás»
+     pintaba el guion del vídeo soltado sin vídeo. Lo que era de él se tira:
+     `cargarVideoLight` lo rehace al reabrirlo. */
+  v.vista = 'encargo';
+  v.pedido = null;
+  v.error = '';
+  v.guion = null;
+  v.audio = null;
+  v.fichas = {};
+  v.planos = [];
+  v.plan = null;
+  v.planDe = '';
+  v.planes = {};
+  v.coste = null;
+  v.cargadoDe = '';
+  return { nombre, ocupado };
+}
+
 /* PASAR AL ENCARGO: se pregunta ANTES de marcar nada si el formulario de «Un
    vídeo nuevo» ya tiene un borrador (sería pisar un vídeo a medio escribir), y
    se rellena con lo que dice el servidor. Lo demás del formulario (qué lleva,
@@ -30049,9 +30100,26 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.fichaAbierta = false;
   PAR.datos = null;
+  const soltado = soltarVideoAbiertoLight();
+  /* La pantalla de Crear se pone ANTES de entrar, como en `entrarEnCrear`:
+     así la entrada de historial que abre `irAModulo` ya es la del borrador
+     con este estilo, y «atrás» no cae en el vídeo soltado. */
+  try { localStorage.setItem('estudio.light.estilo', ficha.id); } catch (err) { /* sin almacén */ }
+  APP.light.vista = 'elegido';
+  APP.light.abierto = ficha.id;
+  APP.light.desdeVideo = '';
+  APP.light.video.vista = 'encargo';
+  /* Sin `elegirEstiloLight` detrás: hace lo mismo pero con un segundo
+     pintado, que apilaba otra entrada y pedía dos «atrás» para salir. */
+  subirArriba('panel');
   irAModulo('crear');
-  elegirEstiloLight(ficha);
   toast(`Encargo lleno con «${recortar(r.nombre || 'el guion', 40)}»: revísalo y pulsa «Generar el guion»`);
+  if (soltado) {
+    const quien = `«${recortar(soltado.nombre, 40)}»`;
+    setTimeout(() => toast(soltado.ocupado
+      ? `${quien} sigue trabajando por su cuenta: lo abres cuando quieras desde Tus proyectos`
+      : `${quien} queda en Tus proyectos, tal como estaba`), 1600);
+  }
   (r.avisos || []).slice(0, 2).forEach(a => setTimeout(() => toast(a, true), 3200));
 }
 

@@ -10,6 +10,15 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+**«Pasar al Encargo» con el formulario limpio (22 de octubre)**
+- Si tenías un vídeo abierto en Crear (por ejemplo, montándose) y pasabas otro
+  guion desde la Parrilla, la pantalla seguía enseñando el vídeo de antes y no
+  quedaba claro de quién eran los botones. Ahora «Pasar al Encargo» **suelta el
+  vídeo abierto** y te deja «Un vídeo nuevo» limpio, con el guion de la
+  Parrilla.
+- El vídeo soltado **no se toca**: lo que estuviera haciendo (montaje,
+  imágenes…) sigue en el servidor, y lo vuelves a abrir desde Tus proyectos.
+  Un aviso te lo recuerda.
 
 **«Lo que dice el guion», sin que se cuele la voz (24 de octubre)**
 - **Las líneas «Visual:» de la Parrilla valen solas.** Si casan con el guion

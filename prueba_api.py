@@ -290,6 +290,49 @@ def probar_salud_y_proyectos(cliente):
     return pid, (gemelo.get("proyecto") or {}).get("id")
 
 
+def probar_resumen_de_tarjetas(cliente, carpeta, pid, virgen):
+    """GET /api/proyectos/_resumen (rediseño de Tus proyectos, 22-10-2026): lo
+    mismo que dice abrir el vídeo, y DE SOLO LECTURA de verdad: llamarla no
+    cambia la fecha de ningún fichero de los vídeos ni crea un estado.json."""
+    seccion("EL RESUMEN DE LAS TARJETAS (solo lectura)")
+    suelto = os.path.join(carpeta, "sin_estado_todavia")
+    os.makedirs(suelto, exist_ok=True)
+    with open(os.path.join(suelto, "proyecto.json"), "w", encoding="utf-8") as fh:
+        json.dump({"id": "sin_estado_todavia", "nombre": "Sin estado"}, fh)
+
+    def fechas():
+        vistas = {}
+        for raiz, _dirs, ficheros in os.walk(carpeta):
+            for nombre in ficheros:
+                ruta = os.path.join(raiz, nombre)
+                try:
+                    vistas[ruta] = os.stat(ruta).st_mtime_ns
+                except OSError:
+                    pass
+        return vistas
+    antes = fechas()
+    time.sleep(0.05)
+    r, d = cliente.get(f"/api/proyectos/_resumen?ids={pid},{virgen},sin_estado_todavia,no_existe,_sistema")
+    despues = fechas()
+    igual(r.status_code, 200, "GET /api/proyectos/_resumen responde 200")
+    videos = d.get("videos") or {}
+    ok(pid in videos and virgen in videos, f"resume los vídeos pedidos ({sorted(videos)})")
+    ok("sin_estado_todavia" not in videos and "no_existe" not in videos and "_sistema" not in videos,
+       "y salta los que no tienen estado.json, los que no existen y las carpetas del sistema")
+    cambiados = sorted(x for x in set(antes) | set(despues) if antes.get(x) != despues.get(x))
+    ok(not cambiados, f"llamarla no cambia ni crea ningún fichero de los vídeos -- {cambiados[:5]}")
+    ok(not os.path.exists(os.path.join(suelto, "estado.json")), "ni crea el estado.json de un vídeo que no lo tiene")
+    _r, ficha = cliente.get(f"/api/proyectos/{pid}")
+    reales = {p.get("id"): p.get("estado") for p in ficha.get("pasos") or []}
+    igual(videos.get(pid, {}).get("pasos"), {k: reales.get(k) for k in ("guion", "voz", "assets", "render")},
+          "y dice lo mismo que abrir el vídeo (estado de guion, voz, imágenes y montaje)")
+    muchos = ",".join(f"falso_{i}" for i in range(130)) + f",{pid}"
+    r, d = cliente.get(f"/api/proyectos/_resumen?ids={muchos}")
+    ok(r.status_code == 200 and pid not in (d.get("videos") or {}),
+       "con más de 120 ids solo mira los 120 primeros (la pantalla pide de 40 en 40)")
+    shutil.rmtree(suelto, ignore_errors=True)
+
+
 def probar_renombrar(cliente, pid):
     """Cambiar el nombre de un proyecto cambia la ETIQUETA, no la carpeta."""
     seccion("RENOMBRAR UN PROYECTO")
@@ -7438,6 +7481,90 @@ def probar_dominios():
         presets.FICHERO = antes
 
 
+def probar_guion_visual():
+    """Rama guion-visual (22-10-2026): qué dibujan las imágenes y el guion visual.
+
+    En este proceso y sin el CLI: nada se paga y ninguna ruta de aquí llama a
+    Claude (proponer y comprobar se prueban en su suite con el CLI falso)."""
+    seccion("GUION VISUAL: QUÉ DIBUJAN LAS IMÁGENES")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    bloques = [{"id": "B001", "texto": "Este error de mampara te deja sin espacio.", "personaje": False},
+               {"id": "B002", "texto": "Una corrediza te devuelve el espacio.", "personaje": False}]
+    base = tempfile.mkdtemp(prefix="estudio_gv_")
+    servidor.fijar_raiz_proyectos(base)
+    real = servidor._bloques_del_guion
+    servidor._bloques_del_guion = lambda _ctx: bloques
+    try:
+        pid = Proyecto.crear(base, "guion visual").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        firma = ctx.estado.firma("assets")
+        for nada in ({}, {"imagenes": None}, {"imagenes": ""}, {"visuales": "no es una lista"}):
+            servidor._opciones_al_crear(ctx, "", nada)
+        ok("imagenes" not in (ctx.estado.params("assets") or {})
+           and "guion_visual" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: sin elegir nada, no se escribe nada (regla 1)")
+        codigo, _m = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": False})
+        ok("guion_visual" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: retirar la aprobación de nada no escribe nada")
+        igual(ctx.estado.firma("assets"), firma, "GUION VISUAL: y la firma no se mueve")
+        codigo, _m = _llamar(servidor._opciones_al_crear, ctx, "", {"imagenes": "telenovela"})
+        igual(codigo, 400, "GUION VISUAL: un modo que no existe da 400")
+        servidor._opciones_al_crear(ctx, "", {"imagenes": "guion", "visuales": [
+            {"voz": "Este error de mampara te deja sin espacio.", "visual": ["la batiente choca"]},
+            {"voz": "Una corrediza te devuelve el espacio.", "visual": ["la corrediza", "el riel"]}]})
+        codigo, f = _llamar(servidor.leer_guion_visual, pid)
+        ok(codigo == 200 and f["modo"] == "guion" and f["aprobado"] and f["aprobado_solo"],
+           "GUION VISUAL: elegido al crear, rige, y las líneas de la Parrilla valen solas (decisión B)")
+        igual([(p["bloque"], p["visual"]) for p in f["propuesta"]],
+              [("B001", "la batiente choca"), ("B002", "la corrediza"), ("B002", "el riel")],
+              "GUION VISUAL: las líneas de la Parrilla, casadas con el guion (sin guardarlas)")
+        igual(((ctx.estado.params("assets") or {}).get("guion_visual") or {}).get("planos"), [],
+              "GUION VISUAL: leer la ficha no escribe nada")
+        imp = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+        ok(not any("guion visual" in (x.get("que") or "") for x in imp),
+           "GUION VISUAL: con las líneas de la Parrilla, generar no se para a esperar")
+        igual(servidor._planos_previstos(ctx)["con_imagen"], 3,
+              "GUION VISUAL: el precio cuenta una imagen por línea")
+        codigo, _m = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": True})
+        igual(codigo, 409, "GUION VISUAL: no se aprueba uno vacío")
+        codigo, _m = _llamar(servidor.guardar_guion_visual, pid,
+                             {"planos": [{"bloque": "B009", "visual": "x"}]})
+        igual(codigo, 400, "GUION VISUAL: un bloque que no existe da 400")
+        codigo, f = _llamar(servidor.guardar_guion_visual, pid, {"planos": f["propuesta"]})
+        ok(codigo == 200 and len(f["guion_visual"]["planos"]) == 3 and not f["aprobado"],
+           "GUION VISUAL: guardarlo lo deja sin aprobar")
+        imp = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+        ok(any("guion visual" in (x.get("que") or "") for x in imp),
+           "GUION VISUAL: guardado a mano y sin aprobar, generar dice que falta aprobarlo")
+        real_listo = servidor._asistente_listo
+        servidor._asistente_listo = lambda: (False, "", None, [], False)  # sin Claude aquí
+        try:
+            codigo, f = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": True})
+        finally:
+            servidor._asistente_listo = real_listo
+        ok(codigo == 200 and f["aprobado"], "GUION VISUAL: aprobado")
+        imp = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+        ok(not any("guion visual" in (x.get("que") or "") for x in imp),
+           "GUION VISUAL: aprobado, ya no lo pide")
+        codigo, f = _llamar(servidor.guardar_modo_guion_visual, pid, {"imagenes": None})
+        ok(codigo == 200 and f["modo"] == "voz" and "imagenes" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: null vuelve a lo del estilo y quita la clave")
+        codigo, f = _llamar(servidor.guardar_modo_guion_visual, pid, {"imagenes": "voz"})
+        ok(codigo == 200 and "imagenes" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: «voz» con un estilo que no dice guion no escribe nada (regla 1)")
+        ctx.estado.actualizar_params("assets", {"estilo": {"imagenes": "guion"}})
+        codigo, f = _llamar(servidor.guardar_modo_guion_visual, pid, {"imagenes": "voz"})
+        ok(codigo == 200 and (ctx.estado.params("assets") or {}).get("imagenes") == "voz",
+           "GUION VISUAL: con un estilo que dice guion, «voz» explícito se guarda y manda")
+        codigo, _m = _llamar(servidor.guardar_imagenes_estilo, "no-existe", {"imagenes": "guion"})
+        ok(codigo in (400, 404), f"GUION VISUAL: el estilo que no existe da error ({codigo})")
+    finally:
+        servidor._bloques_del_guion = real
+
+
 def _video_montado_de_prueba(servidor, base, nombre):
     """Un vídeo con todos los pasos hechos y su MP4: «montado y al día»."""
     from nucleo import Estado, Proyecto                       # noqa: PLC0415
@@ -7586,6 +7713,7 @@ def main():
 
         sembrar(os.path.join(carpeta, pid))
         tid, salidas = probar_ejecucion(cliente, base, pid)
+        probar_resumen_de_tarjetas(cliente, carpeta, pid, virgen)
         probar_versiones(cliente, pid)
         probar_archivos(cliente, pid, salidas)
         probar_feedback(cliente, pid)
@@ -7668,6 +7796,7 @@ def main():
         probar_espacio_fijo()
         probar_tipo_relato()
         probar_dominios()
+        probar_guion_visual()
     finally:
         parar(proceso)
         if not argumentos.conservar:

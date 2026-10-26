@@ -292,7 +292,13 @@ def _planos_legibles(proyecto, escenas, imagenes, bloques):
             + (f"\n    EDITADO DESDE LA IMAGEN BASE de «{escena['base_clave'].replace('#', ' · estado ')}» "
                f"(que ya muestra: {_texto(escena.get('cambio'), 400)}); lo unico que se pidio "
                f"cambiar: (nada del sitio: solo la accion)"
-               if escena.get("editar_base") and escena.get("base_clave") else ""))
+               if escena.get("editar_base") and escena.get("base_clave") else "")
+            # GUION VISUAL (rama guion-visual): lo que tiene que verse lo dice
+            # su linea, no la voz; sin linea, como siempre
+            + (f"\n    GUION VISUAL: lo que tiene que verse es «{_texto((escena.get('linea_gv') or {}).get('visual'), 500)}». "
+               f"Juzga la imagen contra ESTA linea, NO contra la voz: en este video la voz va "
+               f"por su lado y no es un problema de \"guion\" que la imagen no la ilustre"
+               if escena.get("linea_gv") else ""))
     return "\n".join(lineas)
 
 

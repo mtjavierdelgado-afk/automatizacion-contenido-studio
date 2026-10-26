@@ -3133,8 +3133,8 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     # de lo que se esta pidiendo: la guia del estilo, la escena y la nota del
     # revisor (ver `contexto_de_reglas`).
     # Las del TIPO DE NEGOCIO (Etapa Foto C) entran en su hueco de
-    # `reglas_foto.json`: las del tipo que fije el estilo o, sin fijar, las
-    # condicionales de los de fabrica, que son las de consolas de siempre.
+    # `reglas_foto.json`: las de la ficha del negocio que lleve el estilo o, sin
+    # ficha, ninguna (ya no hay negocios de fabrica con reglas).
     bloque = (reglas.bloque_prompt("prompt_imagen", modo="foto",
                                    contexto=contexto_de_reglas(estilo, escena,
                                                                feedback),

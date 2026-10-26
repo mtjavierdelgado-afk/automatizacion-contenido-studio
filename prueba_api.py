@@ -2253,7 +2253,7 @@ def probar_sistema(cliente):
                 "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
                 "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business",
                 "emojis_redes"],
-          "estan las treinta y dos guias (siete de Crear, diecinueve de Publicar y seis de la Parrilla), en orden")
+          "estan las treinta y tres guias (ocho de Crear, diecinueve de Publicar y seis de la Parrilla), en orden")
     ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
            for g in datos.get("guias") or []),
        "cada guia trae plantilla, prompt para otra IA y que hace el sistema")

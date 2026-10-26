@@ -15785,10 +15785,12 @@ def _negocio_al_estilo(preset_id):
     la quita si su proyecto no tiene). -> el id puesto ("" si ninguno)"""
     dominios = PASOS_MODULOS.dominios
     presets = _presets()
-    cid = CLIENTES.cliente_de(raiz_proyectos(), estilo_id=preset_id) or ""
-    negocio = dominios.de_cliente(cid) if cid else None
-    tid = negocio["id"] if negocio else ""
     with presets.lock_de(presets.FICHERO):
+        # el proyecto y su ficha se leen DENTRO del cerrojo: quitar la ficha y
+        # mover el estilo a la vez dejaba el id de una ficha ya borrada
+        cid = CLIENTES.cliente_de(raiz_proyectos(), estilo_id=preset_id) or ""
+        negocio = dominios.de_cliente(cid) if cid else None
+        tid = negocio["id"] if negocio else ""
         try:
             ficha = presets.leer(preset_id)
         except presets.ErrorPreset:

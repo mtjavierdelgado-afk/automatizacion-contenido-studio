@@ -10,6 +10,22 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+**Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
+está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
+cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
+
+**Portadas: los avisos se pueden cerrar (25 de octubre)**
+- En el editor de portadas, el aviso va en su fila, debajo de los botones de
+  arriba (antes tapaba la cabecera).
+- **Lo que sale bien se va solo** a los 6 segundos.
+- **Un error se queda** hasta que lo cierras con su **✕** o hasta que lo mismo
+  sale bien (entonces lo sustituye el aviso bueno).
+- El error se dice **en una línea con qué hacer** (por ejemplo, si OpenAI
+  rechaza la imagen: elegir un plano sin personas con poca ropa, marcas o
+  logos, o usar el texto en capas), y el texto técnico va plegado en «Ver
+  detalle».
+- **«Avisos (N)»** guarda los últimos 10 del editor, con su hora: cerrar uno
+  no lo borra de ahí.
 
 **«Lo que dice el guion», sin que se cuele la voz (24 de octubre)**
 - **Las líneas «Visual:» de la Parrilla valen solas.** Si casan con el guion
@@ -39,10 +55,6 @@ vídeos, estilos, claves y contraseña no se tocan.
   ni trípodes; mira los objetos y el equipo de ESE vídeo.
 - Un estilo puede fijar su dominio (`PUT /api/presets-light/{id}/dominio`); la
   pantalla para elegirlo llegará con la Etapa Foto C.
-**Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
-está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
-cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
-
 **Tus proyectos y la pantalla de un proyecto, nuevas (22 de octubre)**
 - **«+ Nuevo vídeo» en Crear**, arriba en la portada y en cada proyecto: pregunta
   **¿con qué estilo?** y abre el Encargo de un vídeo nuevo (lo mismo que pulsar

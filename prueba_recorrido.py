@@ -8205,5 +8205,69 @@ def guion_visual(navegador, datos):
         pg.sin_errores("el guion visual")
         pg.cerrar()
 
+
+# ======================================================================
+# AVISOS-PORTADA (25-10-2026). Tramo propio, al final.
+
+@escenario
+def avisos_de_portada_que_se_cierran(navegador, datos):
+    """Pedido del dueño del 25-10: el error de la IA («RechazoSeguridad…»)
+    tapaba la cabecera del editor y no se podía quitar. Ahora: una línea con
+    qué hacer y el detalle plegado, una ✕, «Avisos (N)» que lo recuerda, el
+    éxito de lo mismo lo sustituye, y lo que sale bien se va solo."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos, nombre="avisos_portada")
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    ok(pg.esperar(".portada-publicar button", "Diseñar portada", 20), "Publicar abre la ficha")
+    pg.pulsar(".portada-publicar button", "Diseñar portada")
+    ok(pg.esperar(".vista-portada-grande img", segundos=30), "se abre el editor")
+    largo = ("RechazoSeguridad: OpenAI ha rechazado esta imagen con su filtro de seguridad (id req_6084c1f976). "
+             "Suele ser por pedir marcas, logos o personajes con derechos. Hay que describir lo que se ve sin nombres propios.")
+    pg.p.evaluate(f"() => avisoPortada('no se ha podido hacer con la IA: ' + {largo!r}, true, 'ia')")
+    pg.p.wait_for_timeout(300)
+    texto = pg.p.locator(".capa-portada .aviso-portada.malo > span").first.inner_text()
+    ok("filtro de seguridad" in texto and "plano sin personas" in texto and "req_6084" not in texto,
+       f"el error se dice en una línea con qué hacer, sin el texto técnico ({texto[:90]!r})")
+    ok(pg.visible(".capa-portada .aviso-portada.malo summary", "Ver detalle"), "el detalle técnico va plegado")
+    ok(pg.visible(".capa-portada .cab-portada button", "Guardar diseño"),
+       "y ya no está dentro de la cabecera: los botones de arriba siguen a la vista")
+    # un «Pintando…» de OTRA cosa no tapa el error
+    pg.p.evaluate("() => avisoPortada('Pintando la portada a tamaño real…', false, 'descargar')")
+    pg.p.wait_for_timeout(200)
+    ok(pg.visible(".capa-portada .aviso-portada.malo"), "un aviso de otra cosa no tapa el error")
+    pg.pulsar(".capa-portada .cerrar-aviso-portada", "✕")
+    pg.p.wait_for_timeout(200)
+    ok(not pg.visible(".capa-portada .aviso-portada.malo"), "la ✕ lo cierra")
+    ok(pg.visible(".capa-portada .historial-avisos-portada summary", "Avisos (1)"),
+       "y «Avisos (1)» lo sigue recordando (lo que estaba a medias, «Pintando…», no se guarda)")
+    pg.pulsar(".capa-portada .historial-avisos-portada summary", "Avisos")
+    ok(pg.visible(".capa-portada .linea-aviso-portada", "filtro de seguridad"), "con su hora y su texto")
+    # vuelve a fallar y luego sale bien: el bueno sustituye al error
+    pg.p.evaluate(f"() => avisoPortada({largo!r}, true, 'ia')")
+    pg.p.evaluate("() => avisoPortada('Fondo hecho con IA ✓', false, 'ia')")
+    pg.p.wait_for_timeout(200)
+    ok(not pg.visible(".capa-portada .aviso-portada.malo") and pg.visible(".capa-portada .aviso-portada.bueno", "Fondo hecho"),
+       "cuando lo mismo sale bien, el error se quita solo")
+    pg.p.wait_for_timeout(6800)
+    ok(not pg.visible(".capa-portada .aviso-portada"), "y lo que sale bien se va solo a los 6 s")
+    # de verdad: guardar enseña su aviso
+    pg.pulsar(".capa-portada button", "Guardar diseño")
+    ok(pg.esperar(".capa-portada .aviso-portada.bueno", "guardado", 10), "«Guardar diseño» sigue diciendo que se ha guardado")
+    pg.captura("avisos_portada", entera=False)
+    movil = None
+    pg.p.set_viewport_size({"width": 390, "height": 780})
+    pg.p.evaluate(f"() => avisoPortada({largo!r}, true, 'ia')")
+    pg.p.wait_for_timeout(300)
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2 and pg.visible(".capa-portada .cerrar-aviso-portada"),
+       f"en el móvil cabe y la ✕ se ve ({ancho}px)")
+    pg.p.evaluate("() => { PORT.cambiado = false; }")
+    pg.pulsar(".capa-portada button", "Cerrar")
+    pg.sin_errores("los avisos de la portada")
+    pg.cerrar()
+
+
+
 if __name__ == "__main__":
     sys.exit(main())

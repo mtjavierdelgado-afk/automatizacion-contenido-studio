@@ -23103,6 +23103,7 @@ const PORT = {
   cambiado: false, vista: '', pidiendo: 0, reloj: null, guias: true, error: '',
   propuestas: null, proponiendo: false, ia: null, abierto: false, fondos: [], cortar: null,
   aviso: null, ideas: null, pensandoIdeas: false, iaPendiente: null,
+  avisos: [], verAvisos: false, relojAviso: null,
 };
 
 function campoPortada(etiqueta, control, ayuda) {
@@ -23115,7 +23116,8 @@ async function abrirEditorPortada(pid) {
   if (PORT.vista) URL.revokeObjectURL(PORT.vista);
   Object.assign(PORT, { pid, abierto: true, error: '', propuestas: null, ia: null, cambiado: false,
     proponiendo: false, vista: '', diseno: null, fondos: [], aviso: null, ideas: null, pensandoIdeas: false,
-    iaPendiente: null });
+    iaPendiente: null, avisos: [], verAvisos: false });
+  clearTimeout(PORT.relojAviso);
   PORT.pidiendo += 1;
   try {
     if (!PORT.catalogo) PORT.catalogo = await pedir(`${BASE}/api/portadas/catalogo`);
@@ -23230,21 +23232,98 @@ function bajarBlobPortada(blob, nombre) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-/* EL AVISO, DENTRO DEL EDITOR: el aviso flotante salía DEBAJO de la capa del
-   editor y «Guardar diseño» parecía no hacer nada (notas del 21-10). Ahora va
-   en la cabecera del editor y, además, el flotante por encima de la capa. */
-function avisoPortada(texto, malo) {
-  PORT.aviso = { texto, malo: !!malo, hora: new Date() };
-  toast(texto, !!malo);
-  const sitio = document.querySelector('.capa-portada .aviso-portada');
+/* EL AVISO, DENTRO DEL EDITOR (portadas-2, 21-10) Y QUE SE PUEDE CERRAR
+   (avisos-portada, 25-10, pedido del dueño: un error largo tapaba la cabecera
+   y no se iba).
+   - Lo que sale bien se va solo a los 6 s.
+   - Un error se queda hasta su ✕ o hasta que LO MISMO (`clave`: guardar,
+     descargar, ia…) sale bien: entonces lo sustituye el aviso bueno.
+   - Una línea con qué pasó y qué hacer; el texto técnico, plegado en «Ver
+     detalle».
+   - «Avisos (N)» guarda los últimos 10 de la sesión del editor: cerrar uno no
+     lo borra de ahí. Se vacía al abrir el editor de otro vídeo. */
+const MAX_AVISOS_PORTADA = 10;
+
+/* El error de la máquina, dicho en una línea que se entienda y con qué hacer. */
+function resumenErrorPortada(texto) {
+  const t = String(texto || '');
+  if (/RechazoSeguridad|filtro de seguridad|safety|moderation/i.test(t)) {
+    return 'OpenAI rechazó la imagen por su filtro de seguridad (no se cobra). Elige de fondo un plano sin personas '
+      + 'con poca ropa, marcas, logos ni personajes conocidos, o usa el texto en capas sin IA.';
+  }
+  if (/HTTP 5\d\d|no he podido pintar|Failed to fetch|NetworkError/i.test(t)) {
+    return 'El servidor no ha podido terminarlo. Vuelve a intentarlo en un momento.';
+  }
+  if (/sesión de Claude|cupo|quota|rate limit/i.test(t)) {
+    return 'Claude no ha contestado (sesión o cupo). Vuelve a pedirlo en un minuto.';
+  }
+  // lo demás: la primera frase, corta
+  // (sin «lookbehind»: un Safari viejo no lo entiende y se pararía todo el fichero)
+  const primera = (t.match(/^[\s\S]*?[.!?](?=\s|$)/) || [t])[0];
+  return primera.length > 160 ? `${primera.slice(0, 157)}…` : primera;
+}
+
+function avisoPortada(texto, malo, clave) {
+  const ahora = new Date();
+  const corto = malo ? resumenErrorPortada(texto) : String(texto || '');
+  const aviso = { texto: corto, detalle: malo && corto !== String(texto) ? String(texto) : '', malo: !!malo,
+    hora: ahora, clave: clave || '', id: `${ahora.getTime()}-${Math.random().toString(36).slice(2, 6)}` };
+  const actual = PORT.aviso;
+  // un aviso que no es un error ni el éxito de lo que falló NO tapa un error
+  // que sigue a la vista (p. ej. «Pintando…» mientras se ve el fallo de la IA)
+  const tapaError = actual && actual.malo && !malo && !(clave && actual.clave === clave);
+  // lo que aún está pasando («Pintando…») no se guarda: solo cómo acabó
+  if (!/…$/.test(corto)) PORT.avisos = [aviso].concat(PORT.avisos || []).slice(0, MAX_AVISOS_PORTADA);
+  if (!tapaError) PORT.aviso = aviso;
+  clearTimeout(PORT.relojAviso);
+  if (!malo && !tapaError) {
+    PORT.relojAviso = setTimeout(() => {
+      if (PORT.aviso && PORT.aviso.id === aviso.id) { PORT.aviso = null; repintarAvisoPortada(); }
+    }, 6000);
+  }
+  repintarAvisoPortada();
+}
+
+function cerrarAvisoPortada() {
+  clearTimeout(PORT.relojAviso);
+  PORT.aviso = null;
+  repintarAvisoPortada();
+}
+
+function repintarAvisoPortada() {
+  const sitio = document.querySelector('.capa-portada .avisos-portada');
   if (sitio) sitio.replaceWith(pintarAvisoPortada());
+}
+
+function horaPortada(fecha) {
+  return fecha.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
 }
 
 function pintarAvisoPortada() {
   const a = PORT.aviso;
-  if (!a) return h('span', { clase: 'aviso-portada meta' }, PORT.cambiado ? 'Cambios sin guardar' : '');
-  const hora = a.hora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
-  return h('span', { clase: `aviso-portada${a.malo ? ' malo' : ' bueno'}`, role: 'status' }, `${a.texto} · ${hora}`);
+  const lista = PORT.avisos || [];
+  const caja = h('div', { clase: 'avisos-portada' });
+  if (a) {
+    caja.appendChild(h('div', { clase: `aviso-portada${a.malo ? ' malo' : ' bueno'}`, role: a.malo ? 'alert' : 'status' },
+      h('span', { clase: 'crece' }, `${a.texto} · ${horaPortada(a.hora)}`),
+      a.detalle ? h('details', { clase: 'detalle-aviso-portada' }, h('summary', {}, 'Ver detalle'),
+        h('span', {}, a.detalle)) : null,
+      h('button', { clase: 'cerrar-aviso-portada', type: 'button', title: 'Cerrar este aviso (sigue en «Avisos»)',
+        'aria-label': 'Cerrar el aviso', onclick: () => cerrarAvisoPortada() }, '✕')));
+  } else if (PORT.cambiado) {
+    caja.appendChild(h('span', { clase: 'meta' }, 'Cambios sin guardar'));
+  }
+  if (lista.length) {
+    const historial = h('details', { clase: 'historial-avisos-portada', open: !!PORT.verAvisos,
+      ontoggle: ev => { PORT.verAvisos = ev.currentTarget.open; } },
+    h('summary', {}, `Avisos (${lista.length})`));
+    lista.forEach(x => historial.appendChild(h('div', { clase: `fila linea-aviso-portada${x.malo ? ' malo' : ''}` },
+      h('span', { clase: 'meta' }, horaPortada(x.hora)),
+      h('span', { clase: 'crece' }, `${x.malo ? '⚠ ' : '✓ '}${x.texto}`),
+      x.detalle ? h('details', {}, h('summary', {}, 'detalle'), h('span', { clase: 'meta' }, x.detalle)) : null)));
+    caja.appendChild(historial);
+  }
+  return caja;
 }
 
 /* QUÉ LLEVA LA IMAGEN ENCIMA, con su ✕. */
@@ -23363,12 +23442,12 @@ function pintarEditorPortada() {
 
   capa.replaceChildren(h('div', { clase: 'panel-portada' },
     h('div', { clase: 'fila cab-portada' }, h('h3', { clase: 'crece' }, 'Diseñar portada'),
-      pintarAvisoPortada(),
       h('button', { clase: 'mini', type: 'button', onclick: () => guardarDisenoPortada() }, 'Guardar diseño'),
       h('button', { clase: 'mini', type: 'button', title: 'La portada a tamaño real, en PNG, para tenerla de respaldo',
         onclick: () => descargarPortada() }, '⬇ Descargar portada'),
       h('button', { clase: 'primario', type: 'button', onclick: () => usarPortada() }, 'Usar como portada'),
       h('button', { clase: 'mini fantasma', type: 'button', onclick: () => cerrarEditorPortada() }, 'Cerrar')),
+    pintarAvisoPortada(),
     h('div', { clase: 'cuerpo-portada' }, vista, mandos)));
   pintarVistaPortada();
   mandos.scrollTop = scroll;
@@ -23585,7 +23664,7 @@ async function cambiarPlantillaPortada(cambios) {
       method: 'POST', cuerpo: Object.assign({ diseno: PORT.diseno }, cambios) });
     PORT.diseno = r.diseno;
     tocarPortada(true);
-  } catch (e) { avisoPortada(e.message, true); }
+  } catch (e) { avisoPortada(e.message, true, 'plantilla'); }
 }
 
 async function guardarDisenoPortada() {
@@ -23594,14 +23673,14 @@ async function guardarDisenoPortada() {
       method: 'PUT', cuerpo: { diseno: PORT.diseno } });
     PORT.diseno = r.diseno;
     PORT.cambiado = false;
-    avisoPortada('Diseño guardado ✓');
-  } catch (e) { avisoPortada(`no se ha guardado: ${e.message}`, true); }
+    avisoPortada('Diseño guardado ✓', false, 'guardar');
+  } catch (e) { avisoPortada(`no se ha guardado: ${e.message}`, true, 'guardar'); }
 }
 
 async function descargarPortada() {
   const pid = PORT.pid;
   try {
-    avisoPortada('Pintando la portada a tamaño real…');
+    avisoPortada('Pintando la portada a tamaño real…', false, 'descargar');
     const r = await fetch(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/descargar`), {
       method: 'POST', headers: cabecerasPortada({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ diseno: PORT.diseno }) });
@@ -23613,13 +23692,13 @@ async function descargarPortada() {
     // (sin comillas dentro de una expresión regular: parten los analizadores de herramientas/)
     const nombre = ((r.headers.get('Content-Disposition') || '').split('filename=')[1] || '').replace(/\x22/g, '').trim() || 'portada.png';
     bajarBlobPortada(await r.blob(), nombre);
-    avisoPortada('Portada descargada ✓');
-  } catch (e) { avisoPortada(`no se ha podido descargar: ${e.message}`, true); }
+    avisoPortada('Portada descargada ✓', false, 'descargar');
+  } catch (e) { avisoPortada(`no se ha podido descargar: ${e.message}`, true, 'descargar'); }
 }
 
 async function usarPortada() {
   try {
-    avisoPortada('Pintando la portada a tamaño real…');
+    avisoPortada('Pintando la portada a tamaño real…', false, 'usar');
     const ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/usar`), {
       method: 'POST', cuerpo: { diseno: PORT.diseno } });
     PORT.cambiado = false;
@@ -23627,7 +23706,7 @@ async function usarPortada() {
     cerrarEditorPortada();
     toast('Portada puesta: es la que se mandará a las redes');
     if (typeof pintarModulo === 'function') pintarModulo();
-  } catch (e) { avisoPortada(`no se ha podido poner la portada: ${e.message}`, true); }
+  } catch (e) { avisoPortada(`no se ha podido poner la portada: ${e.message}`, true, 'usar'); }
 }
 
 /* Lo que se pide a Claude se sigue preguntando (un minuto pasa del proxy). */
@@ -23653,7 +23732,7 @@ async function proponerPortadas() {
     if (PORT.pid !== pid || !PORT.abierto) return;
     PORT.propuestas = ficha.propuestas || [];
   } catch (e) {
-    if (PORT.pid === pid) avisoPortada(`no se han podido proponer portadas: ${e.message}`, true);
+    if (PORT.pid === pid) avisoPortada(`no se han podido proponer portadas: ${e.message}`, true, 'proponer');
   }
   if (PORT.pid !== pid) return;
   PORT.proponiendo = false;
@@ -23669,7 +23748,7 @@ async function pedirIdeasIA() {
     if (PORT.pid !== pid || !PORT.abierto) return;
     PORT.ideas = ficha.ideas || [];
   } catch (e) {
-    if (PORT.pid === pid) avisoPortada(`no se han podido pedir ideas: ${e.message}`, true);
+    if (PORT.pid === pid) avisoPortada(`no se han podido pedir ideas: ${e.message}`, true, 'ideas');
   }
   if (PORT.pid !== pid) return;
   PORT.pensandoIdeas = false;
@@ -23687,7 +23766,7 @@ async function prepararIA(que, prompt, calidad) {
     pintarEditorPortada();
     const caja = document.querySelector('.capa-portada .antes-de-pagar');
     if (caja) caja.scrollIntoView({ block: 'nearest' });
-  } catch (e) { avisoPortada(e.message, true); }
+  } catch (e) { avisoPortada(e.message, true, 'ia'); }
 }
 
 /* PASO 2: se paga y se dibuja con el prompt de la pantalla. */
@@ -23723,10 +23802,10 @@ async function portadaConIA(p) {
     if (p.que === 'portada') PORT.diseno.modo = 'ia';
     PORT.ia = null;
     tocarPortada(true);
-    avisoPortada(p.que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA ✓');
+    avisoPortada(p.que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA ✓', false, 'ia');
     return;
   } catch (e) {
-    if (PORT.pid === pid) avisoPortada(`no se ha podido hacer con la IA: ${e.message}`, true);
+    if (PORT.pid === pid) avisoPortada(`no se ha podido hacer con la IA: ${e.message}`, true, 'ia');
   }
   p.enviando = false;
   if (PORT.pid !== pid || !PORT.abierto) return;

@@ -21241,47 +21241,6 @@ def parrilla_desde_cuenta(cid: str, peticion: Request, cuerpo: dict = Body(defau
     return trabajo_
 
 
-# --------------------------------------------------- EL ASISTENTE DE LA RUTA
-# El chat de ayuda de otra web («Ruta piloto»), que contesta con el CLI de este
-# servicio (pasos/asistente_ruta.py). Estas rutas van FUERA del login del
-# Studio (las llama el PHP de esa web, servidor a servidor) y se protegen con la
-# cabecera X-Ruta-Clave. Sin clave configurada contestan 503: apagado de fábrica.
-
-import asistente_ruta as ASISTENTE_RUTA  # noqa: E402
-
-
-def _ruta_autorizada(peticion):
-    try:
-        ASISTENTE_RUTA.comprobar_clave(peticion.headers.get("x-ruta-clave"))
-    except ASISTENTE_RUTA.ErrorRuta as fallo:
-        raise ErrorApi(fallo.codigo, fallo.mensaje)
-
-
-@app.post("/api/ruta/preguntar", status_code=202)
-def ruta_preguntar(peticion: Request, cuerpo: dict = Body(default=None)):
-    """Pregunta al asistente de la Ruta; la respuesta se sigue con GET."""
-    _ruta_autorizada(peticion)
-    d = _cuerpo(cuerpo)
-    try:
-        ficha = ASISTENTE_RUTA.preguntar(str(d.get("charla") or ""),
-                                         d.get("texto"), d.get("contexto") or "")
-    except ASISTENTE_RUTA.ErrorRuta as fallo:
-        raise ErrorApi(fallo.codigo, fallo.mensaje)
-    anotar_global("ruta_pregunta", {"charla": ficha["charla"],
-                                    "caracteres": len(str(d.get("texto") or ""))})
-    return ficha
-
-
-@app.get("/api/ruta/charla/{cid}")
-def ruta_charla(cid: str, peticion: Request):
-    """Cómo va la respuesta: estado pensando/listo/error y su texto."""
-    _ruta_autorizada(peticion)
-    charla = ASISTENTE_RUTA.obtener(cid)
-    if charla is None:
-        raise ErrorApi(404, "esa charla ya no existe; empieza otra")
-    return charla.ver()
-
-
 # ------------------------------------------------------------------------ main
 
 def main():

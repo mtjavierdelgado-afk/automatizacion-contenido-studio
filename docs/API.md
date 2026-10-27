@@ -341,6 +341,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/asistente/imagenes/{nombre}` | Una imagen pegada al asistente, para su miniatura en la charla. |
 | `POST` | `/api/asistente/probar` | Prueba las cuentas con las que contestaría el asistente y dice cómo están. |
 
+## El asistente de la Ruta piloto (otra web, con X-Ruta-Clave)
+
+| | Ruta | Qué hace |
+|---|---|---|
+| `GET` | `/api/ruta/charla/{cid}` | Cómo va la respuesta: estado pensando/listo/error y su texto. |
+| `POST` | `/api/ruta/preguntar` | Pregunta al asistente de la Ruta; la respuesta se sigue con GET. |
+
 ## Ficheros y salud
 
 | | Ruta | Qué hace |
@@ -494,4 +501,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**380 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**382 endpoints.** Escrito por `generar_api.py` desde `app.py`.

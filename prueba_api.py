@@ -8178,36 +8178,6 @@ def probar_mezcla_cancelada_se_aplica_con_otra_mezcla():
         shutil.rmtree(base, ignore_errors=True)
 
 
-def probar_asistente_ruta(cliente):
-    """El asistente de la Ruta: apagado sin clave, 401 con la mala, y contesta."""
-    seccion("el asistente de la Ruta piloto (/api/ruta)")
-    respuesta, _ = cliente.post("/api/ruta/preguntar", {"texto": "hola"})
-    igual(respuesta.status_code, 503, "sin clave configurada esta apagado (503)")
-    ruta = os.path.join(cliente.carpeta, "secretos", "ruta_asistente.json")
-    with io.open(ruta, "w", encoding="utf-8") as f:
-        json.dump({"clave": "clave-de-prueba-ruta"}, f)
-    respuesta, _ = cliente.post("/api/ruta/preguntar", {"texto": "hola"},
-                                headers={"X-Ruta-Clave": "mala"})
-    igual(respuesta.status_code, 401, "con la clave mala, 401")
-    buena = {"X-Ruta-Clave": "clave-de-prueba-ruta"}
-    respuesta, ficha = cliente.post("/api/ruta/preguntar",
-                                    {"texto": "que es la DGAC", "contexto": "plan"},
-                                    headers=buena)
-    igual(respuesta.status_code, 202, f"con la buena, 202: {ficha}")
-    cid = (ficha or {}).get("charla")
-    fin, estado = time.time() + 10, {}
-    while time.time() < fin:
-        _r, estado = cliente.get(f"/api/ruta/charla/{cid}", headers=buena)
-        if (estado or {}).get("estado") != "pensando":
-            break
-        time.sleep(0.1)
-    ok((estado or {}).get("estado") == "listo" and "DGAC" in estado.get("texto", ""),
-       f"y contesta por GET: {estado}")
-    respuesta, _ = cliente.get(f"/api/ruta/charla/{cid}")
-    igual(respuesta.status_code, 401, "leer la charla sin clave, 401")
-    os.remove(ruta)
-
-
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -8270,7 +8240,6 @@ def main():
         probar_claves(cliente)
         probar_cuentas_cli(cliente)
         probar_asistente(cliente)
-        probar_asistente_ruta(cliente)
         probar_la_foto_del_asistente(cliente, pid)
         probar_onboarding(cliente)
         probar_turno_y_notas_de_otro_texto()

@@ -63,6 +63,7 @@ FAMILIAS = (
                                         "/api/rendimiento", "/api/mapa")),
     ("Claves y enlaces", ("/api/claves", "/api/enlaces")),
     ("El asistente", ("/api/asistente",)),
+    ("El asistente de la Ruta piloto (otra web, con X-Ruta-Clave)", ("/api/ruta",)),
     ("Ficheros y salud", ("/a/", "/api/salud", "/api/dictado")),
 )
 

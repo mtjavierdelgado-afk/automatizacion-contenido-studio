@@ -10,6 +10,15 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+**El asistente de la Ruta piloto (27 de octubre)**
+- El Studio puede contestar el chat de ayuda de **otra web** (la «Ruta piloto»)
+  con la misma cuenta de Claude, sin clave de API nueva. No ve nada del Studio:
+  corre en una carpeta vacía, sin leer ficheros, y solo puede buscar en internet.
+  No resuelve exámenes: explica el concepto y manda a estudiar.
+- Está **apagado de fábrica**. Se enciende creando su clave en el servidor:
+  `python pasos/asistente_ruta.py --clave`. Tope de 80 preguntas al día
+  (`ESTUDIO_RUTA_TOPE`). En la pantalla del Studio no cambia nada.
+
 **Claude en el coste de cada vídeo, tokens sin inflar y tarifas al día (26 de octubre)**
 - **«Coste del vídeo» enseña lo de Claude de ese vídeo**: cuántas llamadas, los
   tokens y lo que costaría por API, y en «Claude en este vídeo, por tarea» en qué

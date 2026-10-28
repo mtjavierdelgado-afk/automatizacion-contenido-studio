@@ -24,8 +24,9 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 **Quitar e insertar imágenes: los dos detalles que quedaban (28 de octubre)**
 - **Un subtítulo corregido a mano ya no repite ni pierde palabras** cuando partes
-  esa imagen (insertar) o le pasas la voz de otra (quitar): en ese caso se deja
-  de usar lo escrito a mano y sale el subtítulo de la voz, que es el correcto.
+  esa imagen (insertar) o le pasas la voz de otra (quitar): si lo escribiste
+  para la frase de antes, se deja de usar y sale el subtítulo de la voz; si lo
+  escribiste para la frase de ahora, se sigue usando.
   Desde ahora, cada subtítulo que corriges recuerda la frase para la que lo
   escribiste: si esa frase cambia más adelante, vuelve el de la voz en vez de
   enseñar un texto que ya no es el que se oye.

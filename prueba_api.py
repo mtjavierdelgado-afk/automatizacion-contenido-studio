@@ -8173,6 +8173,12 @@ def probar_detalles_insertar_quitar():
     escrito_hogar = {"unidades": {"escena:S002": {"subtitulo_texto": "Y ASÍ quedó."}}}
     ok("bonito" in texto_de(hogar, escrito_hogar).lower(),
        f"SUBTÍTULO: el plano que se lleva la voz de una quitada no la pierde ({texto_de(hogar, escrito_hogar)!r})")
+    despues = {"unidades": {"escena:S002": {"subtitulo_texto": "Y ASÍ quedó. El más BONITO."}}}
+    ok("BONITO" in texto_de(hogar, despues),
+       "SUBTÍTULO: escrito DESPUÉS de quitar, aunque no traiga ancla, se sigue usando (vídeos de antes)")
+    sin_ancla_partido = {"unidades": {"escena:S001": {"subtitulo_texto": "Este baño era EL MÁS FEO"}}}
+    ok("EL MÁS FEO" in texto_de(partida, sin_ancla_partido),
+       "SUBTÍTULO: escrito para el trozo de ahora sin ancla (no se supo la frase), se usa")
     con_ancla = {"unidades": {"escena:S001": {"subtitulo_texto": "Este baño era EL MÁS FEO",
                                                "subtitulo_ancla": "Este baño era el más feo"}}}
     ok("EL MÁS FEO" in texto_de(partida, con_ancla),
@@ -8193,6 +8199,9 @@ def probar_detalles_insertar_quitar():
               "SUBTÍTULO: el repaso guarda contra qué frase se escribió")
     finally:
         p6.plan_actual = real_plan
+    ip = servidor._insertar_planos()
+    igual(ip.letra_libre([], "x", 0, {"B"}), "C",
+          "DIRIGIR: una letra que aún guarda params de otra insertada no se reutiliza")
     # «DIRIGIR» LA INSERTADA: de punta a punta en el recorrido
     # (`insertar_una_imagen`); aquí, que planificar lee su unidad
     fuente = open(os.path.join(RAIZ_ESTUDIO, "pasos", "p6_assets.py"), encoding="utf-8").read()

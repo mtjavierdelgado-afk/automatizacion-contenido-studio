@@ -1611,20 +1611,18 @@ def ancla_subtitulo_de(p, uid, escena=None):
     `subtitulos.de_escena`: si ya no es la de ahora, lo escrito no se usa.
 
     La guardan el corrector de ortografia y, desde el 28-10, el repaso. Un
-    texto escrito antes sin ancla en un plano cuya voz ha cambiado al quitar o
-    insertar una imagen (`narracion_imagen` != `narracion`) se escribio para la
-    frase de siempre: esa es su ancla, y asi no repite las palabras que ahora
-    dice la imagen de al lado ni se queda sin las que se lleva de la quitada."""
+    texto escrito antes sin ancla, en un plano cuya voz ha cambiado al quitar o
+    insertar una imagen, se compara con las dos frases (`subtitulos.ancla_implicita`):
+    si era de la de antes se deja de usar --no repite las palabras que ahora dice
+    la imagen de al lado ni pierde las que se lleva de la quitada--; si era de
+    la de ahora, se sigue usando."""
     bloque = (p.get("unidades") or {}).get(uid)
     if not isinstance(bloque, dict):
         return ""
     ancla = " ".join(str(bloque.get("subtitulo_ancla") or "").split())
-    if ancla or not bloque.get("subtitulo_texto") or not isinstance(escena, dict):
+    if ancla or not isinstance(escena, dict):
         return ancla
-    dibujada = " ".join(str(escena.get("narracion_imagen") or "").split())
-    if dibujada and dibujada != " ".join(str(escena.get("narracion") or "").split()):
-        return dibujada
-    return ""
+    return subtitulos.ancla_implicita(escena, " ".join(str(bloque.get("subtitulo_texto") or "").split()))
 
 
 def _sin_callout(p, uid):

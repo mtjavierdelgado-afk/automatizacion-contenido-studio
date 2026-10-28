@@ -4757,7 +4757,7 @@ function seccionPaleta() {
    módulo. Los enlaces son enlaces y no botones, para que el barrido de botones
    del recorrido no se vaya a otra parte a mitad. */
 const PIE_DERECHOS = '© 2026 Agencia Redes Botánica · CrearIA Studio — '
-  + 'Automatización de contenido · v3.1 · Todos los derechos reservados.';
+  + 'Automatización de contenido · v5.1 · Todos los derechos reservados.';
 
 /* EL CONTACTO (mailto) y LOS TÉRMINOS DE USO, que viven en docs/TERMINOS.md y
    se sirven en /api/sistema/terminos, como el manual. */

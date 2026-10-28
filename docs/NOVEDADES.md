@@ -20,6 +20,15 @@ vídeos, estilos, claves y contraseña no se tocan.
 - La tabla nueva llega al servidor sola con `asvs actualizar` (si no editaste
   las tarifas a mano).
 
+## V5.1 · octubre de 2026
+
+**El Studio pasa a la versión 5.1 (28 de octubre)**
+- La versión se ve en el pie del Studio, en la página de acceso y en
+  Configuración → Novedades. Lo de debajo de este apartado es lo que trajo la 3.1.
+- Se han quitado del código los restos del proyecto en el que se basó al
+  principio (nombres, dominio y carpetas de su autor en ejemplos, pruebas y
+  documentos). No cambia nada de lo que hace el Studio.
+
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
 **El nombre nuevo, también en la página de acceso (26 de octubre)**

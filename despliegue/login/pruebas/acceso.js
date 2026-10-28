@@ -26,18 +26,18 @@ function igual(que, dio, esperaba) {
 (async () => {
   console.log('-- la contrasena elige la cuenta');
   const cuentas = [
-    { id: 1, username: 'adrian', password_hash: await hashPassword('llave-de-adrian-123') },
-    { id: 2, username: 'ramon',  password_hash: await hashPassword('llave-de-ramon-456') },
+    { id: 1, username: 'ana', password_hash: await hashPassword('llave-de-ana-123') },
+    { id: 2, username: 'bruno',  password_hash: await hashPassword('llave-de-bruno-456') },
   ];
-  igual('la de adrian', ((await elegirCuenta('llave-de-adrian-123', cuentas)) || {}).username, 'adrian');
-  igual('la de ramon',  ((await elegirCuenta('llave-de-ramon-456', cuentas)) || {}).username, 'ramon');
+  igual('la de ana', ((await elegirCuenta('llave-de-ana-123', cuentas)) || {}).username, 'ana');
+  igual('la de bruno',  ((await elegirCuenta('llave-de-bruno-456', cuentas)) || {}).username, 'bruno');
   igual('una que no es de nadie', await elegirCuenta('otra-cosa-distinta-789', cuentas), null);
   igual('vacia', await elegirCuenta('', cuentas), null);
-  igual('casi (un caracter menos)', await elegirCuenta('llave-de-adrian-12', cuentas), null);
+  igual('casi (un caracter menos)', await elegirCuenta('llave-de-ana-12', cuentas), null);
 
   console.log('-- sin cuentas, o con filas raras, no revienta');
-  igual('sin cuentas', await elegirCuenta('llave-de-adrian-123', []), null);
-  igual('lista nula', await elegirCuenta('llave-de-adrian-123', null), null);
+  igual('sin cuentas', await elegirCuenta('llave-de-ana-123', []), null);
+  igual('lista nula', await elegirCuenta('llave-de-ana-123', null), null);
   igual('fila sin hash', await elegirCuenta('x'.repeat(12), [{ id: 3, username: 'roto' }]), null);
   igual('hash de otro formato',
         await elegirCuenta('x'.repeat(12), [{ id: 4, username: 'viejo', password_hash: 'bcrypt$...' }]),

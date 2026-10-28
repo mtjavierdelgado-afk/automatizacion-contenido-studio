@@ -8,6 +8,18 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
+**Dos ajustes finos del gasto (26 de octubre)**
+- **Imágenes sin detalle de OpenAI**: cuando OpenAI no dice lo que cobró por una
+  imagen, el Studio la calcula con la tabla oficial de gpt-image-2. En calidad
+  baja, apaisada o vertical, son 0,005 $ (antes apuntaba 0,006 $, el precio de
+  la cuadrada). Lo normal es que OpenAI sí lo diga, y entonces manda su cifra.
+- **La voz, sin contar las pausas como texto**: cada pausa (`<break …/>`)
+  cuenta como UN carácter, como cobra Cartesia. Antes contaba como 23. El gasto
+  de voz baja unos céntimos por vídeo. Las demás marcas se siguen contando
+  enteras, porque Cartesia no dice cómo las cobra y es mejor pasarse que quedarse corto.
+- La tabla nueva llega al servidor sola con `asvs actualizar` (si no editaste
+  las tarifas a mano).
+
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
 **Claude en el coste de cada vídeo, tokens sin inflar y tarifas al día (26 de octubre)**

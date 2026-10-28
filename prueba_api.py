@@ -8257,6 +8257,28 @@ def probar_tipos_de_negocio():
         ok("Mamparas de vidrio" in servidor._reglas_para_revisor(
             dict(foto, dominio=f"cliente-{otro}"), {"escenas": [{"prompt": "una mampara"}]}),
            "con ficha, recibe sus reglas")
+        # AL MOMENTO (28-10): guardar el estilo por la ruta general (p. ej.
+        # «Guardar como estilo» desde un vídeo) sin el negocio no lo pierde
+        codigo, r = _llamar(servidor.guardar_preset_canal, {
+            "tipo": "canal", "nombre": "Otro foto", "id": pid2,
+            "datos": {"estilo": {"referencias": refs, "modo": "foto"},
+                      "guion": {"instrucciones": "x"}}})
+        ok(codigo == 200 and (r["preset"]["datos"]["estilo"] or {}).get("dominio") == f"cliente-{otro}",
+           f"guardar un estilo de foto de un proyecto con ficha se la pone al momento ({codigo})")
+        codigo, r = _llamar(servidor.guardar_preset_canal, {
+            "tipo": "canal", "nombre": "Dibujo", "id": pid3,
+            "datos": {"estilo": {"referencias": refs}, "guion": {"instrucciones": "x"}}})
+        ok(codigo == 200 and "dominio" not in (r["preset"]["datos"]["estilo"] or {}),
+           "y a uno de dibujo no se la pone")
+        sin = servidor.crear_cliente({"nombre": "Sin ficha"})["cliente"]["id"]
+        pid4 = presets.guardar("canal", "Foto sin ficha", {"estilo": {"referencias": refs, "modo": "foto"},
+                                                           "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(pid4, {"cliente": sin})
+        codigo, r = _llamar(servidor.guardar_preset_canal, {
+            "tipo": "canal", "nombre": "Foto sin ficha", "id": pid4,
+            "datos": {"estilo": {"referencias": refs, "modo": "foto"}, "guion": {"instrucciones": "x"}}})
+        ok(codigo == 200 and "dominio" not in (r["preset"]["datos"]["estilo"] or {}),
+           "sin ficha en su proyecto no se escribe nada: lo general")
     finally:
         presets.FICHERO = antes
         servidor.fijar_raiz_proyectos(raiz_antes)

@@ -217,6 +217,12 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   cada estilo se ve, sin editarla, encima de las reglas del estilo, con un botón
   para ir a cambiarla. Llega a los vídeos nuevos al crearlos y a los ya hechos
   con «Traer el estilo».
+- **La recoge al momento**: al crear el estilo, al rehacerlo (también al
+  pasarlo a foto o al dibujar sus láminas), al moverlo de proyecto y al
+  guardarlo como estilo desde un vídeo. Si el proyecto no tiene ficha, no pasa
+  nada: el estilo usa lo general (fotos sin reglas de ningún negocio), igual
+  que antes; en cuanto la llenes, sus estilos la reciben solos. Los estilos de
+  dibujo no la llevan nunca.
 - Ojo: cambiar las reglas de la ficha de un proyecto con vídeos de foto cambia
   el prompt de sus imágenes; quedan para rehacer, y rehacerlas se paga.
 

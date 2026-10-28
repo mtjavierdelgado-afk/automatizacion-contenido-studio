@@ -14136,6 +14136,18 @@ def guardar_preset_canal(cuerpo: dict = Body(default=None)):
         datos.get("tipo"), datos.get("nombre"), datos.get("datos"),
         nota=datos.get("nota") or "", miniatura=datos.get("miniatura") or "",
         pid=datos.get("id") or None))
+    # LA FICHA DEL NEGOCIO, AL MOMENTO (Etapa Foto C, decisión del dueño 28-10):
+    # guardar aquí un estilo de canal (p. ej. «Guardar como estilo» desde un
+    # vídeo, o sustituir su contenido) puede dejarlo en foto y con láminas sin
+    # el negocio de su proyecto. Se le pone ya; sin ficha en el proyecto, o en
+    # un estilo de dibujo, no se escribe nada (lo general, como hasta ahora).
+    if ficha.get("tipo") == "canal":
+        try:
+            antes = ((ficha.get("datos") or {}).get("estilo") or {}).get("dominio") or ""
+            if _negocio_al_estilo(ficha["id"]) != antes:
+                ficha = _presets().leer(ficha["id"])
+        except Exception as fallo:                           # noqa: BLE001
+            anotar_global("aviso", {"negocio": str(fallo), "preset": ficha.get("id")})
     anotar_global("preset_guardado", {"id": ficha["id"], "tipo": ficha["tipo"],
                                       "nombre": ficha["nombre"]})
     return {"preset": ficha, **_presets().listar()}

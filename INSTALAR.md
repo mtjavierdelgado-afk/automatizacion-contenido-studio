@@ -1,4 +1,4 @@
-# Instalar Automatización Contenido Studio en tu servidor
+# Instalar CrearIA Studio en tu servidor
 
 Esto deja el estudio funcionando en un VPS, con su dirección web, su candado y su
 contraseña. **Son tres pasos y unos cinco minutos**, y no hace falta saber nada

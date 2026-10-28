@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-#  asvs — el mando de Automatización Contenido Studio en el servidor.
+#  asvs — el mando de CrearIA Studio en el servidor.
 #
 #  Existe para que, cuando algo va raro, la respuesta a «¿que hago?» sea una
 #  palabra y no un parrafo de comandos de systemd.
@@ -55,7 +55,7 @@ estado() {
   puerto="$(_puerto)"; dominio="$(_dominio)"; esquema="$(_esquema)"
   [ -n "$esquema" ] || esquema=https
 
-  printf '\n%s  Automatización Contenido Studio%s   %s%s://%s%s\n\n' "$B" "$N" "$GRIS" "$esquema" "$dominio" "$N"
+  printf '\n%s  CrearIA Studio%s   %s%s://%s%s\n\n' "$B" "$N" "$GRIS" "$esquema" "$dominio" "$N"
 
   systemctl is-active --quiet as-video-studio && si "el estudio esta en marcha" || no "el estudio esta PARADO"
   systemctl is-active --quiet as-video-login  && si "el acceso esta en marcha"  || no "el acceso esta PARADO"
@@ -262,6 +262,49 @@ _deshacer_config() {
   if nginx -t >/dev/null 2>&1; then systemctl reload nginx || true; fi
 }
 
+# _tarifas_al_dia <tarifas del codigo nuevo> <carpeta de datos>
+# LAS TARIFAS DEL SERVIDOR SE PONEN AL DIA (medidor-claude-2, 26-10-2026).
+# `instalar.sh` las copia a datos/ una vez, para que quien quiera las ajuste sin
+# que un update se las lleve; pero asi un precio nuevo de OpenAI o Cartesia no
+# llegaba nunca. Ahora: si datos/tarifas.json es la de fabrica que se puso la
+# ultima vez (tarifas.de_fabrica.json), o identica a la nueva, se pone la nueva
+# (dejando tarifas.json.anterior); si se edito a mano, NO se toca y se dice.
+#: Las huellas (sha256) de cada tarifas.json que se ha publicado: una copia de
+#: datos/ que coincide con una de estas es de fabrica, aunque todavia no haya
+#: tarifas.de_fabrica.json (el primer update tras medidor-claude-2). Al cambiar
+#: tarifas.json en el repo, se anade aqui su huella (sha256sum tarifas.json).
+TARIFAS_PUBLICADAS="e876f7c9ef25d480d5a84b118c291903a4a1ab7f82637aed2880e59053682b1f
+9f9825684653091514af97d8623961b8844c14bba5d5a5b0533bf5f51d7b88fc
+25bd9f527db53da0f4a17d5c15ec9426cd2756ae0da0c6ef18ab542cc808733b"
+
+_tarifas_al_dia() {
+  local nueva="$1" datos="$2" actual fabrica huella de_fabrica=0
+  actual="$datos/tarifas.json"; fabrica="$datos/tarifas.de_fabrica.json"
+  [ -f "$nueva" ] || return 0
+  if [ ! -f "$actual" ]; then
+    cp "$nueva" "$actual" || return 0
+    si "tarifas puestas (no habia)"
+  elif ! cmp -s "$actual" "$nueva"; then
+    if [ -f "$fabrica" ] && cmp -s "$actual" "$fabrica"; then
+      de_fabrica=1
+    elif [ ! -f "$fabrica" ]; then
+      huella="$(sha256sum "$actual" 2>/dev/null | cut -d' ' -f1)"
+      [ -n "$huella" ] && printf '%s\n' "$TARIFAS_PUBLICADAS" | grep -qx "$huella" && de_fabrica=1
+    fi
+    if [ "$de_fabrica" = 1 ]; then
+      cp -p "$actual" "$actual.anterior" || return 0
+      cp "$nueva" "$actual" || return 0
+      si "tarifas al dia (las de antes, en tarifas.json.anterior)"
+    elif [ -f "$fabrica" ]; then
+      no "tarifas.json esta cambiado a mano: no lo toco (las de fabrica nuevas: $nueva)"
+    else
+      no "no se si tarifas.json es de fabrica o lo cambiaste tu: no lo toco (las nuevas: $nueva)"
+    fi
+  fi
+  cp "$nueva" "$fabrica" || return 0
+  chown "$USUARIO:$USUARIO" "$actual" "$fabrica" 2>/dev/null || true
+}
+
 actualizar() {
   local temporal forzar=0 activos anterior
   [ "${1:-}" = "--forzar" ] && forzar=1
@@ -332,6 +375,8 @@ actualizar() {
     || cp "$temporal/codigo/motores/reglas/reglas.json" "$RAIZ/app/motores/reglas/reglas.json"
   rsync -a --delete "${EXCLUIR_LOGIN[@]}" "$temporal/codigo/despliegue/login/" "$RAIZ/login/"
   chown -R "$USUARIO:$USUARIO" "$RAIZ/app" "$RAIZ/login"
+  # LAS TARIFAS, AL DIA (medidor-claude-2): nunca falla ni deshace nada
+  _tarifas_al_dia "$RAIZ/app/tarifas.json" "$RAIZ/datos" || true
   # systemd, nginx, el navegador y el entorno, con copia en anterior/config
   _configurar "$RAIZ/app/despliegue" "$anterior/config"
   chown "$USUARIO:$USUARIO" "$RAIZ/datos/entorno"

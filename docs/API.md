@@ -57,12 +57,17 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/ortografia/descartar` | Lo que se deja SIN marcar al aplicar: {rid, ids: [...]}. Esos textos se |
 | `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
 | `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
+| `POST` | `/api/proyectos/{pid}/planos/describir` | Pide a Claude, en un hilo, la descripción en español de los planos que |
+| `GET` | `/api/proyectos/{pid}/planos/descripciones` | Lo que se pidió dibujar en cada plano, en español. -> la ficha |
 | `POST` | `/api/proyectos/{pid}/planos/devolver` | Deshace «Quitar esta imagen». {narracion: lo que decía la imagen quitada} |
 | `GET` | `/api/proyectos/{pid}/planos/elementos` | {planos: {sid: [elementos]}, no_aplica, tipos, entradas, intensidades, |
+| `POST` | `/api/proyectos/{pid}/planos/insertadas/deshacer` | Quita una imagen insertada: el plano del que salió recupera toda su voz, |
+| `GET` | `/api/proyectos/{pid}/planos/insertar` | Cómo va la última imagen insertada y lo que cuesta una. -> {estado, |
 | `GET` | `/api/proyectos/{pid}/planos/montaje` | {video, planos: {sid: {movimiento?, profundidad?}}, no_aplica, niveles, profundidad} |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/elementos` | {elementos: [...]} de UN plano (vacia, los quita). Deja pendientes ese |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/nota-ia` | LA OTRA OPCION (se paga al aplicarla): una nota de imagen que pide |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/vista` | La imagen del plano con sus elementos encima, quietos (todos a la vez), |
+| `POST` | `/api/proyectos/{pid}/planos/{sid}/insertar` | Inserta una imagen nueva en `sid`. {palabra, que, usd} |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | {movimiento?: quieto|sobrio|vivo|dinamico|null, profundidad?: true|false|null} |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/quitar` | Quita la imagen `sid`: su voz pasa a la de antes o a la de después. |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
@@ -353,8 +358,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
-| `GET` | `/api/claude/consumo` | El medidor de Claude (solo lee): el cupo de cada cuenta, los avisos al |
-| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: una llamada mínima por cuenta (haiku, una palabra) para |
+| `GET` | `/api/claude/consumo` | El medidor de Claude: cupo de cada cuenta, avisos y consumo (solo lee). |
+| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: lee el cupo de cada cuenta con una llamada mínima. |
 | `GET` | `/api/clientes` | Los proyectos (clientes) y a cual pertenece cada estilo. |
 | `POST` | `/api/clientes` | Un proyecto nuevo: {nombre}. |
 | `PUT` | `/api/clientes/estilos/{preset_id}` | Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca). |
@@ -365,7 +370,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/clientes/{cid}/negocio` | Crea o cambia la ficha del negocio de un proyecto: {nombre (qué hace), reglas? (formato de las reglas del estilo), revisor?: {equipo?, orientacion?}}. Se la pone a todos sus estilos (`estilo.dominio`). -> {negocio, estilos} |
 | `DELETE` | `/api/clientes/{cid}/negocio` | Quita la ficha: sus estilos vuelven a lo general; los vídeos ya hechos no cambian |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
-| `GET` | `/api/cola_studio` | La cola de todo el Studio: imágenes, montaje y lo demás que trabaja. |
+| `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee; sin nombres de proyectos con clave). |
 | `GET` | `/api/dominios` | El negocio general y las fichas del negocio de los proyectos (Etapa Foto C). -> {dominios, automatico} |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
@@ -497,4 +502,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**380 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**385 endpoints.** Escrito por `generar_api.py` desde `app.py`.

@@ -421,6 +421,12 @@ cuánto tardarán. Se dibujan **una detrás de otra** en el servidor: puedes
 cerrar o recargar la página y sigue. Si escribes **varias notas para la misma
 imagen**, se juntan y se paga **una**.
 
+**Lo que se pidió dibujar**: debajo de la imagen, una o dos frases en español
+con lo que se le pidió al dibujante (el sitio, quién sale, qué hace, el
+encuadre). Las escribe Claude solo al abrir Imágenes, sin coste ni redibujar
+nada; **Ver el original en inglés** enseña el texto que de verdad se manda. En
+una imagen marcada como vieja, la frase es lo que se pide ahora.
+
 **Ajustar esta imagen** (cuando dos imágenes seguidas no casan):
 **Igualar con la anterior / la siguiente** te escribe la nota para rehacerla
 con la de al lado como referencia (se paga al rehacerla). **Quitar esta
@@ -429,6 +435,12 @@ alarga y conserva su dibujo: gratis, sin cambiar los números de las demás.
 Después hay que **volver a montar** el vídeo (gratis). La imagen que se lleva la
 voz lo dice («Lleva también la voz de S002») con su botón **Deshacer**, que la
 devuelve con su misma imagen. Las cartelas no se quitan ni reciben voz.
+**Insertar una imagen aquí…** hace lo contrario: pulsas la palabra donde
+empieza la imagen nueva y escribes qué quieres que se vea. La de antes conserva
+su dibujo y se queda con lo de antes; la nueva (**S004B**, sin cambiar los
+números de las demás) se dibuja sola: **se paga una imagen**, y te pregunta con
+el precio. Su diapositiva dice «Imagen insertada en S004» con **Deshacer**, que
+es gratis.
 
 **Retocar o dibujar desde cero.** «Rehacer esta imagen» **retoca** la de ahora:
 es lo mejor para cambios pequeños («que lleve gafas», «más luz»). Para un

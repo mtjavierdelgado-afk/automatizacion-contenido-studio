@@ -292,3 +292,7 @@ p  { margin: 0; }
 .brand__mark { background: var(--degradado) !important; }
 .brand__mark svg { color: #fff !important; }
 .login__legal { line-height: 1.6; }
+
+/* CrearIA Studio: el logo de la C con el bucle (el mismo de web/logo.svg),
+   en lugar del cuadrado con el «play» del nombre antiguo. */
+.brand__logo { width: 40px; height: 40px; flex: 0 0 40px; display: block; }

@@ -1,4 +1,4 @@
-# Automatización Contenido Studio — lo que hay que saber antes de tocarlo
+# CrearIA Studio — lo que hay que saber antes de tocarlo
 
 Lee primero [README.md](README.md): qué es, cómo se arranca y cómo está montado.
 Y si vienes a retomar sin contexto, [docs/RETOMAR.md](docs/RETOMAR.md): el
@@ -96,7 +96,7 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 | `pruebas-completas` | **Probar el Studio entero con dos comandos** (pedido del dueño, 22-10): `asvs revisar` (todas las suites gratis como el usuario del servicio, desligado de la consola, con barra de progreso, tiempo restante e informe en español) y `asvs probar completo` (vídeos reales de punta a punta: la prueba real, «Un espacio que cambia» con base, estados y rehacer, portada, SEO y PUBLICAR DE VERDAD en la cuenta que el dueño elige al empezar; tope 5 $ por defecto, barra e informe). Solo herramientas: no cambia el Studio ni ninguna firma. **Propios:** `herramientas/prueba_completa.py`, `herramientas/revisar.py` y `herramientas/prueba_herramientas_prueba.py` (nuevos). **Por zonas:** `despliegue/asvs` (la función `probar`, una función `revisar` nueva, su línea en el `case` y la ayuda de arriba); `pruebas.sh`/`pruebas.ps1` (una línea); `docs/NOVEDADES.md`. No toca `app.py`, `web/` ni `pasos/` | 22-10-2026 |
 | `tipo-de-relato-2` | **Recorrido y clase con varios ambientes, y la cámara de los primeros planos** (pedido del dueño, 25-10): en «recorrido» y «clase» Claude declara varios ambientes del mismo lugar (misma luz y materiales) en vez de colapsarlos en uno, y cada ambiente puede tener su imagen base (generada con la del principal como referencia), que sus planos llevan como referencia; en modo guion, una línea cuya cámara pide un primer plano o detalle NO edita la base (la lleva de referencia) y sí respeta su encuadre. Sin tipo de relato guardado, nada cambia (regla 1). **Por zonas:** `pasos/tipo_relato.py` (criterio de recorrido/clase y una constante nueva); `pasos/catalogo_visual.py` (`_criterio` en la rama sin espacio y `_aplicar_relato` para recorrido/clase); `pasos/p6_assets.py` (`espacio_del_relato` y una vecina `ambientes_del_relato`, `prompt_y_refs_de_base`, la familia en `_marcar_edicion`); en `app.py` `_ficha_tipo_relato` (un campo `ambientes`, SUMA con lo de `estados-en-espanol`) y `sitio` en las rutas `/tipo_relato/base/*` y `_correr_base`; en `web/app.js` una función nueva `ambientesDelRelato` justo antes de las del guion visual y UNA línea donde se pinta el bloque del tipo de relato del vídeo; un bloque AMBIENTES en `web/estilo.css`; `pasos/prueba_tipo_relato.py`, `pasos/prueba_guion_visual.py`, `prueba_api.py` (una sección), un tramo al final de `prueba_recorrido.py`; `docs/NOVEDADES.md`, `docs/API.md`, `docs/MANUAL.md`. No toca lo reservado por las otras ramas | 25-10-2026 |
 | `vidiq-1` | **vidIQ desde el Claude del Studio, sin API de pago** (pedido del dueño, 25-10; plan en el Proyecto: `estado/plan_vidiq_1_2026-10-25.md`). El CLI (membresía) carga el servidor MCP de vidIQ con `--mcp-config` (un fichero temporal por llamada, como el asistente) y una LISTA BLANCA de herramientas de solo consultar y puntuar; lo que publica, sube o gasta muchos créditos queda vetado. La clave va en el almacén de claves (entrada `vidiq`), nunca en params ni firmas, y sin clave el Studio funciona exactamente igual (regla 1). Todo a pedido con un botón: «Ideas con vidIQ» por turno en el chat de la Parrilla (apagado por defecto) y «Mejorar con vidIQ» en el paso SEO de la ficha de Publicar (palabra clave, nota del título y 3 alternativas; «Usar» no cambia nada sin pulsarlo). Resultados en `<proyectos>/_sistema/vidiq/`, fuera de toda firma. Simulado con `ESTUDIO_SIMULAR`. **Propios:** `pasos/vidiq.py` y `pasos/prueba_vidiq.py` (nuevos). **Por zonas:** `pasos/claves.py` (la entrada `vidiq` en `_vacio`, `_normalizar`, `_fusionar`, `resumen` y una función `vidiq()`); `pasos/guionista.py` (`herramientas`, `anexos_del_turno`, `ejecutar_simulado`, `Chat.escribir` y `Chat._correr`: el interruptor); en `app.py` un bloque VIDIQ al final (rutas `/api/vidiq/*`) y UNA línea en `_parrilla_chat_mensaje_en_hilo`; en `web/app.js` un bloque VIDIQ al final, UNA línea en `pintarConfig`, UNA en `pasoSeoPublicar` y el interruptor del chat de la Parrilla junto a «Buscar en internet» (y su campo al enviar); un bloque VIDIQ en `web/estilo.css`; `pruebas.sh`/`pruebas.ps1` (una línea); `docs/NOVEDADES.md`, `docs/API.md`, `docs/MANUAL.md`; `prueba_api.py` (una sección) y un tramo al final de `prueba_recorrido.py`. No toca lo reservado por las otras ramas | 25-10-2026 |
-| `medidor-claude-2` | **Claude en el gasto de cada vídeo, tokens sin inflar y tarifas al día** (pedido del dueño, 26-10, tras la revisión de costes: `estado/revision_costes_2026-10-26.md` del Proyecto). (1) La tabla «Coste del vídeo» enseña lo de Claude de ESE vídeo desde `consumo_claude.jsonl` (llamadas, tokens nuevos, de caché, ≈ $ por API y por tarea), con lo del coste del proyecto de respaldo. (2) Los tokens de Claude se cuentan aparte: «nuevos» (entrada + salida + caché creada) y «de caché» (leída, ~10 % del precio), en el vídeo y en el medidor; `reportar_claude` guarda las dos cachés por separado (en `detalle`, sin cambiar `tokens`). (3) `asvs actualizar` pone al día `datos/tarifas.json` si no se ha editado a mano (lo compara con `datos/tarifas.de_fabrica.json`, deja `tarifas.json.anterior`); si se editó, no lo toca y lo dice. Nada que pague, ningún param, ninguna firma. **Por zonas:** `nucleo/coste.py` SOLO `reportar_claude`; `pasos/consumo_claude.py` (`_caja`, `_sumar`, una función `del_video`); en `app.py` `_desglose_de_eventos` (la rama de `claude_cli`) y UNA línea en `coste_en_detalle`; en `web/app.js` la fila de Claude de `tablaDeGasto`, un bloque tras la tabla en `abrirCosteDelVideo` y `tablaConsumoClaude`; `web/estilo.css` (dos reglas en el bloque MEDIDOR DE CLAUDE); `despliegue/asvs` SOLO el tramo de las tarifas en `actualizar` y `despliegue/prueba/prueba_actualizar.sh` (una sección); `pasos/prueba_consumo_claude.py`, `prueba_api.py` (una sección), un escenario al final de `prueba_recorrido.py`; `docs/NOVEDADES.md`, `docs/API.md`. No toca lo reservado por las otras ramas | 26-10-2026 |
+| `limpieza-v51` | **Quitar los restos del autor original y pasar a la versión 5.1** (pedido del dueño, 28-10; pequeña, solo textos y el número): `VERSION = "5.1"` en `app.py`, el pie de `web/app.js` (`PIE_DERECHOS`) y el de la página de acceso, el `User-Agent`, un apartado `## V5.1` arriba de `docs/NOVEDADES.md` (desde ahora las entradas nuevas van debajo de él) y su comprobación en `prueba_recorrido.py`; y los datos y ejemplos con nombres, dominio y carpetas del autor original en `docs/RETOMAR.md`, `herramientas/mudar_proyecto.py` (solo la ayuda), `despliegue/login/pruebas/acceso.js`, comentarios de `despliegue/login/lib/` y `pasos/prueba_cta.py`. Los nombres INTERNOS no se tocan. No cambia ninguna firma ni ninguna ruta | 28-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
 la quita.
@@ -121,7 +121,7 @@ petición del dueño: estaban probadas en el servidor), `rediseno-automatizar`
 (22-10, por delante de `dominio-negocio`, que aún no estaba lista), `dominio-negocio`
 (22-10, adelantada por decisión del dueño), `rediseno-proyectos` (23-10),
 `guion-visual` (24-10, por delante de 6-8, que no estaban listas),
-`guion-visual-2` (25-10), `rediseno-publicar` (25-10), `encargo-limpio` (25-10), `cola-montaje` (25-10), `estados-en-espanol` (26-10), `notas-24oct` (26-10), `medidor-claude` (26-10), `unir-planos` (26-10).
+`guion-visual-2` (25-10), `rediseno-publicar` (25-10), `encargo-limpio` (25-10), `cola-montaje` (25-10), `estados-en-espanol` (26-10), `notas-24oct` (26-10), `medidor-claude` (26-10), `unir-planos` (26-10), `medidor-claude-2` (26-10), `descripcion-planos` (28-10), `insertar-imagen` (28-10), `asistente-ruta` y `quitar-asistente-ruta` (27-10), `costes-menores` (28-10), `nombre-crearia` (28-10).
 
 El orden sale de unir de prueba cada rama con main y con las demás
 (`git merge-tree`, 22-10): primero las que hoy no chocan con nada, y las que
@@ -149,8 +149,11 @@ tienen que encajar piezas de otras, detrás de esas otras.
    `prueba_recorrido.py`).
 14. ~~`medidor-claude`~~ — UNIDA (26-10).
 15. ~~`unir-planos`~~ — UNIDA (26-10).
-16. `medidor-claude-2` — lista (26-10): pruebas y revisión independiente en verde; se une en cuanto esté probada en el servidor. Solo choques de AÑADIR con las abiertas
-   (docs, `prueba_api.py`, `prueba_recorrido.py`).
+16. ~~`medidor-claude-2`~~ — UNIDA (26-10).
+17. ~~`costes-menores`~~ — UNIDA (28-10).
+18. ~~`descripcion-planos`~~ — UNIDA (28-10).
+19. ~~`insertar-imagen`~~ — UNIDA (28-10).
+20. ~~`asistente-ruta`~~ — UNIDA (27-10). 21. ~~`quitar-asistente-ruta`~~ — UNIDA (27-10): el Copiloto de la Ruta corre fuera del Studio (`/opt/ruta-copiloto`).
 
 
 
@@ -408,8 +411,12 @@ La burbuja de abajo a la derecha es `pasos/asistente.py` más las rutas
 
 ## La V2.0: nombre, diseño, guías, novedades y notas
 
-- **El producto se llama «Automatización Contenido Studio»** en todo lo que se
-  ve (`NOMBRE_PRODUCTO` en `app.py`). Los nombres INTERNOS no se cambian:
+- **El producto se llama «CrearIA Studio · Automatización de contenido»** en
+  todo lo que se ve (`NOMBRE_PRODUCTO` y `SUBTITULO_PRODUCTO` en `app.py`; antes
+  «AS Video Studio» y «Automatización Contenido Studio»). La página de acceso
+  (`despliegue/login/public/`) lleva su propia copia del nombre, del logo
+  (`assets/logo.svg` y `favicon.svg`, copias de `web/`) y de la versión en el
+  pie: si cambian, se cambian también ahí. Los nombres INTERNOS no se cambian:
   `/opt/as-video-studio`, el comando `asvs`, los servicios `as-video-*`, el
   repositorio. Renombrarlos rompe las instalaciones que ya funcionan sin que
   nada lo diga.

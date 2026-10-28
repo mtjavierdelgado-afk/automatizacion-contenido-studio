@@ -1,5 +1,10 @@
 # RETOMAR — estado al cerrar el 10-09-2026
 
+> **Documento histórico.** Es el estado del Studio de antes de octubre de 2026,
+> cuando aún tenía otro nombre. Hoy el producto se llama **CrearIA Studio ·
+> Automatización de contenido**; lo de aquí sigue valiendo por los fallos que
+> cuenta y su causa.
+
 **Lo último (10-09, tarde): la guía de inicio y el asistente**, desplegados en
 el VPS (ver §7). Las 23 suites en verde y las herramientas de análisis limpias.
 
@@ -23,13 +28,13 @@ comando `estudio-clave`. Todo en «El acceso: una contraseña, sin usuario» de 
 Para retomar desde un chat sin contexto: este fichero + `CLAUDE.md` (las reglas
 del producto) + `C:\claude_server_workspace\youtube_adrian_saenz\studio-videos-ia\CLAUDE.md`
 (el runbook del VPS: claves, `scripts/vps.sh`, `deploy.sh`, y el apartado
-«AS Video Studio (v2), en `/v2/`»).
+de la v2, en `/v2/`).
 
 ---
 
 ## 1. Qué es esto
 
-**AS Video Studio** = una segunda versión, más simple, del Estudio de vídeo de
+**El Studio** (hoy CrearIA Studio) = una segunda versión, más simple, del Estudio de vídeo de
 `C:\IA\estudio`. Fork independiente, NO una rama: código, datos, venv, motores,
 puerto y servicio propios.
 
@@ -79,7 +84,7 @@ Ver «Lo que NO hay, y no es un olvido» en `CLAUDE.md`.
 4. **El login pasó a ser de las dos versiones** (ver §4).
 
 Los tres primeros están documentados con sus comandos en el runbook del VPS
-(apartado «AS Video Studio (v2)»). El cuarto, en «El login es de las DOS
+(apartado de la v2). El cuarto, en «El login es de las DOS
 versiones».
 
 ---

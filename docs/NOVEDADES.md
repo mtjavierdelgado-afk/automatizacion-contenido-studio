@@ -8,7 +8,77 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
+**Dos ajustes finos del gasto (26 de octubre)**
+- **Imágenes sin detalle de OpenAI**: cuando OpenAI no dice lo que cobró por una
+  imagen, el Studio la calcula con la tabla oficial de gpt-image-2. En calidad
+  baja, apaisada o vertical, son 0,005 $ (antes apuntaba 0,006 $, el precio de
+  la cuadrada). Lo normal es que OpenAI sí lo diga, y entonces manda su cifra.
+- **La voz, sin contar las pausas como texto**: cada pausa (`<break …/>`)
+  cuenta como UN carácter, como cobra Cartesia. Antes contaba como 23. El gasto
+  de voz baja unos céntimos por vídeo. Las demás marcas se siguen contando
+  enteras, porque Cartesia no dice cómo las cobra y es mejor pasarse que quedarse corto.
+- La tabla nueva llega al servidor sola con `asvs actualizar` (si no editaste
+  las tarifas a mano).
+
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
+
+**El nombre nuevo, también en la página de acceso (26 de octubre)**
+- La página donde se pone la contraseña dice **CrearIA Studio · Automatización
+  de contenido**, con el logo de la C y su icono en la pestaña, y el pie con
+  «© 2026 Agencia Redes Botánica · v3.1». Antes seguía con el nombre antiguo y
+  «V2.0».
+- El asistente se presenta con el nombre nuevo, y también el letrero de
+  `asvs estado` y del instalador.
+
+**Lo que se pidió dibujar en cada imagen, en español (26 de octubre)**
+- En **Imágenes**, debajo de cada imagen sale **«Lo que se pidió dibujar»**: una
+  o dos frases en español con lo que se le pidió al dibujante (el sitio, quién
+  sale y qué hace, el encuadre). Sirve para ver de un vistazo por qué una imagen
+  no cuadra con la de al lado.
+- Lo escribe Claude solo al abrir la pantalla, la primera vez y solo para las
+  imágenes que no lo tienen (unas tres llamadas para un vídeo de cuatro
+  minutos, con tu membresía). **No dibuja nada ni cuesta dinero**, y no deja
+  ninguna imagen por rehacer.
+- **«Ver el original en inglés»** despliega el texto que de verdad se manda a
+  dibujar, que sigue en inglés porque el dibujante lo entiende mejor.
+- Si una imagen está marcada como vieja, la frase es lo que se pide ahora, no
+  con lo que se dibujó.
+
+**Claude en el coste de cada vídeo, tokens sin inflar y tarifas al día (26 de octubre)**
+- **«Coste del vídeo» enseña lo de Claude de ese vídeo**: cuántas llamadas, los
+  tokens y lo que costaría por API, y en «Claude en este vídeo, por tarea» en qué
+  se gastaron (guion, ortografía, revisor…). Con la membresía no se cobra aparte.
+- **Los tokens de Claude ya no salen inflados**: se separan los **nuevos**
+  (lo que de verdad pesa) de los **leídos de caché**, que cuestan ~10 %. Antes una
+  llamada pequeña aparecía con 30 000–40 000 tokens. Igual en el medidor de
+  Configuración.
+- **Las tarifas se ponen al día solas** con `asvs actualizar`: si OpenAI o
+  Cartesia cambian sus precios, el servidor se entera. Si las cambiaste a mano,
+  no se tocan y te lo dice.
+
+**Arreglo: «Montar el vídeo» pedía dibujar imágenes que ya estaban (26 de octubre)**
+- En los vídeos con **guion visual** (aprobado, o con las líneas que trae la
+  Parrilla), «Montar el vídeo» avisaba «hay que dibujar antes N imágenes que han
+  quedado viejas» y ponía su precio, aunque todas estuvieran dibujadas y al día.
+  Era un fallo de la cuenta: no contaba lo ya dibujado. Rehacer las imágenes no
+  lo quitaba, y por eso el aviso volvía en cada versión.
+- Ahora cuenta lo que ya está dibujado: con las imágenes al día, montar dice
+  «gratis», y si falta alguna pide solo esa.
+**Insertar una imagen nueva dentro de otra (26 de octubre)**
+- En **Imágenes**, «Ajustar esta imagen» → **«Insertar una imagen aquí…»**:
+  pulsas la palabra de la frase donde empieza la imagen nueva y escribes en
+  español qué quieres que se vea. Claude lo pasa al inglés para el dibujante.
+- La imagen de antes **conserva su dibujo** y se queda con lo que se dice
+  antes de esa palabra; la nueva, con el mismo sitio y estilo, se queda con el
+  resto. Se llama como la de antes con una letra (**S004B**): los números de
+  las demás y tus notas no se mueven.
+- **Se paga una imagen** (unos 0,05 $ en calidad baja, 0,08 $ en media): te
+  pregunta antes con el precio. Después hay que volver a montar el vídeo
+  (gratis).
+- **«Deshacer · quitar esta imagen nueva»** es gratis: la de antes recupera
+  toda su voz con su imagen de siempre.
+- No se puede insertar en una cartela, en la continuación de otra imagen, en
+  una imagen insertada ni en una que ya lleva la voz de una quitada.
 
 **Quitar una imagen o igualarla con la de al lado (26 de octubre)**
 - **«Quitar esta imagen»** (en cada diapositiva de Imágenes, «Ajustar esta
@@ -22,6 +92,7 @@ vídeos, estilos, claves y contraseña no se tocan.
   rehacer esa imagen con la de al lado como referencia (mismo sitio, acabados y
   luz). Se paga solo cuando la rehagas, como cualquier nota.
 - No se pueden quitar las cartelas ni pasar la voz a una cartela.
+
 **Tus notas de mejoras (24 de octubre)**
 - **El asistente habla en español de Latinoamérica**: tutea, nada de
   «vosotros», «vale», «ordenador» ni «móvil».

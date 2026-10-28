@@ -134,6 +134,12 @@ def responder(entrada):
         que = _entre(entrada, "imagen_nueva")
         return {"direccion": "" if "ROMPER" in que else "close-up, EN: " + que,
                 "personas": "persona" in que}
+    if "<describir_en_espanol>" in entrada:
+        # lo que se pidió dibujar en cada plano (rama descripcion-planos): «DESC:»
+        # y el principio del prompt; «ROMPER» en el prompt, sin respuesta
+        textos = re.findall(r'<t id="([^"]+)">(.*?)</t>', _entre(entrada, "describir_en_espanol"), re.S)
+        return {"descripciones": {tid: "DESC: " + texto.strip()[:60] for tid, texto in textos
+                                  if "ROMPER" not in texto}}
     if "<pasar_al_ingles>" in entrada:
         # el cambio reescrito en español, de vuelta al inglés que se manda
         texto = _entre(entrada, "pasar_al_ingles")

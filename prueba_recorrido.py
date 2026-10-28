@@ -9117,6 +9117,58 @@ def medidor_de_claude(navegador, datos):
 
 
 @escenario
+def descripcion_de_cada_plano(navegador, datos):
+    """Rama descripcion-planos (26-10): en Imágenes, debajo de cada imagen, «Lo
+    que se pidió dibujar» en español (lo escribe solo el CLI falso al abrir:
+    «DESC: …»), con el prompt en inglés plegado. No dibuja nada ni deja ninguna
+    imagen por rehacer."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    fichero = os.path.join(datos["proyectos"], pid, "descripciones.json")
+    if os.path.exists(fichero):
+        os.remove(fichero)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    escenas = previa.get("escenas") or []
+    elegida = next((e for e in escenas if e.get("prompt") and e.get("imagen")), None)
+    ok(elegida is not None, "hay un plano con imagen y prompt")
+    if elegida is None:
+        return
+    ok(not elegida.get("descripcion"), "sin descripciones.json, el plano aún no trae la suya")
+    viejas = sorted(e["id"] for e in escenas if e.get("obsoleta"))
+    _r, assets = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    for ancho, alto, nombre in ((1280, 900, "descripcion"), (390, 844, "descripcion móvil")):
+        pg = Pagina(navegador, datos, ancho=ancho, alto=alto, nombre=nombre)
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+        pg.p.wait_for_function("() => (PREVIA.ficha || {}).escenas", timeout=20000)
+        pg.js(f"PREVIA.i = PREVIA.ficha.escenas.findIndex(x => x.id === '{elegida['id']}'); repintarVideo();")
+        ok(pg.esperar(".plano-descripcion .meta", "Lo que se pidió dibujar", 10),
+           f"[{ancho}px] la diapositiva trae «Lo que se pidió dibujar»")
+        ok(pg.esperar(".plano-descripcion .plano-descripcion-texto", "DESC:", 25),
+           f"[{ancho}px] y se escribe sola en español al abrir")
+        ok(pg.visible(".plano-descripcion-ingles summary", "Ver el original en inglés"),
+           f"[{ancho}px] con el original en inglés plegado")
+        pg.pulsar(".plano-descripcion-ingles summary", "Ver el original en inglés")
+        ok(pg.visible(".plano-descripcion-prompt", elegida["prompt"][:30]),
+           f"[{ancho}px] que se despliega con el prompt de ese plano")
+        desborde = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        ok(desborde <= 2, f"[{ancho}px] sin salirse por los lados ({desborde}px)")
+        pg.captura("descripcion_de_cada_plano" + ("_movil" if ancho < 600 else ""), entera=False)
+        pg.sin_errores(f"la descripción del plano a {ancho}px")
+        pg.cerrar()
+    _r, ficha = api.get(f"/api/proyectos/{pid}/planos/descripciones")
+    ok(ficha.get("faltan") == 0 and ficha.get("total"),
+       f"el servidor ya no echa en falta ninguna descripción ({ficha.get('faltan')} de {ficha.get('total')})")
+    ok(os.path.exists(fichero), "y las guarda en descripciones.json del proyecto")
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    ahora = sorted(e["id"] for e in previa.get("escenas") or [] if e.get("obsoleta"))
+    ok(ahora == viejas, f"describir no deja ninguna imagen por rehacer ({viejas} -> {ahora})")
+    _r, assets_despues = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    ok((assets_despues or {}).get("firma") == (assets or {}).get("firma") and (assets or {}).get("firma"),
+       "ni mueve la firma de las imágenes")
+
+
+@escenario
 def claude_en_el_coste_del_video(navegador, datos):
     """Rama medidor-claude-2 (26-10): en «Coste del vídeo» la fila de Claude
     dice los tokens nuevos (y los de caché aparte, si hay), y en Configuración

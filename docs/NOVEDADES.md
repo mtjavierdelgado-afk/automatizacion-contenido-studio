@@ -8,7 +8,33 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
+**Dos ajustes finos del gasto (26 de octubre)**
+- **Imágenes sin detalle de OpenAI**: cuando OpenAI no dice lo que cobró por una
+  imagen, el Studio la calcula con la tabla oficial de gpt-image-2. En calidad
+  baja, apaisada o vertical, son 0,005 $ (antes apuntaba 0,006 $, el precio de
+  la cuadrada). Lo normal es que OpenAI sí lo diga, y entonces manda su cifra.
+- **La voz, sin contar las pausas como texto**: cada pausa (`<break …/>`)
+  cuenta como UN carácter, como cobra Cartesia. Antes contaba como 23. El gasto
+  de voz baja unos céntimos por vídeo. Las demás marcas se siguen contando
+  enteras, porque Cartesia no dice cómo las cobra y es mejor pasarse que quedarse corto.
+- La tabla nueva llega al servidor sola con `asvs actualizar` (si no editaste
+  las tarifas a mano).
+
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
+
+**Lo que se pidió dibujar en cada imagen, en español (26 de octubre)**
+- En **Imágenes**, debajo de cada imagen sale **«Lo que se pidió dibujar»**: una
+  o dos frases en español con lo que se le pidió al dibujante (el sitio, quién
+  sale y qué hace, el encuadre). Sirve para ver de un vistazo por qué una imagen
+  no cuadra con la de al lado.
+- Lo escribe Claude solo al abrir la pantalla, la primera vez y solo para las
+  imágenes que no lo tienen (unas tres llamadas para un vídeo de cuatro
+  minutos, con tu membresía). **No dibuja nada ni cuesta dinero**, y no deja
+  ninguna imagen por rehacer.
+- **«Ver el original en inglés»** despliega el texto que de verdad se manda a
+  dibujar, que sigue en inglés porque el dibujante lo entiende mejor.
+- Si una imagen está marcada como vieja, la frase es lo que se pide ahora, no
+  con lo que se dibujó.
 
 **Claude en el coste de cada vídeo, tokens sin inflar y tarifas al día (26 de octubre)**
 - **«Coste del vídeo» enseña lo de Claude de ese vídeo**: cuántas llamadas, los

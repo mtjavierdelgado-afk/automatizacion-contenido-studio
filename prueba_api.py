@@ -7893,6 +7893,95 @@ def probar_quitar_imagen():
         p6.plan_actual, servidor._pasada_sin_dibujar = real_plan, real_pasada
 
 
+def probar_descripcion_planos():
+    """Rama descripcion-planos (26-10-2026): lo que se pidió dibujar, en español.
+
+    En este proceso: el plan es un doble y `describir` también. Lo que se mira:
+    que pide solo lo que falta, una vez, que «auto» no se relanza tras un
+    error y el botón sí, que va a `descripciones.json` y NO a params (ni una
+    firma se mueve), y que un prompt que cambia vuelve a faltar."""
+    seccion("DESCRIPCIÓN DE CADA PLANO, EN ESPAÑOL")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    p6 = servidor.PASOS_MODULOS.p6_assets
+    mod = servidor._traducciones()
+    base = tempfile.mkdtemp(prefix="estudio_describir_")
+    servidor.fijar_raiz_proyectos(base)
+    plan = {"escenas": [
+        {"id": "S001", "narracion": "Este baño era el más feo.", "prompt": "A small grey bathroom, wide shot"},
+        {"id": "S002", "narracion": "Y llega el cambio.", "prompt": "",
+         "cartela": {"plantilla": "cifra", "fondo": "negro"}},
+        {"id": "S003", "narracion": "Así quedó.", "prompt": "The same bathroom, renovated"},
+        {"id": "S004", "narracion": "Así quedó.", "prompt": "The same bathroom, renovated", "sigue_a": "S003"}]}
+    pedidos = []
+    respuesta = {"modo": "bien"}
+
+    def describir_falso(prompts, cwd=None):
+        pedidos.append(list(prompts))
+        if respuesta["modo"] == "mal":
+            raise mod.ErrorTraduccion("la sesión de Claude no responde")
+        return {pr: "ES " + pr for pr in prompts}
+
+    real_plan, real_describir = p6.plan_actual, mod.describir
+    p6.plan_actual = lambda *_a, **_k: plan
+    mod.describir = describir_falso
+
+    def esperar(pid):
+        for _ in range(100):
+            if (servidor._DESCRIBIENDO.get(pid) or {}).get("estado") != "pensando":
+                return
+            time.sleep(0.05)
+
+    try:
+        pid = Proyecto.crear(base, "describir planos").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        firma = ctx.estado.firma("assets")
+        params = json.loads(json.dumps(ctx.estado.params("assets") or {}))
+        codigo, ficha = _llamar(servidor.leer_descripciones_planos, pid)
+        igual((codigo, ficha.get("faltan"), ficha.get("total"), ficha.get("descripciones")),
+              (200, 2, 2, {}), "LEER: dos prompts distintos (la cartela no, la continuación es el mismo)")
+        respuesta["modo"] = "mal"
+        codigo, ficha = _llamar(servidor.describir_planos, pid, {"auto": True})
+        igual(codigo, 200, "DESCRIBIR: arranca")
+        esperar(pid)
+        codigo, ficha = _llamar(servidor.leer_descripciones_planos, pid)
+        igual((ficha.get("estado"), "no responde" in str(ficha.get("error"))), ("error", True),
+              "DESCRIBIR: un error se queda con su motivo")
+        _llamar(servidor.describir_planos, pid, {"auto": True})
+        igual(len(pedidos), 1, "DESCRIBIR: «auto» tras un error no vuelve a llamar a Claude")
+        respuesta["modo"] = "bien"
+        _llamar(servidor.describir_planos, pid, {})
+        esperar(pid)
+        igual(sorted(pedidos[-1]), ["A small grey bathroom, wide shot", "The same bathroom, renovated"],
+              "DESCRIBIR: el botón sí, con cada prompt una vez")
+        codigo, ficha = _llamar(servidor.leer_descripciones_planos, pid)
+        igual((ficha.get("estado"), ficha.get("faltan"), ficha.get("descripciones")),
+              ("listo", 0, {"S001": "ES A small grey bathroom, wide shot",
+                            "S003": "ES The same bathroom, renovated",
+                            "S004": "ES The same bathroom, renovated"}),
+              "LEER: todas descritas, también la continuación")
+        igual(ficha.get("prompts", {}).get("S003"), "The same bathroom, renovated",
+              "LEER: cada descripción viaja con el prompt para el que se escribió")
+        ok(os.path.exists(os.path.join(ctx.proyecto.raiz, "descripciones.json")),
+           "DESCRIBIR: van a descripciones.json del proyecto")
+        igual(ctx.estado.firma("assets"), firma, "DESCRIBIR: la firma de assets NO se mueve")
+        igual(ctx.estado.params("assets") or {}, params, "DESCRIBIR: ni un param cambia (regla 1)")
+        _llamar(servidor.describir_planos, pid, {"auto": True})
+        igual(len(pedidos), 2, "DESCRIBIR: sin nada que falte no se llama a Claude")
+        plan["escenas"][0]["prompt"] = "A small grey bathroom, close-up of the sink"
+        codigo, ficha = _llamar(servidor.leer_descripciones_planos, pid)
+        igual((ficha.get("faltan"), "S001" in ficha.get("descripciones")), (1, False),
+              "LEER: un prompt que cambia vuelve a faltar (nunca la de otro prompt)")
+        _llamar(servidor.describir_planos, pid, {"auto": True})
+        esperar(pid)
+        igual(pedidos[-1], ["A small grey bathroom, close-up of the sink"], "DESCRIBIR: y se pide solo ese")
+    finally:
+        p6.plan_actual, mod.describir = real_plan, real_describir
+
+
 def probar_insertar_imagen():
     """Rama insertar-imagen (26-10-2026): «Insertar una imagen aquí…» y deshacer.
 
@@ -8430,6 +8519,7 @@ def main():
         probar_tipo_relato()
         probar_relato_en_espanol()
         probar_quitar_imagen()
+        probar_descripcion_planos()
         probar_insertar_imagen()
         probar_dominios()
         probar_guion_visual()

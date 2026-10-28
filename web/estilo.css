@@ -3354,6 +3354,24 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
   .plano-texto-cab a.boton-enlace { flex: 1 1 auto; text-align: center; }
 }
 
+/* ---- DESCRIPCIÓN DEL PLANO (rama descripcion-planos, 26-10): lo que se pidió
+   dibujar, en español, y el prompt en inglés plegado debajo */
+.plano-descripcion { display: flex; flex-direction: column; gap: 6px; margin-top: 10px;
+  padding: 10px 14px; border: 1px solid var(--linea); border-radius: 10px;
+  background: var(--panel); }
+.plano-descripcion-texto { margin: 0; color: var(--texto); font-size: 16px; line-height: 1.45;
+  overflow-wrap: anywhere; }
+.plano-descripcion-error { color: var(--malo); }
+.plano-descripcion-ingles summary { cursor: pointer; color: var(--tenue);
+  font-size: 13px; }
+.plano-descripcion-prompt { margin-top: 6px; font-size: 13px; line-height: 1.45;
+  color: var(--tenue); max-height: 12em; overflow-y: auto;
+  overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .plano-descripcion { padding: 8px 10px; }
+  .plano-descripcion-texto { font-size: 15px; }
+}
+
 /* ==================================================== REGLAS DEL ESTILO
    Rama `reglas-estilo` (19-10-2026): las tarjetas de cada regla en la pantalla
    del estilo. */

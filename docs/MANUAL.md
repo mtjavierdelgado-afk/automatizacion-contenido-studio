@@ -421,6 +421,12 @@ cuánto tardarán. Se dibujan **una detrás de otra** en el servidor: puedes
 cerrar o recargar la página y sigue. Si escribes **varias notas para la misma
 imagen**, se juntan y se paga **una**.
 
+**Lo que se pidió dibujar**: debajo de la imagen, una o dos frases en español
+con lo que se le pidió al dibujante (el sitio, quién sale, qué hace, el
+encuadre). Las escribe Claude solo al abrir Imágenes, sin coste ni redibujar
+nada; **Ver el original en inglés** enseña el texto que de verdad se manda. En
+una imagen marcada como vieja, la frase es lo que se pide ahora.
+
 **Ajustar esta imagen** (cuando dos imágenes seguidas no casan):
 **Igualar con la anterior / la siguiente** te escribe la nota para rehacerla
 con la de al lado como referencia (se paga al rehacerla). **Quitar esta

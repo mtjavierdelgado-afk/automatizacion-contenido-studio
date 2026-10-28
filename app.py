@@ -7580,6 +7580,100 @@ def devolver_imagen(pid: str, cuerpo: dict = Body(default=None)):
     return dict(ficha, devuelta=True)
 
 
+# --------------------------------- DESCRIPCIÓN DE CADA PLANO (descripcion-planos)
+#
+# Rama descripcion-planos (26-10-2026, pedido del dueño). Debajo de cada imagen,
+# en Imágenes, una o dos frases en español con lo que su prompt pide dibujar.
+# El prompt sigue en inglés y no se toca: la descripción la escribe Claude
+# (membresía) y va a `<proyecto>/descripciones.json` por la huella del prompt,
+# FUERA de params y firmas (regla 1). Si el prompt cambia, su descripción vieja
+# deja de casar sola y se pide otra; nunca se enseña la de otro prompt.
+
+_DESCRIBIENDO = {}
+_LOCK_DESCRIBIENDO = threading.Lock()
+
+
+def _prompts_de_planos(plan):
+    """[(sid, prompt en inglés)] de los planos con imagen, en orden."""
+    salida = []
+    for escena in plan.get("escenas") or []:
+        sid, prompt = str(escena.get("id") or ""), " ".join(str(escena.get("prompt") or "").split())
+        if sid and prompt:
+            salida.append((sid, prompt))
+    return salida
+
+
+def _ficha_descripciones(ctx, plan=None):
+    """{descripciones: {sid: español}, faltan, total, estado, error?}."""
+    if plan is None:
+        plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    mod = _traducciones()
+    pares = _prompts_de_planos(plan)
+    hechas = mod.de(ctx.proyecto.raiz, [p for _s, p in pares], mod.FICHERO_DESCRIPCIONES)
+    descripciones = {sid: hechas.get(p) or "" for sid, p in pares}
+    with _LOCK_DESCRIBIENDO:
+        marcha = dict(_DESCRIBIENDO.get(ctx.id) or {})
+    ficha = {"descripciones": {s: d for s, d in descripciones.items() if d},
+             # el prompt de cada plano: la pantalla pone la descripción junto
+             # al prompt para el que se escribió, nunca junto a otro
+             "prompts": dict(pares),
+             "faltan": len({p for s, p in pares if not descripciones.get(s)}),
+             "total": len({p for _s, p in pares}),
+             "estado": marcha.get("estado") or "quieto"}
+    if marcha.get("error"):
+        ficha["error"] = marcha["error"]
+    return ficha
+
+
+@app.get("/api/proyectos/{pid}/planos/descripciones")
+def leer_descripciones_planos(pid: str):
+    """Lo que se pidió dibujar en cada plano, en español. -> la ficha"""
+    return _ficha_descripciones(contexto(pid))
+
+
+@app.post("/api/proyectos/{pid}/planos/describir", status_code=202)
+def describir_planos(pid: str, cuerpo: dict = Body(default=None)):
+    """Pide a Claude, en un hilo, la descripción en español de los planos que
+    no la tienen. {auto?: bool}: lo pide la pantalla sola al abrir Imágenes, y
+    entonces no se relanza tras un error (una sesión de Claude caída no se
+    reintenta en cada repintado); el botón «Reintentar» sí. No dibuja ni
+    cambia nada del vídeo. -> la ficha, con `estado` «pensando» si arrancó."""
+    ctx = contexto(pid)
+    auto = bool(_cuerpo(cuerpo).get("auto"))
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    mod = _traducciones()
+    raiz = ctx.proyecto.raiz
+    faltan = mod.faltan(raiz, [p for _s, p in _prompts_de_planos(plan)],
+                        mod.FICHERO_DESCRIPCIONES)
+    with _LOCK_DESCRIBIENDO:
+        previo = dict(_DESCRIBIENDO.get(ctx.id) or {})
+        lanzar = (bool(faltan) and previo.get("estado") != "pensando"
+                  and not (auto and previo.get("estado") == "error"))
+        if lanzar:
+            _DESCRIBIENDO[ctx.id] = {"estado": "pensando"}
+
+    def hilo():
+        try:
+            hechas = mod.describir(faltan, cwd=RAIZ_ESTUDIO)
+            mod.guardar(raiz, hechas, mod.FICHERO_DESCRIPCIONES)
+            if not hechas:
+                raise mod.ErrorTraduccion("Claude no ha devuelto ninguna descripción; "
+                                          "vuelve a pedirla.")
+            ctx.bitacora.anotar("planos_descritos", "assets", {"planos": len(hechas)})
+            ficha = {"estado": "listo"}
+            if len(hechas) < len(faltan):
+                ficha = {"estado": "error", "error": f"Faltan {len(faltan) - len(hechas)} "
+                         "descripciones que Claude no devolvió; vuelve a pedirlas."}
+        except Exception as fallo:                          # noqa: BLE001
+            ficha = {"estado": "error", "error": _error_para_persona(fallo)}
+        with _LOCK_DESCRIBIENDO:
+            _DESCRIBIENDO[ctx.id] = ficha
+
+    if lanzar:
+        threading.Thread(target=hilo, daemon=True, name=f"describir-{ctx.id}").start()
+    return _ficha_descripciones(ctx, plan)
+
+
 @app.get("/api/proyectos/{pid}/previsualizacion")
 def leer_previsualizacion(pid: str):
     """Las piezas para ver el video sin montarlo. -> {escenas, audio, ...}"""
@@ -7597,6 +7691,8 @@ def leer_previsualizacion(pid: str):
     # lo mismo, y uno de los dos viejo.
     params_callouts = ctx.estado.params("callouts") or {}
     medir, banda = _medidor_de_subtitulo(ctx, plan)
+    # lo que se pidió dibujar, en español (rama descripcion-planos)
+    descritos = _ficha_descripciones(ctx, plan)["descripciones"]
     escenas = []
     for escena in escenas_plan:
         sid = str(escena.get("id") or "")
@@ -7641,6 +7737,10 @@ def leer_previsualizacion(pid: str):
             # «Quitar esta imagen» (a qué vecinos puede ir su voz) y la voz de
             # los quitados que lleva (rama unir-planos)
             **_quitar_en_la_previa(plan, escena),
+            # lo que su prompt pide dibujar, en español, y el prompt en inglés
+            # (rama descripcion-planos; vacíos en una cartela)
+            "descripcion": descritos.get(sid) or "",
+            "prompt": " ".join(str(escena.get("prompt") or "").split()),
             # EL CUADRO YA COMPUESTO, cuando existe, y manda sobre todo lo
             # demas. `p7_callouts.previsualizar` compone lo MISMO que renderiza
             # `p8_render` --la imagen dentro del transform de camara, la capa

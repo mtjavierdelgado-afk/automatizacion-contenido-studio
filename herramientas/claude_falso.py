@@ -128,6 +128,12 @@ def responder(entrada):
         # texto con «ES:» delante, para que la pantalla enseñe que es la traducción
         textos = re.findall(r'<t id="([^"]+)">(.*?)</t>', _entre(entrada, "traducir_al_espanol"), re.S)
         return {"traducciones": {tid: "ES: " + texto.strip() for tid, texto in textos}}
+    if "<describir_en_espanol>" in entrada:
+        # lo que se pidió dibujar en cada plano (rama descripcion-planos): «DESC:»
+        # y el principio del prompt; «ROMPER» en el prompt, sin respuesta
+        textos = re.findall(r'<t id="([^"]+)">(.*?)</t>', _entre(entrada, "describir_en_espanol"), re.S)
+        return {"descripciones": {tid: "DESC: " + texto.strip()[:60] for tid, texto in textos
+                                  if "ROMPER" not in texto}}
     if "<pasar_al_ingles>" in entrada:
         # el cambio reescrito en español, de vuelta al inglés que se manda
         texto = _entre(entrada, "pasar_al_ingles")

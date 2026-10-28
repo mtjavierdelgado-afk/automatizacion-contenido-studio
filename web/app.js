@@ -13620,6 +13620,120 @@ function textoDelPlano(e) {
   return caja;
 }
 
+/* LO QUE SE PIDIÓ DIBUJAR, EN ESPAÑOL (rama descripcion-planos, 26-10-2026).
+ *
+ * Debajo de la imagen, una o dos frases en español con lo que su prompt pide
+ * dibujar, y el prompt en inglés plegado debajo. Las escribe Claude (membresía)
+ * al abrir Imágenes, solo las que faltan, y viven en `descripciones.json` del
+ * proyecto: FUERA de params y firmas, así que pedirlas no redibuja nada.
+ * `DESCRIBIR.autoDe` es la ficha de la previa para la que ya se pidieron solas:
+ * una ficha nueva (otro corte, otra versión) las vuelve a pedir, y el servidor
+ * no relanza un «auto» tras un error. */
+const DESCRIBIR = { pid: '', estado: '', error: '', siguiendo: false, autoDe: null, vuelta: 0 };
+
+function aplicarDescripciones(pid, ficha) {
+  if (!PREVIA.ficha || PREVIA.pid !== pid) return;
+  DESCRIBIR.pid = pid;
+  DESCRIBIR.estado = ficha.estado || '';
+  DESCRIBIR.error = ficha.error || '';
+  /* CON SU PROMPT: la descripción va junto al prompt para el que se escribió.
+     Si el del plano cambió sin recargar la previa, se ponen los dos nuevos. */
+  const dadas = ficha.descripciones || {};
+  const prompts = ficha.prompts || {};
+  (PREVIA.ficha.escenas || []).forEach(x => {
+    if (!(x.id in prompts)) return;
+    x.prompt = prompts[x.id];
+    x.descripcion = dadas[x.id] || '';
+  });
+}
+
+async function describirPlanos(auto) {
+  const pid = PREVIA.pid;
+  if (!pid) return;
+  if (!auto) { DESCRIBIR.pid = pid; DESCRIBIR.estado = 'pensando'; DESCRIBIR.error = ''; repintarVideo(); }
+  try {
+    const ficha = await pedir(`${API.proyecto(pid)}/planos/describir`,
+      { method: 'POST', cuerpo: { auto: !!auto } });
+    aplicarDescripciones(pid, ficha);
+    if (ficha.estado === 'pensando') seguirDescripciones(pid);
+  } catch (err) {
+    if (PREVIA.pid === pid) { DESCRIBIR.pid = pid; DESCRIBIR.estado = 'error'; DESCRIBIR.error = err.message; }
+  }
+  repintarVideo();
+}
+
+/* Se pregunta cada dos segundos y medio hasta que Claude termina. Un corte de
+   red no deja la pantalla «escribiendo» para siempre: se reintenta con más
+   espera y, pasados unos intentos, se suelta con su aviso. */
+function seguirDescripciones(pid) {
+  if (DESCRIBIR.siguiendo) return;
+  DESCRIBIR.siguiendo = true;
+  /* UNA SOLA VUELTA VIVA: cambiar de vídeo sube el turno y la de antes se
+     para sola, aunque se vuelva al mismo vídeo antes de su siguiente pregunta */
+  DESCRIBIR.vuelta += 1;
+  const turno = DESCRIBIR.vuelta;
+  let fallos = 0;
+  const vuelta = async () => {
+    if (turno !== DESCRIBIR.vuelta) return;
+    if (PREVIA.pid !== pid || videoAbierto().pid !== pid) { DESCRIBIR.siguiendo = false; return; }
+    try {
+      const ficha = await pedir(`${API.proyecto(pid)}/planos/descripciones`);
+      if (turno !== DESCRIBIR.vuelta) return;
+      fallos = 0;
+      aplicarDescripciones(pid, ficha);
+      if (ficha.estado === 'pensando') { setTimeout(vuelta, 2500); return; }
+      DESCRIBIR.siguiendo = false;
+    } catch (_err) {
+      if (turno !== DESCRIBIR.vuelta) return;
+      fallos += 1;
+      if (fallos < 6 && PREVIA.pid === pid) { setTimeout(vuelta, 2500 * fallos); return; }
+      DESCRIBIR.siguiendo = false;
+      DESCRIBIR.estado = 'error';
+      DESCRIBIR.error = 'Se ha perdido la conexión con el Studio mientras se escribían: '
+        + 'recarga la página para ver cómo quedó.';
+    }
+    repintarVideo();
+  };
+  setTimeout(vuelta, 2500);
+}
+
+function descripcionDelPlano(e) {
+  const escenas = (PREVIA.ficha || {}).escenas || [];
+  if (DESCRIBIR.pid !== PREVIA.pid) {
+    DESCRIBIR.pid = PREVIA.pid; DESCRIBIR.estado = ''; DESCRIBIR.error = ''; DESCRIBIR.siguiendo = false;
+    DESCRIBIR.vuelta += 1; // la vuelta del otro vídeo se para
+  }
+  // SOLAS, UNA VEZ POR FICHA, aunque se esté mirando una cartela: se piden
+  // después de pintar, no en mitad
+  if (PREVIA.ficha && DESCRIBIR.autoDe !== PREVIA.ficha && escenas.some(x => x.prompt && !x.descripcion)) {
+    DESCRIBIR.autoDe = PREVIA.ficha;
+    setTimeout(() => describirPlanos(true), 0);
+  }
+  if (!e || !e.prompt) return null;
+  const caja = h('div', { clase: 'plano-descripcion', datos: { plano: e.id } },
+    h('span', { clase: 'meta' }, 'Lo que se pidió dibujar'));
+  if (e.descripcion) {
+    caja.appendChild(h('p', { clase: 'plano-descripcion-texto' }, e.descripcion));
+    if (e.obsoleta) {
+      caja.appendChild(h('div', { clase: 'meta' },
+        'Es lo que se pide ahora: esta imagen se dibujó con un texto anterior.'));
+    }
+  } else if (DESCRIBIR.estado === 'pensando') {
+    caja.appendChild(h('div', { clase: 'meta plano-descripcion-espera' },
+      'Claude lo está escribiendo en español…'));
+  } else {
+    caja.appendChild(h('div', { clase: 'fila' },
+      DESCRIBIR.estado === 'error' && DESCRIBIR.error
+        ? h('span', { clase: 'meta plano-descripcion-error' }, DESCRIBIR.error) : null,
+      h('button', { clase: 'mini', type: 'button', onclick: () => describirPlanos(false) },
+        DESCRIBIR.estado === 'error' ? 'Reintentar' : 'Verlo en español')));
+  }
+  caja.appendChild(h('details', { clase: 'plano-descripcion-ingles' },
+    h('summary', {}, 'Ver el original en inglés'),
+    h('div', { clase: 'plano-descripcion-prompt' }, e.prompt)));
+  return caja;
+}
+
 /* Lo que se cuelga debajo de la imagen: la cabecera con las descargas y el
    botón de ocultar, y el cuadro con el texto si se quiere ver. */
 function descargasYTextoDelPlano(e) {
@@ -13718,6 +13832,7 @@ function vistaPreviaLight() {
   engancharSwipePrevia(marco);
   caja.appendChild(marco);
   caja.appendChild(descargasYTextoDelPlano(e)); // descargar y leer lo que dice (imagenes-texto)
+  const pedido = descripcionDelPlano(e); if (pedido) caja.appendChild(pedido); // en español (descripcion-planos)
 
   /* LOS MANDOS. La flecha derecha es el gesto principal —pasar de escena y
      oírla— así que va grande y también en el teclado. */

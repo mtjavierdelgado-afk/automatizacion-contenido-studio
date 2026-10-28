@@ -10,7 +10,7 @@ todas esas rutas apuntando al disco de la maquina de origen.
 Copiar y reemplazar el texto del JSON tampoco vale, y por dos motivos
 distintos:
 
-1. En el fichero las barras van escapadas (`C:\\\\IA\\\\estudio`) y en memoria no,
+1. En el fichero las barras van escapadas (`C:\\\\Estudio`) y en memoria no,
    asi que un `str.replace` sobre el texto acierta unas veces y otras no. Por
    eso se muda con `nucleo.proyecto._mudar_rutas`, que recorre la estructura.
 

@@ -25,7 +25,7 @@ factura. Hizo falta: `prueba_rehacer_de_verdad` se calculaba a mano el nombre
 del fichero de la cache, el codigo le anadio `tamano` a la firma, la copia se
 quedo atras y la llamada siguio camino hasta OpenAI.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_piezas.py
+    python pasos/prueba_piezas.py
 """
 import io
 import json

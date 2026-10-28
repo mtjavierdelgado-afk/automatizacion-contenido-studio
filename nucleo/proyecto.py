@@ -3,7 +3,7 @@ Proyecto del Estudio de Video: una carpeta en disco con su configuracion.
 
     from nucleo.proyecto import Proyecto
 
-    p = Proyecto.crear(r"C:\\IA\\estudio\\proyectos", "Caso Meridiano")
+    p = Proyecto.crear(r"proyectos", "Caso Meridiano")
     p.ruta("assets", "reparto")          -> <raiz>/assets/reparto
     p.ruta_paso("guion")                 -> <raiz>/pasos/guion/v3   (version activa)
     p.ruta_trabajo("guion")              -> <raiz>/pasos/guion/trabajo
@@ -373,7 +373,7 @@ def _mudar_rutas(dato, desde, hasta):
 
     Recorre la estructura entera y no hace un reemplazo sobre el texto del JSON,
     y la diferencia importa: en el fichero las barras van escapadas
-    (`C:\\IA\\estudio`) y en memoria no, asi que un `str.replace` sobre el texto
+    (`C:\\Estudio`) y en memoria no, asi que un `str.replace` sobre el texto
     acierta unas veces y otras no -- que es peor que fallar siempre.
 
     Compara en minusculas porque Windows no distingue mayusculas en las rutas y

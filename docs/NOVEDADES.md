@@ -8,6 +8,17 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
+## V5.1 · octubre de 2026
+
+**El Studio pasa a la versión 5.1 (28 de octubre)**
+- La versión se ve en el pie del Studio, en la página de acceso y en
+  Configuración → Novedades. Lo de debajo de este apartado es lo que trajo la 3.1.
+- Se han quitado del código los restos del proyecto en el que se basó al
+  principio: nombres, dominio, servidor y carpetas de su autor en ejemplos,
+  pruebas, comentarios y documentos. No cambia nada de lo que hace el Studio.
+
+## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
+
 **Dos ajustes finos del gasto (26 de octubre)**
 - **Imágenes sin detalle de OpenAI**: cuando OpenAI no dice lo que cobró por una
   imagen, el Studio la calcula con la tabla oficial de gpt-image-2. En calidad
@@ -19,17 +30,6 @@ vídeos, estilos, claves y contraseña no se tocan.
   enteras, porque Cartesia no dice cómo las cobra y es mejor pasarse que quedarse corto.
 - La tabla nueva llega al servidor sola con `asvs actualizar` (si no editaste
   las tarifas a mano).
-
-## V5.1 · octubre de 2026
-
-**El Studio pasa a la versión 5.1 (28 de octubre)**
-- La versión se ve en el pie del Studio, en la página de acceso y en
-  Configuración → Novedades. Lo de debajo de este apartado es lo que trajo la 3.1.
-- Se han quitado del código los restos del proyecto en el que se basó al
-  principio (nombres, dominio y carpetas de su autor en ejemplos, pruebas y
-  documentos). No cambia nada de lo que hace el Studio.
-
-## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
 **El nombre nuevo, también en la página de acceso (26 de octubre)**
 - La página donde se pone la contraseña dice **CrearIA Studio · Automatización

@@ -1,4 +1,4 @@
-# Automatización Contenido Studio — lo que hay que saber antes de tocarlo
+# CrearIA Studio — lo que hay que saber antes de tocarlo
 
 Lee primero [README.md](README.md): qué es, cómo se arranca y cómo está montado.
 Y si vienes a retomar sin contexto, [docs/RETOMAR.md](docs/RETOMAR.md): el
@@ -411,8 +411,12 @@ La burbuja de abajo a la derecha es `pasos/asistente.py` más las rutas
 
 ## La V2.0: nombre, diseño, guías, novedades y notas
 
-- **El producto se llama «Automatización Contenido Studio»** en todo lo que se
-  ve (`NOMBRE_PRODUCTO` en `app.py`). Los nombres INTERNOS no se cambian:
+- **El producto se llama «CrearIA Studio · Automatización de contenido»** en
+  todo lo que se ve (`NOMBRE_PRODUCTO` y `SUBTITULO_PRODUCTO` en `app.py`; antes
+  «AS Video Studio» y «Automatización Contenido Studio»). La página de acceso
+  (`despliegue/login/public/`) lleva su propia copia del nombre, del logo
+  (`assets/logo.svg` y `favicon.svg`, copias de `web/`) y de la versión en el
+  pie: si cambian, se cambian también ahí. Los nombres INTERNOS no se cambian:
   `/opt/as-video-studio`, el comando `asvs`, los servicios `as-video-*`, el
   repositorio. Renombrarlos rompe las instalaciones que ya funcionan sin que
   nada lo diga.

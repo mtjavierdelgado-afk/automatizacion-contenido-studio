@@ -1,5 +1,5 @@
 [Unit]
-Description=Automatización Contenido Studio — el estudio
+Description=CrearIA Studio — el estudio
 After=network.target
 
 [Service]

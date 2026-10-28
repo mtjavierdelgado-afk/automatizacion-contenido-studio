@@ -1,4 +1,4 @@
-/* Studio Videos IA — panel principal */
+/* CrearIA Studio — panel principal */
 (function () {
   'use strict';
 

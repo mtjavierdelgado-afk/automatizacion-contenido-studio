@@ -6231,6 +6231,7 @@ def probar_audio_y_musica_de_la_previa(cliente, carpeta):
         def __init__(self):
             self.proyecto = Proyecto(os.path.join(carpeta, pid))
             self.estado = Estado(self.proyecto)
+            self.id = pid   # como Contexto.id: lo pide _ficha_descripciones
 
     guardado = servidor.contexto
     servidor.contexto = lambda _pid: _Ctx()

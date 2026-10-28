@@ -56,6 +56,22 @@ vídeos, estilos, claves y contraseña no se tocan.
   lo quitaba, y por eso el aviso volvía en cada versión.
 - Ahora cuenta lo que ya está dibujado: con las imágenes al día, montar dice
   «gratis», y si falta alguna pide solo esa.
+**Insertar una imagen nueva dentro de otra (26 de octubre)**
+- En **Imágenes**, «Ajustar esta imagen» → **«Insertar una imagen aquí…»**:
+  pulsas la palabra de la frase donde empieza la imagen nueva y escribes en
+  español qué quieres que se vea. Claude lo pasa al inglés para el dibujante.
+- La imagen de antes **conserva su dibujo** y se queda con lo que se dice
+  antes de esa palabra; la nueva, con el mismo sitio y estilo, se queda con el
+  resto. Se llama como la de antes con una letra (**S004B**): los números de
+  las demás y tus notas no se mueven.
+- **Se paga una imagen** (unos 0,05 $ en calidad baja, 0,08 $ en media): te
+  pregunta antes con el precio. Después hay que volver a montar el vídeo
+  (gratis).
+- **«Deshacer · quitar esta imagen nueva»** es gratis: la de antes recupera
+  toda su voz con su imagen de siempre.
+- No se puede insertar en una cartela, en la continuación de otra imagen, en
+  una imagen insertada ni en una que ya lleva la voz de una quitada.
+
 **Quitar una imagen o igualarla con la de al lado (26 de octubre)**
 - **«Quitar esta imagen»** (en cada diapositiva de Imágenes, «Ajustar esta
   imagen»): lo que se oye en ella pasa a la imagen de antes o a la de después,

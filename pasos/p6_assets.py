@@ -1524,6 +1524,24 @@ def planificar(proyecto, params, inventario=None, replantear=False,
                 if principal else {}))
         # el encuadre lo dice su direccion: la carta del plano partido no es suya
         nueva.pop("encuadre", None)
+        # «DIRIGIR» SOBRE LA INSERTADA (28-10): su direccion o su parrafo
+        # escritos a mano para ESTE plano mandan sobre lo que se pidio al
+        # insertarla, igual que en cualquier otro plano (el bucle de arriba
+        # corre antes de que exista)
+        ajustes = _ajustes_unidad(p, f"escena:{nueva['id']}")
+        linea = " ".join(str(ajustes.get("direccion") or "").split())
+        if linea:
+            nueva["direccion"] = linea
+        parrafo = " ".join(str(ajustes.get("redactado") or "").split())
+        if parrafo:
+            nueva["redactado"] = parrafo
+            sitio = ajustes.get("redactado_set")
+            if sitio is not None:
+                sitio = str(sitio).strip()
+                if sitio and sitio in (catalogo.get("sets") or {}):
+                    nueva["set"], nueva["componente"] = sitio, None
+                elif not sitio:
+                    nueva["set"] = None
         nueva["prompt"] = _prompt_visual(nueva, beat, catalogo, modo=modo)
 
     insertados = insertar_planos.aplicar(escenas, getattr(proyecto, "raiz", None), _texto_clave,

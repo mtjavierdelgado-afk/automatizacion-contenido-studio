@@ -7947,7 +7947,7 @@ def leer_previsualizacion(pid: str):
                 texto=PASOS_MODULOS.p7_callouts.texto_subtitulo_de(
                     params_callouts, f"escena:{sid}"),
                 ancla=PASOS_MODULOS.p7_callouts.ancla_subtitulo_de(
-                    params_callouts, f"escena:{sid}")) or []
+                    params_callouts, f"escena:{sid}", escena)) or []
         except Exception:                                     # noqa: BLE001
             trozos = []
         escenas.append({
@@ -9853,6 +9853,16 @@ def _aplicar_cambios_del_repaso(ctx, reparto, avisos):
         # que escribir sólo el subtítulo borraría sus zonas a evitar y su
         # `sin_callout`.
         previas = (ctx.estado.params("callouts") or {}).get("unidades") or {}
+        # LA NARRACION DE AHORA DE CADA PLANO, que es su ancla (28-10): si
+        # después cambia lo que dice ese plano --se quita la imagen de al lado
+        # y se lleva su voz, o se inserta una dentro--, lo escrito a mano se
+        # deja de usar en vez de repetir o perder palabras (ver de_escena)
+        try:
+            dichas = {f"escena:{e.get('id')}": " ".join(str(e.get("narracion") or "").split())
+                      for e in (PASOS_MODULOS.p6_assets.plan_actual(
+                          ctx.proyecto, "assets", estado=ctx.estado) or {}).get("escenas") or []}
+        except Exception:                                   # noqa: BLE001
+            dichas = {}
         bloque = {}
         for uid, texto in unidades_callouts.items():
             actual = previas.get(uid)
@@ -9860,7 +9870,10 @@ def _aplicar_cambios_del_repaso(ctx, reparto, avisos):
             actual["subtitulo_texto"] = texto
             # escrito a mano contra la narracion de AHORA: el ancla de una
             # corrección de ortografía anterior ya no vale (ver de_escena)
-            actual.pop("subtitulo_ancla", None)
+            if dichas.get(uid):
+                actual["subtitulo_ancla"] = dichas[uid]
+            else:
+                actual.pop("subtitulo_ancla", None)
             bloque[uid] = actual
         params_callouts["unidades"] = bloque
     if params_callouts:

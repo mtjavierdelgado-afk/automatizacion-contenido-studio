@@ -8130,6 +8130,77 @@ def probar_insertar_imagen():
         servidor._ruta_de_version = real["ruta"]
 
 
+def probar_detalles_insertar_quitar():
+    """Rama detalles-insertar-quitar (28-10-2026), los dos detalles que quedaban:
+
+    1. un subtítulo escrito a mano en un plano que luego se parte (insertar) o
+       se alarga (quitar) NO repite ni pierde palabras: se deja de usar y sale
+       el de la voz; y el repaso guarda desde ahora contra qué frase se escribió;
+    2. «Dirigir» (o el párrafo redactado) sobre la imagen insertada SÍ cambia
+       su prompt."""
+    seccion("DETALLES DE INSERTAR Y QUITAR: SUBTÍTULO A MANO Y DIRIGIR LA INSERTADA")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    p7 = servidor.PASOS_MODULOS.p7_callouts
+    subs = servidor.PASOS_MODULOS.subtitulos
+    p6 = servidor.PASOS_MODULOS.p6_assets
+
+    def plano(sid, texto, **extra):
+        palabras = texto.split()
+        return dict({"id": sid, "narracion": texto, "t_in": 0.0, "t_out": len(palabras) * 0.5,
+                     "marcas": [[i * 0.5, i * 0.5 + 0.4] for i in range(len(palabras))]}, **extra)
+
+    entera = "Este baño era el más feo con baldosas grises."
+    partida = plano("S001", "Este baño era el más feo", narracion_imagen=entera)
+    escrito = {"unidades": {"escena:S001": {"subtitulo_texto": "Este baño era EL MÁS FEO con baldosas grises."}}}
+
+    def texto_de(escena, params):
+        uid = f"escena:{escena['id']}"
+        return " ".join(t["texto"] for t in subs.de_escena(
+            escena, texto=p7.texto_subtitulo_de(params, uid),
+            ancla=p7.ancla_subtitulo_de(params, uid, escena)))
+
+    igual(p7.ancla_subtitulo_de(escrito, "escena:S001", partida), entera,
+          "SUBTÍTULO: escrito sin ancla en un plano partido, su ancla es la frase de siempre")
+    ok("grises" not in texto_de(partida, escrito).lower(),
+       f"SUBTÍTULO: el plano partido NO repite lo que dice la insertada ({texto_de(partida, escrito)!r})")
+    entero = plano("S001", entera)
+    ok("EL MÁS FEO" in texto_de(entero, escrito),
+       "SUBTÍTULO: sin partir, lo escrito a mano se sigue usando")
+    hogar = plano("S002", "Y así quedó. El más bonito.", narracion_imagen="Y así quedó.")
+    escrito_hogar = {"unidades": {"escena:S002": {"subtitulo_texto": "Y ASÍ quedó."}}}
+    ok("bonito" in texto_de(hogar, escrito_hogar).lower(),
+       f"SUBTÍTULO: el plano que se lleva la voz de una quitada no la pierde ({texto_de(hogar, escrito_hogar)!r})")
+    con_ancla = {"unidades": {"escena:S001": {"subtitulo_texto": "Este baño era EL MÁS FEO",
+                                               "subtitulo_ancla": "Este baño era el más feo"}}}
+    ok("EL MÁS FEO" in texto_de(partida, con_ancla),
+       "SUBTÍTULO: escrito DESPUÉS de partir (con su ancla), se usa")
+    # EL REPASO GUARDA EL ANCLA
+    base = tempfile.mkdtemp(prefix="estudio_detalles_")
+    servidor.fijar_raiz_proyectos(base)
+    real_plan = p6.plan_actual
+    p6.plan_actual = lambda *_a, **_k: {"escenas": [partida]}
+    try:
+        pid = Proyecto.crear(base, "detalles").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        servidor._aplicar_cambios_del_repaso(ctx, {"cambios": [
+            {"tipo": "subtitulo_texto", "plano": "S001", "texto": "Este baño era EL MÁS FEO"}]}, [])
+        unidad = ((ctx.estado.params("callouts") or {}).get("unidades") or {}).get("escena:S001") or {}
+        igual(unidad.get("subtitulo_ancla"), "Este baño era el más feo",
+              "SUBTÍTULO: el repaso guarda contra qué frase se escribió")
+    finally:
+        p6.plan_actual = real_plan
+    # «DIRIGIR» LA INSERTADA: de punta a punta en el recorrido
+    # (`insertar_una_imagen`); aquí, que planificar lee su unidad
+    fuente = open(os.path.join(RAIZ_ESTUDIO, "pasos", "p6_assets.py"), encoding="utf-8").read()
+    i = fuente.index("def _preparar_insertada")
+    ok("_ajustes_unidad(p, f\"escena:{nueva['id']}\")" in fuente[i:i + 1500],
+       "DIRIGIR: planificar lee los params de la unidad de la insertada")
+
+
 def probar_dominios():
     """Rama dominio-negocio (21-10-2026): listar los dominios y fijar el de un estilo."""
     seccion("DOMINIOS: EL NEGOCIO DE UN ESTILO")
@@ -8522,6 +8593,7 @@ def main():
         probar_quitar_imagen()
         probar_descripcion_planos()
         probar_insertar_imagen()
+        probar_detalles_insertar_quitar()
         probar_dominios()
         probar_guion_visual()
     finally:

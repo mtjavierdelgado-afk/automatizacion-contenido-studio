@@ -22,6 +22,16 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+**Quitar e insertar imágenes: los dos detalles que quedaban (28 de octubre)**
+- **Un subtítulo corregido a mano ya no repite ni pierde palabras** cuando partes
+  esa imagen (insertar) o le pasas la voz de otra (quitar): en ese caso se deja
+  de usar lo escrito a mano y sale el subtítulo de la voz, que es el correcto.
+  Desde ahora, cada subtítulo que corriges recuerda la frase para la que lo
+  escribiste: si esa frase cambia más adelante, vuelve el de la voz en vez de
+  enseñar un texto que ya no es el que se oye.
+- **«Dirigir» funciona en una imagen insertada** (S004B): lo que escribas ahí
+  cambia su dibujo al rehacerla, como en cualquier otra imagen.
+
 **El nombre nuevo, también en la página de acceso (26 de octubre)**
 - La página donde se pone la contraseña dice **CrearIA Studio · Automatización
   de contenido**, con el logo de la C y su icono en la pestaña, y el pie con

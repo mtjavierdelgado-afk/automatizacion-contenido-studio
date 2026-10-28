@@ -9279,6 +9279,23 @@ def insertar_una_imagen(navegador, datos):
        f"y no deja imágenes por rehacer ({assets.get('unidades_obsoletas')})")
     _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")
     ok(render.get("estado") == "obsoleto", "el vídeo queda por volver a montar")
+    # «DIRIGIR» LA INSERTADA (28-10): su dirección escrita a mano manda
+    _r, dirigido = api.get(f"/api/proyectos/{pid}/direccion")
+    plan_dir = dict(dirigido.get("plan") or {})           # el PUT manda el plan entero
+    plan_dir[nuevo] = "a hand cleaning the grout between the grey tiles"
+    r, _d = api.put(f"/api/proyectos/{pid}/direccion", {"plan": plan_dir})
+    ok(r.status_code == 200, f"se puede dirigir {nuevo} ({r.status_code})")
+    r, lanz = api.post(f"/api/proyectos/{pid}/pasos/assets/ejecutar", {"unidades": [f"escena:{nuevo}"]})
+    if r.status_code == 202:
+        api.esperar(lanz.get("trabajo_id") or lanz.get("trabajo"), 300)
+    api.libre(pid, 300)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    dirigida = next((e for e in previa.get("escenas") or [] if e["id"] == nuevo), {})
+    ok("cleaning the grout" in (dirigida.get("prompt") or ""),
+       f"«Dirigir» sobre {nuevo} cambia su dibujo ({(dirigida.get('prompt') or '')[:80]})")
+    ok(_huellas_de_planos(datos, pid).get(sid) == antes.get(sid), f"y {sid} sigue con su dibujo")
+    pg.js("reiniciarPrevia(); cargarPreviaLight();")
+    pg.p.wait_for_function("() => (PREVIA.ficha || {}).escenas", timeout=20000)
     pg.js(f"PREVIA.i = PREVIA.ficha.escenas.findIndex(x => x.id === '{nuevo}'); repintarVideo();")
     ok(pg.esperar(".ajustar-absorbe", f"Imagen insertada en {sid}", 20),
        f"la diapositiva de {nuevo} dice de dónde sale, con «Deshacer»")

@@ -6121,6 +6121,10 @@ def prueba_costes_menores():
         coste._anotar = original
     igual((apuntes[0]["cantidad"]["caracteres"], apuntes[0]["detalle"]["enviados"]),
           (9, 29), "la toma apunta los cobrados y guarda los enviados en el detalle")
+    import p4_voz                                                   # noqa: PLC0415
+    cortada = p4_voz._cortada(RuntimeError("corte"), ['Uno.<break time="500ms"/>', "Dos."],
+                              [b"\x00\x00" * 10], [])             # noqa: SLF001
+    igual(cortada.caracteres, 9, "una toma cortada cuenta igual que una entera")
 
 
 def main():

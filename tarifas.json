@@ -1,7 +1,7 @@
 {
   "version": 1,
   "moneda": "USD",
-  "actualizado": "2026-08-13T12:04:49",
+  "actualizado": "2026-10-26T14:50:00",
   "openai": {
     "modelo": "gpt-image-2",
     "usd_por_token": {
@@ -12,12 +12,12 @@
     },
     "usd_por_imagen": {
       "1536x1024": {
-        "low": 0.006,
+        "low": 0.005,
         "medium": 0.041,
         "high": 0.165
       },
       "1024x1536": {
-        "low": 0.006,
+        "low": 0.005,
         "medium": 0.041,
         "high": 0.165
       },

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "descripcion": "EL ÚNICO TIPO DE NEGOCIO DE FÁBRICA: «general», para cualquier cliente (Etapa Foto C, 21-10-2026: «nada de un cliente metido en el código»). El negocio de cada cliente es una FICHA que se llena en su proyecto (Crear → el proyecto → Ficha del negocio) y vive en <proyectos>/_sistema/dominios.json, fuera del código. Un tipo lleva sus reglas de foto (formato de motores/reglas/reglas_foto.json), las frases del revisor y, si algún día las tiene, su escalera de cartas de foto con sus servicios.",
+  "dominios": [
+    {
+      "id": "general",
+      "nombre": "General (cualquier negocio)",
+      "descripcion": "Para cualquier negocio: la escalera general de foto y un revisor que no habla de ningún equipo en concreto.",
+      "servicios": [],
+      "en_texto": {},
+      "por_defecto": [],
+      "escalera": [],
+      "revisor": {
+        "equipo": "los objetos, el equipo o el producto no son los que mandan las\n    indicaciones o estan montados o colocados como no se hace de verdad\n    (tamanos imposibles, piezas de otro modelo, cables o soportes absurdos).",
+        "congruencia": "el mismo sitio, los mismos objetos o la misma gente cambian de un\n    plano a otro sin que el guion lo pida.",
+        "manos": "dedos de mas o de menos, manos fundidas con lo que sujetan o con otra mano.",
+        "orientacion": "la gente no mira a donde tiene que mirar (de espaldas a lo que\n    hace, mirando a camara cuando esta ocupada en otra cosa).",
+        "continuidad": "el mismo sitio, los\nmismos objetos y la misma gente"
+      },
+      "reglas": []
+    }
+  ]
+}

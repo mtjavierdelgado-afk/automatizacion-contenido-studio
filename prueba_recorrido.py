@@ -7539,6 +7539,69 @@ def publicar_arreglos_del_20_10(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def tipos_de_negocio(navegador, datos):
+    """Etapa Foto C (21-10-2026): la ficha del negocio vive en el PROYECTO
+    (cliente), no en Configuración; sus estilos la enseñan en «Reglas». Abrir
+    las pantallas no escribe nada; guardar es un botón."""
+    api, cid = datos["api"], datos["cliente"]
+
+    def negocio():
+        _r, d = api.get(f"/api/clientes/{cid}/negocio")
+        return d.get("negocio")
+    pg = Pagina(navegador, datos)
+    pg.js("conmutarConfig(true);")
+    pg.p.wait_for_timeout(1500)
+    ok(not pg.visible("#cuerpo-config h3", "Tipos de negocio"),
+       "Configuración ya no tiene «Tipos de negocio» (es del proyecto)")
+    pg.js("conmutarConfig(false);")
+    pg.js(f"elegirCliente('{cid}'); irALight('galeria');")
+    ok(pg.esperar(".abrir-ajustes-proyecto", None, 15), "dentro del proyecto está «⚙ Ajustes del proyecto»")
+    ok(negocio() is None, "el proyecto de prueba no tiene ficha")
+    pg.pulsar(".abrir-ajustes-proyecto")
+    ok(pg.esperar(".cajon-proyecto .ajustes-ficha-negocio", "Ficha del negocio", 10),
+       "el cajón de ajustes trae la sección «Ficha del negocio»")
+    ok(pg.esperar(".cajon-proyecto .panel-negocio-proyecto", "Qué hace este negocio", 10), "con su panel")
+    ok(negocio() is None, "abrirlo no guarda nada")
+    panel = pg.p.locator(".panel-negocio-proyecto")
+    panel.locator("input").first.fill("Alquiler de consolas para eventos")
+    pg.pulsar(".panel-negocio-proyecto button", "Añadir regla")
+    panel = pg.p.locator(".panel-negocio-proyecto")
+    ok(panel.locator("input").first.input_value() == "Alquiler de consolas para eventos",
+       "añadir una regla repinta sin perder lo escrito")
+    panel.locator(".regla-estilo textarea").nth(0).fill("Los mandos se sujetan con las dos manos")
+    panel.locator(".regla-estilo input").nth(0).fill("mando, consola")
+    panel.locator("textarea[data-foco='negocio-revisor-equipo']").fill("teles sin trípode")
+    ok(negocio() is None, "escribir no guarda nada todavía")
+    pg.captura("ficha_del_negocio", entera=False)
+    pg.pulsar(".panel-negocio-proyecto button", "Guardar la ficha")
+    pg.p.wait_for_timeout(1500)
+    n = negocio() or {}
+    ok(n.get("nombre") == "Alquiler de consolas para eventos"
+       and (n.get("reglas") or [{}])[0].get("palabras") == ["mando", "consola"]
+       and (n.get("revisor") or {}).get("equipo") == "teles sin trípode",
+       f"«Guardar la ficha» la guarda con su regla y su revisor ({n})")
+    ok(pg.esperar(".panel-negocio-proyecto", "la usan sus estilos", 10), "y el panel lo dice")
+    pg.js("cerrarAjustesProyecto();")
+    pg.sin_errores("la ficha del negocio en el proyecto")
+
+    # EN LA PESTAÑA «REGLAS» DEL ESTILO DEL PROYECTO
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{datos['preset']}' }});")
+    pg.p.wait_for_timeout(1500)
+    pg.pulsar("button", "📏 Reglas")
+    ok(pg.esperar(".negocio-del-estilo", "Negocio: Alquiler de consolas", 15),
+       "en «Reglas» del estilo se ve el negocio de su proyecto")
+    ok(pg.visible(".regla-negocio", "Los mandos se sujetan"), "con sus reglas, sin editarlas")
+    pg.captura("negocio_en_reglas_del_estilo", entera=False)
+    pg.pulsar(".negocio-del-estilo button", "Editar la ficha")
+    ok(pg.esperar(".cajon-proyecto .panel-negocio-proyecto", "Qué hace este negocio", 15),
+       "«✎ Editar la ficha» lleva al proyecto con el cajón de ajustes y la ficha abiertos")
+    pg.pulsar(".panel-negocio-proyecto button", "Quitar la ficha")
+    pg.p.wait_for_timeout(1500)
+    ok(negocio() is None, "«Quitar la ficha» (tras confirmar) la quita")
+    pg.sin_errores("el negocio en las reglas del estilo")
+    pg.cerrar()
+
 # ======================================================================
 # PORTADAS-2 (21-10-2026). Tramo propio, al final.
 

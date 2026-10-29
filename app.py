@@ -1251,6 +1251,12 @@ def cambiar_cliente(cid: str, cuerpo: dict = Body(default=None)):
 def borrar_cliente(cid: str):
     """Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto."""
     sueltos = _cliente_o_400(lambda: CLIENTES.borrar(raiz_proyectos(), cid))
+    # SU FICHA DEL NEGOCIO se va con él, y sus estilos (ahora sin proyecto)
+    # vuelven a automático (Etapa Foto C)
+    if PASOS_MODULOS is not None:
+        PASOS_MODULOS.dominios.borrar_de_cliente(cid)
+        for pid in sueltos if isinstance(sueltos, list) else []:
+            _negocio_al_estilo(pid)
     anotar_global("cliente_borrado", {"id": cid, "estilos": len(sueltos)})
     return {"borrado": cid, "estilos_sin_proyecto": sueltos}
 
@@ -1287,6 +1293,9 @@ def asignar_estilo_a_cliente(preset_id: str, cuerpo: dict = Body(default=None)):
     """Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca)."""
     cid = str(_cuerpo(cuerpo).get("cliente") or "").strip()
     _cliente_o_400(lambda: CLIENTES.asignar(raiz_proyectos(), preset_id, cid))
+    # la ficha del negocio de su nuevo proyecto, o ninguna (Etapa Foto C)
+    if PASOS_MODULOS is not None:
+        _negocio_al_estilo(preset_id)
     return {"estilo": preset_id, "cliente": cid}
 
 
@@ -9135,7 +9144,10 @@ def _reglas_para_revisor(estilo, plan):
         if p6.modo_de(estilo) == "foto":
             contexto = " ".join([p6.contexto_de_reglas(estilo)] + [
                 str(e.get("prompt") or "") for e in plan.get("escenas") or []])
-            lineas = reglas.para("prompt_imagen", modo="foto", contexto=contexto)
+            # con las de la ficha del negocio en su hueco (Etapa Foto C), las mismas
+            # que recibió el generador (`p6_assets._prompt_completo`)
+            lineas = reglas.para("prompt_imagen", modo="foto", contexto=contexto,
+                                 extra=p6.dominios.reglas_de_foto(estilo))
         else:
             lineas = reglas.para("prompt_imagen")
         return "\n".join(f"  - {l}" for l in lineas)
@@ -14126,6 +14138,18 @@ def guardar_preset_canal(cuerpo: dict = Body(default=None)):
         datos.get("tipo"), datos.get("nombre"), datos.get("datos"),
         nota=datos.get("nota") or "", miniatura=datos.get("miniatura") or "",
         pid=datos.get("id") or None))
+    # LA FICHA DEL NEGOCIO, AL MOMENTO (Etapa Foto C, decisión del dueño 28-10):
+    # guardar aquí un estilo de canal (p. ej. «Guardar como estilo» desde un
+    # vídeo, o sustituir su contenido) puede dejarlo en foto y con láminas sin
+    # el negocio de su proyecto. Se le pone ya; sin ficha en el proyecto, o en
+    # un estilo de dibujo, no se escribe nada (lo general, como hasta ahora).
+    if ficha.get("tipo") == "canal":
+        try:
+            antes = ((ficha.get("datos") or {}).get("estilo") or {}).get("dominio") or ""
+            if _negocio_al_estilo(ficha["id"]) != antes:
+                ficha = _presets().leer(ficha["id"])
+        except Exception as fallo:                           # noqa: BLE001
+            anotar_global("aviso", {"negocio": str(fallo), "preset": ficha.get("id")})
     anotar_global("preset_guardado", {"id": ficha["id"], "tipo": ficha["tipo"],
                                       "nombre": ficha["nombre"]})
     return {"preset": ficha, **_presets().listar()}
@@ -14198,6 +14222,9 @@ def restaurar_preset_canal(pid: str):
     él: se apartaron juntos (`borrar_preset_light`) y sin el taller el estilo
     vuelve sin sus láminas ni su escucha."""
     ficha = _preset_o_400(lambda p: p.restaurar(pid))
+    # mientras estuvo en la papelera pudo cambiar la ficha de su proyecto
+    if PASOS_MODULOS is not None:
+        _negocio_al_estilo(pid)
     taller = ((ficha.get("datos") or {}).get("origen") or {}).get("taller") if isinstance(ficha, dict) else ""
     devuelto = ""
     if taller and not os.path.isdir(os.path.join(raiz_proyectos(), taller)):
@@ -15399,6 +15426,13 @@ def _correr_preset_light_dentro(avisar, ctx, encargo, solo, preset_id, retomar,
             CLIENTES.asignar(raiz_proyectos(), ficha["id"], encargo["cliente"])
         except CLIENTES.ErrorCliente as fallo:
             ctx.bitacora.anotar("aviso", None, {"cliente": str(fallo)})
+    # LA FICHA DEL NEGOCIO DE SU PROYECTO (Etapa Foto C), al crearlo y al rehacerlo:
+    # rehacer puede ser el momento en que el estilo tiene láminas por primera vez,
+    # o en que pasa a foto
+    try:
+        _negocio_al_estilo(ficha["id"])
+    except Exception as fallo:                                # noqa: BLE001
+        ctx.bitacora.anotar("aviso", None, {"negocio": str(fallo)})
     salida["resumen"] = ficha.get("resumen") or ""
     salida["coste_usd"] = round(salida["coste_usd"], 4)
     avisar(1.0, f"preset «{ficha['nombre']}» listo", PUBLICO_LISTO)
@@ -15857,6 +15891,10 @@ def duplicar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
                                                   os.path.basename(una)))
             except OSError:
                 pass
+    # LA COPIA NO SE LLEVA LA FICHA DEL NEGOCIO del original: la recibe la de su
+    # proyecto (ninguna hasta que se meta en uno), Etapa Foto C
+    if PASOS_MODULOS is not None:
+        _negocio_al_estilo(nueva["id"])
     return {"preset": nueva, "de": preset_id}
 
 
@@ -16853,17 +16891,140 @@ def guardar_relato_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
 # La pantalla para elegirlo llega con la Etapa Foto C: aqui, leerlo y fijarlo.
 
 @app.get("/api/dominios")
-def listar_dominios():
-    """Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico}"""
+def listar_dominios(peticion: Request = None):
+    """El negocio general y las fichas de los clientes (Etapa Foto C).
+    -> {dominios, automatico}"""
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
-    return {"dominios": PASOS_MODULOS.dominios.listar(),
-            "automatico": "sin fijar: se detecta por el texto del vídeo, como siempre"}
+    cerrados = _cerrados(peticion) if peticion is not None else set()
+    return {"dominios": [d for d in PASOS_MODULOS.dominios.listar()
+                         if (d.get("cliente") or "") not in cerrados],
+            "automatico": "sin ficha: el general, sin reglas de ningún negocio"}
+
+
+# ------------------------------------------------- LA FICHA DEL NEGOCIO
+#
+# Etapa Foto C (21-10-2026): el negocio de cada cliente es una FICHA de su
+# proyecto (qué hace, sus reglas de foto, lo que vigila el revisor), en
+# `<proyectos>/_sistema/dominios.json` (`dominios.ruta_usuario`), fuera del
+# código. Los estilos del proyecto la llevan en `estilo.dominio` (la pone
+# `_negocio_al_estilo` al guardar la ficha, al borrarla, al mover un estilo de
+# proyecto y al crear uno dentro) y llega a los vídeos nuevos al crearlos y a
+# los hechos con «Traer el estilo», como el resto del estilo. Cambiar las reglas
+# de una ficha que ya usa un vídeo de foto cambia el prompt de sus imágenes:
+# quedan para rehacer, y rehacerlas se paga.
+
+def _negocio_al_estilo(preset_id):
+    """Pone en el estilo `preset_id` la ficha del negocio de su proyecto (o se
+    la quita si su proyecto no tiene). -> el id puesto ("" si ninguno)"""
+    dominios = PASOS_MODULOS.dominios
+    presets = _presets()
+    with presets.lock_de(presets.FICHERO):
+        # el proyecto y su ficha se leen DENTRO del cerrojo: quitar la ficha y
+        # mover el estilo a la vez dejaba el id de una ficha ya borrada
+        cid = CLIENTES.cliente_de(raiz_proyectos(), estilo_id=preset_id) or ""
+        negocio = dominios.de_cliente(cid) if cid else None
+        tid = negocio["id"] if negocio else ""
+        try:
+            ficha = presets.leer(preset_id)
+        except presets.ErrorPreset:
+            return ""
+        if ficha.get("tipo") != "canal":
+            return ""
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        estilo = dict(contenido.get("estilo") or {})
+        if not estilo.get("referencias"):
+            return ""              # sin estilo gráfico todavía: no hay donde
+        if estilo.get("modo") != "foto":
+            # la ficha solo cambia las imágenes de FOTO: en un estilo de dibujo
+            # no se escribe, y así no mueve la firma de sus vídeos al traerlo
+            tid = ""
+        if (estilo.get("dominio") or "") == tid:
+            return tid
+        if tid:
+            estilo["dominio"] = tid
+        else:
+            estilo.pop("dominio", None)
+        contenido["estilo"] = estilo
+        try:
+            presets.guardar("canal", ficha.get("nombre") or "", contenido,
+                            nota=ficha.get("nota") or "",
+                            miniatura=ficha.get("miniatura") or "", pid=preset_id)
+        except presets.ErrorPreset:
+            return ""
+    return tid
+
+
+def _estilos_del_cliente(cid):
+    """Los ids de los estilos de un proyecto."""
+    asignados = (CLIENTES.listar(raiz_proyectos()) or {}).get("estilos") or {}
+    return [pid for pid, dueno in asignados.items() if dueno == cid]
+
+
+def _cliente_que_existe(cid):
+    cid = str(cid or "").strip()
+    clientes = (CLIENTES.listar(raiz_proyectos()) or {}).get("clientes") or []
+    if not any(c.get("id") == cid for c in clientes):
+        raise ErrorApi(404, "ese proyecto no existe")
+    return cid
+
+
+def _negocio_abierto(peticion, cid):
+    """El proyecto existe y quien pide puede verlo (los de clave, con su pase)."""
+    cid = _cliente_que_existe(cid)
+    if peticion is not None and cid in _cerrados(peticion):
+        raise ErrorApi(403, "este proyecto tiene clave: ábrelo primero")
+    return cid
+
+
+@app.get("/api/clientes/{cid}/negocio")
+def leer_negocio_cliente(cid: str, peticion: Request = None):
+    """La ficha del negocio de un proyecto. -> {negocio: ficha|null, estilos}"""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    cid = _negocio_abierto(peticion, cid)
+    crudo = PASOS_MODULOS.dominios.de_cliente(cid)
+    return {"negocio": PASOS_MODULOS.dominios.publicar(crudo) if crudo else None,
+            "estilos": len(_estilos_del_cliente(cid))}
+
+
+@app.put("/api/clientes/{cid}/negocio")
+def guardar_negocio_cliente(cid: str, cuerpo: dict = Body(default=None),
+                            peticion: Request = None):
+    """Crea o cambia la ficha del negocio de un proyecto: {nombre, reglas?,
+    revisor?: {equipo?, orientacion?}}. Se la pone a todos sus estilos.
+    -> {negocio, estilos: cuántos la llevan}"""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    cid = _negocio_abierto(peticion, cid)
+    try:
+        crudo = PASOS_MODULOS.dominios.guardar_de_cliente(cid, _cuerpo(cuerpo))
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    puestos = sum(1 for pid in _estilos_del_cliente(cid) if _negocio_al_estilo(pid))
+    anotar_global("negocio_guardado", {"cliente": cid, "estilos": puestos})
+    return {"negocio": PASOS_MODULOS.dominios.publicar(crudo), "estilos": puestos}
+
+
+@app.delete("/api/clientes/{cid}/negocio")
+def borrar_negocio_cliente(cid: str, peticion: Request = None):
+    """Quita la ficha del negocio de un proyecto: sus estilos vuelven a
+    automático (general). Los vídeos ya creados no cambian."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    cid = _negocio_abierto(peticion, cid)
+    if not PASOS_MODULOS.dominios.borrar_de_cliente(cid):
+        raise ErrorApi(404, "este proyecto no tiene ficha del negocio")
+    for pid in _estilos_del_cliente(cid):
+        _negocio_al_estilo(pid)
+    anotar_global("negocio_borrado", {"cliente": cid})
+    return {"borrado": cid}
 
 
 @app.put("/api/presets-light/{preset_id}/dominio")
 def guardar_dominio_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
-    """Fija el negocio de un estilo: {dominio: "estadoplay" | "general" | null}.
+    """Fija el negocio de un estilo: {dominio: id de un tipo (de fábrica o del
+    dueño) | null}.
     null (o "") vuelve a la deteccion automatica. No toca ningun video: llega a
     los nuevos al crearlos y a los hechos con «Traer el estilo»."""
     if PASOS_MODULOS is None:
@@ -16876,6 +17037,13 @@ def guardar_dominio_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
         dominio = PASOS_MODULOS.dominios.normalizar(datos.get("dominio"))
     except ValueError as fallo:
         raise ErrorApi(400, str(fallo))
+    # una ficha de cliente, solo la del PROYECTO de este estilo y si sigue viva
+    # (Etapa Foto C): la de otro cliente o una borrada no se eligen
+    if dominio and dominio not in PASOS_MODULOS.dominios.DE_FABRICA:
+        cid = CLIENTES.cliente_de(raiz_proyectos(), estilo_id=preset_id) or ""
+        propia = PASOS_MODULOS.dominios.de_cliente(cid) if cid else None
+        if not propia or propia["id"] != dominio:
+            raise ErrorApi(400, "esa ficha del negocio no es la del proyecto de este estilo")
     with presets.lock_de(presets.FICHERO):
         ficha = _preset_o_400(lambda p: p.leer(preset_id))
         if ficha.get("tipo") != "canal":

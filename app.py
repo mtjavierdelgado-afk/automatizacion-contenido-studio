@@ -22161,8 +22161,12 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj):
     formato = base["formato"]
     entrada = {"titulo": info.get("titulo") or info.get("nombre"), "palabras": [],
                "resumen": _resumen_para_portada(info), "negocio": info.get("cliente_nombre") or ""}
-    candidatos = []
-    if aj.get("portadas") in ("ambas", "plano"):
+    # AL RETOMAR NO SE PAGA OTRA VEZ: las candidatas que ya estan en disco se
+    # quedan (la de IA es una imagen pagada)
+    hechas = {c.get("tipo"): c for c in (P.leer(raiz, vid).get("portadas") or [])
+              if c.get("fichero") and os.path.isfile(os.path.join(carpeta_p, c["fichero"]))}
+    candidatos = [hechas["plano"]] if "plano" in hechas else []
+    if aj.get("portadas") in ("ambas", "plano") and "plano" not in hechas:
         avisar(0.1, "Claude propone la portada con un plano del vídeo", "Diseñando la portada")
         try:
             propuestas = PO.proponer(entrada, formato, base=base, n=1, cwd=RAIZ_ESTUDIO)
@@ -22185,7 +22189,9 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj):
             candidatos.append({"id": f"plano{i}", "tipo": "plano", "fichero": nombre,
                                "nombre": "Con un plano del vídeo", "coste_usd": 0.0,
                                "por_que": str(prop.get("por_que") or "")[:200], "diseno": diseno})
-    if aj.get("portadas") in ("ambas", "ia"):
+    if "ia" in hechas:
+        candidatos.append(hechas["ia"])
+    elif aj.get("portadas") in ("ambas", "ia"):
         diseno = PO.normalizar(candidatos[0]["diseno"] if candidatos else base)
         try:
             avisar(0.5, "dibujando la portada con IA (se paga una imagen)", "Dibujando la portada")

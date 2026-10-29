@@ -8698,6 +8698,10 @@ def probar_el_piloto():
             igual(guardado["diseno"]["modo"], "capas", "y se guarda su diseño como portada del vídeo")
             ok(all(os.path.isfile(os.path.join(P.carpeta_portadas(base, fa["id"]), c["fichero"]))
                    for c in ficha_p["portadas"]), "las dos candidatas quedan en disco para elegir")
+            servidor._piloto_portadas(lambda *a, **k: None, ctx, base, fa["id"], aj)
+            igual(len(ia_pedida), 1, "al retomar no se vuelve a pagar la portada con IA (ya está en disco)")
+            igual([c["id"] for c in P.leer(base, fa["id"])["portadas"]], ["plano1", "ia"],
+                  "y siguen las dos candidatas")
             guardado.clear()
             servidor.piloto_elegir_portada(fa["id"], peticion, {"id": "ia"})
             igual((guardado["diseno"]["modo"], guardado["diseno"]["fondo"].get("imagen")),

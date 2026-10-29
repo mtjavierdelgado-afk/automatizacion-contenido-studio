@@ -38,7 +38,8 @@
     ['guardados', /(guardad[oa]s?|bookmarks?|saves?)/],
   ];
   /* un espacio dentro del número solo si separa miles («12 345»): «1.024 38 comentarios» son dos */
-  const NUMERO = '(\\d(?:[\\d.,]|\\s(?=\\d{3}(?!\\d)))*(?:\\s*(?:mil millones|mill(?:ones|\\.)?|mil|[kmb]))?)';
+  /* y el sufijo solo si es palabra entera: «12 más» o «7 mins» no son millones */
+  const NUMERO = '(\\d(?:[\\d.,]|\\s(?=\\d{3}(?!\\d)))*(?:\\s*(?:mil millones|mill(?:ones|\\.)?|milh(?:ões|ão)|mil|[kmb])(?![a-záéíóúñãõç]))?)';
   const cifrasDeFrase = (frase, cifras) => {
     const f = String(frase || '').toLowerCase();
     for (const [clave, palabra] of PALABRAS) {
@@ -139,7 +140,7 @@
       if (!Object.values(datos.cifras).some(Boolean)) cifrasDeFrase(descripcion, datos.cifras);
     } else if (es('threads.net', 'threads.com')) {
       datos.red = 'threads'; datos.lector = 'generico';
-    } else if (/(^|\.)pinterest\./.test(host)) {
+    } else if (/(^|\.)pinterest\.([a-z]{2,3}|com?\.[a-z]{2})$/.test(host)) {
       datos.red = 'pinterest'; datos.lector = 'generico';
     }
   } catch (e) {

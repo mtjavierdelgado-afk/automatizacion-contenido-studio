@@ -23,8 +23,9 @@ function normalizar(direccion) {
   let u;
   try { u = new URL(String(direccion || '').trim()); } catch (e) { return null; }
   if (!/^https?:$/.test(u.protocol)) return null;
-  /* la dirección del Studio puede llevar una carpeta (/v2/): la API cuelga de ahí */
-  let carpeta = u.pathname.replace(/\/[^/]*\.[a-z0-9]+$/i, '/');
+  /* la dirección del Studio puede llevar una carpeta (/v2/): la API cuelga de ahí. Si se
+     pega la de una pantalla (…/login, …/index.html) se quita ese último trozo */
+  let carpeta = u.pathname.replace(/\/(login|studio|index\.html|[^/]*\.[a-z0-9]+)\/?$/i, '/');
   if (!carpeta.endsWith('/')) carpeta += '/';
   return { base: u.origin + carpeta, origen: u.origin, api: u.origin + carpeta + 'api/' };
 }
@@ -152,20 +153,41 @@ async function enviar() {
 
 /* ----------------------------------------------------------- los ajustes */
 
+/* ¿Esa dirección es un Studio? Se pregunta SIN el código: un Studio contesta a
+   /api/recibidos/ping con un 401 suyo, o su login lo manda a /login. Así una
+   errata en la dirección no le regala el código a otra web. */
+async function esUnStudio(n) {
+  try {
+    const r = await fetch(n.api + 'recibidos/ping', { credentials: 'include', redirect: 'manual' });
+    if (r.type === 'opaqueredirect') return true;
+    if (r.status === 401 || r.status === 200) {
+      const d = await r.json().catch(() => null);
+      return !!d && (r.status === 200 || /c[oó]digo de env[ií]o/.test(String(d.error || '')));
+    }
+  } catch (e) { return false; }
+  return false;
+}
+
 async function guardar() {
   const n = normalizar($('studio').value);
   const codigo = $('codigo').value.trim();
-  if (!n) { estado('estadoConfig', 'La dirección no parece una web (https://…).', 'mal'); return; }
-  if (!codigo) { estado('estadoConfig', 'Falta el código de envío.', 'mal'); return; }
+  if (!n) { estado('estadoConfig', 'La dirección no parece una web (https://…).', 'mal'); return false; }
+  if (!codigo) { estado('estadoConfig', 'Falta el código de envío.', 'mal'); return false; }
   /* el permiso para hablar con TU Studio, y solo con él */
   const ok = await chrome.permissions.request({ origins: [n.origen + '/*'] }).catch(() => false);
-  if (!ok) { estado('estadoConfig', 'Sin ese permiso la extensión no puede mandar nada a tu Studio.', 'mal'); return; }
+  if (!ok) { estado('estadoConfig', 'Sin ese permiso la extensión no puede mandar nada a tu Studio.', 'mal'); return false; }
+  estado('estadoConfig', 'comprobando la dirección…');
+  if (!(await esUnStudio(n))) {
+    estado('estadoConfig', 'En esa dirección no contesta un CrearIA Studio. Cópiala de Configuración → Enviar al Studio.', 'mal');
+    return false;
+  }
   await chrome.storage.local.set({ studio: n.base, codigo });
   estado('estadoConfig', 'Guardado. Pulsa «Probar» para comprobarlo.', 'bien');
+  return true;
 }
 
 async function probar() {
-  await guardar();
+  if (!(await guardar())) return;
   const cfg = await config();
   if (!cfg) return;
   estado('estadoConfig', 'probando…');

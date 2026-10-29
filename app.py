@@ -21622,11 +21622,36 @@ def recibidos_ping(peticion: Request):
 
 
 @app.post("/api/recibidos", status_code=201)
-def recibidos_guardar(peticion: Request, cuerpo: dict = Body(default=None)):
-    """{url, titulo?, autor?, texto?, seleccion?, nota?, cifras?, imagen?, captura?} -> el recibido."""
-    _codigo_de_envio(peticion)
-    r = _por_recibidos(RECIBIDOS.guardar, raiz_proyectos(), _cuerpo(cuerpo))
-    anotar_global("recibido", {"red": r["red"], "captura": bool(r["captura"])})
+async def recibidos_guardar(peticion: Request):
+    """{url, titulo?, autor?, texto?, seleccion?, nota?, cifras?, imagen?, captura?} -> el recibido.
+
+    El cuerpo se lee A MANO y con tope (6 MB), y el código se mira ANTES de
+    convertirlo: con `Body`, FastAPI leía y convertía cualquier cuerpo entero
+    (nginx deja pasar 2 GB) antes de saber si quien lo manda tiene código."""
+    R = _recibidos()
+    await _en_hilo(_codigo_de_envio, peticion)
+    try:
+        largo = int(peticion.headers.get("content-length") or 0)
+    except ValueError:
+        largo = 0
+    if largo > R.MAX_CUERPO:
+        raise ErrorApi(413, "lo enviado pesa demasiado (más de 6 MB): prueba sin captura")
+    crudo = bytearray()
+    async for trozo in peticion.stream():
+        crudo.extend(trozo)
+        if len(crudo) > R.MAX_CUERPO:
+            raise ErrorApi(413, "lo enviado pesa demasiado (más de 6 MB): prueba sin captura")
+
+    def _guardar():
+        try:
+            datos = json.loads(bytes(crudo).decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError):
+            raise ErrorApi(400, "lo enviado no es JSON") from None
+        guardado = _por_recibidos(R.guardar, raiz_proyectos(), datos if isinstance(datos, dict) else {})
+        anotar_global("recibido", {"red": guardado["red"], "captura": bool(guardado["captura"])})
+        return guardado
+
+    r = await _en_hilo(_guardar)
     return {"ok": True, "id": r["id"], "red": r["red"]}
 
 

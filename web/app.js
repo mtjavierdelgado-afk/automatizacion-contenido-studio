@@ -32606,8 +32606,9 @@ async function cargarRecibidos() {
     PAR.recibidos = await pedir(rutaRecibidos());
     PAR.recibidosError = '';
   } catch (e) {
+    /* sin inventar datos: con un «sin código» de mentira, Configuración ofrecía
+       crear uno nuevo sin preguntar y dejaba sin valer el de las extensiones */
     PAR.recibidosError = e.message;
-    if (!PAR.recibidos) PAR.recibidos = { recibidos: [], total: 0, codigo: null };
   } finally {
     PAR.recibidosCargando = false;
   }
@@ -32615,11 +32616,18 @@ async function cargarRecibidos() {
   repintarClaves();
 }
 
-const NOMBRE_CIFRA_RECIBIDO = { vistas: 'vistas', me_gusta: 'me gusta', comentarios: 'comentarios',
-  compartidos: 'compartidos', guardados: 'guardados' };
-
 function cifrasDeRecibido(r) {
-  return Object.entries(r.cifras_vistas || {}).map(([k, v]) => `${v} ${NOMBRE_CIFRA_RECIBIDO[k] || k}`).join(' · ');
+  const nombres = { vistas: 'vistas', me_gusta: 'me gusta', comentarios: 'comentarios',
+    compartidos: 'compartidos', guardados: 'guardados' };
+  return Object.entries(r.cifras_vistas || {}).map(([k, v]) => `${v} ${nombres[k] || k}`).join(' · ');
+}
+
+/* Leyendo, o el error con «Reintentar» (sin volver a pedir solo, para no
+   repetir un fallo en bucle). */
+function cargandoRecibidos() {
+  if (!PAR.recibidosError) return h('div', { clase: 'cargando' }, 'leyendo…');
+  return h('div', {}, cajaError(PAR.recibidosError),
+    h('button', { clase: 'mini', onclick: () => { PAR.recibidosError = ''; cargarRecibidos(); } }, 'Reintentar'));
 }
 
 function seccionRecibidosParrilla() {
@@ -32629,7 +32637,7 @@ function seccionRecibidosParrilla() {
   const ahora_ = Date.now();
   const entrada = !PAR.recibidosPintadoAl || ahora_ - PAR.recibidosPintadoAl > 3000;
   PAR.recibidosPintadoAl = ahora_;
-  if ((!PAR.recibidos || entrada) && !PAR.recibidosCargando) setTimeout(cargarRecibidos, 0);
+  if ((!PAR.recibidos || entrada) && !PAR.recibidosCargando && !(PAR.recibidosError && !PAR.recibidos)) setTimeout(cargarRecibidos, 0);
   caja.appendChild(h('div', { clase: 'fila cab-recibidos' },
     h('h3', {}, 'Recibidos de Chrome'), h('span', { clase: 'crece' }),
     h('button', { clase: 'mini fantasma', title: 'Volver a mirar', onclick: () => { PAR.recibidos = null; cargarRecibidos(); } }, '↻ Actualizar'),
@@ -32638,9 +32646,9 @@ function seccionRecibidosParrilla() {
     + 'Instagram, TikTok, YouTube, Facebook, LinkedIn, X o cualquier web: el enlace, el texto, las cifras que se ven y '
     + 'una captura. Con «Usar en el chat» se lo pasas a Claude para escribir un guion con esa referencia. Son de todo el '
     + 'Studio, no de un proyecto.'));
-  if (PAR.recibidosError) caja.appendChild(cajaError(PAR.recibidosError));
   const datos = PAR.recibidos;
-  if (!datos) { caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…')); return caja; }
+  if (!datos) { caja.appendChild(cargandoRecibidos()); return caja; }
+  if (PAR.recibidosError) caja.appendChild(cajaError(PAR.recibidosError));
   if (datos.codigo && !datos.codigo.puesto) {
     caja.appendChild(h('div', { clase: 'caja-aviso fila' },
       h('span', { clase: 'crece' }, 'Todavía no has conectado la extensión: se descarga y se conecta en Configuración → Enviar al Studio.'),
@@ -32737,9 +32745,9 @@ function seccionEnviarAlStudio() {
       + 'YouTube, Facebook, LinkedIn, X o cualquier web): el enlace, el texto, las cifras que se ven y una captura. Llega a '
       + 'Automatizar → Recibidos de Chrome. Solo manda lo que tú ves: no recorre perfiles sola.'));
   const datos = PAR.recibidos;
-  if (!datos) {
-    if (!PAR.recibidosCargando) setTimeout(cargarRecibidos, 0);
-    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+  if (!datos || !datos.codigo) {
+    if (!PAR.recibidosCargando && !PAR.recibidosError) setTimeout(cargarRecibidos, 0);
+    caja.appendChild(cargandoRecibidos());
     return caja;
   }
   const codigo = datos.codigo || {};
@@ -32761,13 +32769,15 @@ function seccionEnviarAlStudio() {
     h('span', { clase: 'crece' }),
     h('button', { type: 'button', clase: 'mini', onclick: () => crearCodigoEnvio(!!codigo.puesto) },
       codigo.puesto ? 'Crear uno nuevo' : 'Crear el código de envío'))];
+  /* el código en claro se ve 5 minutos, para copiarlo; después, nunca más */
+  if (PAR.codigoEnvioNuevo && Date.now() - (PAR.codigoEnvioNuevoAl || 0) > 5 * 60 * 1000) PAR.codigoEnvioNuevo = '';
   if (PAR.codigoEnvioNuevo) {
     const campo = h('input', { type: 'text', readonly: true, 'aria-label': 'Tu código de envío', datos: { foco: 'codigo-envio' } });
     campo.value = PAR.codigoEnvioNuevo;
     filaCodigo.push(h('div', { clase: 'fila-clave' }, campo,
       h('button', { type: 'button', clase: 'mini primario', onclick: () => copiarTexto(campo.value) }, 'Copiar')),
-    h('div', { clase: 'caja-aviso' }, 'Cópialo ahora y pégalo en la extensión: por seguridad no se vuelve a enseñar. '
-      + 'Si lo pierdes, crea uno nuevo.'));
+    h('div', { clase: 'caja-aviso' }, 'Cópialo ahora y pégalo en la extensión: por seguridad se ve solo unos minutos y no '
+      + 'se vuelve a enseñar. Si lo pierdes, crea uno nuevo.'));
   }
   caja.appendChild(paso(3, 'El código de envío', h('div', { clase: 'pista' },
     'Es lo que impide que otro mande cosas a tu Studio. Solo se guarda su huella.'), ...filaCodigo));
@@ -32786,6 +32796,7 @@ async function crearCodigoEnvio(habia) {
   try {
     const r = await pedir(rutaRecibidos('/codigo'), { method: 'POST', cuerpo: {} });
     PAR.codigoEnvioNuevo = r.codigo;
+    PAR.codigoEnvioNuevoAl = Date.now();
     if (PAR.recibidos) PAR.recibidos.codigo = { puesto: r.puesto, cola: r.cola, creado: r.creado };
     toast('código creado: cópialo');
   } catch (e) { toast(e.message, true); }

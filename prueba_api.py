@@ -8202,6 +8202,20 @@ def probar_detalles_insertar_quitar():
     ip = servidor._insertar_planos()
     igual(ip.letra_libre([], "x", 0, {"B"}), "C",
           "DIRIGIR: una letra que aún guarda params de otra insertada no se reutiliza")
+    # DESHACER NO PASA EL DIBUJO DE LA INSERTADA A SU PLANO (visto en el
+    # servidor el 28-10): S004 dibujado para una frase más vieja, S004B con el
+    # final de la de ahora; al deshacer, S004 se quedaba con las baldosas
+    carpeta = tempfile.mkdtemp(prefix="estudio_recolocar_")
+    for sid, texto, contenido in (("S004", "tres colores que cortaban la vista.", "BANO"),
+                                  ("S004B", "cortaban la vista. Por eso remodelamos.", "BALDOSAS")):
+        with open(os.path.join(carpeta, f"{sid}.json"), "w", encoding="utf-8") as fh:
+            json.dump({"id": sid, "narracion": texto, "png": f"escenas/{sid}.png"}, fh)
+        with open(os.path.join(carpeta, f"{sid}.png"), "w", encoding="utf-8") as fh:
+            fh.write(contenido)
+    p6._recolocar_escenas(carpeta, [{"id": "S004", "narracion":
+                                     "tres colores que se veían bien pero cortaban la vista. Por eso remodelamos."}])
+    igual(open(os.path.join(carpeta, "S004.png"), encoding="utf-8").read(), "BANO",
+          "DESHACER: S004 conserva su dibujo; no se queda con el de la insertada")
     # «DIRIGIR» LA INSERTADA: de punta a punta en el recorrido
     # (`insertar_una_imagen`); aquí, que planificar lee su unidad
     fuente = open(os.path.join(RAIZ_ESTUDIO, "pasos", "p6_assets.py"), encoding="utf-8").read()

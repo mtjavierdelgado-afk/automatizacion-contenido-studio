@@ -3818,6 +3818,17 @@ def _recolocar_escenas(carpeta, escenas):
             if texto:
                 guardadas.append([nombre[:-5], texto])
 
+    # EL DIBUJO DE UNA IMAGEN INSERTADA (S004B) SOLO ES DE UNA INSERTADA
+    # (28-10, visto en el servidor). Al deshacerla, su plano de origen vuelve a
+    # decir la frase entera, y si su dibujo de siempre se hizo para una frase
+    # algo distinta (la voz se regrabo despues), el de la insertada --que dice
+    # justo el final de esa frase-- «se parecia mas» (`_mismo_dicho`, la vara
+    # de «uno dentro del otro») y se lo llevaba: S004 salia con las baldosas de
+    # S004B. Un plano normal no puede reclamar el dibujo de una insertada.
+    def puede_llevarse(escena, guardada):
+        return (not re.fullmatch(r"S\d{3,4}[B-J]", guardada)
+                or bool(escena.get("insertada")))
+
     # DOS VUELTAS, Y EN ESTE ORDEN: primero las que dicen EXACTAMENTE lo mismo
     # y luego las parecidas. En una sola vuelta un plano parecido se lleva la
     # imagen que otro necesitaba palabra por palabra, y el que la tenia exacta
@@ -3841,7 +3852,7 @@ def _recolocar_escenas(carpeta, escenas):
                 continue
             texto = _texto_clave(escena)
             for par in guardadas:
-                if par[1] is None:
+                if par[1] is None or not puede_llevarse(escena, par[0]):
                     continue
                 if (par[1] == texto if exacta else _mismo_dicho(texto, par[1])):
                     quiere[escena["id"]] = par[0]

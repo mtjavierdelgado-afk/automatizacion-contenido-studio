@@ -9,8 +9,8 @@
 el VPS (ver §7). Las 23 suites en verde y las herramientas de análisis limpias.
 
 **Después (10-09, noche): la parada «Encargo» en la barra de abajo**, desplegada
-en `/opt/studio-v2/app` (`app.js`, `estilo.css`, `app.py`; `studio-v2@adrian`
-reiniciado; `studio-v2@ramon` nunca se aprovisionó y sigue parado). Con un vídeo
+en `/opt/studio-v2/app` (`app.js`, `estilo.css`, `app.py`; `studio-v2@<cuenta principal>`
+reiniciado; `studio-v2@<segunda cuenta>` nunca se aprovisionó y sigue parado). Con un vídeo
 abierto enseña lo que se le pidió al redactor
 —nombre, duración, formato, material, indicaciones, llamadas a la acción— leído
 de los params de `ingesta`/`brief`/`guion`, editable con autoguardado, y el pie
@@ -26,7 +26,7 @@ comando `estudio-clave`. Todo en «El acceso: una contraseña, sin usuario» de 
 `CLAUDE.md`. De este lado no cambia nada: `/api/me` y `/api/logout` siguen igual.
 
 Para retomar desde un chat sin contexto: este fichero + `CLAUDE.md` (las reglas
-del producto) + `C:\claude_server_workspace\youtube_adrian_saenz\studio-videos-ia\CLAUDE.md`
+del producto) + el `CLAUDE.md` del repo del login de entonces
 (el runbook del VPS: claves, `scripts/vps.sh`, `deploy.sh`, y el apartado
 de la v2, en `/v2/`).
 
@@ -35,13 +35,13 @@ de la v2, en `/v2/`).
 ## 1. Qué es esto
 
 **El Studio** (hoy CrearIA Studio) = una segunda versión, más simple, del Estudio de vídeo de
-`C:\IA\estudio`. Fork independiente, NO una rama: código, datos, venv, motores,
+la carpeta local de la v1. Fork independiente, NO una rama: código, datos, venv, motores,
 puerto y servicio propios.
 
 | | v1 (la de siempre) | v2 (esto) |
 |---|---|---|
-| local | `C:\IA\estudio` | `C:\claude_server_workspace\youtube_adrian_saenz\as-video-studio` |
-| URL | `https://studiovideo.cloud/` | `https://studiovideo.cloud/v2/` |
+| local | la carpeta local de la v1 | la carpeta local de la v2 |
+| URL | `https://<dominio>/` | `https://<dominio>/v2/` |
 | VPS | `/opt/studio/app`, `studio-estudio@<cuenta>`, :8010/:8011 | `/opt/studio-v2/app`, `studio-v2@<cuenta>`, :8110/:8111 |
 
 **La v1 sigue viva y no se toca.** Lo único compartido: el login de delante y
@@ -205,23 +205,18 @@ no sabe por cuál de las dos versiones se le llama).
 powershell -NoProfile -File pruebas.ps1        # las 22 suites
 ```
 
-El intérprete con fastapi/requests/PIL es `C:\IA\venvs\cartoon\Scripts\python.exe`
+El intérprete con fastapi/requests/PIL es el del entorno virtual del proyecto
 (el `python` del PATH no los tiene):
 
 ```bash
-/c/IA/venvs/cartoon/Scripts/python.exe prueba_api.py     # 743 comprobaciones
+python prueba_api.py                                      # 743 comprobaciones
 python herramientas/alcanzables_js.py                    # 406/406 vivas
 python herramientas/sin_llamar_js.py                     # 0 sin llamar
 ```
 
-Desplegar (el `tar | ssh` completo está en el runbook del VPS). Un fichero
-suelto del front:
-
-```bash
-cd /c/claude_server_workspace/youtube_adrian_saenz/studio-videos-ia
-scp -i secret/studio-videos-ia_vps -o IdentitiesOnly=yes ../as-video-studio/web/app.js root@la IP del VPS:/opt/studio-v2/app/web/app.js
-./scripts/vps.sh "chown studio:studio /opt/studio-v2/app/web/app.js && systemctl restart studio-v2@adrian"
-```
+Desplegar, en aquel montaje, era copiar los ficheros al VPS a mano. **Hoy ya no
+es así**: el servidor se actualiza desde `main` con `asvs actualizar` (ver
+`despliegue/LEEME.md`).
 
 `web/app.js` se sirve con `?v=<sello>` calculado del propio fichero: **aquí no
 hay ningún número que subir a mano** (eso es sólo de los HTML del login).
@@ -231,7 +226,7 @@ hay ningún número que subir a mano** (eso es sólo de los HTML del login).
 ## 6. Lo que queda abierto
 
 - **Confirmarlo en el navegador con la contraseña**: entrar en
-  `https://studiovideo.cloud/v2/` y ver que se aterriza en la v2. Es lo único
+  `https://<dominio>/v2/` y ver que se aterriza en la v2. Es lo único
   que no se pudo comprobar desde la sesión (no tengo la contraseña); todo lo
   demás se midió, incluido el login completo contra una instancia de usar y
   tirar del mismo código.
@@ -305,7 +300,7 @@ que corre el asistente en modo simulado. `docs/API.md` regenerado: 144 endpoints
 
 - **Desplegado el 10-09 a las 12:28 UTC** con el `tar | ssh` del runbook (más
   `--exclude=secretos --exclude=.claude`, que el runbook ya lleva). En el VPS
-  `/api/asistente` contesta `listo` con la cuenta de adrian (plan max) y la foto
+  `/api/asistente` contesta `listo` con la cuenta principal (plan max) y la foto
   sale sin claves. La primera pregunta de verdad **no se pudo ver contestada:
   la cuenta tiene el cupo semanal agotado hasta el 14-09 a las 02:00 UTC**, y el
   asistente lo dice tal cual en el turno (`LimiteAgotado`). Que el CLI de allí
@@ -313,7 +308,7 @@ que corre el asistente en modo simulado. `docs/API.md` regenerado: 144 endpoints
   sabe porque el error es el del cupo y no el de una opción desconocida. Queda
   pendiente, en cuanto se renueve: una pregunta real desde `/v2/` y pedirle
   `secretos/` para ver la negativa del permiso también allí.
-- La guía de inicio saldrá UNA vez a adrian en el VPS (`onboarding_visto` no
+- La guía de inicio saldrá UNA vez a la cuenta principal en el VPS (`onboarding_visto` no
   existía allí): con las claves ya puestas, cada tarjeta dice «puesta» y se
   pasa con «Empezar» o «Saltar por ahora».
 - Decidir si el asistente merece su propia línea en el medidor de coste: hoy
@@ -472,10 +467,11 @@ En la rama, sin unir a `main`. `estilo.modo` = "ilustracion" | "foto".
   (`asvs actualizar` no sobrescribe este). En foto entran esas y NINGUNA de
   cartoon. En ilustracion se llama a `bloque_prompt` sin el argumento `modo`, a
   proposito: un `ESTUDIO_MOTORES` viejo no lo conoceria.
-- **Escalera**: `encuadres.ESCALERA_FOTO`, 13 cartas `foto_*` con `servicios`.
-  Los servicios del video salen del param `servicios` de assets (opcional,
-  nunca escrito por defecto); sin el, consolas. La Etapa C lo pondra en
-  pantalla.
+- **Escalera**: la general de foto (`encuadres.ESCALERA_FOTO_GENERAL`). Las 13
+  cartas de consolas de EstadoPlay SALIERON del código con la Etapa Foto C
+  (21-10-2026, «nada de un cliente metido en el código»): lo de cada negocio
+  va en la ficha del negocio de su proyecto (`pasos/dominios.py`), que por
+  ahora lleva reglas de foto y revisor, no cartas propias.
 - **Pantalla**: «Tipo de imagen» en el bloque «Estilo grafico», al crear y en
   un estilo guardado (ahi cambiarlo es cambiar la fuente: rehace guia y
   laminas con las mismas imagenes; `fuenteParaServidor` manda solo

@@ -8,19 +8,7 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
-**Dos ajustes finos del gasto (26 de octubre)**
-- **Imágenes sin detalle de OpenAI**: cuando OpenAI no dice lo que cobró por una
-  imagen, el Studio la calcula con la tabla oficial de gpt-image-2. En calidad
-  baja, apaisada o vertical, son 0,005 $ (antes apuntaba 0,006 $, el precio de
-  la cuadrada). Lo normal es que OpenAI sí lo diga, y entonces manda su cifra.
-- **La voz, sin contar las pausas como texto**: cada pausa (`<break …/>`)
-  cuenta como UN carácter, como cobra Cartesia. Antes contaba como 23. El gasto
-  de voz baja unos céntimos por vídeo. Las demás marcas se siguen contando
-  enteras, porque Cartesia no dice cómo las cobra y es mejor pasarse que quedarse corto.
-- La tabla nueva llega al servidor sola con `asvs actualizar` (si no editaste
-  las tarifas a mano).
-
-## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
+## V5.1 · octubre de 2026
 
 **Quitar e insertar imágenes: los dos detalles que quedaban (28 de octubre)**
 - **Un subtítulo corregido a mano ya no repite ni pierde palabras** cuando partes
@@ -32,6 +20,52 @@ vídeos, estilos, claves y contraseña no se tocan.
   enseñar un texto que ya no es el que se oye.
 - **«Dirigir» funciona en una imagen insertada** (S004B): lo que escribas ahí
   cambia su dibujo al rehacerla, como en cualquier otra imagen.
+
+**El Studio pasa a la versión 5.1 (28 de octubre)**
+- La versión se ve en el pie del Studio, en la página de acceso y en
+  Configuración → Novedades. Lo de debajo de este apartado es lo que trajo la 3.1.
+- Se han quitado del código los restos del proyecto en el que se basó al
+  principio: nombres, dominio, servidor y carpetas de su autor en ejemplos,
+  pruebas, comentarios y documentos. No cambia nada de lo que hace el Studio.
+
+**La ficha del negocio de cada cliente (28 de octubre, Etapa Foto C)**
+- **El Studio ya no trae ningún negocio de fábrica**, ni EstadoPlay ni ningún
+  otro: sirve igual para cualquier cliente. Sin ficha, todo es «general»: las
+  fotos no llevan reglas de ningún negocio y se reparten los encuadres
+  generales de foto. Lo que antes se metía solo en los vídeos de consolas (los
+  encuadres de estaciones y trípodes, las reglas de mandos y equipo) ya no está.
+- **Crear → tu proyecto → «⚙ Ajustes del proyecto» → «Ficha del negocio».** Cada proyecto (cliente) tiene
+  la suya: qué hace el negocio, sus **reglas de foto** (con «Solo si el plano
+  habla de…» y «Afinar con Claude», como las del estilo) y lo que vigila el
+  **revisor** del equipo o producto y de las miradas. Se guarda fuera del
+  código: `asvs actualizar` no la toca. «Copiar la de otro proyecto» la trae de
+  otro cliente parecido.
+- **Todos los estilos del proyecto la usan solos**, y en la pestaña «Reglas» de
+  cada estilo se ve, sin editarla, encima de las reglas del estilo, con un botón
+  para ir a cambiarla. Llega a los vídeos nuevos al crearlos y a los ya hechos
+  con «Traer el estilo».
+- **La recoge al momento**: al crear el estilo, al rehacerlo (también al
+  pasarlo a foto o al dibujar sus láminas), al moverlo de proyecto y al
+  guardarlo como estilo desde un vídeo. Si el proyecto no tiene ficha, no pasa
+  nada: el estilo usa lo general (fotos sin reglas de ningún negocio), igual
+  que antes; en cuanto la llenes, sus estilos la reciben solos. Los estilos de
+  dibujo no la llevan nunca.
+- Ojo: cambiar las reglas de la ficha de un proyecto con vídeos de foto cambia
+  el prompt de sus imágenes; quedan para rehacer, y rehacerlas se paga.
+
+## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
+
+**Dos ajustes finos del gasto (26 de octubre)**
+- **Imágenes sin detalle de OpenAI**: cuando OpenAI no dice lo que cobró por una
+  imagen, el Studio la calcula con la tabla oficial de gpt-image-2. En calidad
+  baja, apaisada o vertical, son 0,005 $ (antes apuntaba 0,006 $, el precio de
+  la cuadrada). Lo normal es que OpenAI sí lo diga, y entonces manda su cifra.
+- **La voz, sin contar las pausas como texto**: cada pausa (`<break …/>`)
+  cuenta como UN carácter, como cobra Cartesia. Antes contaba como 23. El gasto
+  de voz baja unos céntimos por vídeo. Las demás marcas se siguen contando
+  enteras, porque Cartesia no dice cómo las cobra y es mejor pasarse que quedarse corto.
+- La tabla nueva llega al servidor sola con `asvs actualizar` (si no editaste
+  las tarifas a mano).
 
 **El nombre nuevo, también en la página de acceso (26 de octubre)**
 - La página donde se pone la contraseña dice **CrearIA Studio · Automatización
@@ -212,7 +246,6 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   tu línea. Tampoco sale una composición «abstracta»: la línea dice lo que se ve.
 - **El precio cuenta una imagen por línea** del guion visual (antes podía
   prometer otra cifra: «8 imágenes» y salían 6).
-
 **El negocio de cada estilo (21 de octubre)**
 - **Lo de EstadoPlay ya no está escrito a mano en el Studio.** Los servicios
   (consolas, simuladores, realidad virtual, karaoke) y cómo se reconocen, las
@@ -226,8 +259,9 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 - **Lo único que cambia sin pedirlo**: en un vídeo que no es de consolas (un
   baño, unas plantas), el revisor de imágenes ya no busca televisores, mandos
   ni trípodes; mira los objetos y el equipo de ESE vídeo.
-- Un estilo puede fijar su dominio (`PUT /api/presets-light/{id}/dominio`); la
-  pantalla para elegirlo llegará con la Etapa Foto C.
+- (Esto se quedó atrás con la Etapa Foto C, arriba: EstadoPlay ya no viene de
+  fábrica y cada cliente lleva su ficha del negocio en su proyecto.)
+
 **Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.

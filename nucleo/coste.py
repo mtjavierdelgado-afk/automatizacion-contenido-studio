@@ -30,7 +30,7 @@ Uso:
     Medidor(proyecto).total()            # {"total_usd": ..., "proveedores": ...}
 
 Persistencia: eventos append-only en <proyecto>/coste.jsonl y, con el proyecto
-anotado, en C:\\IA\\estudio\\coste_global.jsonl. Igual que la bitacora, se anota
+anotado, en la carpeta del Studio (coste_global.jsonl). Igual que la bitacora, se anota
 al ocurrir y nunca se reescribe: el historico sigue siendo valido aunque las
 tarifas cambien despues.
 """

@@ -83,7 +83,7 @@ print("\n== un proyecto de antes del 06-09-2026 ==")
 #: pantalla diciendo otra.
 igual("las casillas viejas del personaje ya no encienden nada",
       cta.activos(cta._normalizar({"personajes": [
-          {"nombre": "Adrian", "presentarse": True, "cta": True}]},
+          {"nombre": "Lucía", "presentarse": True, "cta": True}]},
           estricto=False)["cta"]), [])
 igual("sin personajes y sin nada guardado, los defectos",
       cta._normalizar({}, estricto=False)["cta"], cta.POR_DEFECTO)

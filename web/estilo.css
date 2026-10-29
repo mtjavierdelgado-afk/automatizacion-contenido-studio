@@ -3387,6 +3387,22 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .regla-estilo-propuesta { border: 1px dashed var(--acento-borde); border-radius: 8px;
   padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--hueco); }
 
+/* ================================================== LA FICHA DEL NEGOCIO
+   Etapa Foto C: el panel del proyecto y el negocio en «Reglas» del estilo. */
+.panel-negocio-proyecto { display: flex; flex-direction: column; gap: 8px;
+  border: 1px solid var(--linea); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.panel-negocio-proyecto .fila { align-items: center; gap: 8px; flex-wrap: wrap; }
+.panel-negocio-proyecto h3 { margin: 0; font-size: 14px; }
+.panel-negocio-proyecto .regla-estilo-en { display: flex; flex-direction: column; gap: 4px; }
+.panel-negocio-proyecto .regla-estilo-en textarea { width: 100%; }
+.panel-negocio-proyecto .regla-estilo-campos input[type="text"] { flex: none; width: 100%; }
+.negocio-del-estilo { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px;
+  margin-bottom: 10px; border-bottom: 1px dashed var(--linea); }
+.negocio-del-estilo .fila { align-items: center; gap: 8px; flex-wrap: wrap; }
+.regla-negocio { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--linea);
+  border-radius: 8px; padding: 6px 10px; background: var(--hueco); font-size: 13px; }
+.regla-negocio .pastilla { white-space: nowrap; }
+
 /* Los elementos de una imagen (rama elementos-video), en su diapositiva. */
 .elementos-plano { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--linea);
   border-radius: 10px; padding: 8px 10px; margin-top: 8px; }

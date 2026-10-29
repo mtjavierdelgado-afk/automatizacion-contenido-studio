@@ -3,7 +3,7 @@
 DE DONDE VIENE ESTO
 -------------------
 Hasta el 20-08-2026 cada proveedor cargaba su clave por su cuenta y desde un
-sitio distinto: OpenAI de `C:\\IA\\secrets\\.env` (una principal mas
+sitio distinto: OpenAI de un `.env` de secretos (una principal mas
 OPENAI_API_KEY_2..9), Cartesia del .env del motor anterior, Jamendo y Freesound del
 de secrets, y el CLI de Claude de la sesion con la que estuviera logueado. Anadir
 una cuenta era editar un fichero a mano y reiniciar, y en pantalla no habia nada:
@@ -16,7 +16,7 @@ Aqui vive el almacen, y tres reglas que no se tocan:
    arregla borrandolo: se rota. Se puede mover con `ESTUDIO_SECRETOS`, que es
    lo que hace falta cuando varias cuentas comparten una maquina.
 
-2. **El .env se sigue escribiendo.** Los motores de `C:\\IA\\motores` leen el
+2. **El .env se sigue escribiendo.** Los motores de `motores/` leen el
    .env y no son solo del Estudio, asi que guardar aqui ESPEJA las claves alli
    con los nombres de siempre (OPENAI_API_KEY, OPENAI_API_KEY_2...). Asi el dia
    que alguien arranque un motor sin pasar por el Estudio, sigue funcionando.

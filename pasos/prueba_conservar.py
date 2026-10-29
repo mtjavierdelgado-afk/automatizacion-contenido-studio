@@ -8,7 +8,7 @@ entradas nuevas sin rehacer.
 
 No hay red ni CLI: todo lo que aqui se comprueba es determinista.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_conservar.py
+    python pasos/prueba_conservar.py
 """
 import json
 import os

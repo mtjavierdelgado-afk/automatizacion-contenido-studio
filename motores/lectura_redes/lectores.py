@@ -90,7 +90,7 @@ def _pedir(url, metodo="GET", cuerpo=None, plazo=PLAZO_S, claves=(), bases=None,
     Las claves van en CABECERAS (`cabeceras_extra`), no en la URL: una URL
     acaba en los registros de cualquier proxy por el que pase."""
     datos = None
-    cabeceras = {"Accept": "application/json", "User-Agent": "CrearIAStudio/3.1"}
+    cabeceras = {"Accept": "application/json", "User-Agent": "CrearIAStudio/5.1"}
     cabeceras.update(cabeceras_extra or {})
     if cuerpo is not None:
         datos = json.dumps(cuerpo).encode("utf-8")

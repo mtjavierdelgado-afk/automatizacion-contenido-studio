@@ -2,7 +2,7 @@
 Utilidades compartidas por los pasos del pipeline.
 
 Aqui vive solo lo que los tres pasos necesitan por igual: cargar un motor de
-C:\\IA\\motores, dejar limpia la carpeta de trabajo y leer la salida de un paso
+motores/, dejar limpia la carpeta de trabajo y leer la salida de un paso
 anterior. Nada de logica de negocio.
 """
 import importlib.util
@@ -36,7 +36,7 @@ def _motores_congelados():
 
 
 def cargar_motor(paquete, fichero=None):
-    """Importa un motor de C:\\IA\\motores por ruta, y lo RECARGA si ha cambiado.
+    """Importa un motor de motores/ por ruta, y lo RECARGA si ha cambiado.
 
     Se carga por ruta en vez de con sys.path porque los motores tienen nombres
     genericos ("ingesta", "voz") que chocarian con cualquier otro modulo.

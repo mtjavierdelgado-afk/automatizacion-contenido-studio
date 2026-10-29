@@ -3825,9 +3825,15 @@ def _recolocar_escenas(carpeta, escenas):
     # justo el final de esa frase-- «se parecia mas» (`_mismo_dicho`, la vara
     # de «uno dentro del otro») y se lo llevaba: S004 salia con las baldosas de
     # S004B. Un plano normal no puede reclamar el dibujo de una insertada.
+    # Y AL REVES: una insertada se dibuja siempre para ella (con su
+    # direccion), asi que tampoco se lleva el dibujo de un plano normal que
+    # otro plano necesitaba. Si su plano de origen cambio de numero (S004B ->
+    # S005B) sigue encontrando el suyo.
+    def de_insertada(nombre):
+        return bool(re.fullmatch(r"S\d{3,4}[B-J]", nombre))
+
     def puede_llevarse(escena, guardada):
-        return (not re.fullmatch(r"S\d{3,4}[B-J]", guardada)
-                or bool(escena.get("insertada")))
+        return de_insertada(guardada) == bool(escena.get("insertada"))
 
     # DOS VUELTAS, Y EN ESTE ORDEN: primero las que dicen EXACTAMENTE lo mismo
     # y luego las parecidas. En una sola vuelta un plano parecido se lleva la
@@ -3859,6 +3865,22 @@ def _recolocar_escenas(carpeta, escenas):
                     par[1] = None
                     break
     informe["obsoletas"] = [e["id"] for e in escenas if e["id"] not in quiere]
+
+    # EL DIBUJO DE UNA INSERTADA DESHECHA SE APARTA (no se borra): si se
+    # quedara con su nombre, una insertada nueva con la misma letra lo daria
+    # por suyo sin dibujarse (visto en la revision del 28-10). Va a
+    # `_deshechas/`, donde la rejilla no lo ve y nada lo reclama.
+    vivos = {e["id"] for e in escenas}
+    reclamados = set(quiere.values())
+    for nombre, _texto in guardadas:
+        if de_insertada(nombre) and nombre not in reclamados and nombre not in vivos:
+            apartado = os.path.join(carpeta, "_deshechas")
+            os.makedirs(apartado, exist_ok=True)
+            for ext in (".png", ".json"):
+                suyo = os.path.join(carpeta, nombre + ext)
+                if os.path.exists(suyo):
+                    os.replace(suyo, os.path.join(apartado, nombre + ext))
+            informe.setdefault("apartadas", []).append(nombre)
 
     mueve = {d: o for d, o in quiere.items() if d != o}
     if not mueve:

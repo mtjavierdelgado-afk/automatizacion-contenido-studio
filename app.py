@@ -9092,6 +9092,20 @@ _REVISOR = {}
 #: tanda o de la cola de notas: la pantalla lo ensena en su panel.
 _REVISOR_AUTO = {}
 _REVISOR_LOCK = threading.Lock()
+#: {pid: {"revisor_modo", "revisor_vueltas"}} mientras el PILOTO dibuja ese
+#: video (rama video-completo): el revisor va en «automatico» con el tope de
+#: rehacer del piloto, diga lo que diga Configuracion, SOLO en ese video.
+_REVISOR_FORZADO = {}
+
+
+def _ajustes_revisor(ctx):
+    """Los ajustes del revisor para ESTE video: los de Configuracion, con lo
+    que fuerce el piloto mientras lo hace (ver `_REVISOR_FORZADO`)."""
+    ajustes = dict(AJUSTES.leer())
+    with _REVISOR_LOCK:
+        forzado = dict(_REVISOR_FORZADO.get(getattr(ctx, "id", "")) or {})
+    ajustes.update(forzado)
+    return ajustes
 
 
 def _revisor():
@@ -9116,7 +9130,7 @@ def _huellas_de_planos(ctx):
     """{plano: huella del PNG activo}: la foto de antes de una tanda. Vacia en
     modo manual: ahi nadie la va a mirar y leer ochenta PNG no es gratis."""
     try:
-        if AJUSTES.leer().get("revisor_modo") not in ("autonomo", "automatico"):
+        if _ajustes_revisor(ctx).get("revisor_modo") not in ("autonomo", "automatico"):
             return {}
         plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
         revisor = _revisor()
@@ -9299,7 +9313,7 @@ def _revisor_tras_tanda(avisar, ctx, antes):
     de los planos antes de dibujar: se revisa SOLO lo que cambio. Nunca tumba la
     tanda: un fallo del revisor se apunta y la tanda sigue."""
     try:
-        ajustes = AJUSTES.leer()
+        ajustes = _ajustes_revisor(ctx)
         modo = ajustes.get("revisor_modo")
         if modo not in ("autonomo", "automatico"):
             return None
@@ -9352,7 +9366,7 @@ def _correr_notas_y_revisar(avisar, ctx):
     otra tanda a la vez (regla 2). Los redibujos del propio revisor no pasan por
     aqui (`_rehacer_en_linea` llama a `_correr_notas_imagenes`), asi que no se
     revisa a si mismo en bucle."""
-    if AJUSTES.leer().get("revisor_modo") not in ("autonomo", "automatico"):
+    if _ajustes_revisor(ctx).get("revisor_modo") not in ("autonomo", "automatico"):
         return _correr_notas_imagenes(avisar, ctx)
     antes = _huellas_de_planos(ctx)
     resultado = _correr_notas_imagenes(avisar, ctx)
@@ -9362,7 +9376,7 @@ def _correr_notas_y_revisar(avisar, ctx):
     # YA, antes de mirar que cambio: la pantalla pregunta en cuanto la cola se
     # vacia, y tiene que saber que el revisor viene detras
     with _REVISOR_LOCK:
-        _REVISOR_AUTO[ctx.id] = {"desde": time.time(), "modo": AJUSTES.leer().get("revisor_modo"),
+        _REVISOR_AUTO[ctx.id] = {"desde": time.time(), "modo": _ajustes_revisor(ctx).get("revisor_modo"),
                                  "planos": 0, "mensaje": "comprobando qué imágenes cambiaron",
                                  "trabajo": mio}
     try:
@@ -21571,6 +21585,933 @@ def parrilla_desde_cuenta(cid: str, peticion: Request, cuerpo: dict = Body(defau
     return trabajo_
 
 
+# ====================================================================== PILOTO
+#
+# «HACER EL VÍDEO COMPLETO» (rama video-completo, 28-10-2026). El nivel 1 del
+# piloto automatico: desde un guion de la Parrilla, sin mas clics, crea el
+# video, guion, voz, imagenes con el revisor y su tope de rehacer, montaje en
+# la cola de montaje y el paquete de publicacion (textos por red y portadas).
+# NO publica: eso sigue siendo de una persona.
+#
+# Los datos y las decisiones viven en `pasos/piloto.py`; aqui solo el codigo
+# que encadena, y es A PROPOSITO el mismo que corre cada boton: crear el video
+# es `crear_video_light`, cada tanda es `_correr_cadena` con su plan y sus
+# impedimentos, el revisor es el de siempre (forzado a «automatico» solo en
+# ese video, `_REVISOR_FORZADO`), el montaje espera su turno en la cola de
+# montaje (`_TURNO_MONTAJE`) y los textos y las portadas son los de Publicar.
+#
+# CADA VIDEO ES UN TRABAJO «generar:piloto» DE SU PROPIO GESTOR: abrir el
+# video en Crear enseña su barra, «Parar» lo para como cualquier tanda, y
+# `_trabajo_de_cadena` impide lanzar otra generacion encima. Un hilo vigia
+# (`_piloto_vigilar`) arranca los que tocan, `a_la_vez` como mucho: dibujar y
+# montar van igual de uno en uno en todo el Studio (sus turnos), asi que con
+# dos a la vez el guion y la voz del siguiente avanzan mientras el anterior
+# dibuja o se monta.
+#
+# NADA ARRANCA SOLO TRAS UN REINICIO: lo que estaba trabajando pasa a
+# «interrumpido» (`piloto.al_arrancar`) y se retoma con «Reintentar», que sigue
+# donde iba sin volver a pagar lo hecho (las tandas van en «pendientes»).
+try:
+    import piloto as PILOTO  # noqa: E402  (pasos/ ya esta en sys.path)
+    ERROR_PILOTO = ""
+except Exception as _fallo_piloto:                          # noqa: BLE001
+    PILOTO = None
+    ERROR_PILOTO = f"{type(_fallo_piloto).__name__}: {_fallo_piloto}"
+
+_PILOTO_LOCK = threading.Lock()
+#: el hilo vigia, su evento para despertarlo y las raices ya puestas al dia
+_PILOTO_VIGIA = {"hilo": None, "evento": threading.Event(), "raices": set()}
+#: vid -> el hilo que lleva ese video (crear + esperar a su trabajo)
+_PILOTO_HILOS = {}
+#: cada cuanto mira el vigia si hay algo que arrancar (o si volvio el cupo)
+PILOTO_LATIDO_S = float(os.environ.get("ESTUDIO_PILOTO_LATIDO_S") or 30)
+#: las etapas, y el trozo de la barra que se lleva cada una
+_PILOTO_TRAMOS = {"guion": (0.0, 0.15), "voz": (0.15, 0.10), "vistos": (0.25, 0.05),
+                  "imagenes": (0.30, 0.45), "montaje": (0.75, 0.15), "textos": (0.90, 0.04),
+                  "portadas": (0.94, 0.06)}
+
+
+class _PilotoPara(Exception):
+    """El piloto se detiene y espera a una persona. `donde` es donde se arregla."""
+
+    def __init__(self, porque, donde=""):
+        super().__init__(porque)
+        self.donde = str(donde or "")
+
+
+class _SinPeticion:
+    """Lo que algunas funciones de Publicar leen de la peticion: aqui no hay
+    ninguna (lo lanza el piloto), y no hay proyectos con clave que ocultar."""
+    headers = {}
+
+
+def _piloto():
+    if PILOTO is None:
+        raise ErrorApi(503, f"el piloto no se ha podido cargar: {ERROR_PILOTO}")
+    return PILOTO
+
+
+def _por_piloto(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except PILOTO.ErrorPiloto as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+# ------------------------------------------------------------------ el vigia
+
+def _piloto_despertar():
+    """Arranca el vigia si no corre y le dice que mire ya."""
+    if PILOTO is None:
+        return
+    raiz = raiz_proyectos()
+    with _PILOTO_LOCK:
+        if raiz not in _PILOTO_VIGIA["raices"]:
+            # LO QUE EL SERVICIO DEJO A MEDIAS al reiniciarse: interrumpido. Se
+            # hace una vez por raiz y ANTES de arrancar nada, asi que no puede
+            # tocar un video que este proceso haya puesto en marcha.
+            _PILOTO_VIGIA["raices"].add(raiz)
+            try:
+                PILOTO.al_arrancar(raiz)
+            except Exception as fallo:                       # noqa: BLE001
+                anotar_global("piloto_fallo", {"al_arrancar": str(fallo)[:300]})
+        hilo = _PILOTO_VIGIA["hilo"]
+        if hilo is None or not hilo.is_alive():
+            hilo = threading.Thread(target=_piloto_vigilar, daemon=True, name="piloto-vigia")
+            _PILOTO_VIGIA["hilo"] = hilo
+            hilo.start()
+    _PILOTO_VIGIA["evento"].set()
+
+
+def _piloto_vigilar():
+    evento = _PILOTO_VIGIA["evento"]
+    while True:
+        evento.wait(PILOTO_LATIDO_S)
+        evento.clear()
+        try:
+            _piloto_una_vuelta()
+        except Exception as fallo:                           # noqa: BLE001
+            anotar_global("piloto_fallo", {"vigia": str(fallo)[:300]})
+
+
+def _piloto_cupo_lleno(tope_pct):
+    """El motivo para NO arrancar un video por el cupo de Claude, o "".
+
+    Con varias cuentas manda la MEJOR: el CLI pasa a la siguiente cuando una se
+    agota. Sin medida no se para (y se pide una, en segundo plano)."""
+    cc = CONSUMO_CLAUDE
+    if cc is None:
+        return ""
+    try:
+        cuentas = _cuentas_para_medir()
+        for cuenta in cuentas:
+            if not cc.midiendo() and cc.toca_medir(cuenta):
+                cc.medir_en_segundo_plano(cuenta)
+        cupos = cc.leer_cupo()
+        ahora_ = time.time()
+        mejor = None
+        for cuenta in cuentas:
+            ficha = cupos.get(cc.clave_de(cuenta))
+            if not isinstance(ficha, dict):
+                return ""                             # una cuenta sin medir: no se para
+            uso = 1.0 if ficha.get("estado") == "rejected" else 0.0
+            for v in (ficha.get("ventanas") or {}).values():
+                reinicia = v.get("reinicia")
+                if reinicia and float(reinicia) <= ahora_:
+                    continue
+                uso = max(uso, float(v.get("uso") or 0))
+            mejor = uso if mejor is None else min(mejor, uso)
+    except Exception:                                       # noqa: BLE001
+        return ""
+    if mejor is not None and mejor * 100 >= float(tope_pct):
+        return (f"esperando cupo de Claude: va por el {mejor * 100:.0f} % y el piloto no "
+                f"arranca vídeos por encima del {int(tope_pct)} %")
+    return ""
+
+
+def _piloto_una_vuelta():
+    """Arranca los videos que tocan, si hay hueco y cupo."""
+    P = _piloto()
+    raiz = raiz_proyectos()
+    ajustes = P.ajustes(raiz)
+    with _PILOTO_LOCK:
+        vivos = {v for v, h in _PILOTO_HILOS.items() if h.is_alive()}
+        for v in list(_PILOTO_HILOS):
+            if v not in vivos:
+                _PILOTO_HILOS.pop(v, None)
+    for ficha in P.siguientes(raiz, ajustes["a_la_vez"]):
+        if ficha["id"] in vivos:
+            continue
+        motivo = _piloto_cupo_lleno(P.ajustes_del_video(raiz, ficha)["cupo_max_pct"])
+        if motivo:
+            if ficha.get("mensaje") != motivo:
+                P.cambiar(raiz, ficha["id"], mensaje=motivo)
+            break                                 # el orden de llegada se respeta
+        P.cambiar(raiz, ficha["id"], estado="trabajando", empezado=ahora(),
+                  mensaje="arrancando", porque="",
+                  intentos=int(ficha.get("intentos") or 0) + 1)
+        hilo = threading.Thread(target=_piloto_correr, args=(raiz, ficha["id"]),
+                                daemon=True, name=f"piloto-{ficha['id']}")
+        with _PILOTO_LOCK:
+            _PILOTO_HILOS[ficha["id"]] = hilo
+        hilo.start()
+
+
+def _piloto_correr(raiz, vid):
+    """Lleva UN video: lo crea (si no existe) y espera a su trabajo."""
+    P = _piloto()
+    try:
+        ficha = P.leer(raiz, vid)
+        pid = ficha.get("pid") or ""
+        if not pid:
+            pid = _piloto_crear_video(raiz, vid)
+        ctx = contexto(pid)
+        with _cerrojo_de_cadena(ctx.id):
+            activo = _trabajo_de_cadena(ctx)
+            if activo is not None or ctx.gestor.listar(activos=True):
+                raise _PilotoPara("ese vídeo tiene algo en marcha: cuando acabe, pulsa «Reintentar»",
+                                  "el vídeo")
+            with _COLA_LOCK:
+                if _cola_dibujando(ctx):
+                    raise _PilotoPara("se están rehaciendo imágenes con tus notas en ese vídeo: "
+                                      "cuando acaben, pulsa «Reintentar»", "Imágenes")
+            trabajo_id = ctx.gestor.lanzar("generar:piloto", _piloto_cadena, ctx, raiz, vid,
+                                           paso="ingesta", toca=[p["id"] for p in PASOS])
+        _registrar_trabajo(trabajo_id, ctx.id)
+        P.cambiar(raiz, vid, trabajo=trabajo_id)
+        final = ctx.gestor.esperar(trabajo_id)
+        ahora_ficha = P.leer(raiz, vid)
+        if final["estado"] == "cancelado":
+            P.cambiar(raiz, vid, estado="cancelado", trabajo="", terminado=ahora(),
+                      mensaje="lo has parado tú: «Reintentar» sigue donde iba")
+        elif final["estado"] == "error":
+            P.cambiar(raiz, vid, estado="error", trabajo="", terminado=ahora(),
+                      mensaje=str(final.get("error") or "falló")[:400],
+                      porque=f"falló en «{_piloto_nombre_etapa(ahora_ficha.get('etapa'))}»")
+        elif ahora_ficha.get("estado") == "trabajando":
+            # el trabajo acabo sin decir como: se cierra como listo
+            P.cambiar(raiz, vid, estado="listo", trabajo="", terminado=ahora(), etapa="fin")
+    except _PilotoPara as parada:
+        _piloto_parar(raiz, vid, parada)
+    except Exception as fallo:                              # noqa: BLE001
+        mensaje = fallo.mensaje if isinstance(fallo, ErrorApi) else str(fallo)
+        try:
+            P.cambiar(raiz, vid, estado="error", trabajo="", terminado=ahora(),
+                      mensaje=str(mensaje)[:400])
+        except Exception:                                   # noqa: BLE001
+            pass
+        anotar_global("piloto_fallo", {"video": vid, "error": str(mensaje)[:400]})
+    finally:
+        _PILOTO_VIGIA["evento"].set()             # el siguiente de la cola
+
+
+def _piloto_nombre_etapa(etapa):
+    return dict(PILOTO.ETAPAS).get(etapa, etapa or "") if PILOTO else str(etapa or "")
+
+
+def _piloto_parar(raiz, vid, parada):
+    P = _piloto()
+    # EL PORQUE Y EL DONDE VAN EN LA FICHA, no en «Para revisar»: al retomarlo
+    # se borran (ya no son verdad), y lo apuntado para revisar se queda
+    P.cambiar(raiz, vid, estado="parado", trabajo="", terminado=ahora(),
+              porque=str(parada)[:400], donde=parada.donde[:80],
+              mensaje=("Detenido: " + str(parada))[:400])
+
+
+# ------------------------------------------------------------ crear el video
+
+def _cta_vacia():
+    return {"presentacion": {"puesto": False, "texto": ""},
+            "cta_medio": {"puesto": False, "texto": ""},
+            "cta_final": {"puesto": False, "texto": ""}}
+
+
+def _piloto_opciones(encargo):
+    """Lo que el guion de la Parrilla fija del video, como lo manda la pantalla
+    (`opcionesParaCrear`). Lo que no trae no viaja: queda automatico (regla 1)."""
+    salida = {}
+    ef = encargo.get("espacio_fijo") if isinstance(encargo.get("espacio_fijo"), dict) else {}
+    if str(ef.get("descripcion") or "").strip():
+        salida["espacio_fijo"] = {
+            "sitio": str(ef.get("sitio") or "").strip(),
+            "descripcion": str(ef.get("descripcion")).strip(),
+            "luz": str(ef.get("luz") or "").strip(),
+            "secundarios": [{"nombre": str(x.get("nombre") or "").strip(),
+                             "descripcion": str(x.get("descripcion") or "").strip()}
+                            for x in (ef.get("secundarios") or [])
+                            if isinstance(x, dict) and str(x.get("nombre") or "").strip()]}
+    tr = encargo.get("tipo_relato") if isinstance(encargo.get("tipo_relato"), dict) else {}
+    if tr.get("modo"):
+        salida["tipo_relato"] = ({"modo": tr["modo"], "cambia": tr.get("cambia") or "objeto"}
+                                 if tr["modo"] == "espacio_que_cambia" else {"modo": tr["modo"]})
+    if encargo.get("imagenes") in ("guion", "voz"):
+        salida["imagenes"] = encargo["imagenes"]
+    if isinstance(encargo.get("visuales"), list) and encargo["visuales"]:
+        salida["visuales"] = encargo["visuales"][:400]
+    return salida
+
+
+def _piloto_crear_video(raiz, vid):
+    """El video nuevo, con el MISMO codigo que «Generar el guion» de Crear. -> pid"""
+    P = _piloto()
+    ficha = P.leer(raiz, vid)
+    PAR = _parrilla()
+    cid = ficha.get("cid") or PAR.SIN_PROYECTO
+    P.cambiar(raiz, vid, etapa="crear", mensaje="creando el vídeo con su estilo")
+    # «usado» y la huella del material: la Parrilla lo enlaza sola a su video
+    encargo = _por_parrilla(PAR.pasar_al_encargo, raiz, cid, ficha["gid"],
+                            ficha.get("indice") or 0, ficha["estilo"])
+    duracion = ficha.get("duracion_s") or encargo.get("duracion_objetivo_s")
+    formato = ficha.get("formato") or encargo.get("formato")
+    if not duracion or formato not in ("vertical", "horizontal"):
+        raise _PilotoPara("al guion le falta la duración o el formato: elígelos al mandarlo "
+                          "al piloto (o escríbelos en el guion)", "Parrilla")
+    cuerpo = {"nombre": encargo.get("nombre") or ficha.get("titulo") or "Vídeo del piloto",
+              "duracion_objetivo_s": int(duracion), "formato": formato,
+              "material": encargo["material"], "guion_propio": bool(encargo.get("guion_propio")),
+              "indicaciones": encargo.get("indicaciones") or "",
+              "cta": encargo.get("cta") or _cta_vacia(),
+              "opciones": _piloto_opciones(encargo)}
+    hecho = crear_video_light(ficha["estilo"], cuerpo)
+    pid = (hecho.get("proyecto") or {}).get("id")
+    if not pid:
+        raise RuntimeError("el servidor no ha devuelto ningún vídeo")
+    P.cambiar(raiz, vid, pid=pid, nombre=(hecho.get("proyecto") or {}).get("nombre") or pid)
+    for aviso in (encargo.get("avisos") or [])[:6]:
+        P.apuntar_revision(raiz, vid, f"Del guion: {aviso}", "Parrilla")
+    for aviso in (hecho.get("avisos") or [])[:6]:
+        P.apuntar_revision(raiz, vid, str(aviso), "Encargo")
+    try:
+        ctx = contexto(pid)
+        ctx.bitacora.anotar("piloto_video_creado", None, {"piloto": vid, "guion": ficha["gid"],
+                                                          "estilo": ficha["estilo"]})
+    except Exception:                                       # noqa: BLE001
+        pass
+    return pid
+
+
+# --------------------------------------------------------------- la cadena
+
+def _piloto_tramo(avisar, etapa):
+    """Un `avisar` que reparte el 0..1 de una etapa en su trozo de la barra."""
+    desde, ancho = _PILOTO_TRAMOS[etapa]
+
+    def tramo(valor, mensaje="", publico=""):
+        try:
+            fraccion = min(1.0, max(0.0, float(valor or 0)))
+        except (TypeError, ValueError):
+            fraccion = 0.0
+        return avisar(min(0.999, desde + ancho * fraccion), mensaje, publico)
+    tramo.al_cancelar = getattr(avisar, "al_cancelar", None)
+    return tramo
+
+
+def _piloto_tanda(avisar, ctx, tanda):
+    """Una tanda del modo light, con su plan y sus impedimentos, como
+    `generar_video` pero dentro del trabajo del piloto. -> salida o None"""
+    datos = {"tanda": tanda}
+    elegidas = _con_origen(ctx, _pestanas_pedidas(datos))
+    plan = _plan_de_generacion(ctx, elegidas, "pendientes", datos)
+    if not plan["tareas"]:
+        return None
+    if plan["impedimentos"]:
+        primero = plan["impedimentos"][0]
+        raise _PilotoPara(primero["que"], primero.get("donde") or "")
+    marca = uuid.uuid4().hex[:12]
+    _apuntar_tanda(ctx, {"marca": marca, "tandas": elegidas, "modo": "pendientes",
+                         "lanzada": ahora(), "piloto": True,
+                         "prometido_usd": (plan.get("coste") or {}).get("usd_por_generar"),
+                         "prometido_imagenes": (plan.get("coste") or {}).get("imagenes_por_generar")})
+    return _cadena_con_cuenta(avisar, ctx, marca, elegidas, "pendientes", datos, plan)
+
+
+def _piloto_gastado(ctx):
+    try:
+        return float(medidor(ctx).total().get("total_usd") or 0.0)
+    except Exception:                                       # noqa: BLE001
+        return 0.0
+
+
+def _piloto_previsto(ctx, aj):
+    """Lo que se prevé que cueste el video entero, en dolares."""
+    try:
+        coste = _coste_previsto(ctx, ["guion", "voz", "video", "render"])
+        total = float(coste.get("usd_por_generar") or coste.get("usd_total") or 0.0)
+    except Exception:                                       # noqa: BLE001
+        total = 0.0
+    if aj.get("portadas") in ("ambas", "ia"):
+        try:
+            total += float(AJUSTES.precio_por_imagen(aj.get("calidad_portada_ia") or "low")
+                           .get("usd") or 0.0)
+        except Exception:                                   # noqa: BLE001
+            pass
+    return round(total, 3)
+
+
+def _piloto_vistos_buenos(avisar, ctx, raiz, vid, modo):
+    """Lo que un video pide aprobar antes de dibujar, aprobado por el piloto
+    (en «seguir» y «mezcla») o pedido a la persona (en «parar»)."""
+    P = _piloto()
+    da = P.da_vistos_buenos(modo)
+    # 1. EL GUION VISUAL: con «lo que dice el guion» y sin aprobar, no se dibuja
+    gv = _guion_visual()
+    params_a = ctx.estado.params("assets") or {}
+    bloques = _bloques_del_guion(ctx)
+    if gv.modo_de(params_a) == "guion":
+        planos_a, _origen = gv.efectivo(params_a, bloques)
+        falta = not planos_a or bool(gv.fuera_de_la_voz(planos_a, [b.get("id") for b in bloques]))
+        if falta:
+            if not da:
+                raise _PilotoPara("el guion visual espera tu visto bueno: revísalo, apruébalo "
+                                  "y pulsa «Seguir igualmente»", "Guion visual")
+            try:
+                guardado = gv.normalizar(params_a.get("guion_visual"))
+            except ValueError:
+                guardado = {}
+            limpio = bool(guardado.get("planos")) and not gv.fuera_de_la_voz(
+                guardado["planos"], [b.get("id") for b in bloques])
+            if not limpio:
+                avisar(0.2, "Claude escribe el guion visual", "Pensando qué se ve en cada escena")
+                por_fase = CLI_CLAUDE.por_defecto_de("catalogo_visual")
+                _correr_proponer_gv(avisar, ctx, _ajuste_cli({}, por_fase["modelo"], por_fase["esfuerzo"]))
+            with _cerrojo_de_cadena(ctx.id):
+                guardado = gv.normalizar((ctx.estado.params("assets") or {}).get("guion_visual"))
+                if guardado.get("planos") and not guardado.get("aprobado"):
+                    ctx.estado.actualizar_params("assets", {"guion_visual": dict(guardado, aprobado=True)})
+            ctx.bitacora.anotar("guion_visual_aprobado", "assets", {"aprobado": True, "piloto": vid})
+            P.apuntar_revision(raiz, vid, "El guion visual lo aprobó el piloto: míralo si las "
+                                          "imágenes no cuentan lo que querías", "Guion visual")
+    # 2. LA IMAGEN BASE DEL TIPO DE RELATO y la de cada estado
+    tr = _tipo_relato()
+    params_a = ctx.estado.params("assets") or {}
+    if not tr.edita(tr.resolver(params_a)):
+        return
+    ficha = _ficha_tipo_relato(ctx)
+    if ficha.get("listo"):
+        return
+    if not da:
+        raise _PilotoPara("la imagen base del tipo de relato espera tu visto bueno: apruébala "
+                          "y pulsa «Seguir igualmente»", "Imágenes → La imagen base")
+    # los estados salen del reparto de sitios: se reparte antes (es la misma
+    # tarea de la tanda de imagenes, que despues se la salta por estar al dia)
+    receta = _receta_de_video(ctx, "video")
+    funcion, args = _que_hace("escenarios", ctx, receta, "pendientes")
+    if not _esta_al_dia(ctx, _recetas().TAREAS_POR_ID["escenarios"]):
+        avisar(0.3, "repartiendo los sitios del vídeo", "Pensando dónde ocurre cada escena")
+        funcion(avisar, *args)
+    ficha = _ficha_tipo_relato(ctx)
+    sitio = ficha.get("sitio")
+    if not sitio:
+        raise _PilotoPara("este vídeo no tiene un sitio para la imagen base: revisa el tipo de "
+                          "relato o el espacio fijo", "El tipo de relato")
+    if not ficha.get("base_aprobada"):
+        if sitio not in (ficha.get("bases") or {}):
+            if ficha.get("puede_usar_subida"):
+                _piloto_base_subida(ctx, sitio)          # gratis, y ya aprobada
+            else:
+                avisar(0.5, "dibujando la imagen base (se paga una imagen)", "Dibujando el sitio")
+                _correr_base(avisar, ctx, False)
+        _piloto_aprobar_bases(ctx, sitio)
+    for est in _ficha_tipo_relato(ctx).get("estados") or []:
+        if est.get("aprobada"):
+            continue
+        if not est.get("vigente"):
+            avisar(0.7, f"dibujando el estado «{est['estado']}» (se paga una imagen)",
+                   "Dibujando cómo cambia el sitio")
+            _correr_estado(avisar, ctx, est["estado"], False)
+        _piloto_aprobar_bases(ctx, sitio, estado=est["estado"])
+    ctx.bitacora.anotar("tipo_relato_base_aprobada", "assets", {"sitio": sitio, "piloto": vid})
+    P.apuntar_revision(raiz, vid, "La imagen base (y sus estados) la aprobó el piloto: si el "
+                                  "sitio no es como querías, cámbiala y rehaz las imágenes",
+                       "Imágenes → La imagen base")
+
+
+def _piloto_base_subida(ctx, sitio):
+    """La imagen subida del espacio fijo como base, aprobada (como
+    `usar_subida_como_base`, sin su 409: esto corre DENTRO del trabajo)."""
+    tr = _tipo_relato()
+    params = ctx.estado.params("assets") or {}
+    subida = (params.get("espacio_fijo") or {}).get("imagen") \
+        if isinstance(params.get("espacio_fijo"), dict) else None
+    if not subida:
+        raise _PilotoPara("el espacio fijo no tiene imagen subida", "El espacio fijo")
+    with _cerrojo_de_cadena(ctx.id):
+        guardado = _tipo_relato_guardado(ctx)
+        bases = dict(guardado.get("bases") or {})
+        bases[sitio] = {"imagen": subida, "aprobada": True}
+        guardado["bases"] = bases
+        ctx.estado.actualizar_params("assets", {"tipo_relato": tr.normalizar(guardado)})
+
+
+def _piloto_aprobar_bases(ctx, sitio, estado=""):
+    tr = _tipo_relato()
+    with _cerrojo_de_cadena(ctx.id):
+        guardado = _tipo_relato_guardado(ctx)
+        bases = dict(guardado.get("bases") or {})
+        if sitio not in bases:
+            raise _PilotoPara("la imagen base no ha salido: genérala a mano", "Imágenes → La imagen base")
+        if estado:
+            estados = dict(bases[sitio].get("estados") or {})
+            if estado not in estados or estados[estado].get("aprobada"):
+                return
+            estados[estado] = dict(estados[estado], aprobada=True)
+            bases[sitio] = dict(bases[sitio], estados=estados)
+        else:
+            if bases[sitio].get("aprobada"):
+                return
+            bases[sitio] = dict(bases[sitio], aprobada=True)
+        guardado["bases"] = bases
+        ctx.estado.actualizar_params("assets", {"tipo_relato": tr.normalizar(guardado)})
+
+
+def _piloto_imagenes(avisar, ctx, aj):
+    """La tanda de imagenes con el revisor en «automatico» y el tope del piloto."""
+    with _REVISOR_LOCK:
+        _REVISOR_FORZADO[ctx.id] = {"revisor_modo": "automatico",
+                                    "revisor_vueltas": int(aj.get("vueltas") or 2)}
+    try:
+        return _piloto_tanda(avisar, ctx, "video")
+    finally:
+        with _REVISOR_LOCK:
+            _REVISOR_FORZADO.pop(ctx.id, None)
+
+
+def _piloto_decidir(ctx, raiz, vid, aj, forzar):
+    """El interruptor: lo que queda marcado tras el tope de rehacer. -> (decision, porque)"""
+    P = _piloto()
+    p6 = PASOS_MODULOS.p6_assets
+    plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    imagenes = _imagenes_de_planos(ctx, plan)
+    try:
+        resumen = _revisor().resumen(ctx.proyecto, imagenes)
+    except Exception:                                       # noqa: BLE001
+        resumen = {"pendientes": [], "sin_revisar": None}
+    marcadas = sorted({p["plano"] for p in resumen.get("pendientes") or [] if p["plano"] in imagenes})
+    decision, porque = P.decidir(aj["si_falla"], len(marcadas), len(imagenes), aj["umbral_pct"])
+    if marcadas:
+        lista = ", ".join(marcadas[:12]) + (" y más" if len(marcadas) > 12 else "")
+        P.apuntar_revision(raiz, vid, f"El revisor sigue marcando {len(marcadas)} "
+                                      f"{'imagen' if len(marcadas) == 1 else 'imágenes'}: {lista}",
+                           "Imágenes")
+    if resumen.get("sin_revisar"):
+        P.apuntar_revision(raiz, vid, f"{resumen['sin_revisar']} imágenes no se pudieron revisar "
+                                      "(Claude no contestó): míralas tú", "Imágenes")
+    if forzar and decision == "parar":
+        return "seguir", "lo has mirado tú: se monta igual"
+    return decision, porque
+
+
+def _piloto_textos(avisar, ctx, raiz, vid):
+    """Los textos de las redes del proyecto, con Claude (los de Publicar)."""
+    P = _piloto()
+    PUB = _publicar()
+    info = _info_para_publicar(ctx)
+    if not info.get("montado"):
+        P.apuntar_revision(raiz, vid, "El vídeo no quedó montado: no hay textos", "Vídeo")
+        return
+    ajustes = PUB.ajustes_de(raiz_proyectos(), info["cliente"])
+    ficha = PUB.ficha(raiz_proyectos(), info, ajustes)
+    redes = [r for r in ficha.get("redes") or [] if r in PUB.REDES]
+    P.cambiar(raiz, vid, redes=redes)
+    if not redes:
+        P.apuntar_revision(raiz, vid, "El proyecto no tiene redes elegidas: elígelas en Publicar "
+                                      "y pulsa «Escribir los textos»", "Publicar")
+        return
+    textos = ficha.get("textos") or {}
+    hechos = [r for r in redes if str((textos.get(r) or {}).get("descripcion") or "").strip()]
+    if len(hechos) == len(redes) and not ficha.get("desactualizada"):
+        return                                    # retomado: ya estaban escritos
+    avisar(0.1, "Claude escribe los títulos y textos de cada red", "Escribiendo los textos")
+    del_proyecto = [v for v in _videos_para_publicar(_SinPeticion()) if v["cliente"] == info["cliente"]]
+    cid_res = "" if info["cliente"] in ("", PUB.SIN_PROYECTO) else info["cliente"]
+    try:
+        PUB.lanzar_textos(raiz_proyectos(), info, redes, ajustes, proyecto=ctx.proyecto,
+                          cwd=ctx.proyecto.raiz, en_hilo=False,
+                          aprendido=PUB.aprendido_de_resultados(raiz_proyectos(), del_proyecto, cid_res),
+                          recientes=PUB.hashtags_recientes(raiz_proyectos(),
+                                                           [v["pid"] for v in del_proyecto], sin_pid=ctx.id))
+    except PUB.ErrorPublicar as fallo:
+        P.apuntar_revision(raiz, vid, f"Los textos no salieron: {fallo}", "Publicar")
+        return
+    error = PUB.ficha(raiz_proyectos(), info, ajustes).get("error_textos")
+    if error:
+        P.apuntar_revision(raiz, vid, f"Los textos: {str(error)[:240]}", "Publicar")
+
+
+def _piloto_render_portada(diseno, rutas, destino):
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    _portadas().renderizar(diseno, rutas, destino)
+    return destino
+
+
+def _piloto_portadas(avisar, ctx, raiz, vid, aj):
+    """Opcion C del dueño: una portada con un plano del video (gratis) y otra
+    hecha con IA (se paga una imagen). Se deja puesta la primera; las dos se
+    pueden elegir en la ficha del piloto."""
+    P = _piloto()
+    PO = _portadas()
+    info = _info_para_publicar(ctx)
+    if not info.get("montado"):
+        return
+    carpeta_p = P.carpeta_portadas(raiz, vid)
+    os.makedirs(carpeta_p, exist_ok=True)
+    base = _diseno_inicial(ctx, info)
+    formato = base["formato"]
+    entrada = {"titulo": info.get("titulo") or info.get("nombre"), "palabras": [],
+               "resumen": _resumen_para_portada(info), "negocio": info.get("cliente_nombre") or ""}
+    candidatos = []
+    if aj.get("portadas") in ("ambas", "plano"):
+        avisar(0.1, "Claude propone la portada con un plano del vídeo", "Diseñando la portada")
+        try:
+            propuestas = PO.proponer(entrada, formato, base=base, n=1, cwd=RAIZ_ESTUDIO)
+        except _Cancelado:
+            raise
+        except Exception as fallo:                          # noqa: BLE001
+            propuestas = [{"diseno": base, "por_que": "la de partida"}]
+            P.apuntar_revision(raiz, vid, f"Claude no propuso portada ({str(fallo)[:120]}): va "
+                                          "la de partida, retócala en Publicar", "Publicar → Portada")
+        for i, prop in enumerate(propuestas[:1], 1):
+            diseno = PO.normalizar(prop.get("diseno"))
+            nombre = f"plano{i}.png"
+            try:
+                _piloto_render_portada(diseno, _rutas_fondo_portada(ctx, info, diseno),
+                                       os.path.join(carpeta_p, nombre))
+            except Exception as fallo:                      # noqa: BLE001
+                P.apuntar_revision(raiz, vid, f"No se pudo pintar la portada: {str(fallo)[:160]}",
+                                   "Publicar → Portada")
+                continue
+            candidatos.append({"id": f"plano{i}", "tipo": "plano", "fichero": nombre,
+                               "nombre": "Con un plano del vídeo", "coste_usd": 0.0,
+                               "por_que": str(prop.get("por_que") or "")[:200], "diseno": diseno})
+    if aj.get("portadas") in ("ambas", "ia"):
+        diseno = PO.normalizar(candidatos[0]["diseno"] if candidatos else base)
+        try:
+            avisar(0.5, "dibujando la portada con IA (se paga una imagen)", "Dibujando la portada")
+            prompt = PO.prompt_final("portada", PO.prompt_portada_ia(diseno, entrada), diseno, entrada)
+            hecho = _correr_portada_ia(avisar, ctx, "portada", prompt,
+                                       _rutas_fondo_portada(ctx, info, diseno),
+                                       aj.get("calidad_portada_ia") or "low",
+                                       PO.TAMANO_IA[diseno["formato"]])
+            ia = PO.normalizar(dict(diseno, modo="ia",
+                                    fondo=dict(diseno.get("fondo") or {}, tipo="ia",
+                                               imagen=hecho["nombre"])))
+            _piloto_render_portada(ia, _rutas_fondo_portada(ctx, info, ia),
+                                   os.path.join(carpeta_p, "ia.png"))
+            candidatos.append({"id": "ia", "tipo": "ia", "fichero": "ia.png",
+                               "nombre": "Hecha con IA", "coste_usd": hecho.get("coste_usd"),
+                               "por_que": "", "diseno": ia})
+        except _Cancelado:
+            raise
+        except Exception as fallo:                          # noqa: BLE001
+            P.apuntar_revision(raiz, vid, f"La portada con IA no salió: {str(fallo)[:160]}",
+                               "Publicar → Portada")
+    puesta = ""
+    if candidatos:
+        _piloto_usar_portada(ctx, candidatos[0]["diseno"])
+        puesta = candidatos[0]["id"]
+    else:
+        P.apuntar_revision(raiz, vid, "No hay portada: hazla en Publicar", "Publicar → Portada")
+    P.cambiar(raiz, vid, portadas=candidatos, portada_puesta=puesta)
+
+
+def _piloto_usar_portada(ctx, diseno):
+    """La deja como portada del video, como «Usar esta portada» del editor."""
+    PO = _portadas()
+    info = _info_para_publicar(ctx)
+    diseno = PO.normalizar(diseno)
+    destino = os.path.join(_raiz_publicar(), "portadas", "vistas", f"final_{uuid.uuid4().hex[:12]}.png")
+    try:
+        _piloto_render_portada(diseno, _rutas_fondo_portada(ctx, info, diseno), destino)
+        with open(destino, "rb") as fh:
+            contenido = fh.read()
+    finally:
+        try:
+            os.remove(destino)
+        except OSError:
+            pass
+    _por_publicar(_publicar().guardar_imagen_portada, raiz_proyectos(), ctx.id, contenido, ".png")
+    PO.guardar(_raiz_publicar(), ctx.id, diseno)
+    ctx.bitacora.anotar("portada_disenada", "publicar", {"plantilla": diseno["plantilla"],
+                                                         "formato": diseno["formato"], "piloto": True})
+
+
+def _piloto_cadena(avisar, ctx, raiz, vid):
+    """EL VIDEO ENTERO, en un trabajo. Las paradas se apuntan y no son un error."""
+    P = _piloto()
+    ficha = P.leer(raiz, vid)
+    aj = P.ajustes_del_video(raiz, ficha)
+    forzar = bool(ficha.get("forzar_seguir"))
+    salida = {"piloto": vid, "avisos": []}
+
+    def etapa(nombre, mensaje):
+        P.cambiar(raiz, vid, etapa=nombre, mensaje=mensaje)
+
+    def tanda(nombre, que, mensaje):
+        etapa(nombre, mensaje)
+        hecho = _piloto_tanda(_piloto_tramo(avisar, nombre), ctx, que)
+        for aviso in (hecho or {}).get("avisos") or []:
+            P.apuntar_revision(raiz, vid, str(aviso), "Vídeo")
+        return hecho
+
+    try:
+        # 0. LO QUE VA A COSTAR, antes de gastar nada
+        previsto = _piloto_previsto(ctx, aj)
+        P.cambiar(raiz, vid, previsto_usd=previsto)
+        if previsto > aj["tope_usd"] and not forzar:
+            raise _PilotoPara(f"costaría unos {previsto:.2f} $ y tu tope por vídeo es "
+                              f"{aj['tope_usd']:.2f} $: sube el tope o pulsa «Seguir igualmente»",
+                              "Piloto → Ajustes")
+        # 1-2. GUION Y VOZ
+        tanda("guion", "guion", "escribiendo el guion")
+        tanda("voz", "voz", "poniéndole voz")
+        # 3. LOS VISTOS BUENOS que pide el video antes de dibujar
+        etapa("vistos", "preparando lo que hay que aprobar antes de dibujar")
+        _piloto_vistos_buenos(_piloto_tramo(avisar, "vistos"), ctx, raiz, vid, aj["si_falla"])
+        # el tope, ahora con los planos de verdad
+        try:
+            por_dibujar = float(_coste_previsto(ctx, ["video"]).get("usd_por_generar") or 0.0)
+        except Exception:                                   # noqa: BLE001
+            por_dibujar = 0.0
+        gastado = _piloto_gastado(ctx)
+        if gastado + por_dibujar > aj["tope_usd"] and not forzar:
+            raise _PilotoPara(f"las imágenes costarían unos {por_dibujar:.2f} $ (ya van "
+                              f"{gastado:.2f} $) y tu tope es {aj['tope_usd']:.2f} $",
+                              "Piloto → Ajustes")
+        # 4. LAS IMAGENES, con el revisor y su tope de rehacer
+        etapa("imagenes", f"dibujando las imágenes (el revisor rehace lo marcado, "
+                          f"hasta {aj['vueltas']} {'ronda' if aj['vueltas'] == 1 else 'rondas'})")
+        hecho = _piloto_imagenes(_piloto_tramo(avisar, "imagenes"), ctx, aj)
+        for aviso in (hecho or {}).get("avisos") or []:
+            P.apuntar_revision(raiz, vid, str(aviso), "Imágenes")
+        # 5. EL INTERRUPTOR
+        etapa("decidir", "mirando lo que dejó marcado el revisor")
+        decision, porque = _piloto_decidir(ctx, raiz, vid, aj, forzar)
+        if decision == "parar":
+            raise _PilotoPara(porque, "Imágenes")
+        # 6. EL MONTAJE, en la cola de montaje
+        tanda("montaje", "render", "montando el vídeo (espera su turno en la cola de montaje)")
+        # 7-8. EL PAQUETE DE PUBLICACION
+        etapa("textos", "escribiendo los títulos, descripciones y hashtags de cada red")
+        _piloto_textos(_piloto_tramo(avisar, "textos"), ctx, raiz, vid)
+        etapa("portadas", "preparando las portadas")
+        _piloto_portadas(_piloto_tramo(avisar, "portadas"), ctx, raiz, vid, aj)
+    except _PilotoPara as parada:
+        P.cambiar(raiz, vid, coste_usd=round(_piloto_gastado(ctx), 3), forzar_seguir=False)
+        _piloto_parar(raiz, vid, parada)
+        salida["parado"] = str(parada)
+        avisar(1.0, f"el piloto se ha detenido: {parada}", "Detenido")
+        return salida
+    final = P.leer(raiz, vid)
+    estado = "revisar" if final.get("revisar") else "listo"
+    P.cambiar(raiz, vid, estado=estado, etapa="fin", trabajo="", terminado=ahora(),
+              coste_usd=round(_piloto_gastado(ctx), 3), forzar_seguir=False,
+              mensaje=("listo para publicar" if estado == "listo"
+                       else "listo para publicar, con cosas que revisar"))
+    ctx.bitacora.anotar("piloto_terminado", None, {"piloto": vid, "estado": estado})
+    salida["estado"] = estado
+    avisar(1.0, "vídeo hecho y paquete de publicación listo", PUBLICO_LISTO)
+    return salida
+
+
+# ------------------------------------------------------------------ las rutas
+
+def _piloto_visible(ficha, cerrados):
+    return not (cerrados and ficha.get("cid") in cerrados)
+
+
+def _piloto_vivo(ficha):
+    """El progreso del trabajo de un video en marcha (si su video esta abierto)."""
+    if ficha.get("estado") != "trabajando" or not ficha.get("trabajo") or not ficha.get("pid"):
+        return None
+    with _LOCK:
+        ctx = _CONTEXTOS.get(ficha["pid"])
+    if ctx is None:
+        return None
+    try:
+        t = ctx.gestor.estado(ficha["trabajo"])
+    except KeyError:
+        return None
+    return {"progreso": t.get("progreso"), "mensaje": t.get("publico") or t.get("mensaje") or "",
+            "segundos": t.get("segundos"), "cancelando": t.get("cancelando")}
+
+
+def _piloto_para_pantalla(ficha):
+    salida = {k: v for k, v in ficha.items() if k != "portadas"}
+    salida["portadas"] = [{k: v for k, v in c.items() if k != "diseno"}
+                          for c in ficha.get("portadas") or []]
+    salida["vivo"] = _piloto_vivo(ficha)
+    return salida
+
+
+@app.get("/api/piloto")
+def piloto_estado(peticion: Request):
+    """La cola del piloto, la bandeja «Necesita revisión», los ajustes y el cupo."""
+    P = _piloto()
+    _piloto_despertar()
+    resumen = _por_piloto(P.resumen, raiz_proyectos())
+    cerrados = _cerrados(peticion)
+    resumen["videos"] = [_piloto_para_pantalla(v) for v in resumen["videos"]
+                         if _piloto_visible(v, cerrados)]
+    resumen["cupo"] = _piloto_cupo_lleno(resumen["ajustes"]["cupo_max_pct"])
+    return resumen
+
+
+@app.put("/api/piloto/ajustes")
+def piloto_guardar_ajustes(cuerpo: dict = Body(default=None)):
+    """{si_falla?, umbral_pct?, vueltas?, tope_usd?, a_la_vez?, portadas?,
+    calidad_portada_ia?, cupo_max_pct?} -> los ajustes"""
+    P = _piloto()
+    hecho = _por_piloto(P.guardar_ajustes, raiz_proyectos(), _cuerpo(cuerpo))
+    _piloto_despertar()
+    return hecho
+
+
+@app.post("/api/piloto/previa")
+def piloto_previa(peticion: Request, cuerpo: dict = Body(default=None)):
+    """Lo que hará el piloto con un guion, SIN mandarlo: {cid, gid, indice?,
+    estilo} -> {encargo, falta, avisos, coste}. No marca ni crea nada."""
+    datos = _cuerpo(cuerpo)
+    PAR = _parrilla()
+    cid = _proyecto_parrilla(datos.get("cid") or PAR.SIN_PROYECTO, peticion)
+    guion = _por_parrilla(PAR.leer, raiz_proyectos(), cid, str(datos.get("gid") or ""))
+    encargos = guion.get("encargo") or []
+    try:
+        indice = int(datos.get("indice") or 0)
+    except (TypeError, ValueError):
+        indice = 0
+    enc = encargos[indice] if 0 <= indice < len(encargos) else (encargos[0] if encargos else {})
+    if not isinstance(enc, dict):
+        enc = {}
+    falta = []
+    if not enc.get("material"):
+        falta.append("material")
+    if not enc.get("duracion_objetivo_s"):
+        falta.append("duracion")
+    if enc.get("formato") not in ("vertical", "horizontal"):
+        falta.append("formato")
+    estilos = {e["id"]: e for e in _estilos_para_parrilla(peticion)}
+    estilo = str(datos.get("estilo") or "")
+    return {"encargo": {k: enc.get(k) for k in ("nombre", "duracion_objetivo_s", "formato",
+                                                 "uso", "tipo_relato", "imagenes")},
+            "falta": falta, "avisos": list(enc.get("avisos") or [])[:8],
+            "estilo": estilos.get(estilo), "estilos": list(estilos.values()),
+            "ajustes": _piloto().ajustes(raiz_proyectos())}
+
+
+@app.post("/api/piloto/videos", status_code=201)
+def piloto_encolar(peticion: Request, cuerpo: dict = Body(default=None)):
+    """Manda un guion de la Parrilla al piloto: {cid, gid, indice?, estilo,
+    duracion_s?, formato?, ajustes?: {si_falla, umbral_pct, vueltas, tope_usd,
+    portadas}}. -> la ficha. Arranca en cuanto haya hueco y cupo."""
+    P = _piloto()
+    PAR = _parrilla()
+    datos = _cuerpo(cuerpo)
+    cid = _proyecto_parrilla(datos.get("cid") or PAR.SIN_PROYECTO, peticion)
+    gid = str(datos.get("gid") or "")
+    guion = _por_parrilla(PAR.leer, raiz_proyectos(), cid, gid)
+    estilo = str(datos.get("estilo") or "")
+    if estilo not in {e["id"] for e in _estilos_para_parrilla(peticion)}:
+        raise ErrorApi(404, "ese estilo ya no está: elige otro")
+    encargos = guion.get("encargo") or []
+    try:
+        indice = int(datos.get("indice") or 0)
+    except (TypeError, ValueError):
+        indice = 0
+    enc = encargos[indice] if 0 <= indice < len(encargos) else (encargos[0] if encargos else {})
+    if not (enc or {}).get("material"):
+        raise ErrorApi(400, "el guion no tiene material para el Encargo: escribe «- Material:» "
+                            "en «PARA EL ENCARGO» o la voz de cada escena")
+    leido = guion.get("leido") or {}
+    titulo = " — ".join(x for x in (leido.get("codigo"), leido.get("titulo")) if x)
+    pedido = {"cid": "" if cid == PAR.SIN_PROYECTO else cid, "gid": gid, "indice": indice,
+              "estilo": estilo, "titulo": titulo or (enc or {}).get("nombre") or "",
+              "duracion_s": datos.get("duracion_s") or None, "formato": datos.get("formato") or None,
+              "ajustes": datos.get("ajustes") if isinstance(datos.get("ajustes"), dict) else {}}
+    if not pedido["duracion_s"] and not (enc or {}).get("duracion_objetivo_s"):
+        raise ErrorApi(400, "el guion no dice cuánto dura: elige la duración")
+    if not pedido["formato"] and (enc or {}).get("formato") not in ("vertical", "horizontal"):
+        raise ErrorApi(400, "el guion no dice el formato: elige vertical u horizontal")
+    ficha = _por_piloto(P.encolar, raiz_proyectos(), pedido)
+    anotar_global("piloto_encolado", {"piloto": ficha["id"], "guion": gid, "estilo": estilo})
+    _piloto_despertar()
+    return _piloto_para_pantalla(ficha)
+
+
+def _piloto_ficha_o_404(vid, peticion):
+    P = _piloto()
+    ficha = _por_piloto(P.leer, raiz_proyectos(), vid)
+    if not _piloto_visible(ficha, _cerrados(peticion)):
+        raise ErrorApi(404, "ese vídeo ya no está en el piloto")
+    return ficha
+
+
+@app.post("/api/piloto/videos/{vid}/parar")
+def piloto_parar(vid: str, peticion: Request):
+    """Para un video: si espera, sale de la cola; si trabaja, se cancela su
+    trabajo (lo que se estaba pagando se acaba y se guarda)."""
+    P = _piloto()
+    ficha = _piloto_ficha_o_404(vid, peticion)
+    if ficha["estado"] == "en_cola":
+        return _piloto_para_pantalla(P.cambiar(raiz_proyectos(), vid, estado="cancelado",
+                                               terminado=ahora(), mensaje="lo has parado tú"))
+    if ficha["estado"] != "trabajando":
+        raise ErrorApi(409, "este vídeo no está trabajando")
+    if ficha.get("trabajo") and ficha.get("pid"):
+        try:
+            contexto(ficha["pid"]).gestor.cancelar(ficha["trabajo"])
+        except (KeyError, ErrorApi):
+            pass
+    return _piloto_para_pantalla(P.cambiar(raiz_proyectos(), vid, mensaje="parando…"))
+
+
+@app.post("/api/piloto/videos/{vid}/seguir")
+def piloto_seguir(vid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Seguir igualmente» ({forzar: true}: salta el tope y el interruptor una
+    vez, porque ya lo has mirado) o «Reintentar» (sin forzar). Sigue donde iba:
+    lo ya hecho no se vuelve a pagar."""
+    P = _piloto()
+    _piloto_ficha_o_404(vid, peticion)
+    ficha = _por_piloto(P.preparar_reintento, raiz_proyectos(), vid,
+                        bool(_cuerpo(cuerpo).get("forzar")))
+    _piloto_despertar()
+    return _piloto_para_pantalla(ficha)
+
+
+@app.delete("/api/piloto/videos/{vid}")
+def piloto_quitar(vid: str, peticion: Request):
+    """Lo quita de la lista. El video, si se creo, se queda en Tus proyectos."""
+    P = _piloto()
+    _piloto_ficha_o_404(vid, peticion)
+    ficha = _por_piloto(P.quitar, raiz_proyectos(), vid)
+    return {"quitado": vid, "pid": ficha.get("pid") or ""}
+
+
+@app.post("/api/piloto/videos/{vid}/portada")
+def piloto_elegir_portada(vid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{id}: deja esa portada candidata como portada del video (gratis)."""
+    P = _piloto()
+    ficha = _piloto_ficha_o_404(vid, peticion)
+    elegida = str(_cuerpo(cuerpo).get("id") or "")
+    candidato = next((c for c in ficha.get("portadas") or [] if c.get("id") == elegida), None)
+    if not candidato or not ficha.get("pid"):
+        raise ErrorApi(404, "esa portada no está")
+    _piloto_usar_portada(contexto(ficha["pid"]), candidato["diseno"])
+    return _piloto_para_pantalla(P.cambiar(raiz_proyectos(), vid, portada_puesta=elegida))
+
+
+@app.get("/api/piloto/videos/{vid}/portadas/{cual}.png")
+def piloto_imagen_portada(vid: str, cual: str, peticion: Request):
+    """La imagen de una portada candidata."""
+    ficha = _piloto_ficha_o_404(vid, peticion)
+    candidato = next((c for c in ficha.get("portadas") or [] if c.get("id") == cual), None)
+    if not candidato:
+        raise ErrorApi(404, "esa portada no está")
+    ruta = os.path.join(_piloto().carpeta_portadas(raiz_proyectos(), vid), candidato["fichero"])
+    if not os.path.isfile(ruta):
+        raise ErrorApi(404, "esa portada no está")
+    return FileResponse(ruta, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
 # ------------------------------------------------------------------------ main
 
 def main():
@@ -21595,6 +22536,9 @@ def main():
             publicar_auto.arrancar(raiz_proyectos)
         except Exception as fallo:                          # noqa: BLE001
             print(f"AVISO: las cifras automáticas no arrancan -> {fallo}")
+    # el piloto (rama video-completo): lo que quedo a medias pasa a
+    # «interrumpido» y el vigia arranca lo que este en cola
+    _piloto_despertar()
     print(f"Estudio de Video en http://{argumentos.host}:{argumentos.puerto}")
     print(f"proyectos en {raiz_proyectos()}")
     if ERROR_PASOS:

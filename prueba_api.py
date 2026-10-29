@@ -8415,6 +8415,313 @@ def probar_mezcla_cancelada_se_aplica_con_otra_mezcla():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_el_piloto():
+    """Rama video-completo (28-10-2026): «Hacer el vídeo completo» desde la
+    Parrilla. En este proceso, con proyectos de verdad (núcleo real) y los
+    pasos caros sustituidos por dobles: se mira que la CADENA vaya en orden,
+    que el interruptor pare o siga, que el tope y el cupo frenen, que el
+    revisor vaya en «automático» solo mientras dibuja y que un vídeo con
+    problemas deje pasar al siguiente. Ni red, ni Claude, ni una imagen."""
+    seccion("EL PILOTO: HACER EL VÍDEO COMPLETO (28-10)")
+    import threading                                          # noqa: PLC0415
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    sys.path.insert(0, os.path.join(RAIZ_ESTUDIO, "pasos"))
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Proyecto                               # noqa: PLC0415
+    from nucleo import bitacora as BITACORA                   # noqa: PLC0415
+
+    raiz_antes = servidor.raiz_proyectos()
+    base = tempfile.mkdtemp(prefix="estudio_piloto_")
+    global_antes = BITACORA.RUTA_GLOBAL
+    BITACORA.RUTA_GLOBAL = os.path.join(base, "_bitacora_global.jsonl")
+    servidor.fijar_raiz_proyectos(base)
+    PAR = servidor._parrilla()
+    P = servidor._piloto()
+    texto = ("P01 — Prueba del piloto\nCliente / proyecto: prueba\nUso: exacto\nRed: Reels\n"
+             "Formato: vertical\nDuración: 30 s\nObjetivo: probar\nCTA: Síguenos\nTono: alegre\n\n"
+             "ESCENA 1\nVoz: «Esto es una prueba del piloto.»\n\n"
+             "PARA EL ENCARGO\n- Material: Esto es una prueba del piloto.\n- Indicaciones: alegre\n"
+             "- Llamadas a la acción: Síguenos\n- Duración: 30 s · Formato: vertical\n\nAVISOS\n- ninguno")
+    sin = PAR.SIN_PROYECTO
+    gids = []
+    for n in range(6):
+        _mid, nuevos = PAR.anadir_en_formato(base, sin, "", texto.replace("P01", f"P0{n + 1}"))
+        gids += nuevos
+
+    # ---- los dobles ----------------------------------------------------------
+    reales = {n: getattr(servidor, n) for n in (
+        "crear_video_light", "_piloto_tanda", "_coste_previsto", "_imagenes_de_planos",
+        "_piloto_textos", "_piloto_portadas", "_estilos_para_parrilla", "_piloto_cupo_lleno",
+        "_piloto_gastado")}
+    revisor = servidor._revisor()
+    resumen_real = revisor.resumen
+    tandas, vistos, pedidos = [], {}, {"marcadas": 0, "coste": 0.4, "falla": "", "espera": None,
+                                       "cupo": ""}
+
+    def crear_falso(estilo, cuerpo):
+        proyecto = Proyecto.crear(base, cuerpo["nombre"])
+        pedidos.setdefault("cuerpos", []).append(dict(cuerpo, estilo=estilo))
+        return {"proyecto": {"id": proyecto.id, "nombre": cuerpo["nombre"]}, "avisos": []}
+
+    def tanda_falsa(avisar, ctx, que):
+        tandas.append((ctx.id, que))
+        if que == "video":
+            vistos[ctx.id] = servidor._ajustes_revisor(ctx).get("revisor_modo")
+        if pedidos["falla"] == que:
+            raise RuntimeError(f"la tanda {que} ha fallado (a propósito)")
+        if pedidos["espera"] == que:
+            for _ in range(200):
+                avisar(0.5, "esperando")           # lanza Cancelado al pararlo
+                time.sleep(0.05)
+        avisar(1.0, "hecho")
+        return {"avisos": []}
+
+    servidor.crear_video_light = crear_falso
+    servidor._piloto_tanda = tanda_falsa
+    servidor._coste_previsto = lambda ctx, p: {"usd_por_generar": pedidos["coste"],
+                                               "usd_total": pedidos["coste"]}
+    servidor._piloto_gastado = lambda ctx: 0.0
+    servidor._imagenes_de_planos = lambda ctx, plan: {f"S{i:03d}": "x.png" for i in range(1, 11)}
+    revisor.resumen = lambda proyecto, imagenes=None: {
+        "pendientes": [{"plano": f"S{i:03d}", "nota": f"n{i}", "gravedad": "alta",
+                        "alcance": "retoque"} for i in range(1, pedidos["marcadas"] + 1)],
+        "sin_revisar": 0}
+    servidor._piloto_textos = lambda avisar, ctx, raiz, vid: pedidos.setdefault("textos", []).append(vid)
+    servidor._piloto_portadas = lambda avisar, ctx, raiz, vid, aj: pedidos.setdefault(
+        "portadas", []).append((vid, aj["portadas"]))
+    servidor._estilos_para_parrilla = lambda peticion: [{"id": "e1", "nombre": "Estilo", "cliente": sin}]
+    servidor._piloto_cupo_lleno = lambda tope: pedidos["cupo"]
+
+    peticion = servidor._SinPeticion()
+
+    def esperar(vid, estados, limite=20):
+        fin = time.time() + limite
+        while time.time() < fin:
+            ficha = P.leer(base, vid)
+            if ficha["estado"] in estados:
+                return ficha
+            time.sleep(0.1)
+        return P.leer(base, vid)
+
+    def mandar(gid, **ajustes):
+        return servidor.piloto_encolar(peticion, {"cid": sin, "gid": gid, "estilo": "e1",
+                                                  "ajustes": ajustes})
+
+    try:
+        # ---- 1. mezcla con una marcada de diez: sigue, monta y marca ----------
+        pedidos["marcadas"] = 1
+        a = mandar(gids[0])
+        igual(a["estado"], "en_cola", "mandar un guion al piloto lo deja en cola")
+        try:
+            mandar(gids[0])
+            ok(False, "el mismo guion dos veces a la vez da 409")
+        except servidor.ErrorApi as fallo:
+            igual(fallo.codigo, 409, "el mismo guion dos veces a la vez da 409 (no se paga dos veces)")
+        fa = esperar(a["id"], P.TERMINADOS)
+        igual(fa["estado"], "revisar", "mezcla con 1 de 10 marcada: listo, con cosas que revisar")
+        pid = fa["pid"]
+        igual([t for p_, t in tandas if p_ == pid], ["guion", "voz", "video", "render"],
+              "la cadena va en orden: guion, voz, imágenes y montaje")
+        igual(vistos.get(pid), "automatico", "mientras dibuja, el revisor va en «automático»")
+        ok(servidor._ajustes_revisor(servidor.contexto(pid)).get("revisor_modo")
+           == servidor.AJUSTES.leer().get("revisor_modo"),
+           "y al acabar vuelve a lo de Configuración (solo se forzó en ese vídeo)")
+        ok(any("S001" in r["que"] for r in fa["revisar"]), "«Para revisar» dice qué imagen sigue marcada")
+        ok(a["id"] in (pedidos.get("textos") or []), "escribe los textos de las redes")
+        ok((a["id"], "ambas") in (pedidos.get("portadas") or []), "y las dos portadas (opción C)")
+        cuerpo = pedidos["cuerpos"][0]
+        igual((cuerpo["duracion_objetivo_s"], cuerpo["formato"], cuerpo["guion_propio"], cuerpo["estilo"]),
+              (30, "vertical", True, "e1"),
+              "el vídeo nace con la duración, el formato, «es el guion» y el estilo del guion")
+        igual(PAR.leer(base, sin, gids[0])["estado"], "usado",
+              "y el guion pasa a «usado» en la Parrilla (se enlazará solo a su vídeo)")
+
+        # ---- 2. «parar» con una marcada: no monta; «Seguir igualmente» sí ------
+        b = mandar(gids[1], si_falla="parar")
+        fb = esperar(b["id"], P.TERMINADOS)
+        igual(fb["estado"], "parado", "«parar» con una imagen marcada se detiene")
+        ok("render" not in [t for p_, t in tandas if p_ == fb["pid"]], "y no monta (no se gasta más)")
+        ok(fb["porque"], f"diciendo por qué: {fb['porque']}")
+        servidor.piloto_seguir(b["id"], peticion, {"forzar": True})
+        fb = esperar(b["id"], ("listo", "revisar", "error"))
+        igual(fb["estado"], "revisar", "«Seguir igualmente» termina el vídeo")
+        igual([t for p_, t in tandas if p_ == fb["pid"]].count("render"), 1, "montándolo una vez")
+        igual(sum(1 for c in pedidos["cuerpos"] if c["nombre"] == fb["nombre"]), 1,
+              "sin crear otro vídeo (sigue donde iba)")
+
+        # ---- 3. mezcla con 4 de 10: para y pasa al siguiente ------------------
+        pedidos["marcadas"] = 4
+        c = mandar(gids[2])
+        d = mandar(gids[3])
+        fc = esperar(c["id"], P.TERMINADOS)
+        fd = esperar(d["id"], P.TERMINADOS)
+        igual(fc["estado"], "parado", "mezcla con 4 de 10 (40 % > 25 %) se detiene")
+        igual(fd["estado"], "parado", "y el siguiente de la cola arranca igual (no se queda bloqueado)")
+        pedidos["marcadas"] = 0
+
+        # ---- 4. el tope de gasto, antes de gastar nada -------------------------
+        pedidos["coste"] = 9.0
+        e = mandar(gids[4])
+        fe = esperar(e["id"], P.TERMINADOS)
+        igual(fe["estado"], "parado", "si se prevé más que el tope, se detiene")
+        igual([t for p_, t in tandas if p_ == fe["pid"]], [], "antes de escribir el guion")
+        ok("tope" in fe["porque"], f"y dice que es por el tope: {fe['porque']}")
+        pedidos["coste"] = 0.4
+
+        # ---- 5. un fallo: error, y «Reintentar» sigue -------------------------
+        pedidos["falla"] = "voz"
+        f = mandar(gids[5])
+        ff = esperar(f["id"], P.TERMINADOS)
+        igual(ff["estado"], "error", "un fallo de la voz deja el vídeo en «error»")
+        ok("Voz" in ff.get("porque", ""), f"diciendo en qué etapa: {ff.get('porque')}")
+        pedidos["falla"] = ""
+        servidor.piloto_seguir(f["id"], peticion, {})
+        ff = esperar(f["id"], ("listo", "revisar", "error", "parado"))
+        igual(ff["estado"], "listo", "«Reintentar» lo termina")
+
+        # ---- 6. parar a mano mientras trabaja ---------------------------------
+        pedidos["espera"] = "guion"
+        servidor.piloto_seguir(e["id"], peticion, {"forzar": True})
+        esperar(e["id"], ("trabajando",), 5)
+        fin = time.time() + 5
+        while time.time() < fin and not P.leer(base, e["id"]).get("trabajo"):
+            time.sleep(0.05)
+        servidor.piloto_parar(e["id"], peticion)
+        fg = esperar(e["id"], ("cancelado", "error", "listo", "revisar", "parado"))
+        igual(fg["estado"], "cancelado", "«Parar» cancela el trabajo del vídeo")
+        pedidos["espera"] = None
+
+        # ---- 7. el cupo de Claude: no arranca y lo dice ----------------------
+        pedidos["cupo"] = "esperando cupo de Claude: va por el 95 %"
+        servidor.piloto_seguir(e["id"], peticion, {})
+        time.sleep(0.6)
+        servidor._piloto_despertar()
+        time.sleep(0.6)
+        fh = P.leer(base, e["id"])
+        igual(fh["estado"], "en_cola", "con el cupo de Claude lleno no arranca")
+        ok("cupo" in fh["mensaje"], f"y lo dice: {fh['mensaje']}")
+        pedidos["cupo"] = ""
+        servidor._piloto_despertar()
+        fh = esperar(e["id"], P.TERMINADOS)
+        igual(fh["estado"], "listo", "al volver el cupo, sigue solo")
+
+        # ---- 8. la ruta del estado -------------------------------------------
+        foto = servidor.piloto_estado(peticion)
+        ok(foto["a_revisar"] >= 3, f"GET /api/piloto cuenta la bandeja «Necesita revisión» ({foto['a_revisar']})")
+        ok(all("diseno" not in c for v in foto["videos"] for c in v.get("portadas") or []),
+           "y no manda los diseños enteros de las portadas a la pantalla")
+        try:
+            servidor.piloto_guardar_ajustes({"si_falla": "nunca"})
+            ok(False, "un interruptor que no existe da 400")
+        except servidor.ErrorApi as fallo:
+            igual(fallo.codigo, 400, "un interruptor que no existe da 400")
+
+        # ---- 9. el cupo de verdad: la mejor cuenta manda ----------------------
+        servidor._piloto_cupo_lleno = reales["_piloto_cupo_lleno"]
+
+        class _CC:
+            def midiendo(self):
+                return True
+
+            def toca_medir(self, _c):
+                return False
+
+            def clave_de(self, c):
+                return c["etiqueta"]
+
+            def leer_cupo(self):
+                return {"a": {"ventanas": {"five_hour": {"uso": 0.97}}},
+                        "b": {"ventanas": {"five_hour": {"uso": 0.95}}}}
+
+        cc_real, cuentas_reales = servidor.CONSUMO_CLAUDE, servidor._cuentas_para_medir
+        servidor.CONSUMO_CLAUDE = _CC()
+        servidor._cuentas_para_medir = lambda: [{"etiqueta": "a"}, {"etiqueta": "b"}]
+        try:
+            ok("95 %" in servidor._piloto_cupo_lleno(90), "con dos cuentas llenas para y dice la mejor (95 %)")
+            igual(servidor._piloto_cupo_lleno(96), "", "con el tope por encima de la mejor, arranca")
+        finally:
+            servidor.CONSUMO_CLAUDE, servidor._cuentas_para_medir = cc_real, cuentas_reales
+
+        # ---- 10. el paquete: portadas (opción C) y textos, con el código real -
+        for nombre in ("_piloto_textos", "_piloto_portadas"):
+            setattr(servidor, nombre, reales[nombre])
+        PO, PUB = servidor._portadas(), servidor._publicar()
+        ctx = servidor.contexto(fa["pid"])
+        guardado = {}
+        cambiados = {"PO.proponer": PO.proponer, "PO.renderizar": PO.renderizar,
+                     "PO.guardar": PO.guardar, "PUB.guardar_imagen_portada": PUB.guardar_imagen_portada,
+                     "PUB.lanzar_textos": PUB.lanzar_textos, "PUB.ficha": PUB.ficha,
+                     "PUB.ajustes_de": PUB.ajustes_de}
+        info = {"pid": ctx.id, "montado": True, "formato": "vertical", "titulo": "T", "nombre": "T",
+                "cliente": "", "cliente_nombre": "", "guion": [], "material": "m"}
+        reales_paquete = {n: getattr(servidor, n) for n in (
+            "_info_para_publicar", "_diseno_inicial", "_rutas_fondo_portada", "_correr_portada_ia",
+            "_videos_para_publicar")}
+
+        def pintar(diseno, rutas, destino, **_k):
+            with open(destino, "wb") as fh:
+                fh.write(b"\x89PNG\r\n\x1a\n" + json.dumps(diseno.get("modo")).encode())
+            return destino
+
+        PO.proponer = lambda entrada, formato, base=None, n=3, cwd=None: [
+            {"diseno": PO.normalizar(dict(base, plantilla="titular")), "por_que": "se lee bien"}]
+        PO.renderizar = pintar
+        PO.guardar = lambda raiz, pid, diseno: guardado.setdefault("diseno", diseno)
+        PUB.guardar_imagen_portada = lambda raiz, pid, contenido, ext: guardado.setdefault(
+            "imagen", contenido)
+        textos_pedidos = []
+        PUB.ajustes_de = lambda raiz, cid: {"redes": ["tiktok", "instagram"]}
+        PUB.ficha = lambda raiz, info_, aj: {"redes": ["tiktok", "instagram"], "textos": {},
+                                            "desactualizada": False, "error_textos": ""}
+        PUB.lanzar_textos = lambda raiz, info_, redes, aj, **k: textos_pedidos.append(
+            (tuple(redes), k.get("en_hilo")))
+        servidor._info_para_publicar = lambda c: info
+        servidor._diseno_inicial = lambda c, i: PO.normalizar({"formato": "9:16", "fondo": {
+            "tipo": "plano", "planos": ["S001"]}})
+        servidor._rutas_fondo_portada = lambda c, i, d: []
+        servidor._videos_para_publicar = lambda peticion: []
+        ia_pedida = []
+
+        def portada_ia(avisar, c, que, prompt, refs, calidad, tamano):
+            ia_pedida.append((que, calidad, tamano))
+            return {"nombre": "ia_fondo.png", "coste_usd": 0.05}
+        servidor._correr_portada_ia = portada_ia
+        try:
+            aj = dict(P.ajustes(base), portadas="ambas")
+            servidor._piloto_portadas(lambda *a, **k: None, ctx, base, fa["id"], aj)
+            ficha_p = P.leer(base, fa["id"])
+            igual([c["id"] for c in ficha_p["portadas"]], ["plano1", "ia"],
+                  "opción C: una portada con un plano y otra hecha con IA")
+            igual(ia_pedida, [("portada", "low", "vertical")],
+                  "la de IA se pide entera, en calidad baja y vertical para un vídeo vertical")
+            igual(ficha_p["portada_puesta"], "plano1", "queda puesta la del plano (gratis)")
+            igual(guardado["diseno"]["modo"], "capas", "y se guarda su diseño como portada del vídeo")
+            ok(all(os.path.isfile(os.path.join(P.carpeta_portadas(base, fa["id"]), c["fichero"]))
+                   for c in ficha_p["portadas"]), "las dos candidatas quedan en disco para elegir")
+            guardado.clear()
+            servidor.piloto_elegir_portada(fa["id"], peticion, {"id": "ia"})
+            igual((guardado["diseno"]["modo"], guardado["diseno"]["fondo"].get("imagen")),
+                  ("ia", "ia_fondo.png"), "elegir la de IA la deja puesta, con su imagen de fondo")
+            igual(P.leer(base, fa["id"])["portada_puesta"], "ia", "y lo apunta en la ficha")
+            servidor._piloto_textos(lambda *a, **k: None, ctx, base, fa["id"])
+            igual(textos_pedidos, [(("tiktok", "instagram"), False)],
+                  "los textos se piden para las redes del proyecto, esperando a que acaben")
+            igual(P.leer(base, fa["id"])["redes"], ["tiktok", "instagram"], "y las redes quedan en la ficha")
+        finally:
+            for clave, valor in cambiados.items():
+                modulo, nombre = clave.split(".")
+                setattr(PO if modulo == "PO" else PUB, nombre, valor)
+            for nombre, valor in reales_paquete.items():
+                setattr(servidor, nombre, valor)
+    finally:
+        for nombre, valor in reales.items():
+            setattr(servidor, nombre, valor)
+        revisor.resumen = resumen_real
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        BITACORA.RUTA_GLOBAL = global_antes
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -8481,6 +8788,7 @@ def main():
         probar_onboarding(cliente)
         probar_turno_y_notas_de_otro_texto()
         probar_cola_de_montaje(cliente)
+        probar_el_piloto()
         probar_medidor_claude(cliente)
         probar_coste_en_detalle(cliente, pid)
         probar_claude_en_coste(cliente, pid)

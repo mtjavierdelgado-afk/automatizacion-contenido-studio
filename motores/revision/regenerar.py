@@ -161,9 +161,9 @@ Tu trabajo:
 3. Decide que hay que cambiar de verdad. Puede ser el prompt, la luz, el set,
    la camara, los personajes o el zoom.
 4. Aplica el cambio donde corresponda y regenera SOLO la escena {escena} con:
-     C:\\IA\\venvs\\cartoon\\Scripts\\python.exe orquestador_v2.py storyboard --solo {escena}
+     python orquestador_v2.py storyboard --solo {escena}
 5. Si el problema es general y no de esta escena, anade una regla a
-   C:\\IA\\motores\\reglas\\reglas.json con reglas.py.
+   motores/reglas/reglas.json con reglas.py.
 
 Trabaja en {proyecto}. No toques otras escenas. Termina con un resumen de una
 linea de lo que cambiaste.

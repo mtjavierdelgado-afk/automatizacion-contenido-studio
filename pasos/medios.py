@@ -2,7 +2,7 @@
 Utilidades de medios compartidas por los pasos 6, 7 y 8.
 
 Aqui vive lo que los tres pasos visuales necesitan por igual: cargar los motores
-de C:\\IA\\motores (que son scripts sueltos, no paquetes), localizar las salidas
+de motores/ (que son scripts sueltos, no paquetes), localizar las salidas
 de los pasos anteriores, rasterizar SVG con Edge, sembrar la carpeta de trabajo
 con la version activa y EMPAREJAR UN TEXTO ESCRITO CON LO QUE DICE LA VOZ.
 
@@ -197,7 +197,7 @@ AL_CARGAR = _COMPARTIDO.al_cargar
 
 
 def motor(ruta_relativa):
-    """Importa un modulo de C:\\IA\\motores por ruta ('guion/segmentar.py').
+    """Importa un modulo de motores/ por ruta ('guion/segmentar.py').
 
     Por ruta y no por sys.path: los motores tienen nombres genericos ('voz',
     'imagen', 'mapa') que chocarian entre ellos y con cualquier otro modulo.

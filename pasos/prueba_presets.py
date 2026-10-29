@@ -20,7 +20,7 @@ rompen en silencio:
 
 No hay red, ni CLI, ni proyecto de verdad: todo es determinista.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_presets.py
+    python pasos/prueba_presets.py
 """
 import os
 import re

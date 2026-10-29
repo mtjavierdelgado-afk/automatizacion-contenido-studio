@@ -450,7 +450,7 @@ el_login() {
     local secreto id_vps esquema="https"
     secreto="$(openssl rand -hex 48 2>/dev/null || head -c 48 /dev/urandom | od -An -tx1 | tr -d ' \n')"
     # El id del VPS en el panel de Hostinger sale del propio nombre de la
-    # maquina (srv1982300.hstgr.cloud -> 1982300). Solo sirve para el enlace de
+    # maquina (srv1234567.hstgr.cloud -> 1234567). Solo sirve para el enlace de
     # «he olvidado la contrasena»; si no cuadra, el enlace va al listado.
     id_vps="$(hostname | sed -n 's/^srv\([0-9]\{4,\}\).*/\1/p')"
     [ "${ASVS_SIN_TLS:-0}" = "1" ] && esquema="http"

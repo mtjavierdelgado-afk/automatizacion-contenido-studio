@@ -14,7 +14,7 @@ puede romper en silencio:
   - que una charla admita un turno a la vez y se pueda cancelar;
   - que `onboarding_visto` se lea, se guarde y rechace lo que no sea booleano.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe pasos\\prueba_asistente.py
+    python pasos/prueba_asistente.py
 """
 import os
 import shutil

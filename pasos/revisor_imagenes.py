@@ -369,7 +369,7 @@ def _referencia_de(proyecto, plan, primero, imagenes, bloques, frases=None):
     if anterior is None:
         return ""
     return REFERENCIA.format(
-        continuidad=(frases or dominios.REVISOR_ESTADOPLAY)["continuidad"],
+        continuidad=(frases or dominios.REVISOR_GENERAL)["continuidad"],
         plano=_planos_legibles(proyecto, [anterior], imagenes, bloques))
 
 

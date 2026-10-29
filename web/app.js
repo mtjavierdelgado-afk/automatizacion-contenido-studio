@@ -7449,7 +7449,7 @@ function dentroDeProyecto(caja, cid) {
           h('span', { clase: 'pastilla' }, `${plural(estilos.length, 'estilo', 'estilos')} · ${plural(videos.length, 'vídeo', 'vídeos')}`),
           ficha && ficha.logo ? h('span', { clase: 'pastilla ok' }, 'logo ✓') : null))),
     h('div', { clase: 'acc' },
-      ficha ? h('button', { clase: 'mini abrir-ajustes-proyecto', title: 'Nombre, logo, ocultar, clave y borrar',
+      ficha ? h('button', { clase: 'mini abrir-ajustes-proyecto', title: 'Nombre, logo, ficha del negocio, ocultar, clave y borrar',
         onclick: () => abrirAjustesProyecto(cid) }, '⚙ Ajustes del proyecto') : null,
       botonPapeleraLight(),
       botonNuevoVideo(cid))));
@@ -7470,9 +7470,8 @@ function dentroDeProyecto(caja, cid) {
 const SECCIONES_AJUSTES_PROYECTO = [
   { id: 'nombre', titulo: 'Nombre', pinta: c => seccionNombreDelProyecto(c) },
   { id: 'logo', titulo: 'Logo', pinta: c => panelLogoProyecto(c.cliente) },
-  // la Ficha del negocio de etapa-foto-c entra aquí como una sección más (id
-  // reservado `ficha-negocio`), con su botón y su panel tal cual:
-  // { id: 'ficha-negocio', titulo: 'Ficha del negocio', pinta: c => … },
+  // Etapa Foto C: la ficha del negocio de este cliente (sus estilos de foto la usan)
+  { id: 'ficha-negocio', titulo: 'Ficha del negocio', pinta: c => panelNegocioProyecto(c.cliente) },
   { id: 'visibilidad', titulo: 'Visibilidad', pinta: c => seccionVisibilidadDelProyecto(c) },
   { id: 'clave', titulo: 'Clave', pinta: c => seccionClaveDelProyecto(c) },
   { id: 'publicar', titulo: 'Publicar', pinta: () => seccionPublicarDelProyecto() },
@@ -18052,6 +18051,7 @@ function bloqueImagenesEstiloLight(ficha) {
 
 function bloqueReglasLight(ficha) {
   const caja = h('div', {});
+  caja.appendChild(bloqueNegocioDelEstilo(ficha));  // Etapa Foto C
   if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
     caja.appendChild(h('div', { clase: 'pista' },
       'Primero genera el estilo gráfico (las láminas); después podrás ponerle reglas.'));
@@ -32580,4 +32580,324 @@ function bloqueMejoresPublicar() {
     b.appendChild(h('div', { clase: 'meta' }, `Solo publicaciones con ${r.minimo_vistas} vistas o más.`));
   }
   return b;
+}
+
+
+/* ===================================================== LA FICHA DEL NEGOCIO
+ *
+ * Etapa Foto C (21-10-2026, decisiones del dueño: «nada de un cliente metido en
+ * el código» y «el negocio es del proyecto, no de Configuración»). Cada
+ * proyecto (cliente) tiene SU ficha del negocio: qué hace, sus reglas de foto y
+ * lo que vigila el revisor (`pasos/dominios.py`, `/api/clientes/{cid}/negocio`).
+ * Todos los estilos del proyecto la usan solos; en la pestaña «Reglas» de cada
+ * estilo se ve, sin editarla, encima de las reglas propias del estilo.
+ *
+ * DOS SITIOS: la sección «Ficha del negocio» del cajón «⚙ Ajustes del proyecto»
+ * (`SECCIONES_AJUSTES_PROYECTO`, junto al logo) y `bloqueNegocioDelEstilo` en
+ * «Reglas», cuyo «✎ Editar la ficha» abre ese cajón.
+ *
+ * El editor NO se guarda solo, a diferencia de las reglas del estilo: cambiar la
+ * ficha de un proyecto con vídeos de foto deja sus imágenes para rehacer, así
+ * que guardar es un botón y se dice antes. */
+const NEGOCIOS = { porCliente: {}, cargando: {}, fallo: {}, borrador: null, deCliente: '',
+  guardando: false, afinando: {} };
+
+/* La ficha de un proyecto: undefined mientras se lee, null si no tiene. Un
+   fallo al leerla NO se guarda como «no tiene» (se enseñaría vacía y guardar
+   borraría la de verdad): se dice y se ofrece reintentar. */
+function negocioDe(cid) {
+  if (!cid || cid === '_sin') return null;
+  if (cid in NEGOCIOS.porCliente) return NEGOCIOS.porCliente[cid];
+  if (NEGOCIOS.fallo[cid]) return undefined;
+  if (!NEGOCIOS.cargando[cid]) {
+    NEGOCIOS.cargando[cid] = true;
+    pedir(`${BASE}/api/clientes/${encodeURIComponent(cid)}/negocio`)
+      .then(r => { NEGOCIOS.porCliente[cid] = r.negocio || null; delete NEGOCIOS.fallo[cid]; })
+      .catch(err => { NEGOCIOS.fallo[cid] = err.message || 'no se ha podido leer'; })
+      .finally(() => { delete NEGOCIOS.cargando[cid]; pintarLight(); });
+  }
+  return undefined;
+}
+
+function reintentarNegocio(cid) {
+  delete NEGOCIOS.fallo[cid];
+  pintarLight();
+}
+
+function borradorDeNegocio(negocio) {
+  const n = negocio || {};
+  return {
+    nombre: n.nombre || '',
+    reglas: (n.reglas || []).map((r, i) => ({
+      id: r.id || `r${i + 1}`, texto: r.texto || '', en: r.en || '', enDe: r.texto || '',
+      palabras: (r.palabras || []).join(', '), nombre: r.nombre || '',
+      gravedad: r.gravedad || 'media',
+    })),
+    equipo: (n.revisor || {}).equipo || '',
+    orientacion: (n.revisor || {}).orientacion || '',
+  };
+}
+
+function separarPalabras(texto) {
+  return String(texto || '').split(',').map(p => p.trim()).filter(Boolean);
+}
+
+async function guardarNegocio(cliente) {
+  const b = NEGOCIOS.borrador;
+  if (!b || NEGOCIOS.guardando) return;
+  if (!String(b.nombre).trim()) { toast('escribe qué hace este negocio', true); return; }
+  const cuerpo = {
+    nombre: b.nombre,
+    reglas: b.reglas.filter(r => String(r.texto || '').trim()).map(r => ({
+      id: r.id, texto: r.texto, en: r.en || '', nombre: r.nombre || '',
+      gravedad: r.gravedad || 'media', palabras: separarPalabras(r.palabras),
+    })),
+    revisor: { equipo: b.equipo, orientacion: b.orientacion },
+  };
+  NEGOCIOS.guardando = true;
+  pintarLight();
+  try {
+    const r = await pedir(`${BASE}/api/clientes/${encodeURIComponent(cliente.id)}/negocio`,
+      { method: 'PUT', cuerpo });
+    NEGOCIOS.porCliente[cliente.id] = r.negocio;
+    NEGOCIOS.borrador = borradorDeNegocio(r.negocio);
+    toast(`Ficha del negocio guardada${r.estilos ? `: la usan sus ${r.estilos} estilo${r.estilos === 1 ? '' : 's'}` : ''}`);
+    await cargarGaleriaLight(true);
+  } catch (err) {
+    toast(`no se ha podido guardar: ${err.message}`, true);
+  }
+  NEGOCIOS.guardando = false;
+  pintarLight();
+}
+
+async function borrarNegocio(cliente) {
+  if (!window.confirm(`¿Quitar la ficha del negocio de «${cliente.nombre}»? Sus estilos volverán a lo general.`)) return;
+  try {
+    await pedir(`${BASE}/api/clientes/${encodeURIComponent(cliente.id)}/negocio`, { method: 'DELETE' });
+    NEGOCIOS.porCliente[cliente.id] = null;
+    NEGOCIOS.borrador = borradorDeNegocio(null);
+    toast('Ficha del negocio quitada');
+    await cargarGaleriaLight(true);
+  } catch (err) {
+    toast(`no se ha podido quitar: ${err.message}`, true);
+  }
+  pintarLight();
+}
+
+/* COPIAR LA DE OTRO PROYECTO: se trae al editor, y se guarda con «Guardar». */
+async function copiarNegocioDeOtro(cliente) {
+  const otros = listaClientes().filter(c => c.id !== cliente.id && clienteAbierto(c));
+  if (!otros.length) { toast('no hay otro proyecto del que copiarla', true); return; }
+  const r = await dialogo({ titulo: 'Copiar la ficha de otro proyecto',
+    texto: 'Se trae a este editor; no se guarda hasta que pulses «Guardar la ficha».',
+    campos: [{ clave: 'cid', etiqueta: 'De qué proyecto', tipo: 'select', valor: otros[0].id,
+      opciones: otros.map(c => ({ valor: c.id, nombre: c.nombre })) }],
+    aceptar: 'Copiar' });
+  if (!r || !r.cid) return;
+  try {
+    const datos = await pedir(`${BASE}/api/clientes/${encodeURIComponent(r.cid)}/negocio`);
+    if (!datos.negocio) { toast('ese proyecto no tiene ficha del negocio', true); return; }
+    NEGOCIOS.borrador = borradorDeNegocio(datos.negocio);
+    toast('Copiada: revísala y pulsa «Guardar la ficha»');
+  } catch (err) {
+    toast(err.message, true);
+  }
+  pintarLight();
+}
+
+/* «AFINAR CON CLAUDE»: la misma ruta que las reglas del estilo; aquí solo se
+   usa la versión en inglés, que es lo que lee el generador. */
+async function afinarReglaDeNegocio(regla) {
+  if (!String(regla.texto || '').trim()) { toast('escribe primero lo que exige la regla', true); return; }
+  NEGOCIOS.afinando[regla.id] = true;
+  const textoPedido = regla.texto;
+  pintarLight();
+  try {
+    const r = await pedir(`${BASE}/api/reglas-estilo/afinar`, {
+      method: 'POST', cuerpo: { texto: textoPedido, palabras: separarPalabras(regla.palabras) } });
+    let listo = false;
+    for (let i = 0; i < 90 && !listo; i += 1) {
+      await new Promise(seguir => setTimeout(seguir, 2000));
+      const f = await pedir(`${BASE}/api/reglas-estilo/afinar/${encodeURIComponent(r.id)}`);
+      if (f.estado === 'listo') {
+        // escrita para el texto de ANTES: si lo cambiaste mientras tanto, no vale
+        if (regla.texto !== textoPedido) {
+          toast('Cambiaste la regla mientras Claude la afinaba: vuelve a pulsar «Afinar»', true);
+        } else {
+          regla.en = (f.propuesta || {}).en || regla.en;
+          regla.enDe = textoPedido;
+          if (!regla.nombre) regla.nombre = (f.propuesta || {}).nombre || '';
+        }
+        listo = true;
+      }
+      if (f.estado === 'error') { toast(`no se ha podido afinar: ${f.error || ''}`, true); listo = true; }
+    }
+    if (!listo) toast('Claude está tardando demasiado: vuelve a pulsar «Afinar» en un momento', true);
+  } catch (err) {
+    toast(`no se ha podido afinar: ${err.message}`, true);
+  }
+  delete NEGOCIOS.afinando[regla.id];
+  pintarLight();
+}
+
+function tarjetaReglaDeNegocio(b, regla, i) {
+  const en = h('textarea', {
+    rows: 2, value: regla.en, 'aria-label': `Versión para el generador de la regla ${i + 1}`,
+    placeholder: 'opcional: la regla en inglés, que es como mejor la sigue el generador («Afinar con Claude» la escribe)',
+    oninput: ev => { regla.en = ev.target.value; regla.enDe = regla.texto; },
+  });
+  en.dataset.foco = `negocio-regla:${regla.id}:en`;
+  const texto = h('textarea', {
+    rows: 2, value: regla.texto, 'aria-label': `Qué exige la regla ${i + 1}`,
+    placeholder: 'qué se exige, como se lo dirías a un fotógrafo: «las mamparas son de vidrio transparente con perfiles finos»',
+    oninput: ev => {
+      regla.texto = ev.target.value;
+      /* LA VERSIÓN EN INGLÉS ERA DE TU TEXTO DE ANTES, y es la que lee el
+         generador: si cambias el tuyo, se vacía (y se puede volver a afinar). */
+      if (regla.en && regla.enDe !== regla.texto) {
+        regla.en = ''; en.value = '';
+        en.placeholder = 'cambiaste tu texto: la versión en inglés de antes ya no vale. Pulsa «Afinar con Claude» otra vez o déjala vacía';
+      }
+    },
+  });
+  texto.dataset.foco = `negocio-regla:${regla.id}:texto`;
+  const palabras = h('input', {
+    type: 'text', value: regla.palabras, 'aria-label': `Cuándo aplica la regla ${i + 1}`,
+    placeholder: 'vacío = en todos los planos · o palabras: mampara, ducha',
+    oninput: ev => { regla.palabras = ev.target.value; },
+  });
+  palabras.dataset.foco = `negocio-regla:${regla.id}:palabras`;
+  return h('div', { clase: 'regla-estilo' },
+    h('div', { clase: 'fila' },
+      h('span', { clase: 'meta' }, `Regla ${i + 1}`),
+      h('span', { clase: 'crece' }),
+      h('button', {
+        clase: 'mini', disabled: !!NEGOCIOS.afinando[regla.id],
+        title: 'Claude la reescribe en inglés, concreta y física, para el generador de imágenes',
+        onclick: () => afinarReglaDeNegocio(regla),
+      }, NEGOCIOS.afinando[regla.id] ? 'Afinando…' : '✦ Afinar con Claude'),
+      h('button', {
+        clase: 'mini fantasma', title: 'Quitar esta regla',
+        onclick: () => { b.reglas = b.reglas.filter(r => r !== regla); pintarLight(); },
+      }, '✕')),
+    texto,
+    h('div', { clase: 'fila regla-estilo-campos' },
+      h('label', {}, h('span', { clase: 'meta' }, 'Solo si el plano habla de'), palabras)),
+    h('div', { clase: 'regla-estilo-en' },
+      h('span', { clase: 'meta' }, 'Versión para el generador (inglés, opcional)'), en));
+}
+
+/* EL PANEL DEL PROYECTO: la ficha del negocio, para llenarla o cambiarla. */
+function panelNegocioProyecto(cliente) {
+  const caja = h('div', { clase: 'panel-negocio-proyecto' });
+  const actual = negocioDe(cliente.id);
+  if (actual === undefined) {
+    if (NEGOCIOS.fallo[cliente.id]) {
+      caja.appendChild(cajaError(`No se ha podido leer la ficha: ${NEGOCIOS.fallo[cliente.id]}`));
+      caja.appendChild(h('button', { clase: 'mini', onclick: () => reintentarNegocio(cliente.id) }, 'Reintentar'));
+    } else {
+      caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo la ficha del negocio…'));
+    }
+    return caja;
+  }
+  if (!NEGOCIOS.borrador || NEGOCIOS.deCliente !== cliente.id) {
+    NEGOCIOS.deCliente = cliente.id;
+    NEGOCIOS.borrador = borradorDeNegocio(actual);
+  }
+  const b = NEGOCIOS.borrador;
+  // el título lo pone la sección del cajón «⚙ Ajustes del proyecto»
+  caja.appendChild(h('div', { clase: 'fila' },
+    botonGuia('tipo_negocio', null),
+    h('span', { clase: 'crece' }),
+    actual ? pastillaEstado('ok', 'la usan sus estilos') : pastillaEstado('', 'sin ficha: lo general')));
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Lo que el Studio debe saber de este cliente para que sus fotos parezcan de verdad. '
+    + 'Todos los estilos de este proyecto la usan solos: llega a los vídeos nuevos y a los ya '
+    + 'hechos con «Traer el estilo».'));
+  caja.appendChild(campoTexto('Qué hace este negocio', b.nombre, v => { b.nombre = v; },
+    { pista: 'Mamparas y baños a medida en Lima' }));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('strong', {}, 'Reglas de foto'),
+    h('span', { clase: 'crece' }),
+    h('button', {
+      clase: 'mini', disabled: b.reglas.length >= 20,
+      onclick: () => {
+        b.reglas.push({ id: `n${Date.now()}`, texto: '', en: '', enDe: '', palabras: '', nombre: '', gravedad: 'media' });
+        pintarLight();
+      },
+    }, '+ Añadir regla')));
+  if (!b.reglas.length) {
+    caja.appendChild(h('div', { clase: 'meta' },
+      'Sin reglas todavía: lo que el generador suele hacer mal en este negocio (materiales, cómo se '
+      + 'monta o se usa el producto, el sitio). Entran en cada imagen de foto, junto a las de la casa.'));
+  }
+  b.reglas.forEach((r, i) => caja.appendChild(tarjetaReglaDeNegocio(b, r, i)));
+  caja.appendChild(h('strong', {}, 'Lo que vigila el revisor'));
+  caja.appendChild(campoArea('El equipo o el producto', b.equipo, v => { b.equipo = v; },
+    'vacío = lo general · p. ej. «la mampara no es de vidrio, flota sin perfiles o tiene un tamaño imposible»',
+    'negocio-revisor-equipo'));
+  caja.appendChild(campoArea('Hacia dónde mira la gente', b.orientacion, v => { b.orientacion = v; },
+    'vacío = lo general · p. ej. «el instalador mira lo que hace, no a cámara»',
+    'negocio-revisor-orientacion'));
+  if (actual) {
+    caja.appendChild(h('div', { clase: 'meta revisor-fallo' },
+      'Si algún vídeo de foto de este proyecto ya usa la ficha, cambiar sus reglas cambia el '
+      + 'prompt de sus imágenes: quedarán para rehacer, y rehacerlas se paga.'));
+  }
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'primario', disabled: NEGOCIOS.guardando, onclick: () => guardarNegocio(cliente) },
+      NEGOCIOS.guardando ? 'Guardando…' : 'Guardar la ficha'),
+    h('button', { clase: 'mini', onclick: () => copiarNegocioDeOtro(cliente) }, 'Copiar la de otro proyecto'),
+    h('span', { clase: 'crece' }),
+    actual ? h('button', { clase: 'mini fantasma peligro', onclick: () => borrarNegocio(cliente) }, 'Quitar la ficha') : null));
+  return caja;
+}
+
+/* EN LA PESTAÑA «REGLAS» DEL ESTILO: el negocio de su proyecto, sin editarlo,
+   encima de las reglas propias del estilo. Así se ve en un solo sitio todo lo
+   que cada imagen tiene que cumplir. */
+function bloqueNegocioDelEstilo(ficha) {
+  const cid = clienteDe(ficha.id);
+  const cliente = fichaCliente(cid);
+  const caja = h('div', { clase: 'negocio-del-estilo' });
+  const ir = () => {
+    if (!cliente) return;
+    APP.light.ajustesProyecto = cid;
+    NEGOCIOS.deCliente = '';
+    NEGOCIOS.borrador = null;
+    apuntarCliente(cid);
+    irALight('galeria');
+  };
+  if (!cliente) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Negocio: lo general. Este estilo no está en ningún proyecto; mételo en el de su cliente '
+      + 'para que use la ficha del negocio de ese cliente.'));
+    return caja;
+  }
+  const negocio = negocioDe(cid);
+  if (negocio === undefined) {
+    caja.appendChild(NEGOCIOS.fallo[cid]
+      ? h('div', { clase: 'meta' }, `No se ha podido leer la ficha del negocio: ${NEGOCIOS.fallo[cid]}`,
+        ' ', h('button', { clase: 'mini', onclick: () => reintentarNegocio(cid) }, 'Reintentar'))
+      : h('div', { clase: 'cargando' }, 'leyendo la ficha del negocio…'));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('strong', {}, negocio ? `Negocio: ${negocio.nombre}` : 'Negocio: lo general'),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini', onclick: ir }, negocio ? '✎ Editar la ficha' : 'Llenar la ficha del negocio')));
+  if (!negocio) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      `El proyecto «${cliente.nombre}» no tiene ficha del negocio: sus imágenes no llevan reglas de ningún negocio.`));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'pista' },
+    `Viene de la ficha del proyecto «${cliente.nombre}»: se cambia allí y vale para todos sus estilos.`));
+  if (!(negocio.reglas || []).length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'La ficha no tiene reglas de foto.'));
+  }
+  (negocio.reglas || []).forEach(r => caja.appendChild(h('div', { clase: 'regla-negocio' },
+    h('span', { clase: 'pastilla' }, 'del negocio'),
+    h('span', {}, r.texto + ((r.palabras || []).length ? ` (solo si habla de: ${r.palabras.join(', ')})` : '')))));
+  return caja;
 }

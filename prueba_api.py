@@ -4,7 +4,7 @@ Prueba del servicio HTTP del Estudio.
 Arranca app.py en un puerto libre contra una carpeta de proyectos temporal,
 ejerce los endpoints principales y comprueba codigos y formas de respuesta.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\prueba_api.py
+    python prueba_api.py
 
 Corre con ESTUDIO_SIMULAR=1: la sintesis de voz no llama a Cartesia, asi que la
 prueba ejercita el camino real de ejecutar -> trabajo -> SSE -> version sin

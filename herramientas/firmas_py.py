@@ -35,7 +35,7 @@ analisis estatico no sabe (`*args`, un desempaquetado). Aqui interesa el fallo
 que de verdad pasa, que es el del nombre mal escrito o el parametro que nunca
 se llego a anadir.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\herramientas\\firmas_py.py
+    python herramientas/firmas_py.py
 """
 import ast
 import importlib

@@ -6,7 +6,7 @@ sinteticas y reescritura local, para no gastar creditos de Cartesia ni del CLI d
 Claude. Al final se hace UNA sola llamada real y corta a Cartesia para verificar
 que el envoltorio con __experimental_controls habla de verdad con la API.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_pasos_voz.py
+    python pasos/prueba_pasos_voz.py
     ... --sin-red      solo simulado, no toca la red
     ... --con-claude   ademas, una reescritura real con el CLI (cuesta unos centimos)
 """

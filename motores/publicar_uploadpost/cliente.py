@@ -274,7 +274,7 @@ class ClienteUploadPost:
         datos = None
         todas = {"Authorization": f"Apikey {self.clave}",
                  "Accept": "application/json",
-                 "User-Agent": "CrearIAStudio/3.1"}
+                 "User-Agent": "CrearIAStudio/5.1"}
         todas.update(cabeceras or {})
         if multipart is not None:
             datos = multipart

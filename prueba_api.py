@@ -2245,7 +2245,7 @@ def probar_sistema(cliente):
     respuesta, datos = cliente.get("/api/sistema/guias")
     igual(respuesta.status_code, 200, "GET /api/sistema/guias responde 200")
     ids = [g.get("id") for g in datos.get("guias") or []]
-    igual(ids, ["estilo_grafico", "tono", "voz", "material", "indicaciones", "tipo_relato", "cta",
+    igual(ids, ["estilo_grafico", "tipo_negocio", "tono", "voz", "material", "indicaciones", "tipo_relato", "cta",
                 "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
                 "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente", "chat_guiones",
                 "analizar_cuenta", "conexiones_cuentas",
@@ -2253,7 +2253,7 @@ def probar_sistema(cliente):
                 "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
                 "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business",
                 "emojis_redes"],
-          "estan las treinta y dos guias (siete de Crear, diecinueve de Publicar y seis de la Parrilla), en orden")
+          "estan las treinta y tres guias (ocho de Crear, diecinueve de Publicar y seis de la Parrilla), en orden")
     ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
            for g in datos.get("guias") or []),
        "cada guia trae plantilla, prompt para otra IA y que hace el sistema")
@@ -8130,14 +8130,95 @@ def probar_insertar_imagen():
         servidor._ruta_de_version = real["ruta"]
 
 
+def probar_detalles_insertar_quitar():
+    """Rama detalles-insertar-quitar (28-10-2026), los dos detalles que quedaban:
+
+    1. un subtítulo escrito a mano en un plano que luego se parte (insertar) o
+       se alarga (quitar) NO repite ni pierde palabras: se deja de usar y sale
+       el de la voz; y el repaso guarda desde ahora contra qué frase se escribió;
+    2. «Dirigir» (o el párrafo redactado) sobre la imagen insertada SÍ cambia
+       su prompt."""
+    seccion("DETALLES DE INSERTAR Y QUITAR: SUBTÍTULO A MANO Y DIRIGIR LA INSERTADA")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    p7 = servidor.PASOS_MODULOS.p7_callouts
+    subs = servidor.PASOS_MODULOS.subtitulos
+    p6 = servidor.PASOS_MODULOS.p6_assets
+
+    def plano(sid, texto, **extra):
+        palabras = texto.split()
+        return dict({"id": sid, "narracion": texto, "t_in": 0.0, "t_out": len(palabras) * 0.5,
+                     "marcas": [[i * 0.5, i * 0.5 + 0.4] for i in range(len(palabras))]}, **extra)
+
+    entera = "Este baño era el más feo con baldosas grises."
+    partida = plano("S001", "Este baño era el más feo", narracion_imagen=entera)
+    escrito = {"unidades": {"escena:S001": {"subtitulo_texto": "Este baño era EL MÁS FEO con baldosas grises."}}}
+
+    def texto_de(escena, params):
+        uid = f"escena:{escena['id']}"
+        return " ".join(t["texto"] for t in subs.de_escena(
+            escena, texto=p7.texto_subtitulo_de(params, uid),
+            ancla=p7.ancla_subtitulo_de(params, uid, escena)))
+
+    igual(p7.ancla_subtitulo_de(escrito, "escena:S001", partida), entera,
+          "SUBTÍTULO: escrito sin ancla en un plano partido, su ancla es la frase de siempre")
+    ok("grises" not in texto_de(partida, escrito).lower(),
+       f"SUBTÍTULO: el plano partido NO repite lo que dice la insertada ({texto_de(partida, escrito)!r})")
+    entero = plano("S001", entera)
+    ok("EL MÁS FEO" in texto_de(entero, escrito),
+       "SUBTÍTULO: sin partir, lo escrito a mano se sigue usando")
+    hogar = plano("S002", "Y así quedó. El más bonito.", narracion_imagen="Y así quedó.")
+    escrito_hogar = {"unidades": {"escena:S002": {"subtitulo_texto": "Y ASÍ quedó."}}}
+    ok("bonito" in texto_de(hogar, escrito_hogar).lower(),
+       f"SUBTÍTULO: el plano que se lleva la voz de una quitada no la pierde ({texto_de(hogar, escrito_hogar)!r})")
+    despues = {"unidades": {"escena:S002": {"subtitulo_texto": "Y ASÍ quedó. El más BONITO."}}}
+    ok("BONITO" in texto_de(hogar, despues),
+       "SUBTÍTULO: escrito DESPUÉS de quitar, aunque no traiga ancla, se sigue usando (vídeos de antes)")
+    sin_ancla_partido = {"unidades": {"escena:S001": {"subtitulo_texto": "Este baño era EL MÁS FEO"}}}
+    ok("EL MÁS FEO" in texto_de(partida, sin_ancla_partido),
+       "SUBTÍTULO: escrito para el trozo de ahora sin ancla (no se supo la frase), se usa")
+    con_ancla = {"unidades": {"escena:S001": {"subtitulo_texto": "Este baño era EL MÁS FEO",
+                                               "subtitulo_ancla": "Este baño era el más feo"}}}
+    ok("EL MÁS FEO" in texto_de(partida, con_ancla),
+       "SUBTÍTULO: escrito DESPUÉS de partir (con su ancla), se usa")
+    # EL REPASO GUARDA EL ANCLA
+    base = tempfile.mkdtemp(prefix="estudio_detalles_")
+    servidor.fijar_raiz_proyectos(base)
+    real_plan = p6.plan_actual
+    p6.plan_actual = lambda *_a, **_k: {"escenas": [partida]}
+    try:
+        pid = Proyecto.crear(base, "detalles").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        servidor._aplicar_cambios_del_repaso(ctx, {"cambios": [
+            {"tipo": "subtitulo_texto", "plano": "S001", "texto": "Este baño era EL MÁS FEO"}]}, [])
+        unidad = ((ctx.estado.params("callouts") or {}).get("unidades") or {}).get("escena:S001") or {}
+        igual(unidad.get("subtitulo_ancla"), "Este baño era el más feo",
+              "SUBTÍTULO: el repaso guarda contra qué frase se escribió")
+    finally:
+        p6.plan_actual = real_plan
+    ip = servidor._insertar_planos()
+    igual(ip.letra_libre([], "x", 0, {"B"}), "C",
+          "DIRIGIR: una letra que aún guarda params de otra insertada no se reutiliza")
+    # «DIRIGIR» LA INSERTADA: de punta a punta en el recorrido
+    # (`insertar_una_imagen`); aquí, que planificar lee su unidad
+    fuente = open(os.path.join(RAIZ_ESTUDIO, "pasos", "p6_assets.py"), encoding="utf-8").read()
+    i = fuente.index("def _preparar_insertada")
+    ok("_ajustes_unidad(p, f\"escena:{nueva['id']}\")" in fuente[i:i + 1500],
+       "DIRIGIR: planificar lee los params de la unidad de la insertada")
+
+
 def probar_dominios():
     """Rama dominio-negocio (21-10-2026): listar los dominios y fijar el de un estilo."""
     seccion("DOMINIOS: EL NEGOCIO DE UN ESTILO")
     sys.path.insert(0, RAIZ_ESTUDIO)
     import app as servidor                                    # noqa: PLC0415
     codigo, d = _llamar(servidor.listar_dominios)
-    ok(codigo == 200 and {x["id"] for x in d.get("dominios") or []} == {"general", "estadoplay"},
-       f"GET /api/dominios: general y estadoplay ({codigo})")
+    ok(codigo == 200 and [x["id"] for x in d.get("dominios") or []][:1] == ["general"]
+       and "estadoplay" not in {x["id"] for x in d.get("dominios") or []},
+       f"GET /api/dominios: el general, y ningún negocio de fábrica ({codigo})")
     codigo, _m = _llamar(servidor.guardar_dominio_estilo, "no-existe", {"dominio": "general"})
     ok(codigo in (400, 404), f"fijar el dominio de un estilo que no existe: {codigo}")
     codigo, _m = _llamar(servidor.guardar_dominio_estilo, "x", {})
@@ -8173,6 +8254,118 @@ def probar_dominios():
         presets.FICHERO = antes
 
 
+def probar_tipos_de_negocio():
+    """Etapa Foto C (21-10-2026): la ficha del negocio de cada proyecto y que
+    sus estilos la lleven."""
+    seccion("LA FICHA DEL NEGOCIO DE CADA PROYECTO")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from PIL import Image as _Imagen                          # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_negocio_")
+    antes_env = os.environ.get("ESTUDIO_DOMINIOS")
+    os.environ["ESTUDIO_DOMINIOS"] = os.path.join(base, "_sistema", "dominios.json")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(os.path.join(base, "proyectos"))
+    presets = servidor._presets()
+    antes = presets.FICHERO
+    try:
+        presets.FICHERO = os.path.join(base, "presets.json")
+        cid = servidor.crear_cliente({"nombre": "Suyu"})["cliente"]["id"]
+        otro = servidor.crear_cliente({"nombre": "Otro"})["cliente"]["id"]
+        refs = []
+        for i in range(3):
+            ruta = os.path.join(base, f"r{i}.png")
+            _Imagen.new("RGB", (64, 40), (40 * i, 90, 160)).save(ruta)
+            refs.append(ruta)
+        pid = presets.guardar("canal", "Reformas foto", {"estilo": {"referencias": refs, "modo": "foto"},
+                                                         "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(pid, {"cliente": cid})
+        estilo = lambda: presets.leer(pid)["datos"]["estilo"]      # noqa: E731
+        codigo, r = _llamar(servidor.leer_negocio_cliente, cid)
+        ok(codigo == 200 and r.get("negocio") is None and r.get("estilos") == 1,
+           f"GET …/negocio de un proyecto sin ficha: null ({codigo} {r})")
+        codigo, _m = _llamar(servidor.leer_negocio_cliente, "no-existe")
+        igual(codigo, 404, "un proyecto que no existe, 404")
+        cuerpo = {"nombre": "Mamparas y baños a medida",
+                  "reglas": [{"texto": "Mamparas de vidrio transparente", "palabras": ["mampara"]}],
+                  "revisor": {"equipo": "la mampara no es de vidrio"}}
+        codigo, r = _llamar(servidor.guardar_negocio_cliente, cid, cuerpo)
+        ok(codigo == 200 and r["negocio"]["id"] == f"cliente-{cid}" and r.get("estilos") == 1,
+           f"PUT …/negocio la guarda y se la pone a su estilo ({codigo} {r})")
+        igual(estilo().get("dominio"), f"cliente-{cid}", "el estilo la lleva en estilo.dominio")
+        igual(len(estilo().get("referencias") or []), 3, "sin tocar el resto del estilo")
+        codigo, _m = _llamar(servidor.guardar_negocio_cliente, cid, {"nombre": ""})
+        igual(codigo, 400, "sin decir qué hace, 400")
+        servidor.asignar_estilo_a_cliente(pid, {"cliente": otro})
+        ok("dominio" not in estilo(), "moverlo a un proyecto sin ficha se la quita")
+        servidor.asignar_estilo_a_cliente(pid, {"cliente": cid})
+        igual(estilo().get("dominio"), f"cliente-{cid}", "y volverlo a su proyecto se la pone")
+        codigo, r = _llamar(servidor.borrar_negocio_cliente, cid)
+        ok(codigo == 200 and "dominio" not in estilo(),
+           "DELETE …/negocio la quita y su estilo vuelve a lo general")
+        codigo, _m = _llamar(servidor.borrar_negocio_cliente, cid)
+        igual(codigo, 404, "quitar una que ya no está, 404")
+        _llamar(servidor.guardar_negocio_cliente, cid, cuerpo)
+        servidor.borrar_cliente(cid)
+        ok("dominio" not in estilo(), "borrar el proyecto deja su estilo en lo general")
+        igual(servidor.PASOS_MODULOS.dominios.de_cliente(cid), None, "y su ficha se va con él")
+        # LA RUTA DE FIJAR A MANO solo acepta la ficha del propio proyecto
+        _llamar(servidor.guardar_negocio_cliente, otro, cuerpo)
+        pid2 = presets.guardar("canal", "Otro foto", {"estilo": {"referencias": refs, "modo": "foto"},
+                                                      "guion": {"instrucciones": "x"}})["id"]
+        codigo, _m = _llamar(servidor.guardar_dominio_estilo, pid2, {"dominio": f"cliente-{otro}"})
+        igual(codigo, 400, "fijar la ficha de un proyecto que no es el del estilo, 400")
+        # UNA COPIA no se lleva la ficha del original
+        servidor.asignar_estilo_a_cliente(pid2, {"cliente": otro})
+        ok(presets.leer(pid2)["datos"]["estilo"].get("dominio") == f"cliente-{otro}",
+           "un estilo de foto del proyecto la recibe")
+        pid3 = presets.guardar("canal", "Dibujo", {"estilo": {"referencias": refs},
+                                                   "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(pid3, {"cliente": otro})
+        ok("dominio" not in presets.leer(pid3)["datos"]["estilo"],
+           "uno de dibujo no la lleva (no movería sus firmas)")
+        codigo, copia = _llamar(servidor.duplicar_preset_light, pid2, {})
+        nuevo = ((copia if isinstance(copia, dict) else {}).get("preset") or {}).get("id")
+        ok(nuevo and "dominio" not in presets.leer(nuevo)["datos"]["estilo"],
+           "duplicarlo: la copia, sin proyecto, no se lleva la ficha")
+        # EL REVISOR recibe las mismas reglas de la casa que el generador
+        foto = {"modo": "foto", "referencias": ["a.png"]}
+        plan = {"escenas": [{"prompt": "two kids hold game controllers"}]}
+        ok("GAME CONTROLLERS" not in servidor._reglas_para_revisor(foto, plan),
+           "sin ficha, el revisor no recibe reglas de consolas")
+        _llamar(servidor.guardar_negocio_cliente, otro, cuerpo)
+        ok("Mamparas de vidrio" in servidor._reglas_para_revisor(
+            dict(foto, dominio=f"cliente-{otro}"), {"escenas": [{"prompt": "una mampara"}]}),
+           "con ficha, recibe sus reglas")
+        # AL MOMENTO (28-10): guardar el estilo por la ruta general (p. ej.
+        # «Guardar como estilo» desde un vídeo) sin el negocio no lo pierde
+        codigo, r = _llamar(servidor.guardar_preset_canal, {
+            "tipo": "canal", "nombre": "Otro foto", "id": pid2,
+            "datos": {"estilo": {"referencias": refs, "modo": "foto"},
+                      "guion": {"instrucciones": "x"}}})
+        ok(codigo == 200 and (r["preset"]["datos"]["estilo"] or {}).get("dominio") == f"cliente-{otro}",
+           f"guardar un estilo de foto de un proyecto con ficha se la pone al momento ({codigo})")
+        codigo, r = _llamar(servidor.guardar_preset_canal, {
+            "tipo": "canal", "nombre": "Dibujo", "id": pid3,
+            "datos": {"estilo": {"referencias": refs}, "guion": {"instrucciones": "x"}}})
+        ok(codigo == 200 and "dominio" not in (r["preset"]["datos"]["estilo"] or {}),
+           "y a uno de dibujo no se la pone")
+        sin = servidor.crear_cliente({"nombre": "Sin ficha"})["cliente"]["id"]
+        pid4 = presets.guardar("canal", "Foto sin ficha", {"estilo": {"referencias": refs, "modo": "foto"},
+                                                           "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(pid4, {"cliente": sin})
+        codigo, r = _llamar(servidor.guardar_preset_canal, {
+            "tipo": "canal", "nombre": "Foto sin ficha", "id": pid4,
+            "datos": {"estilo": {"referencias": refs, "modo": "foto"}, "guion": {"instrucciones": "x"}}})
+        ok(codigo == 200 and "dominio" not in (r["preset"]["datos"]["estilo"] or {}),
+           "sin ficha en su proyecto no se escribe nada: lo general")
+    finally:
+        presets.FICHERO = antes
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        if antes_env is None:
+            os.environ.pop("ESTUDIO_DOMINIOS", None)
+        else:
+            os.environ["ESTUDIO_DOMINIOS"] = antes_env
 def probar_guion_visual():
     """Rama guion-visual (22-10-2026): qué dibujan las imágenes y el guion visual.
 
@@ -8881,7 +9074,9 @@ def main():
         probar_quitar_imagen()
         probar_descripcion_planos()
         probar_insertar_imagen()
+        probar_detalles_insertar_quitar()
         probar_dominios()
+        probar_tipos_de_negocio()
         probar_guion_visual()
     finally:
         parar(proceso)

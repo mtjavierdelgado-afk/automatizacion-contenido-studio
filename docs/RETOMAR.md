@@ -467,10 +467,11 @@ En la rama, sin unir a `main`. `estilo.modo` = "ilustracion" | "foto".
   (`asvs actualizar` no sobrescribe este). En foto entran esas y NINGUNA de
   cartoon. En ilustracion se llama a `bloque_prompt` sin el argumento `modo`, a
   proposito: un `ESTUDIO_MOTORES` viejo no lo conoceria.
-- **Escalera**: `encuadres.ESCALERA_FOTO`, 13 cartas `foto_*` con `servicios`.
-  Los servicios del video salen del param `servicios` de assets (opcional,
-  nunca escrito por defecto); sin el, consolas. La Etapa C lo pondra en
-  pantalla.
+- **Escalera**: la general de foto (`encuadres.ESCALERA_FOTO_GENERAL`). Las 13
+  cartas de consolas de EstadoPlay SALIERON del código con la Etapa Foto C
+  (21-10-2026, «nada de un cliente metido en el código»): lo de cada negocio
+  va en la ficha del negocio de su proyecto (`pasos/dominios.py`), que por
+  ahora lleva reglas de foto y revisor, no cartas propias.
 - **Pantalla**: «Tipo de imagen» en el bloque «Estilo grafico», al crear y en
   un estilo guardado (ahi cambiarlo es cambiar la fuente: rehace guia y
   laminas con las mismas imagenes; `fuenteParaServidor` manda solo

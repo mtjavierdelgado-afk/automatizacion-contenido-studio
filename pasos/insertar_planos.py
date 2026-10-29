@@ -126,11 +126,14 @@ def _llave(entrada):
     return (entrada["texto"], entrada["n"], entrada["palabra"])
 
 
-def letra_libre(entradas, texto, n):
+def letra_libre(entradas, texto, n, ocupadas=()):
     """La letra de la siguiente imagen insertada en ese plano: la primera que no
     lleve otra. Va guardada en la entrada, así que una imagen nueva más arriba
     en la frase no le cambia el nombre (ni la unidad) a las de antes."""
     usadas = {e.get("letra") for e in entradas if (e["texto"], e["n"]) == (texto, n)}
+    # `ocupadas`: letras cuya unidad aún guarda params de una insertada de antes
+    # (su dirección, su nota): una nueva con esa letra los heredaría
+    usadas |= set(ocupadas or ())
     return next((l for l in LETRAS if l not in usadas), "")
 
 

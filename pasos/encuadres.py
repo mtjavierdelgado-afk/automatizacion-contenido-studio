@@ -164,10 +164,11 @@ POR_ID = {carta["id"]: carta for carta in ESCALERA}
 # Los ids llevan el prefijo `foto_` para que no se confundan nunca con los de
 # la escalera de ilustracion en un informe o en una carta forzada a mano.
 
-#: Los servicios que una carta de foto puede pedir. Los de EstadoPlay, que
-#: viven en su DOMINIO (`pasos/dominios.py`, rama dominio-negocio): aqui quedan
-#: los mismos objetos con el nombre de siempre, para todo el que los lea.
-SERVICIOS = dominios.ESTADOPLAY["servicios"]
+#: Los servicios que una carta de foto puede pedir SIN un negocio fijado.
+#: NINGUNO desde la Etapa Foto C (21-10-2026): lo de cada negocio --sus
+#: servicios, cómo se reconocen y sus cartas-- vive en la FICHA de su cliente
+#: (`pasos/dominios.py`), no en el código. Sin ficha, la escalera general.
+SERVICIOS = dominios.SERVICIOS
 
 #: Lo que se supone cuando un video no dice que servicios lleva Y su texto no
 #: nombra ninguno: NINGUNO, y entonces reparte la escalera GENERAL de foto (ver
@@ -176,7 +177,7 @@ SERVICIOS = dominios.ESTADOPLAY["servicios"]
 #: el televisor en su tripode»: el modo foto es para cualquier proyecto.
 SERVICIOS_POR_DEFECTO = ()
 
-SERVICIOS_EN_TEXTO = dominios.ESTADOPLAY["en_texto"]
+SERVICIOS_EN_TEXTO = dominios.SERVICIOS_EN_TEXTO
 
 #: (Lo que sigue describe `SERVICIOS_EN_TEXTO`, que vive en el dominio.)
 #: COMO SE RECONOCE CADA SERVICIO EN EL TEXTO DEL VIDEO (la guia del estilo, su
@@ -195,11 +196,10 @@ def servicios_en_texto(texto):
                  if any(re.search(pat, texto, flags=re.IGNORECASE)
                         for pat in patrones))
 
-#: La escalera de foto de los servicios de alquiler: la de EstadoPlay, en su
-#: dominio. MISMOS objetos, mismo orden y mismos pesos que antes de la rama
-#: dominio-negocio: el sorteo de `carta_de` va por `len(fondo)` y una carta de
-#: mas o de menos le cambiaria la carta a casi todos los planos.
-ESCALERA_FOTO = dominios.ESTADOPLAY["escalera"]
+#: La escalera de foto de los servicios sin negocio fijado: vacía desde la
+#: Etapa Foto C (era la de EstadoPlay, con estaciones, trípodes y mandos). Un
+#: negocio con cartas propias las trae en su ficha (`dominio["escalera"]`).
+ESCALERA_FOTO = dominios.ESCALERA_FOTO
 
 #: LA ESCALERA GENERAL DE FOTO, la de cualquier proyecto que no sea de un
 #: servicio de alquiler. La de arriba se escribio para EstadoPlay --estaciones,
@@ -286,7 +286,7 @@ def escalera_de(modo="ilustracion"):
     Cualquier valor que no sea "foto" es ilustracion, que es lo que lee un
     proyecto que nunca guardo `estilo.modo`.
     """
-    return ESCALERA_FOTO if modo == "foto" else ESCALERA
+    return (ESCALERA_FOTO or ESCALERA_FOTO_GENERAL) if modo == "foto" else ESCALERA
 
 
 def por_id_de(modo="ilustracion"):
@@ -299,7 +299,7 @@ def servicios_de(valor, dominio=None):
 
     Vacio o sin ninguno conocido es el servicio base (`SERVICIOS_POR_DEFECTO`).
     Admite una lista o una cadena separada por comas. `dominio` dice cuales son
-    «conocidos» (sin el, los de EstadoPlay: lo de siempre).
+    «conocidos» (sin el, los de `SERVICIOS`: ninguno desde la Etapa Foto C).
     """
     conocidos = SERVICIOS if dominio is None else tuple(dominio.get("servicios") or ())
     if isinstance(valor, str):
@@ -328,7 +328,8 @@ def escalera_para(modo="ilustracion", servicios=None, dominio=None):
     orden.
 
     `dominio` (rama dominio-negocio) es el del negocio del video, ya resuelto
-    (`dominios.de_estilo`). Sin el, la escalera de servicios es la de EstadoPlay,
+    (`dominios.de_estilo`). Sin el, la escalera de servicios es `ESCALERA_FOTO`
+    (vacía desde la Etapa Foto C, así que la general),
     como siempre. Un dominio sin escalera propia (el general) reparte siempre
     la general.
     """
@@ -382,6 +383,10 @@ def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
     servicios: es una decision tomada mirando.
     """
     lookup = por_id_de(modo)
+    if modo == "foto" and dominio is not None and dominio.get("escalera"):
+        # las cartas propias de un negocio también tienen familia: sin esto la
+        # regla de «nunca dos familias seguidas» no las veía (Etapa Foto C)
+        lookup = dict(lookup, **{c["id"]: c for c in dominio["escalera"]})
     if forzada and forzada in lookup:
         return lookup[forzada]
     previas = [str(p) for p in (previas or [])]

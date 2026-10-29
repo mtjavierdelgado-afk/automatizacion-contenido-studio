@@ -226,9 +226,10 @@ def preparar(api, proyectos, args):
 class Progreso:
     """La barra de todas las partes: lo hecho, la parte en marcha y el gasto."""
 
-    def __init__(self, est, gasto):
+    def __init__(self, est, gasto, lineas=None):
         self.est = est
         self.gasto = gasto              # () -> dólares gastados en los vídeos de prueba
+        self.lineas = lineas or (lambda: [])   # () -> las líneas del informe (para ✓/✗)
         self.fase = ""
         self.t_fase = time.time()
         self.ultimo = 0.0
@@ -257,16 +258,34 @@ class Progreso:
         return quedan * 60
 
     def linea(self):
-        numero = next((i for i, (f, _n, _m) in enumerate(FASES, 1) if f == self.fase), 0)
-        nombre = next((n for f, n, _m in FASES if f == self.fase), "")
+        """El cuadro de progreso: avance, tiempo, gasto, hecho, ahora y pendiente."""
         try:
             gastado = self.gasto()
         except Exception:                                       # noqa: BLE001
             gastado = 0.0
-        return (f"\n  {RV.barra(self.fraccion())} · parte {numero} de {len(FASES)}: {nombre}"
-                f"\n     lleva {RV.minutos(time.time() - float(self.est['inicio']))}"
-                f" · faltan ≈ {RV.minutos(self.faltan_s())}"
-                f" · gastado {gastado:.2f} $ de {float(self.est['tope']):.2f} $")
+        tope = float(self.est["tope"])
+        hechas = [f for f, _n, _m in FASES if f in self.est["hechas"]]
+        con_fallo = {l.get("parte") for l in self.lineas() if l.get("estado") == "fallo"}
+        hecho = " · ".join(f"{'✗' if f in con_fallo else '✓'} {n}"
+                           for f, n, _m in FASES if f in hechas) or "—"
+        ahora = ""
+        if self.fase and self.fase not in self.est["hechas"]:
+            numero = next(i for i, (f, _n, _m) in enumerate(FASES, 1) if f == self.fase)
+            nombre, previsto = next((n, m) for f, n, m in FASES if f == self.fase)
+            ahora = (f"▶ parte {numero}: {nombre} (lleva {RV.minutos(time.time() - self.t_fase)}"
+                     f" · suele tardar ≈ {previsto} min)")
+        pendientes = [n for f, n, _m in FASES if f not in self.est["hechas"] and f != self.fase]
+        faltan = self.faltan_s()
+        return RV.cuadro(f"PROGRESO · prueba completa · {len(hechas)}/{len(FASES)} partes", [
+            ("Avance", RV.barra(self.fraccion())),
+            ("Tiempo", f"lleva {RV.minutos(time.time() - float(self.est['inicio']))}"
+                       f" · faltan ≈ {RV.minutos(faltan)} · termina ≈ {RV.hora_de_fin(faltan)}"),
+            ("Gasto", f"{gastado:.2f} $ de {tope:.2f} $ (quedan {max(0, tope - gastado):.2f} $)"
+             .replace(".", ",")),
+            ("Hecho", hecho),
+            ("Ahora", ahora or "terminando…"),
+            ("Pendiente", " · ".join(pendientes) if pendientes else "nada"),
+        ])
 
     def latido(self, forzar=False, cada=60):
         if forzar or time.time() - self.ultimo >= cada:
@@ -357,7 +376,7 @@ def main():
             total += float((c or {}).get("total_usd") or 0)
         return total
 
-    progreso = Progreso(est, gastado)
+    progreso = Progreso(est, gastado, lambda: informe.lineas)
 
     def parte(fase):
         """¿Hay que hacer esta parte? Si sí, la empieza (y limpia sus líneas)."""

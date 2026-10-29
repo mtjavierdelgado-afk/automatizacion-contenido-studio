@@ -56,7 +56,15 @@ def prueba_revisar():
     ok(abs(m.fraccion()) < 0.05, "al empezar la barra está casi vacía")
     m.termina("a.py", "OK")
     ok(0.2 <= m.fraccion() <= 0.35, "con la primera hecha va por su peso (10 de 40 s)")
-    ok("ahora: b.py" in m.linea() and "1 de 2" in m.linea(), "dice cuál va ahora y cuántas van")
+    cuadro = m.linea()
+    ok("▶ b.py" in cuadro and "1 de 2" in cuadro, "dice cuál va ahora y cuántas van")
+    ok(all(f"│ {e}" in cuadro for e in ("Avance", "Tiempo", "Hecho", "Ahora", "Pendiente")),
+       "el cuadro trae avance, tiempo, hecho, ahora y pendiente")
+    ok("1 bien ✓" in cuadro and "termina ≈" in cuadro, "cuenta lo bien hecho y da la hora de fin")
+    m3 = RV.Marcador(["a.py", "b.py", "c.py"], {})
+    m3.termina("a.py", "FALLA")
+    ok("1 con fallo ✗ (a.py)" in m3.linea() and "Pendiente  1: c.py" in m3.linea(),
+       "nombra lo que falló y lo pendiente sin contar la que va ahora")
     m.termina("b.py", "FALLA")
     ok(m.fraccion() == 1 and not m.actual, "al acabar, 100 % y nada en marcha")
 
@@ -308,8 +316,10 @@ def prueba_completa():
         codigo, salida = _correr(["--api", api, "--hijos", hijos, "--pausa", "0.01", "--cada", "0"])
         print("\n".join("      " + l for l in salida.splitlines()[-14:]))
         ok(codigo == 0 and "PRUEBA COMPLETA APROBADA" in salida, "la prueba entera sale APROBADA")
-        ok("%" in salida and "parte 6 de 6" in salida, "enseña la barra hasta la última parte")
-        ok("gastado 2.90 $ de 5.00 $" in salida, "y el gasto de los vídeos de prueba frente al tope")
+        ok("%" in salida and "▶ parte 6: Publicar de verdad" in salida, "enseña el cuadro hasta la última parte")
+        ok("2,90 $ de 5,00 $ (quedan 2,10 $)" in salida, "y el gasto de los vídeos de prueba frente al tope")
+        ok("✓ El servidor y las claves · ✓ Un vídeo normal" in salida, "lo hecho, parte por parte con ✓")
+        ok("Pendiente  La portada" in salida, "y lo pendiente por su nombre")
         args_relato = open(os.path.join(hijos, "args_prueba_relato.py.txt")).read()
         ok("--tope 4.20" in args_relato and "--solo c" in args_relato,
            "la prueba de foto recibe lo que queda del tope (5 - 0,80) y el tema elegido")

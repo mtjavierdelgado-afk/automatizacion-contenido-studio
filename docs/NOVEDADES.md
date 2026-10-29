@@ -270,7 +270,8 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 - **`asvs revisar`** (gratis): todas las pruebas del Studio, incluido el recorrido
   botón por botón, con motores simulados. Corre como el usuario del Studio (como
   root salían fallos que no lo eran), sigue sola si la consola se corta, enseña
-  una barra con lo que lleva y lo que falta, y termina con un informe en español
+  un cuadro de progreso (Avance · Tiempo, con la hora de fin · Hecho · Ahora ·
+  Pendiente), y termina con un informe en español
   que dice qué falló y, si se conoce, qué hacer. `asvs revisar ver` la vuelve a
   enseñar.
 - **`asvs probar completo`** (con tope, 5 $ por defecto): vídeos de verdad de punta

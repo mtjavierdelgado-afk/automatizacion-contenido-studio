@@ -120,6 +120,45 @@ def barra(fraccion, ancho=24):
     return "[" + "█" * llenos + "░" * (ancho - llenos) + f"] {int(fraccion * 100):3d} %"
 
 
+def hora_de_fin(segundos):
+    """La hora (de Lima) a la que se espera terminar: «21:14»."""
+    try:
+        from zoneinfo import ZoneInfo                         # noqa: PLC0415
+        ahora = datetime.datetime.now(ZoneInfo("America/Lima"))
+    except Exception:                                           # noqa: BLE001
+        ahora = datetime.datetime.now()
+    return (ahora + datetime.timedelta(seconds=max(0, segundos))).strftime("%H:%M")
+
+
+def lista_corta(nombres, cuantos=3):
+    """«a, b, c y 5 más» (o «—» si no hay ninguno)."""
+    nombres = list(nombres)
+    if not nombres:
+        return "—"
+    texto = ", ".join(nombres[:cuantos])
+    return texto + (f" y {len(nombres) - cuantos} más" if len(nombres) > cuantos else "")
+
+
+def cuadro(titulo, filas):
+    """El cuadro de progreso: una fila por cosa, con su etiqueta a la izquierda.
+
+    ┌─ PROGRESO · … ───────
+    │ Avance     [████░░░]  34 %
+    │ Hecho      …
+    └──────────────────────
+    """
+    ancho = 64
+    salida = ["", "┌─ " + titulo + " " + "─" * max(3, ancho - len(titulo) - 3)]
+    for etiqueta, valor in filas:
+        if valor in (None, ""):
+            continue
+        primera, *resto = str(valor).split("\n")
+        salida.append(f"│ {etiqueta:<10} {primera}")
+        salida += [f"│ {'':<10} {r}" for r in resto]
+    salida.append("└" + "─" * ancho)
+    return "\n".join(salida)
+
+
 def minutos(segundos):
     """«3 min», «menos de 1 min», «1 h 05 min»."""
     segundos = max(0, int(segundos))
@@ -202,15 +241,37 @@ class Marcador:
         return max(0, quedan)
 
     def linea(self):
-        texto = (f"  {barra(self.fraccion())} · {len(self.hechas)} de {len(self.suites)} pruebas"
-                 f" · lleva {minutos(time.time() - self.inicio)}")
+        """El cuadro de progreso: avance, tiempo, hecho, ahora y pendiente."""
+        total = len(self.suites)
+        bien = [s for s, e, _t in self.hechas if e == "OK"]
+        mal = [s for s, e, _t in self.hechas if e == "FALLA"]
+        cupo = [s for s, e, _t in self.hechas if e == "CUPO"]
+        faltan = self.faltan_s()
+        tiempo = f"lleva {minutos(time.time() - self.inicio)}"
         if self.actual:
-            texto += f" · faltan ≈ {minutos(self.faltan_s())}"
-            texto += f"\n     ahora: {QUE_PRUEBA.get(self.actual, self.actual)}"
+            tiempo += f" · faltan ≈ {minutos(faltan)} · termina ≈ {hora_de_fin(faltan)}"
+        hecho = f"{len(self.hechas)} de {total}"
+        if self.hechas:
+            hecho += f" · {len(bien)} bien ✓"
+            if mal:
+                hecho += f" · {len(mal)} con fallo ✗ ({lista_corta(QUE_PRUEBA.get(x, x) for x in mal)})"
+            if cupo:
+                hecho += f" · {len(cupo)} sin cupo de Claude"
+        ahora = ""
+        if self.actual:
             lleva = time.time() - self.t_suite
-            if lleva >= 60:
-                texto += f" (lleva {minutos(lleva)})"
-        return texto
+            ahora = (f"▶ {QUE_PRUEBA.get(self.actual, self.actual)}"
+                     f" (lleva {minutos(lleva)} · suele tardar ≈ {minutos(max(60, self.previstos[self.actual]))})")
+        pendientes = self.suites[len(self.hechas) + 1:]
+        pendiente = (f"{len(pendientes)}: " + lista_corta(QUE_PRUEBA.get(x, x) for x in pendientes)
+                     if pendientes else "nada")
+        return cuadro(f"PROGRESO · revisión gratis · {len(self.hechas)}/{total}", [
+            ("Avance", barra(self.fraccion())),
+            ("Tiempo", tiempo),
+            ("Hecho", hecho),
+            ("Ahora", ahora or "terminando…"),
+            ("Pendiente", pendiente),
+        ])
 
     def termina(self, suite, estado):
         segundos = time.time() - self.t_suite

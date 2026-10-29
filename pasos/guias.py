@@ -42,6 +42,16 @@ GUIAS = {
             "ficha usa lo general: ninguna regla de ningún negocio.",
             "El Studio no trae ningún negocio de fábrica: ni EstadoPlay ni ningún "
             "otro. Todo lo de un cliente está en su ficha.",
+            "LAS DEL NEGOCIO Y LAS DEL ESTILO SE SUMAN: cada imagen de foto lleva "
+            "las reglas de esta ficha (valen para todos los estilos de foto del "
+            "proyecto) más las propias de su estilo (valen solo para ese estilo). "
+            "Aquí va lo que vale para todo el cliente; lo específico de un estilo "
+            "(un montaje, un tipo de plano), en las reglas de ese estilo.",
+            "En la pestaña «📏 Reglas» de cada estilo se ven separadas, con cuántas "
+            "recibe cada imagen, y «Revisar si se contradicen» le pide a Claude "
+            "(con tu membresía, y avisando antes) que compare las dos listas; no "
+            "cambia nada, lo cambias tú. En un estilo de dibujo, las del negocio "
+            "no se aplican.",
             "Cada REGLA entra en el prompt de cada imagen de foto, junto a las "
             "reglas de la casa. Si le pones palabras en «Solo si el plano habla "
             "de…», solo entra en los planos que las nombran; si no, en todos.",
@@ -114,6 +124,11 @@ GUIAS = {
             "encuadres (plano general, manos en la acción, reacción...). Sirve "
             "para cualquier proyecto; lo propio de cada negocio (sus reglas de "
             "foto) va en la «Ficha del negocio» de su proyecto.",
+            "Las REGLAS DEL ESTILO (pestaña «📏 Reglas») valen solo para este "
+            "estilo; las de la Ficha del negocio valen para todos los estilos de "
+            "foto del proyecto, y cada imagen de foto recibe las dos listas "
+            "sumadas. Lo que vale para todo el cliente va en la ficha; aquí, lo "
+            "específico de este estilo.",
             "Las IMÁGENES que subes son la fuente principal: el sistema las mira y "
             "escribe una guía de dibujo de 260 a 400 palabras que va dentro de "
             "cada imagen que se genera. Sube de 1 a 24 (mejor 5 o más), todas con el aspecto "

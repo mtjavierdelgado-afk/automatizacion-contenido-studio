@@ -8366,6 +8366,103 @@ def probar_tipos_de_negocio():
             os.environ.pop("ESTUDIO_DOMINIOS", None)
         else:
             os.environ["ESTUDIO_DOMINIOS"] = antes_env
+def probar_choques_de_reglas():
+    """Rama reglas-claras (28-10-2026): «Revisar si se contradicen» compara las
+    reglas del negocio que RECIBE un estilo de foto con las suyas, con Claude
+    simulado, y NO ESCRIBE NADA: ni el estilo, ni la ficha."""
+    seccion("REGLAS CLARAS: ¿CHOCAN LAS DEL NEGOCIO CON LAS DEL ESTILO?")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    import threading as _hilos                                # noqa: PLC0415
+    from PIL import Image as _Imagen                          # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_choques_")
+    antes_env = os.environ.get("ESTUDIO_DOMINIOS")
+    antes_sim = os.environ.get("ESTUDIO_SIMULAR")
+    os.environ["ESTUDIO_DOMINIOS"] = os.path.join(base, "_sistema", "dominios.json")
+    os.environ["ESTUDIO_SIMULAR"] = "1"
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(os.path.join(base, "proyectos"))
+    presets = servidor._presets()
+    antes = presets.FICHERO
+    modulo = servidor._choques_reglas()
+    revisar_de_verdad = modulo.revisar
+
+    def esperar(rid):
+        for _ in range(100):
+            codigo, f = _llamar(servidor.leer_choques_reglas, rid)
+            if codigo != 200 or f.get("estado") != "pensando":
+                return codigo, f
+            time.sleep(0.05)
+        return 0, {}
+
+    try:
+        presets.FICHERO = os.path.join(base, "presets.json")
+        cid = servidor.crear_cliente({"nombre": "Estado Play"})["cliente"]["id"]
+        refs = []
+        for i in range(2):
+            ruta = os.path.join(base, f"r{i}.png")
+            _Imagen.new("RGB", (64, 40), (40 * i, 90, 160)).save(ruta)
+            refs.append(ruta)
+        reglas_propias = [{"texto": "La tele va siempre en su trípode negro, nunca sobre un mueble."},
+                          {"texto": "Luz cálida de salón de fiestas."}]
+        pid = presets.guardar("canal", "Fiesta foto", {
+            "estilo": {"referencias": refs, "modo": "foto", "reglas": reglas_propias},
+            "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(pid, {"cliente": cid})
+        dib = presets.guardar("canal", "Fiesta dibujo", {
+            "estilo": {"referencias": refs, "reglas": reglas_propias},
+            "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(dib, {"cliente": cid})
+        codigo, _m = _llamar(servidor.revisar_choques_reglas, {"preset": pid})
+        igual(codigo, 400, "sin ficha del negocio no hay nada que comparar")
+        _llamar(servidor.guardar_negocio_cliente, cid, {
+            "nombre": "Alquiler de consolas",
+            "reglas": [{"texto": "Cada tele va en su trípode o sobre un mueble, nunca flotando."}]})
+        codigo, _m = _llamar(servidor.revisar_choques_reglas, {"preset": dib})
+        igual(codigo, 400, "un estilo de dibujo no recibe las del negocio: 400")
+        codigo, _m = _llamar(servidor.revisar_choques_reglas, {})
+        igual(codigo, 400, "sin preset, 400")
+        foto_presets = open(presets.FICHERO, "rb").read()
+        foto_dominios = open(os.environ["ESTUDIO_DOMINIOS"], "rb").read()
+        codigo, r = _llamar(servidor.revisar_choques_reglas, {"preset": pid})
+        ok(codigo == 200 and r.get("id"), f"POST …/choques arranca ({codigo} {r})")
+        codigo, f = esperar(r.get("id"))
+        ok(codigo == 200 and f.get("estado") == "listo", f"y termina ({codigo} {f})")
+        pares = f.get("pares") or []
+        ok(pares and (pares[0]["negocio"], pares[0]["estilo"]) == (0, 0),
+           f"señala la tele del negocio con la del estilo ({pares})")
+        ok("trípode o sobre un mueble" in (f.get("negocio") or [""])[0]
+           and "nunca sobre un mueble" in (f.get("estilo") or [""])[0],
+           "con los textos de las dos reglas, para enseñarlos")
+        igual(f.get("simulado"), True, "con ESTUDIO_SIMULAR no se llama al CLI")
+        ok(open(presets.FICHERO, "rb").read() == foto_presets, "no escribe nada en el estilo")
+        ok(open(os.environ["ESTUDIO_DOMINIOS"], "rb").read() == foto_dominios, "ni en la ficha")
+        # DE UNA EN UNA, como «Afinar»
+        suelta = _hilos.Event()
+        modulo.revisar = lambda *a, **k: (suelta.wait(5), {"pares": [], "segundos": 0, "simulado": True})[1]
+        codigo, r1 = _llamar(servidor.revisar_choques_reglas, {"preset": pid})
+        codigo2, _m = _llamar(servidor.revisar_choques_reglas, {"preset": pid})
+        igual(codigo2, 409, "una segunda revisión a la vez, 409")
+        suelta.set()
+        codigo, f = esperar(r1.get("id"))
+        ok(f.get("estado") == "listo" and f.get("pares") == [], "y la primera termina sin pares")
+        modulo.revisar = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("sin cupo"))
+        codigo, r = _llamar(servidor.revisar_choques_reglas, {"preset": pid})
+        codigo, f = esperar(r.get("id"))
+        ok(f.get("estado") == "error" and "sin cupo" in (f.get("error") or ""), "un fallo de Claude se dice")
+        codigo, _m = _llamar(servidor.leer_choques_reglas, "no-existe")
+        igual(codigo, 404, "una revisión que no existe, 404")
+    finally:
+        modulo.revisar = revisar_de_verdad
+        presets.FICHERO = antes
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        for clave, valor in (("ESTUDIO_DOMINIOS", antes_env), ("ESTUDIO_SIMULAR", antes_sim)):
+            if valor is None:
+                os.environ.pop(clave, None)
+            else:
+                os.environ[clave] = valor
+
+
 def probar_guion_visual():
     """Rama guion-visual (22-10-2026): qué dibujan las imágenes y el guion visual.
 
@@ -8718,6 +8815,7 @@ def main():
         probar_detalles_insertar_quitar()
         probar_dominios()
         probar_tipos_de_negocio()
+        probar_choques_de_reglas()
         probar_guion_visual()
     finally:
         parar(proceso)

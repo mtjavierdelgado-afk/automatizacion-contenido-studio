@@ -486,6 +486,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/youtube/probar` | Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo) |
 | `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para el generador: {texto, nombre?, palabras?}. |
 | `GET` | `/api/reglas-estilo/afinar/{rid}` | Como va «Afinar con Claude», y la propuesta al terminar. |
+| `POST` | `/api/reglas-estilo/choques` | «Revisar si se contradicen»: Claude compara las reglas del negocio que recibe un estilo de foto con las suyas: {preset}. Solo lee; de una en una (409). -> {id} |
+| `GET` | `/api/reglas-estilo/choques/{rid}` | Cómo va la revisión, y al terminar {pares: [{tipo: contradicen\|repiten, negocio, estilo, por_que, que_cambiar}], negocio, estilo}. |
 | `GET` | `/api/sistema/estilos-perdidos` | Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira. |
 | `GET` | `/api/sistema/guias` | Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA. |
 | `POST` | `/api/sistema/guias/{gid}/revisar` | Lanza la revision de un texto contra la guia de su campo. -> {id} |

@@ -9379,5 +9379,113 @@ def insertar_una_imagen(navegador, datos):
     pg.sin_errores("insertar una imagen")
     pg.cerrar()
 
+# ======================================================================
+# REGLAS-CLARAS (28-10-2026). Tramo propio, al final.
+
+@escenario
+def reglas_claras(navegador, datos):
+    """Lo que vio el dueño el 28-10: en «📏 Reglas» las del negocio y las del
+    estilo salían seguidas y parecían duplicadas, y una de cada lista se
+    contradecían sin verse. Ahora: dos cajas con su título y su nota, el
+    contador «N reglas: X del negocio + Y de este estilo», la pista gratis y
+    «Revisar si se contradicen» (Claude simulado). Pintar y revisar no escriben
+    nada. Un proyecto y dos estilos propios, para no mover a los demás."""
+    from PIL import Image                                    # noqa: PLC0415
+    api = datos["api"]
+    _r, d = api.post("/api/clientes", {"nombre": "Reglas claras"})
+    cid = d["cliente"]["id"] if "cliente" in d else d.get("id")
+    carpeta = tempfile.mkdtemp(prefix="reglas_claras_")
+    refs = []
+    for i in range(2):
+        ruta = os.path.join(carpeta, f"ref{i}.png")
+        Image.new("RGB", (400, 300), (60 * i + 40, 120, 90)).save(ruta)
+        refs.append(ruta)
+    propias = [{"texto": "La tele va siempre en su trípode negro, nunca sobre un mueble."},
+               {"texto": "Luz cálida de salón de fiestas, sin focos de estudio."}]
+    ids = {}
+    for nombre, modo in (("Fiesta foto", "foto"), ("Fiesta dibujo", None)):
+        estilo = {"referencias": refs, "reglas": propias}
+        if modo:
+            estilo["modo"] = modo
+        _r, d = api.post("/api/presets-canal", {"tipo": "canal", "nombre": nombre,
+                                                "datos": {"estilo": estilo, "guion": {"instrucciones": "x"}}})
+        ids[nombre] = d["preset"]["id"]
+        api.put(f"/api/clientes/estilos/{ids[nombre]}", {"cliente": cid})
+    r, _d = api.put(f"/api/clientes/{cid}/negocio", {
+        "nombre": "Alquiler de consolas",
+        "reglas": [{"texto": "Los mandos se sujetan con las dos manos.", "palabras": ["mando"]},
+                   {"texto": "Cada tele va en su trípode o sobre un mueble, nunca flotando."}]})
+    ok(r.status_code == 200, f"el proyecto de prueba tiene su ficha ({r.status_code})")
+
+    def foto_de_disco():
+        _r, lista = api.get("/api/presets-light")
+        estilos = {x["id"]: (x.get("datos") or {}).get("estilo") for x in lista.get("presets") or []
+                   if x.get("id") in ids.values()}
+        _r, negocio = api.get(f"/api/clientes/{cid}/negocio")
+        return json.dumps([estilos, negocio.get("negocio")], sort_keys=True)
+    antes = foto_de_disco()
+    pg = Pagina(navegador, datos)
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{ids['Fiesta foto']}' }});")
+    pg.p.wait_for_timeout(1500)
+    pg.pulsar("button", "📏 Reglas")
+    ok(pg.esperar(".contador-reglas", "recibe 4 reglas", 15),
+       "el contador dice cuántas reglas recibe cada imagen")
+    ok(pg.visible(".contador-reglas", "2 del negocio") and pg.visible(".contador-reglas", "2 de este estilo"),
+       "X del negocio + Y de este estilo")
+    ok(pg.visible(".caja-reglas-negocio h4", "Del negocio · todo el proyecto «Reglas claras»"),
+       "la caja del negocio lleva su título")
+    ok(pg.visible(".caja-reglas-negocio .nota-reglas", "Valen para todos los estilos de foto de este proyecto"),
+       "y su nota")
+    ok(pg.visible(".caja-reglas-negocio button", "Editar la ficha"), "con «✎ Editar la ficha»")
+    ok(pg.visible(".caja-reglas-estilo h4", "De este estilo · solo «Fiesta foto»"),
+       "la caja del estilo lleva su título")
+    ok(pg.visible(".caja-reglas-estilo .nota-reglas", "Valen solo para este estilo"), "y su nota")
+    ok(pg.esperar(".pista-reglas-parecidas", "léelas juntas", 10)
+       and pg.visible(".pista-reglas-parecidas mark", "mueble"),
+       "la pista gratis junta la tele del negocio con la del estilo")
+    pg.captura("reglas_claras_dos_cajas")
+    pg.pulsar(".revisar-choques button", "Revisar si se contradicen")
+    ok(pg.esperar(".aviso-coste-choques", "membresía de Claude", 5),
+       "antes de revisar avisa de que gasta la membresía")
+    pg.pulsar(".aviso-coste-choques button", "Sí, revisar")
+    ok(pg.esperar(".choque-de-reglas", "Se contradicen", 30),
+       "Claude (simulado) señala el par que se contradice")
+    ok(pg.visible(".revisar-choques", "No se ha cambiado nada"), "y dice que no ha cambiado nada")
+    pg.captura("reglas_claras_choques", entera=False)
+    pg.pulsar(".revisar-choques button", "Revisar otra vez")
+    ok(pg.esperar(".aviso-coste-choques", "no cambia nada", 5), "«Revisar otra vez» vuelve a avisar antes")
+    pg.pulsar(".aviso-coste-choques button", "Cancelar")
+    pg.p.wait_for_timeout(500)
+    ok(not pg.visible(".aviso-coste-choques") and pg.visible(".choque-de-reglas", "Se contradicen"),
+       "y «Cancelar» lo deja como estaba, sin llamar a Claude")
+    ok(foto_de_disco() == antes, "pintar y revisar no escriben nada (ni estilos ni ficha)")
+    pg.sin_errores("las reglas claras de un estilo de foto")
+
+    # EN UN ESTILO DE DIBUJO, las del negocio no se le aplican
+    pg.js(f"irALight('preset', {{ abierto: '{ids['Fiesta dibujo']}' }});")
+    pg.p.wait_for_timeout(1500)
+    pg.pulsar("button", "📏 Reglas")
+    ok(pg.esperar(".contador-reglas", "no se le aplican", 15),
+       "en un estilo de dibujo, el contador dice que las del negocio no se le aplican")
+    ok(pg.visible(".contador-reglas", "0 del negocio"), "y cuenta 0 del negocio")
+
+    # Y EN LA FICHA DEL NEGOCIO: que se suman, y cuántos estilos de foto la usan
+    pg.js(f"elegirCliente('{cid}'); irALight('galeria');")
+    ok(pg.esperar(".abrir-ajustes-proyecto", None, 15), "el proyecto con su «⚙ Ajustes del proyecto»")
+    pg.pulsar(".abrir-ajustes-proyecto")
+    ok(pg.esperar(".uso-ficha-negocio", "se suman", 10), "la ficha dice que sus reglas se suman a las del estilo")
+    ok(pg.visible(".uso-ficha-negocio", "La usan 1 estilo de foto de este proyecto (Fiesta foto)"),
+       "y cuántos estilos de foto la usan")
+    ok(pg.visible(".uso-ficha-negocio", "Los de dibujo (1) no la reciben"), "y que los de dibujo no")
+    pg.captura("reglas_claras_ficha", entera=False)
+    pg.js("cerrarAjustesProyecto();")
+    ok(foto_de_disco() == antes, "abrir la ficha tampoco escribe nada")
+    pg.sin_errores("la línea de la ficha del negocio")
+    pg.cerrar()
+    api._r("DELETE", f"/api/clientes/{cid}/negocio")
+    for pid in ids.values():
+        api._r("DELETE", f"/api/presets-light/{pid}")
+    api._r("DELETE", f"/api/clientes/{cid}")
+
 if __name__ == "__main__":
     sys.exit(main())

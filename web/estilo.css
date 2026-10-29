@@ -3403,6 +3403,51 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
   border-radius: 8px; padding: 6px 10px; background: var(--hueco); font-size: 13px; }
 .regla-negocio .pastilla { white-space: nowrap; }
 
+/* ================================================== REGLAS CLARAS
+   Rama reglas-claras: en «📏 Reglas», el contador y dos cajas con su color
+   (coral: del negocio; violeta: de este estilo), la pista de reglas que
+   hablan de lo mismo y «Revisar si se contradicen». */
+.contador-reglas { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px;
+  border: 1px solid var(--linea); border-radius: 10px; padding: 9px 12px; background: var(--hueco); }
+.contador-reglas strong { font-size: 14px; font-variant-numeric: tabular-nums; }
+.del-negocio { color: var(--coral-texto); font-weight: 600; }
+.del-estilo { color: var(--acento); font-weight: 600; }
+.caja-reglas { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--linea);
+  border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.negocio-del-estilo.caja-reglas { padding-bottom: 10px; border-bottom: 1px solid var(--coral-texto); }
+.caja-reglas-negocio { border-color: var(--coral-texto); background: var(--coral-fondo); }
+.caja-reglas-estilo { border-color: var(--acento-borde); }
+.caja-reglas-tit { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.caja-reglas-tit h4 { margin: 0; font-size: 14px; }
+.caja-reglas-negocio .caja-reglas-tit h4 { color: var(--coral-texto); }
+.caja-reglas-estilo .caja-reglas-tit h4 { color: var(--acento); }
+.etiqueta-reglas { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+  border: 1px solid; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.caja-reglas-negocio .etiqueta-reglas { color: var(--coral-texto); }
+.caja-reglas-estilo .etiqueta-reglas { color: var(--acento); }
+.nota-reglas { font-size: 12.5px; color: var(--tenue); }
+.caja-reglas-negocio .regla-negocio { background: var(--panel); }
+.caja-reglas-negocio .pastilla { color: var(--coral-texto); border-color: var(--coral-texto); }
+.aviso-choques-reglas { display: flex; flex-direction: column; gap: 8px; }
+.pista-reglas-parecidas, .revisar-choques { display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid var(--linea); border-radius: 10px; padding: 9px 12px; }
+.revisar-choques .fila { align-items: center; gap: 8px; flex-wrap: wrap; }
+.par-de-reglas { border-left: 3px solid var(--aviso); background: var(--hueco); border-radius: 6px;
+  padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.par-de-reglas mark { background: var(--aviso-fondo); color: var(--aviso); padding: 0 3px; border-radius: 3px; }
+.aviso-coste-choques { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--aviso-borde);
+  background: var(--aviso-fondo); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.aviso-coste-choques .fila { gap: 8px; flex-wrap: wrap; }
+.choque-de-reglas { display: flex; flex-direction: column; gap: 3px; border-left: 3px solid var(--aviso);
+  background: var(--hueco); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+.choque-de-reglas.se-repiten { border-left-color: var(--acento); }
+.choque-de-reglas .tipo-choque { font-size: 11.5px; letter-spacing: .05em; text-transform: uppercase; }
+.choque-de-reglas.se-contradicen .tipo-choque { color: var(--aviso); }
+.choque-de-reglas.se-repiten .tipo-choque { color: var(--acento); }
+.aviso-dibujo { color: var(--aviso); }
+.uso-ficha-negocio { display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--linea);
+  border-radius: 8px; padding: 8px 10px; background: var(--hueco); font-size: 13px; }
+
 /* Los elementos de una imagen (rama elementos-video), en su diapositiva. */
 .elementos-plano { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--linea);
   border-radius: 10px; padding: 8px 10px; margin-top: 8px; }

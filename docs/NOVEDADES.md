@@ -10,6 +10,24 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Reglas del negocio y del estilo, separadas a la vista (28 de octubre)**
+- **En la pestaña «📏 Reglas» de un estilo hay dos cajas**, cada una con su
+  título y su color: «Del negocio · todo el proyecto» (coral, se cambian en la
+  Ficha del negocio con «✎ Editar la ficha») y «De este estilo · solo…»
+  (violeta, se editan ahí mismo). Antes salían seguidas y parecían duplicadas.
+- **Arriba, un contador**: «Cada imagen de este estilo recibe N reglas: X del
+  negocio + Y de este estilo», con cuántas solo entran en ciertos planos. En un
+  estilo de dibujo dice que las del negocio no se le aplican (solo valen para
+  foto).
+- **Aviso de reglas que chocan, en dos capas**: una pista gratis que sale sola
+  cuando una regla del negocio y una del estilo hablan de lo mismo («léelas
+  juntas»), y el botón «Revisar si se contradicen», que le pide a Claude (con la
+  membresía, avisando antes) qué pares se contradicen o se repiten y qué
+  cambiar. Nunca cambia nada solo.
+- **En «⚙ Ajustes del proyecto → Ficha del negocio»**, una línea dice que sus
+  reglas se suman a las de cada estilo y cuántos estilos de foto la usan.
+- Nada de esto cambia qué reglas recibe cada imagen: es solo pantalla.
+
 **Quitar e insertar imágenes: los dos detalles que quedaban (28 de octubre)**
 - **Un subtítulo corregido a mano ya no repite ni pierde palabras** cuando partes
   esa imagen (insertar) o le pasas la voz de otra (quitar): si lo escribiste

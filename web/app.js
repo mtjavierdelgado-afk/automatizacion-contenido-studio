@@ -18051,39 +18051,45 @@ function bloqueImagenesEstiloLight(ficha) {
 
 function bloqueReglasLight(ficha) {
   const caja = h('div', {});
+  caja.appendChild(contadorDeReglas(ficha));        // reglas-claras
   caja.appendChild(bloqueNegocioDelEstilo(ficha));  // Etapa Foto C
+  /* LAS PROPIAS DEL ESTILO, EN SU CAJA (rama reglas-claras): con su título y
+     su nota, para que no se confundan con las del negocio de arriba. */
+  const propia = cajaReglasDelEstilo(ficha);
+  caja.appendChild(propia);
   if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
-    caja.appendChild(h('div', { clase: 'pista' },
+    propia.appendChild(h('div', { clase: 'pista' },
       'Primero genera el estilo gráfico (las láminas); después podrás ponerle reglas.'));
     return caja;
   }
   if (REGLAS_LIGHT.id !== ficha.id) {
     setTimeout(() => cargarReglasLight(ficha.id), 0);
-    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo las reglas…'));
+    propia.appendChild(h('div', { clase: 'cargando' }, 'leyendo las reglas…'));
     return caja;
   }
   if (REGLAS_LIGHT.error) {
-    caja.appendChild(cajaError(REGLAS_LIGHT.error));
-    caja.appendChild(h('button', { clase: 'mini', onclick: () => cargarReglasLight(ficha.id) }, 'Reintentar'));
+    propia.appendChild(cajaError(REGLAS_LIGHT.error));
+    propia.appendChild(h('button', { clase: 'mini', onclick: () => cargarReglasLight(ficha.id) }, 'Reintentar'));
     return caja;
   }
   if (!REGLAS_LIGHT.reglas) {
-    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo las reglas…'));
+    propia.appendChild(h('div', { clase: 'cargando' }, 'leyendo las reglas…'));
     return caja;
   }
-  caja.appendChild(h('div', { clase: 'pista' },
+  propia.appendChild(h('div', { clase: 'pista' },
     'Lo que NINGUNA imagen de este estilo puede romper. Cada regla entra en las imágenes '
     + 'de los planos a los que aplica, el corrector la respeta y el revisor la comprueba '
     + 'con su gravedad. Pocas y claras: cinco reglas se cumplen, veinte se diluyen.'));
-  REGLAS_LIGHT.reglas.forEach((regla, i) => caja.appendChild(tarjetaReglaLight(regla, i)));
-  caja.appendChild(h('div', { clase: 'fila' },
+  REGLAS_LIGHT.reglas.forEach((regla, i) => propia.appendChild(tarjetaReglaLight(regla, i)));
+  propia.appendChild(h('div', { clase: 'fila' },
     h('button', { clase: 'mini', onclick: anadirReglaLight }, '+ Añadir regla'),
     h('span', { clase: 'crece' }),
     enVivo(() => h('span', { clase: 'meta' }, REGLAS_LIGHT.estado || ''))));
-  caja.appendChild(h('div', { clase: 'meta' },
+  propia.appendChild(h('div', { clase: 'meta' },
     'Llegan a los vídeos nuevos al crearlos. A un vídeo ya hecho, con «Traer el estilo»; '
     + 'sus imágenes no se rehacen solas: cambiar las reglas las marca como desactualizadas '
     + 'y tú decides si las rehaces.'));
+  caja.appendChild(avisoDeChoquesDeReglas(ficha));
   return caja;
 }
 
@@ -32812,8 +32818,9 @@ function panelNegocioProyecto(cliente) {
     actual ? pastillaEstado('ok', 'la usan sus estilos') : pastillaEstado('', 'sin ficha: lo general')));
   caja.appendChild(h('div', { clase: 'pista' },
     'Lo que el Studio debe saber de este cliente para que sus fotos parezcan de verdad. '
-    + 'Todos los estilos de este proyecto la usan solos: llega a los vídeos nuevos y a los ya '
+    + 'Todos los estilos de foto de este proyecto la usan solos: llega a los vídeos nuevos y a los ya '
     + 'hechos con «Traer el estilo».'));
+  caja.appendChild(usoDeLaFichaDelNegocio(cliente, actual));  // reglas-claras
   caja.appendChild(campoTexto('Qué hace este negocio', b.nombre, v => { b.nombre = v; },
     { pista: 'Mamparas y baños a medida en Lima' }));
   caja.appendChild(h('div', { clase: 'fila' },
@@ -32853,13 +32860,309 @@ function panelNegocioProyecto(cliente) {
   return caja;
 }
 
-/* EN LA PESTAÑA «REGLAS» DEL ESTILO: el negocio de su proyecto, sin editarlo,
-   encima de las reglas propias del estilo. Así se ve en un solo sitio todo lo
-   que cada imagen tiene que cumplir. */
+/* ================================================ LAS REGLAS, CLARAS
+ *
+ * Rama reglas-claras (28-10-2026). En «📏 Reglas» salían seguidas las reglas
+ * de la Ficha del negocio y las del estilo, y no se distinguían: el dueño creyó
+ * que se habían duplicado, y una del negocio («la tele en su trípode o sobre un
+ * mueble») contradecía una del estilo («nunca sobre un mueble») sin que se
+ * viera. Ahora: un CONTADOR arriba, DOS CAJAS con su título, nota y color, y el
+ * aviso de choques en dos capas (la pista gratis de palabras en común y el
+ * botón «Revisar si se contradicen», con Claude por la membresía).
+ *
+ * TODO ESTO SOLO PINTA Y LEE: no cambia qué reglas recibe cada imagen, ni
+ * escribe en el estilo, la ficha o un vídeo (regla 1). Lo que llega de verdad
+ * lo deciden `estilo.modo` y `estilo.dominio` (que pone el servidor al guardar
+ * la ficha, `_negocio_al_estilo`), y eso es lo que se cuenta aquí. */
+
+/* Lo que recibe cada imagen de este estilo, tal como está guardado. */
+function reglasQueRecibeElEstilo(ficha) {
+  const estilo = ((ficha || {}).datos || {}).estilo || {};
+  const cid = clienteDe(ficha.id);
+  const cliente = fichaCliente(cid);
+  const negocio = cliente ? negocioDe(cid) : null;      // undefined: se está leyendo
+  const foto = estilo.modo === 'foto';
+  const laminas = !!(estilo.referencias || []).length;
+  const llega = !!(foto && negocio && estilo.dominio && estilo.dominio === negocio.id);
+  const delNegocio = llega ? (negocio.reglas || []).filter(r => String(r.texto || '').trim()) : [];
+  const cargadas = REGLAS_LIGHT.id === ficha.id && Array.isArray(REGLAS_LIGHT.reglas);
+  const delEstilo = cargadas ? REGLAS_LIGHT.reglas.filter(r => String(r.texto || '').trim()) : [];
+  return { cid, cliente, negocio, foto, laminas, llega, delNegocio, delEstilo, cargadas };
+}
+
+function tienePalabras(regla) {
+  const p = regla.palabras;
+  return Array.isArray(p) ? p.length > 0 : !!String(p || '').trim();
+}
+
+/* «Cada imagen de este estilo recibe N reglas: X del negocio + Y de este estilo». */
+function contadorDeReglas(ficha) {
+  return enVivo(() => {
+    const q = reglasQueRecibeElEstilo(ficha);
+    const caja = h('div', { clase: 'contador-reglas' });
+    if (!q.laminas) {
+      caja.appendChild(h('div', { clase: 'meta' },
+        'Cuando generes el estilo gráfico (las láminas), aquí verás cuántas reglas recibe cada imagen.'));
+      return caja;
+    }
+    if (!q.cargadas || q.negocio === undefined) {
+      caja.appendChild(h('div', { clase: 'cargando' }, 'contando las reglas…'));
+      return caja;
+    }
+    const x = q.delNegocio.length;
+    const y = q.delEstilo.length;
+    caja.appendChild(h('strong', {},
+      `Cada imagen de este estilo recibe ${cifra(x + y)} regla${x + y === 1 ? '' : 's'}: `,
+      h('span', { clase: 'del-negocio' }, `${cifra(x)} del negocio`), ' + ',
+      h('span', { clase: 'del-estilo' }, `${cifra(y)} de este estilo`)));
+    const notas = [];
+    const enLaFicha = q.negocio ? (q.negocio.reglas || []).length : 0;
+    if (!q.foto) {
+      notas.push(enLaFicha
+        ? `Este estilo es de dibujo: las ${cifra(enLaFicha)} reglas del negocio no se le aplican (solo valen para foto).`
+        : 'Este estilo es de dibujo: las reglas del negocio no se le aplican (solo valen para foto).');
+    } else if (q.negocio && !q.llega) {
+      notas.push('La ficha del negocio todavía no le ha llegado a este estilo: se le pone al guardar la ficha.');
+    }
+    const condicionales = q.delNegocio.filter(tienePalabras).length + q.delEstilo.filter(tienePalabras).length;
+    if (condicionales) {
+      notas.push(`${cifra(condicionales)} de ellas solo entra${condicionales === 1 ? '' : 'n'} `
+        + 'cuando el plano habla de lo suyo («solo si…»).');
+    }
+    if (q.foto) notas.push('Aparte van las reglas fijas del Studio para foto, que no se editan.');
+    notas.forEach(n => caja.appendChild(h('div', { clase: 'meta' }, n)));
+    return caja;
+  });
+}
+
+/* La caja de las reglas propias del estilo: etiqueta, título y nota. */
+function cajaReglasDelEstilo(ficha) {
+  return h('div', { clase: 'caja-reglas caja-reglas-estilo' },
+    h('div', { clase: 'caja-reglas-tit' },
+      h('span', { clase: 'etiqueta-reglas' }, 'De este estilo'),
+      h('h4', {}, `De este estilo · solo «${ficha.nombre || ficha.id}»`)),
+    h('div', { clase: 'nota-reglas' },
+      'Valen solo para este estilo. Aquí va lo específico (un montaje, un tipo de plano); '
+      + 'lo que vale para todo el cliente va en la Ficha del negocio.'));
+}
+
+/* LA PISTA GRATIS (capa B): pares que comparten palabras. Sin IA, al momento:
+   «léelas juntas». No sabe si se contradicen y nunca lo dice. La misma cuenta
+   que `pasos/choques_reglas.raices`. */
+const PALABRAS_VACIAS_REGLAS = new Set(('nunca siempre solo sola solos solas cada sobre como para '
+  + 'entre plano planos imagen imágenes foto fotos todo toda todos todas tiene tienen debe deben esta '
+  + 'este estos estas esto algo nada donde cuando aunque desde hasta hacia mismo misma otro otra otros '
+  + 'otras pero porque parece parecen real reales verdad cosa cosas están estén sean será hace hacen '
+  + 'lleva llevan dos tres con sin más muy bien regla').split(' ').map(llanoDeRegla));
+
+function llanoDeRegla(texto) {
+  return String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function raicesDeRegla(texto) {
+  const salida = new Map();   // raíz -> la palabra como se ve
+  String(texto || '').split(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+/).forEach(palabra => {
+    const llana = llanoDeRegla(palabra);
+    if (llana.length >= 4 && !PALABRAS_VACIAS_REGLAS.has(llana)) {
+      const raiz = llana.slice(0, 5);
+      if (!salida.has(raiz)) salida.set(raiz, palabra.toLowerCase());
+    }
+  });
+  return salida;
+}
+
+function paresQueHablanDeLoMismo(delNegocio, delEstilo) {
+  const pares = [];
+  delNegocio.forEach((rn, i) => {
+    const raicesN = raicesDeRegla(rn.texto);
+    delEstilo.forEach((rp, j) => {
+      const raicesE = raicesDeRegla(rp.texto);
+      const comunes = [...raicesN.keys()].filter(r => raicesE.has(r)).sort();
+      if (comunes.length >= 2) pares.push({ negocio: i, estilo: j, palabras: comunes.map(r => raicesN.get(r)) });
+    });
+  });
+  return pares;
+}
+
+function recorteDeRegla(texto, tope) {
+  const t = String(texto || '').trim();
+  const max = tope || 110;
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+function pistaDeReglasParecidas(ficha) {
+  return enVivo(() => {
+    const q = reglasQueRecibeElEstilo(ficha);
+    if (!q.llega || !q.delNegocio.length || !q.delEstilo.length) return null;
+    const pares = paresQueHablanDeLoMismo(q.delNegocio, q.delEstilo);
+    if (!pares.length) return null;
+    const caja = h('div', { clase: 'pista-reglas-parecidas' },
+      h('strong', {}, 'Hablan de lo mismo · léelas juntas'),
+      h('div', { clase: 'meta' }, 'Pista automática y gratis: estas reglas comparten palabras. '
+        + 'No dice si se contradicen; solo que conviene leerlas juntas.'));
+    pares.forEach(p => {
+      const linea = h('div', {}, h('span', { clase: 'del-negocio' }, `Negocio ${p.negocio + 1}`), ' y ',
+        h('span', { clase: 'del-estilo' }, `Estilo ${p.estilo + 1}`), ' comparten ');
+      p.palabras.forEach((w, k) => { if (k) linea.appendChild(document.createTextNode(', ')); linea.appendChild(h('mark', {}, w)); });
+      caja.appendChild(h('div', { clase: 'par-de-reglas' }, linea,
+        h('div', { clase: 'meta' },
+          `«${recorteDeRegla(q.delNegocio[p.negocio].texto)}» · «${recorteDeRegla(q.delEstilo[p.estilo].texto)}»`)));
+    });
+    return caja;
+  });
+}
+
+/* «REVISAR SI SE CONTRADICEN» (capa A): Claude por la membresía, con aviso
+   antes. Lee lo GUARDADO (lo pendiente se manda primero) y no escribe nada:
+   el resultado vive en esta página y se pierde al cambiar de estilo. */
+const CHOQUES_REGLAS = { preset: '', estado: 'nada', previo: '', pares: [], negocio: [], estilo: [], error: '', simulado: false };
+
+function choquesDe(ficha) {
+  if (CHOQUES_REGLAS.preset !== ficha.id) {
+    Object.assign(CHOQUES_REGLAS, { preset: ficha.id, estado: 'nada', previo: '', pares: [], negocio: [], estilo: [],
+      error: '', simulado: false });
+  }
+  return CHOQUES_REGLAS;
+}
+
+/* Repinta SOLO el bloque de «Revisar»: lo vivo no se repinta con el foco
+   dentro, y el foco está justo en el botón que se acaba de pulsar. */
+function repintarChoquesDeReglas() {
+  const ficha = fichaLight(CHOQUES_REGLAS.preset);
+  if (!ficha) return;
+  document.querySelectorAll('.revisar-choques').forEach(viejo => {
+    const nuevo = pintarRevisarChoques(ficha);
+    viejo.replaceWith(nuevo);
+    const boton = nuevo.querySelector('button');
+    if (boton) boton.focus();
+  });
+}
+
+async function revisarChoquesDeReglas(ficha) {
+  const c = choquesDe(ficha);
+  c.estado = 'pensando';
+  c.error = '';
+  repintarChoquesDeReglas();
+  try {
+    // lo escrito y aún sin mandar, primero: Claude lee lo guardado
+    if (REGLAS_LIGHT.temporizador) { clearTimeout(REGLAS_LIGHT.temporizador); await volcarReglasLight(); }
+    if (REGLAS_LIGHT.enVuelo && REGLAS_LIGHT.promesa) await REGLAS_LIGHT.promesa;
+    const r = await pedir(`${BASE}/api/reglas-estilo/choques`, { method: 'POST', cuerpo: { preset: ficha.id } });
+    let listo = false;
+    for (let i = 0; i < 90 && !listo; i += 1) {
+      await new Promise(seguir => setTimeout(seguir, 2000));
+      if (CHOQUES_REGLAS.preset !== ficha.id) return;       // cambiaste de estilo
+      const f = await pedir(`${BASE}/api/reglas-estilo/choques/${encodeURIComponent(r.id)}`);
+      if (f.estado === 'listo') {
+        Object.assign(c, { estado: 'hecho', pares: f.pares || [], negocio: f.negocio || [],
+          estilo: f.estilo || [], simulado: !!f.simulado });
+        listo = true;
+      } else if (f.estado === 'error') {
+        Object.assign(c, { estado: 'error', error: f.error || 'no se ha podido revisar' });
+        listo = true;
+      }
+    }
+    if (!listo) Object.assign(c, { estado: 'error', error: 'Claude está tardando demasiado: vuelve a pulsar en un momento' });
+  } catch (err) {
+    if (CHOQUES_REGLAS.preset !== ficha.id) return;
+    Object.assign(c, { estado: 'error', error: err.message });
+  }
+  repintarChoquesDeReglas();
+}
+
+function avisoDeChoquesDeReglas(ficha) {
+  const caja = h('div', { clase: 'aviso-choques-reglas' });
+  caja.appendChild(pistaDeReglasParecidas(ficha));
+  caja.appendChild(enVivo(() => pintarRevisarChoques(ficha)));
+  return caja;
+}
+
+function pintarRevisarChoques(ficha) {
+  const q = reglasQueRecibeElEstilo(ficha);
+  const bloque = h('div', { clase: 'revisar-choques' });
+  if (!q.laminas || !q.cargadas || q.negocio === undefined) { bloque.hidden = true; return bloque; }
+  const c = choquesDe(ficha);
+  const fila = h('div', { clase: 'fila' }, h('strong', {}, '¿Chocan las del negocio con las de este estilo?'),
+    h('span', { clase: 'crece' }));
+  bloque.appendChild(fila);
+  if (!q.foto) {
+    bloque.appendChild(h('div', { clase: 'meta' }, 'Estilo de dibujo: las reglas del negocio no le llegan, no hay choque posible.'));
+    return bloque;
+  }
+  if (!q.delNegocio.length || !q.delEstilo.length) {
+    bloque.appendChild(h('div', { clase: 'meta' }, !q.delNegocio.length
+      ? 'A este estilo no le llega ninguna regla del negocio: no hay nada que comparar.'
+      : 'Este estilo no tiene reglas propias todavía: no hay nada que comparar.'));
+    return bloque;
+  }
+  if (c.estado === 'nada' || c.estado === 'hecho' || c.estado === 'error') {
+    fila.appendChild(h('button', { clase: 'mini', onclick: () => { c.previo = c.estado; c.estado = 'preguntar'; repintarChoquesDeReglas(); } },
+      c.estado === 'hecho' ? 'Revisar otra vez' : 'Revisar si se contradicen'));
+  }
+  if (c.estado === 'preguntar') {
+    bloque.appendChild(h('div', { clase: 'aviso-coste-choques' },
+      h('div', {}, 'Esto hace ', h('strong', {}, 'una consulta a tu membresía de Claude'),
+        ' (no cuesta imágenes ni API). Solo lee las reglas: ', h('strong', {}, 'no cambia nada'), '.'),
+      h('div', { clase: 'fila' },
+        h('button', { clase: 'mini primario', onclick: () => revisarChoquesDeReglas(ficha) }, 'Sí, revisar'),
+        h('button', { clase: 'mini', onclick: () => { c.estado = c.previo || 'nada'; repintarChoquesDeReglas(); } }, 'Cancelar'))));
+  }
+  if (c.estado === 'pensando') {
+    bloque.appendChild(h('div', { clase: 'cargando' },
+      `Claude está leyendo las ${cifra(q.delNegocio.length + q.delEstilo.length)} reglas…`));
+  }
+  if (c.estado === 'error') bloque.appendChild(cajaError(`No se ha podido revisar: ${c.error}`));
+  if (c.estado === 'hecho') {
+    if (!c.pares.length) {
+      bloque.appendChild(h('div', { clase: 'meta' }, 'Claude no ve ninguna regla que se contradiga ni se repita.'));
+    }
+    c.pares.forEach(p => bloque.appendChild(h('div', {
+      clase: `choque-de-reglas ${p.tipo === 'repiten' ? 'se-repiten' : 'se-contradicen'}` },
+      h('strong', { clase: 'tipo-choque' }, p.tipo === 'repiten' ? 'Se repiten' : 'Se contradicen'),
+      h('div', {}, h('span', { clase: 'del-negocio' }, 'Del negocio: '), `«${recorteDeRegla(c.negocio[p.negocio], 160)}»`),
+      h('div', {}, h('span', { clase: 'del-estilo' }, 'De este estilo: '), `«${recorteDeRegla(c.estilo[p.estilo], 160)}»`),
+      p.por_que ? h('div', {}, p.por_que) : null,
+      p.que_cambiar ? h('div', { clase: 'meta' }, `Qué cambiar: ${p.que_cambiar}`) : null)));
+    bloque.appendChild(h('div', { clase: 'meta' }, (c.simulado ? '(simulado) ' : '')
+      + 'No se ha cambiado nada. El resultado se borra al cambiar de estilo.'));
+  }
+  return bloque;
+}
+
+/* EN LA FICHA DEL NEGOCIO: que sus reglas SE SUMAN a las de cada estilo, y
+   cuántos estilos de foto del proyecto la reciben de verdad (`estilo.dominio`). */
+function usoDeLaFichaDelNegocio(cliente, actual) {
+  const estilos = estilosDeCliente(cliente.id).map(f => ({ f, e: ((f.datos || {}).estilo) || {} }));
+  const deFoto = estilos.filter(x => x.e.modo === 'foto');
+  const laUsan = actual ? deFoto.filter(x => x.e.dominio && x.e.dominio === actual.id) : [];
+  const sinLaminas = deFoto.filter(x => !(x.e.referencias || []).length).length;
+  const deDibujo = estilos.length - deFoto.length;
+  const nombres = lista => lista.map(x => x.f.nombre || x.f.id).join(', ');
+  const caja = h('div', { clase: 'uso-ficha-negocio' },
+    h('div', {}, 'Estas reglas ', h('strong', {}, 'se suman'), ' a las de cada estilo: cada imagen de foto '
+      + 'lleva las de aquí ', h('strong', {}, 'más'), ' las de su estilo.'));
+  const partes = [];
+  if (actual) {
+    partes.push(laUsan.length
+      ? `La usan ${cifra(laUsan.length)} estilo${laUsan.length === 1 ? '' : 's'} de foto de este proyecto (${nombres(laUsan)}).`
+      : 'Todavía no la usa ningún estilo de foto de este proyecto.');
+  } else {
+    partes.push(deFoto.length
+      ? `Al guardarla, la usarán los ${cifra(deFoto.length)} estilo${deFoto.length === 1 ? '' : 's'} de foto de este proyecto.`
+      : 'Este proyecto aún no tiene estilos de foto: la usarán cuando los tenga.');
+  }
+  if (sinLaminas) partes.push(`${cifra(sinLaminas)} de foto aún sin estilo gráfico: la recibirá${sinLaminas === 1 ? '' : 'n'} al generarlo.`);
+  if (deDibujo) partes.push(`Los de dibujo (${cifra(deDibujo)}) no la reciben.`);
+  caja.appendChild(h('div', { clase: 'meta' }, partes.join(' ')));
+  return caja;
+}
+
+/* EN LA PESTAÑA «REGLAS» DEL ESTILO: el negocio de su proyecto, en su caja y
+   sin editarlo, encima de la caja de las reglas propias (y debajo del contador). */
 function bloqueNegocioDelEstilo(ficha) {
   const cid = clienteDe(ficha.id);
   const cliente = fichaCliente(cid);
-  const caja = h('div', { clase: 'negocio-del-estilo' });
+  const caja = h('div', { clase: 'negocio-del-estilo caja-reglas caja-reglas-negocio' });
   const ir = () => {
     if (!cliente) return;
     APP.light.ajustesProyecto = cid;
@@ -32868,7 +33171,15 @@ function bloqueNegocioDelEstilo(ficha) {
     apuntarCliente(cid);
     irALight('galeria');
   };
+  const titulo = boton => h('div', { clase: 'caja-reglas-tit' },
+    h('span', { clase: 'etiqueta-reglas' }, 'Del negocio'),
+    h('h4', {}, cliente ? `Del negocio · todo el proyecto «${cliente.nombre}»` : 'Del negocio'),
+    h('span', { clase: 'crece' }), boton);
+  const nota = h('div', { clase: 'nota-reglas' },
+    'Valen para todos los estilos de foto de este proyecto. Se cambian en la Ficha del negocio.');
   if (!cliente) {
+    caja.appendChild(titulo(null));
+    caja.appendChild(nota);
     caja.appendChild(h('div', { clase: 'pista' },
       'Negocio: lo general. Este estilo no está en ningún proyecto; mételo en el de su cliente '
       + 'para que use la ficha del negocio de ese cliente.'));
@@ -32876,28 +33187,30 @@ function bloqueNegocioDelEstilo(ficha) {
   }
   const negocio = negocioDe(cid);
   if (negocio === undefined) {
+    caja.appendChild(titulo(null));
     caja.appendChild(NEGOCIOS.fallo[cid]
       ? h('div', { clase: 'meta' }, `No se ha podido leer la ficha del negocio: ${NEGOCIOS.fallo[cid]}`,
         ' ', h('button', { clase: 'mini', onclick: () => reintentarNegocio(cid) }, 'Reintentar'))
       : h('div', { clase: 'cargando' }, 'leyendo la ficha del negocio…'));
     return caja;
   }
-  caja.appendChild(h('div', { clase: 'fila' },
-    h('strong', {}, negocio ? `Negocio: ${negocio.nombre}` : 'Negocio: lo general'),
-    h('span', { clase: 'crece' }),
-    h('button', { clase: 'mini', onclick: ir }, negocio ? '✎ Editar la ficha' : 'Llenar la ficha del negocio')));
+  caja.appendChild(titulo(h('button', { clase: 'mini', onclick: ir },
+    negocio ? '✎ Editar la ficha' : 'Llenar la ficha del negocio')));
+  caja.appendChild(nota);
   if (!negocio) {
     caja.appendChild(h('div', { clase: 'pista' },
       `El proyecto «${cliente.nombre}» no tiene ficha del negocio: sus imágenes no llevan reglas de ningún negocio.`));
     return caja;
   }
-  caja.appendChild(h('div', { clase: 'pista' },
-    `Viene de la ficha del proyecto «${cliente.nombre}»: se cambia allí y vale para todos sus estilos.`));
+  caja.appendChild(h('div', { clase: 'meta' }, `Negocio: ${negocio.nombre}`));
+  if (((ficha.datos || {}).estilo || {}).modo !== 'foto') {
+    caja.appendChild(h('div', { clase: 'meta aviso-dibujo' }, 'No se aplican a este estilo: es de dibujo.'));
+  }
   if (!(negocio.reglas || []).length) {
     caja.appendChild(h('div', { clase: 'meta' }, 'La ficha no tiene reglas de foto.'));
   }
-  (negocio.reglas || []).forEach(r => caja.appendChild(h('div', { clase: 'regla-negocio' },
-    h('span', { clase: 'pastilla' }, 'del negocio'),
+  (negocio.reglas || []).forEach((r, i) => caja.appendChild(h('div', { clase: 'regla-negocio' },
+    h('span', { clase: 'pastilla' }, `Negocio ${i + 1}`),
     h('span', {}, r.texto + ((r.palabras || []).length ? ` (solo si habla de: ${r.palabras.join(', ')})` : '')))));
   return caja;
 }

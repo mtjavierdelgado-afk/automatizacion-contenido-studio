@@ -2520,6 +2520,7 @@ function pintarConfig() {
   caja.appendChild(seccionClaveYouTube(ficha));  // búsquedas SEO (rama seo-real)
   caja.appendChild(seccionCanalYouTube(ficha));  // tu canal con OAuth (rama seo-real-3)
   caja.appendChild(seccionClavesAnalizarCuentas());  // analizar cuentas: YouTube, Meta y Apify (rediseno-publicar)
+  caja.appendChild(seccionEnviarAlStudio());  // la extensión de Chrome (enviar-al-studio)
   caja.appendChild(h('div', { clase: 'fila' },
     h('button', {
       clase: 'mini fantasma',
@@ -30407,6 +30408,7 @@ function irASeccionParrilla(seccion) {
 const PESTANAS_AUTOMATIZAR = [
   ['parrilla', 'Parrilla'], ['anadir', 'Añadir guiones'], ['chat', 'Conversar con Claude'],
   ['cuentas', 'Cuentas que te gustan'], ['marca', 'Marca del cliente'],
+  ['recibidos', 'Recibidos de Chrome'],  // la extensión «Enviar al Studio» (enviar-al-studio)
 ];
 const COLUMNAS_PARRILLA = [
   ['pendiente', 'Pendientes', 'nadie lo ha usado'],
@@ -30460,6 +30462,7 @@ function vistaParrilla() {
   else if (PAR.seccion === 'chat') caja.appendChild(seccionChatParrilla());
   else if (PAR.seccion === 'marca') caja.appendChild(seccionMarcaParrilla());
   else if (PAR.seccion === 'cuentas') caja.appendChild(seccionCuentasParrilla());
+  else if (PAR.seccion === 'recibidos') caja.appendChild(seccionRecibidosParrilla());  // enviar-al-studio
   else caja.appendChild(seccionListaParrilla());
   if (PAR.fichaAbierta && PAR.guion) caja.appendChild(cajonGuionParrilla());
   return caja;
@@ -32580,4 +32583,211 @@ function bloqueMejoresPublicar() {
     b.appendChild(h('div', { clase: 'meta' }, `Solo publicaciones con ${r.minimo_vistas} vistas o más.`));
   }
   return b;
+}
+
+/* ============================================================ ENVIAR AL STUDIO
+ *
+ * La extensión de Chrome (rama enviar-al-studio, 28-10-2026). Mientras ves un
+ * post en Chrome pulsas su botón y llega aquí: la pestaña «Recibidos de
+ * Chrome» de Automatizar lo enseña y «Usar en el chat» lo pasa al chat de
+ * guiones (texto y captura). En Configuración, «Enviar al Studio» da la
+ * extensión, la dirección del Studio y el código de envío.
+ *
+ * El estado vive en PAR (no en un const propio): esta parte del fichero va
+ * DESPUÉS de `arrancar()`, y un const de aquí aún no existiría si la pantalla
+ * se pinta al arrancar en Automatizar. Nada de aquí escribe params (regla 1).
+ */
+function rutaRecibidos(resto) { return `${BASE}/api/recibidos${resto || ''}`; }
+
+async function cargarRecibidos() {
+  if (PAR.recibidosCargando) return;
+  PAR.recibidosCargando = true;
+  try {
+    PAR.recibidos = await pedir(rutaRecibidos());
+    PAR.recibidosError = '';
+  } catch (e) {
+    PAR.recibidosError = e.message;
+    if (!PAR.recibidos) PAR.recibidos = { recibidos: [], total: 0, codigo: null };
+  } finally {
+    PAR.recibidosCargando = false;
+  }
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
+  repintarClaves();
+}
+
+const NOMBRE_CIFRA_RECIBIDO = { vistas: 'vistas', me_gusta: 'me gusta', comentarios: 'comentarios',
+  compartidos: 'compartidos', guardados: 'guardados' };
+
+function cifrasDeRecibido(r) {
+  return Object.entries(r.cifras_vistas || {}).map(([k, v]) => `${v} ${NOMBRE_CIFRA_RECIBIDO[k] || k}`).join(' · ');
+}
+
+function seccionRecibidosParrilla() {
+  const caja = h('div', { clase: 'seccion-parrilla recibidos-parrilla' });
+  /* AL ENTRAR se vuelve a mirar: lo que mandas desde Chrome llega mientras estás en otra parte.
+     Un repintado seguido (el de la propia carga) no cuenta como entrar. */
+  const ahora_ = Date.now();
+  const entrada = !PAR.recibidosPintadoAl || ahora_ - PAR.recibidosPintadoAl > 3000;
+  PAR.recibidosPintadoAl = ahora_;
+  if ((!PAR.recibidos || entrada) && !PAR.recibidosCargando) setTimeout(cargarRecibidos, 0);
+  caja.appendChild(h('div', { clase: 'fila cab-recibidos' },
+    h('h3', {}, 'Recibidos de Chrome'), h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini fantasma', title: 'Volver a mirar', onclick: () => { PAR.recibidos = null; cargarRecibidos(); } }, '↻ Actualizar'),
+    botonGuia('enviar_al_studio', null)));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Lo que mandas con la extensión «Enviar al Studio» mientras ves un post en '
+    + 'Instagram, TikTok, YouTube, Facebook, LinkedIn, X o cualquier web: el enlace, el texto, las cifras que se ven y '
+    + 'una captura. Con «Usar en el chat» se lo pasas a Claude para escribir un guion con esa referencia. Son de todo el '
+    + 'Studio, no de un proyecto.'));
+  if (PAR.recibidosError) caja.appendChild(cajaError(PAR.recibidosError));
+  const datos = PAR.recibidos;
+  if (!datos) { caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…')); return caja; }
+  if (datos.codigo && !datos.codigo.puesto) {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, 'Todavía no has conectado la extensión: se descarga y se conecta en Configuración → Enviar al Studio.'),
+      h('button', { clase: 'mini', onclick: () => abrirEnviarAlStudioConfig() }, 'Ir a Configuración')));
+  }
+  const lista = datos.recibidos || [];
+  if (!lista.length) {
+    caja.appendChild(h('div', { clase: 'vacio' }, 'Aún no ha llegado nada. Abre un post en Chrome y pulsa el botón de la extensión.'));
+    return caja;
+  }
+  const rejilla = h('div', { clase: 'rejilla-recibidos' });
+  lista.forEach(r => rejilla.appendChild(tarjetaRecibido(r)));
+  caja.appendChild(rejilla);
+  if (datos.total > lista.length) caja.appendChild(h('div', { clase: 'meta' }, `Se ven los ${lista.length} más nuevos de ${datos.total}.`));
+  return caja;
+}
+
+function tarjetaRecibido(r) {
+  const texto = r.seleccion || r.texto || '';
+  return h('article', { clase: `tarjeta-recibido${r.usado ? ' usado' : ''}` },
+    r.captura ? h('a', { href: rutaRecibidos(`/${r.id}/captura`), target: '_blank', rel: 'noopener', clase: 'captura-recibido',
+      title: 'Ver la captura entera' },
+    h('img', { src: rutaRecibidos(`/${r.id}/captura`), alt: `Captura de ${r.red_nombre || 'la página'}`, loading: 'lazy' })) : null,
+    h('div', { clase: 'cuerpo-recibido' },
+      h('div', { clase: 'fila' },
+        h('span', { clase: 'pastilla red-recibido' }, r.red_nombre || 'Web'),
+        r.autor ? h('b', {}, `@${r.autor}`) : null, h('span', { clase: 'crece' }),
+        r.usado ? h('span', { clase: 'pastilla ok', title: `Usado el ${fechaCorta(r.usado)}` }, 'usado') : null,
+        h('span', { clase: 'meta' }, fechaCorta(r.cuando).slice(0, 16))),
+      r.titulo ? h('div', { clase: 'titulo-recibido' }, recortar(r.titulo, 140)) : null,
+      cifrasDeRecibido(r) ? h('div', { clase: 'meta cifras-recibido' }, cifrasDeRecibido(r)) : null,
+      texto ? h('p', { clase: 'texto-recibido' }, recortar(texto, 320)) : null,
+      r.nota ? h('p', { clase: 'nota-recibido' }, `Tu nota: ${r.nota}`) : null,
+      h('div', { clase: 'fila mandos-recibido' },
+        h('button', { clase: 'primario mini', onclick: () => usarRecibidoEnChat(r) }, 'Usar en el chat'),
+        h('a', { href: r.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver el original'),
+        h('span', { clase: 'crece' }),
+        h('button', { clase: 'mini fantasma peligro', onclick: () => borrarRecibido(r) }, 'Borrar'))));
+}
+
+async function usarRecibidoEnChat(r) {
+  const maximo = (PAR.chatsInfo && PAR.chatsInfo.max_capturas) || 6;
+  if (r.captura && PAR.chatCapturas.length < maximo) {
+    try {
+      const respuesta = await fetch(rutaRecibidos(`/${r.id}/captura`), { credentials: 'same-origin' });
+      if (!respuesta.ok) throw new Error(`HTTP ${respuesta.status}`);
+      const blob = await respuesta.blob();
+      const tipo = /^image\/(png|jpeg|webp)$/.test(blob.type) ? blob.type : 'image/jpeg';
+      const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[tipo];
+      PAR.chatCapturas = PAR.chatCapturas.concat([new window.File([blob], `recibido-${r.id}.${ext}`, { type: tipo })]).slice(0, maximo);
+    } catch (e) { toast(`la captura no se ha podido pasar (${e.message}); va el texto`, true); }
+  }
+  const actual = String(PAR.chatTexto || '').trim();
+  PAR.chatTexto = actual ? `${actual}\n\n${r.texto_chat}` : r.texto_chat;
+  try {
+    await pedir(rutaRecibidos(`/${r.id}/usado`), { method: 'POST', cuerpo: {} });
+    r.usado = r.usado || new Date().toISOString();
+  } catch (e) { /* si no se marca, no pasa nada */ }
+  toast('pasado al chat: revísalo y pulsa Enviar');
+  irASeccionParrilla('chat');
+}
+
+async function borrarRecibido(r) {
+  if (!(await preguntarParrilla('Borrar lo recibido', `¿Borrar este recibido de ${r.red_nombre || 'la web'}? Se borran su texto y su captura.`,
+    'Borrar', true))) return;
+  try {
+    await pedir(rutaRecibidos(`/${r.id}`), { method: 'DELETE' });
+    if (PAR.recibidos) {
+      PAR.recibidos.recibidos = (PAR.recibidos.recibidos || []).filter(x => x.id !== r.id);
+      PAR.recibidos.total = Math.max(0, (PAR.recibidos.total || 1) - 1);
+    }
+    toast('borrado');
+  } catch (e) { toast(e.message, true); }
+  pintarModulo();
+}
+
+function abrirEnviarAlStudioConfig() {
+  conmutarConfig(true);
+  setTimeout(() => {
+    const b = document.querySelector('#conf-enviar');
+    if (b) b.scrollIntoView({ block: 'start' });
+  }, 400);
+}
+
+/* ------------------------------------------------- en Configuración */
+
+function direccionDelStudio() { return `${location.origin}${BASE}/`; }
+
+function seccionEnviarAlStudio() {
+  const caja = h('section', { clase: 'bloque-config enviar-studio', id: 'conf-enviar' },
+    h('div', { clase: 'fila' }, h('h3', {}, 'Enviar al Studio — la extensión de Chrome'), h('span', { clase: 'crece' }),
+      botonGuia('enviar_al_studio', null)),
+    h('div', { clase: 'pista' }, 'Un botón en tu Chrome para mandar al Studio el post que estás viendo (Instagram, TikTok, '
+      + 'YouTube, Facebook, LinkedIn, X o cualquier web): el enlace, el texto, las cifras que se ven y una captura. Llega a '
+      + 'Automatizar → Recibidos de Chrome. Solo manda lo que tú ves: no recorre perfiles sola.'));
+  const datos = PAR.recibidos;
+  if (!datos) {
+    if (!PAR.recibidosCargando) setTimeout(cargarRecibidos, 0);
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    return caja;
+  }
+  const codigo = datos.codigo || {};
+  const version = datos.version_extension ? ` (versión ${datos.version_extension})` : '';
+  const paso = (n, titulo, ...resto) => h('div', { clase: 'paso-enviar' },
+    h('div', { clase: 'fila' }, h('span', { clase: 'numero-paso' }, String(n)), h('b', {}, titulo)), ...resto);
+  caja.appendChild(paso(1, `Descarga la extensión${version}`,
+    h('div', { clase: 'fila' },
+      h('a', { href: rutaRecibidos('/extension.zip'), download: 'crearia-enviar-al-studio.zip', clase: 'boton mini primario' }, 'Descargar la extensión'),
+      h('span', { clase: 'meta' }, 'Descomprime el ZIP en una carpeta que no vayas a borrar.'))));
+  const direccion = h('input', { type: 'text', readonly: true, 'aria-label': 'La dirección de tu Studio' });
+  direccion.value = direccionDelStudio();
+  caja.appendChild(paso(2, 'La dirección de tu Studio',
+    h('div', { clase: 'fila-clave' }, direccion,
+      h('button', { type: 'button', clase: 'mini', onclick: () => copiarTexto(direccion.value) }, 'Copiar'))));
+  const filaCodigo = [h('div', { clase: 'fila' },
+    pastillaEstado(codigo.puesto ? 'ok' : 'vacio', codigo.puesto ? `puesto (${codigo.cola || ''})` : 'sin crear'),
+    codigo.creado ? h('span', { clase: 'meta' }, `creado el ${fechaCorta(codigo.creado).slice(0, 16)}`) : null,
+    h('span', { clase: 'crece' }),
+    h('button', { type: 'button', clase: 'mini', onclick: () => crearCodigoEnvio(!!codigo.puesto) },
+      codigo.puesto ? 'Crear uno nuevo' : 'Crear el código de envío'))];
+  if (PAR.codigoEnvioNuevo) {
+    const campo = h('input', { type: 'text', readonly: true, 'aria-label': 'Tu código de envío', datos: { foco: 'codigo-envio' } });
+    campo.value = PAR.codigoEnvioNuevo;
+    filaCodigo.push(h('div', { clase: 'fila-clave' }, campo,
+      h('button', { type: 'button', clase: 'mini primario', onclick: () => copiarTexto(campo.value) }, 'Copiar')),
+    h('div', { clase: 'caja-aviso' }, 'Cópialo ahora y pégalo en la extensión: por seguridad no se vuelve a enseñar. '
+      + 'Si lo pierdes, crea uno nuevo.'));
+  }
+  caja.appendChild(paso(3, 'El código de envío', h('div', { clase: 'pista' },
+    'Es lo que impide que otro mande cosas a tu Studio. Solo se guarda su huella.'), ...filaCodigo));
+  caja.appendChild(paso(4, 'Cárgala en Chrome', h('ol', { clase: 'pasos-instalar' },
+    h('li', {}, 'Abre chrome://extensions y activa «Modo de desarrollador» (arriba a la derecha).'),
+    h('li', {}, 'Pulsa «Cargar descomprimida» y elige la carpeta del paso 1.'),
+    h('li', {}, 'Fija el botón con la pieza de puzle, ábrelo, pega la dirección y el código, y pulsa «Probar».'),
+    h('li', {}, 'Abre un post y pulsa «Enviar al Studio». Lo verás en Automatizar → Recibidos de Chrome.'))));
+  return caja;
+}
+
+async function crearCodigoEnvio(habia) {
+  if (habia && !(await dialogo({ titulo: 'Un código nuevo',
+    texto: 'El código de antes dejará de valer: tendrás que pegar el nuevo en la extensión de cada Chrome donde la uses.',
+    aceptar: 'Crear uno nuevo' }))) return;
+  try {
+    const r = await pedir(rutaRecibidos('/codigo'), { method: 'POST', cuerpo: {} });
+    PAR.codigoEnvioNuevo = r.codigo;
+    if (PAR.recibidos) PAR.recibidos.codigo = { puesto: r.puesto, cola: r.cola, creado: r.creado };
+    toast('código creado: cópialo');
+  } catch (e) { toast(e.message, true); }
+  repintarClaves();
 }

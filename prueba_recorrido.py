@@ -9299,5 +9299,67 @@ def insertar_una_imagen(navegador, datos):
     pg.sin_errores("insertar una imagen")
     pg.cerrar()
 
+
+@escenario
+def enviar_al_studio(navegador, datos):
+    """enviar-al-studio (28-10-2026): en Configuración se descarga la extensión
+    y se crea el código de envío; lo que manda la extensión (aquí, por la API
+    con ese código, que es lo que hace su botón) sale en Automatizar →
+    Recibidos de Chrome, y «Usar en el chat» lo pasa al chat con su captura.
+    Y en el móvil, sin salirse por los lados."""
+    import base64
+    api = datos["api"]
+    pg = Pagina(navegador, datos)
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#conf-enviar h3", "Enviar al Studio", 15), "Configuración tiene el bloque de la extensión")
+    ok(pg.visible("#conf-enviar a", "Descargar la extensión"), "con su descarga")
+    r = api.s.get(api.base + "/api/recibidos/extension.zip", timeout=60)
+    ok(r.status_code == 200 and r.content[:2] == b"PK", "que da un ZIP de verdad")
+    direccion = pg.p.input_value("#conf-enviar input[aria-label='La dirección de tu Studio']")
+    ok(direccion.startswith(datos["url"]), f"la dirección del Studio, lista para copiar ({direccion})")
+    pg.pulsar("#conf-enviar button", "Crear el código de envío")
+    ok(pg.esperar("#conf-enviar .caja-aviso", "no se vuelve a enseñar", 10), "crear el código lo enseña una vez")
+    codigo = pg.p.input_value("[data-foco=codigo-envio]")
+    ok(codigo.startswith("env_"), "un código env_…")
+    pg.captura("enviar_al_studio_config")
+    pg.js("conmutarConfig(false);")
+
+    png = _png_dibujada(os.path.join(datos["base"], "recibido.png"), (40, 160, 90))
+    with open(png, "rb") as fh:
+        captura = "data:image/png;base64," + base64.b64encode(fh.read()).decode()
+    cuerpo = {"url": "https://www.tiktok.com/@ana_baila/video/7300", "titulo": "Ana en TikTok", "autor": "ana_baila",
+              "texto": "Así quedó la fiesta #consolas", "nota": "me gusta el gancho",
+              "cifras": {"me_gusta": "12.5K", "comentarios": "345"}, "captura": captura}
+    r, _d = api.post("/api/recibidos", cuerpo)
+    ok(r.status_code == 401, "sin el código, el Studio no guarda nada")
+    r, d = api.post("/api/recibidos", cuerpo, headers={"X-Estudio-Envio": codigo})
+    ok(r.status_code == 201 and d.get("red") == "tiktok", "con el código, llega")
+
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.pulsar(".pestanas-automatizar button", "Recibidos de Chrome")
+    ok(pg.esperar(".tarjeta-recibido", "@ana_baila", 15), "sale en «Recibidos de Chrome»")
+    ok(pg.visible(".tarjeta-recibido .cifras-recibido", "12.5K me gusta"), "con las cifras como se veían")
+    ok(pg.visible(".tarjeta-recibido .nota-recibido", "me gusta el gancho"), "y tu nota")
+    ok(pg.p.evaluate("() => { const i = document.querySelector('.tarjeta-recibido img'); return !!i && i.complete && i.naturalWidth > 0; }"),
+       "su captura se ve")
+    pg.captura("recibidos_de_chrome")
+    pg.pulsar(".tarjeta-recibido button", "Usar en el chat")
+    ok(pg.esperar(".chat-parrilla", segundos=10), "«Usar en el chat» lleva al chat")
+    ok(pg.p.evaluate("() => PAR.chatCapturas.length") == 1, "con la captura puesta")
+    ok("tiktok.com/@ana_baila" in (pg.p.evaluate("() => PAR.chatTexto") or ""), "y el mensaje con el enlace")
+    pg.sin_errores("enviar al studio")
+    pg.cerrar()
+
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="movil")
+    pg.js("document.documentElement.dataset.tema = 'claro';")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js("irASeccionParrilla('recibidos');")
+    ok(pg.esperar(".tarjeta-recibido", segundos=10), "en el móvil")
+    pg.p.wait_for_timeout(600)
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
+    ok(ancho <= 391, f"los recibidos caben a lo ancho en el móvil ({ancho} px)")
+    pg.sin_errores("enviar al studio en el móvil")
+    pg.cerrar()
+
 if __name__ == "__main__":
     sys.exit(main())

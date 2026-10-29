@@ -897,6 +897,18 @@ YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
   estado («⚠ Falta la clave de YouTube», «✓ Apify conectado», lo gastado) y
   **Configurar ›**, que te lleva allí.
 
+### Recibidos de Chrome
+
+Lo que mandas con la extensión **«Enviar al Studio»** mientras ves un post en
+Chrome: tarjetas con la captura, la red, el autor, las cifras que se veían, el
+texto y tu nota, la más nueva primero.
+
+- **Usar en el chat**: lo pasa a «Conversar con Claude» con su captura y un
+  mensaje listo («Te paso una referencia que vi en…»). Revísalo y pulsa Enviar.
+- **Ver el original** abre el post; **Borrar** se lleva el texto y la captura.
+- Son de todo el Studio, no de un proyecto. Se guardan los 300 más nuevos.
+- La extensión se instala desde **Configuración → Enviar al Studio**.
+
 ### Marca del cliente
 
 Quién es, qué mostrar, qué evitar, el tono, el CTA y otras reglas, una vez por
@@ -918,6 +930,12 @@ Claude la usa en todo lo que escribe para él.
   **Quitar**; desde qué cuenta se mira Instagram (**Volver a buscar**, y cuándo
   caduca el token), **Usar el servicio de pago cuando lo gratis no sirva**, el
   **tope al mes** y lo gastado. **Probar todas las claves** las prueba también.
+- **Enviar al Studio — la extensión de Chrome**: (1) **Descargar la
+  extensión** y descomprimirla; (2) la **dirección de tu Studio**, con
+  «Copiar»; (3) **Crear el código de envío** (se ve una sola vez; uno nuevo deja
+  sin valer el de antes); (4) en `chrome://extensions`, «Modo de desarrollador» →
+  «Cargar descomprimida», y en la extensión pegar la dirección y el código y
+  pulsar «Probar».
 - **Calidad de las imágenes**: el punto de partida de los vídeos nuevos.
 - **Dictado al asistente**: con OpenAI o con el del navegador.
 - **Hora de tu región**: para que el chat y los vídeos enseñen tu hora.

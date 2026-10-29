@@ -5485,3 +5485,34 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .tabla-consumo-claude th:first-child, .tabla-consumo-claude td.que { text-align: left; white-space: normal; overflow-wrap: anywhere; }
 /* medidor-claude-2: Claude de un vídeo, por tarea, en «Coste del vídeo» */
 .claude-del-video { margin: 6px 0 12px; }
+
+/* ============================================================ ENVIAR AL STUDIO
+   La extensión de Chrome (rama enviar-al-studio): la pestaña «Recibidos de
+   Chrome» de Automatizar y su bloque en Configuración. */
+.recibidos-parrilla { display: grid; gap: 12px; }
+.cab-recibidos h3 { margin: 0; }
+.rejilla-recibidos { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; align-items: start; }
+.tarjeta-recibido { background: var(--panel); border: 1px solid var(--linea-suave); border-radius: 12px;
+  overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.tarjeta-recibido.usado { opacity: .78; }
+.captura-recibido { display: block; background: var(--lienzo); aspect-ratio: 16 / 10; overflow: hidden; }
+.captura-recibido img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.cuerpo-recibido { padding: 10px 12px 12px; display: grid; gap: 6px; min-width: 0; }
+.cuerpo-recibido .fila { flex-wrap: wrap; gap: 6px; align-items: center; }
+.red-recibido { background: var(--marcado); color: var(--acento); }
+.titulo-recibido { font-weight: 600; overflow-wrap: anywhere; }
+.texto-recibido, .nota-recibido { margin: 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.nota-recibido { color: var(--tenue); }
+.cifras-recibido { font-variant-numeric: tabular-nums; }
+.mandos-recibido { margin-top: 4px; }
+.enviar-studio .paso-enviar { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--linea-suave); }
+.enviar-studio .numero-paso { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--acento-relleno); color: var(--sobre-acento); font-size: 12px; font-weight: 700; flex: none; }
+.enviar-studio .pasos-instalar { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 13px; }
+.enviar-studio a.boton { display: inline-block; text-decoration: none; padding: 5px 12px; font-size: 13px;
+  border-radius: 6px; border: 1px solid var(--acento); background: var(--acento-relleno); color: var(--sobre-acento);
+  font-weight: 600; }
+.mandos-recibido a { font-size: 12px; }
+@media (max-width: 640px) {
+  .rejilla-recibidos { grid-template-columns: minmax(0, 1fr); }
+}

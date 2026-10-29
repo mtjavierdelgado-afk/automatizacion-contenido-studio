@@ -481,6 +481,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/youtube/oauth/empezar` | {redireccion} (la dirección de vuelta de ESTE Studio) -> {url} de Google |
 | `GET` | `/api/publicar/youtube/oauth/vuelta` | Adonde vuelve Google con el permiso: cambia el código por el token. |
 | `POST` | `/api/publicar/youtube/probar` | Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo) |
+| `GET` | `/api/recibidos` | Los recibidos (el más nuevo primero), el estado del código y la versión de la extensión. |
+| `POST` | `/api/recibidos` | {url, titulo?, autor?, texto?, seleccion?, nota?, cifras?, imagen?, captura?} -> el recibido. |
+| `POST` | `/api/recibidos/codigo` | Un código de envío nuevo (el de antes deja de valer). Se ve UNA vez. |
+| `GET` | `/api/recibidos/extension.zip` | La extensión de Chrome, en un ZIP para descomprimir y cargar. |
+| `GET` | `/api/recibidos/ping` | Lo que pulsa «Probar» en la extensión: el código vale y el Studio contesta. |
+| `DELETE` | `/api/recibidos/{rid}` | Lo borra, con su captura. |
+| `GET` | `/api/recibidos/{rid}/captura` | La captura de lo que se veía al enviarlo (PNG, JPG o WEBP). |
+| `POST` | `/api/recibidos/{rid}/usado` | Lo marca como usado (lo hace «Usar en el chat»). |
 | `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para el generador: {texto, nombre?, palabras?}. |
 | `GET` | `/api/reglas-estilo/afinar/{rid}` | Como va «Afinar con Claude», y la propuesta al terminar. |
 | `GET` | `/api/sistema/estilos-perdidos` | Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira. |
@@ -499,4 +507,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**385 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**393 endpoints.** Escrito por `generar_api.py` desde `app.py`.

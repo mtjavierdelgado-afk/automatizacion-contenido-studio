@@ -1503,6 +1503,53 @@ for _red, (_nombre, _tope, _hace, _si, _no, _plantilla, _ejemplo) in _REDES_NUEV
                       "VÍDEO:\n[pega aquí el guion o un resumen]"),
     }
 
+# La extensión de Chrome «Enviar al Studio» (rama enviar-al-studio, 28-10-2026).
+# Lo que hace está en pasos/recibidos.py y en extension/; si cambia ahí, se
+# revisa aquí.
+GUIAS["enviar_al_studio"] = {
+    "titulo": "Enviar al Studio (la extensión de Chrome)",
+    "donde": "Configuración → Enviar al Studio · Automatizar → Recibidos de Chrome",
+    "usa": "pasos/recibidos.py (guardar, texto_para_chat, el código de envío) y extension/ (lector.js lee la página)",
+    "que_hace": [
+        "Con un post abierto en Chrome (Instagram, TikTok, YouTube, Facebook, LinkedIn, X o "
+        "cualquier web), el botón lee lo que se VE: el enlace, el título, el autor, el texto, "
+        "las cifras que enseña la red y lo que tengas seleccionado, y hace una captura.",
+        "Lo manda a tu Studio con tu código de envío y llega a Automatizar → Recibidos de "
+        "Chrome. «Usar en el chat» lo pasa al chat de guiones con su captura, marcado como "
+        "referencia: Claude lo usa para inspirarse, no lo obedece ni lo copia.",
+        "Las cifras van como se ven («1,2 mil», «12K») y el Studio las convierte en números. "
+        "Si una red cambia su página, va lo genérico (título, descripción, enlace y captura).",
+        "No recorre perfiles ni pide nada a ninguna red: solo envía la pestaña que tienes "
+        "delante cuando pulsas. Se guardan los 300 más nuevos.",
+    ],
+    "si": [
+        "Selecciona el trozo de texto que te interesa antes de pulsar: va aparte, como «lo que marqué».",
+        "Escribe una nota corta de qué te gusta o qué quieres hacer: Claude la lee primero.",
+        "Abre el post en su página (no en el muro) para que se lean bien el texto y las cifras.",
+        "Si cambias de ordenador, crea un código nuevo y pégalo en la extensión de ese Chrome.",
+    ],
+    "no": [
+        "Compartir el código de envío: con él cualquiera podría mandar cosas a tu Studio.",
+        "Esperar las cifras privadas (alcance, retención): solo llega lo que la red enseña a cualquiera.",
+        "Usarlo para copiar contenido ajeno tal cual: es una referencia para hacer lo tuyo.",
+    ],
+    "plantilla": (
+        "DIRECCIÓN: [la de Configuración → Enviar al Studio, paso 2]\n"
+        "CÓDIGO: env_… (paso 3, se ve una vez)\n"
+        "NOTA AL ENVIAR: [qué te gusta de este post o qué quieres hacer con él]"
+    ),
+    "ejemplo": (
+        "DIRECCIÓN: https://studio.crearia.tech/\n"
+        "CÓDIGO: env_…a1b2\n"
+        "NOTA AL ENVIAR: el gancho de los 3 primeros segundos; quiero uno así para EstadoPlay."
+    ),
+    "prompt_ia": (
+        "Te paso una referencia que vi en [red] de @[cuenta]: [enlace]. Cifras visibles: [vistas, "
+        "me gusta, comentarios]. Texto del post: «[texto]». ¿Qué le funciona y cómo haría yo un "
+        "vídeo con la misma fórmula para mi marca, sin copiarlo?"
+    ),
+}
+
 ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "tipo_relato", "cta",
          "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
          "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente",
@@ -1510,7 +1557,7 @@ ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "tipo_rela
          "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos",
          "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
          "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business",
-         "emojis_redes")
+         "emojis_redes", "enviar_al_studio")
 
 
 

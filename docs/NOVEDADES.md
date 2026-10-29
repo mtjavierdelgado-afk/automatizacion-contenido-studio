@@ -10,6 +10,21 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Enviar al Studio: la extensión de Chrome (28 de octubre)**
+- Mientras ves un post en Chrome (**Instagram, TikTok, YouTube, Facebook,
+  LinkedIn, X** o cualquier web), pulsas el botón **«Enviar al Studio»** y el
+  Studio recibe el enlace, el autor, el texto, las cifras que se ven (vistas, me
+  gusta, comentarios, compartidos) y una captura. Si seleccionas un trozo de
+  texto, va aparte; y puedes añadir una nota.
+- Llega a **Automatizar → Recibidos de Chrome**. **«Usar en el chat»** se lo
+  pasa a Claude en «Conversar con Claude», con la captura, marcado como
+  referencia para escribir un guion con la misma fórmula, sin copiarlo.
+- Se instala desde **Configuración → Enviar al Studio**: descargar la extensión,
+  copiar la dirección de tu Studio y crear el **código de envío** (lo que impide
+  que otro mande cosas a tu Studio; se ve una sola vez).
+- Solo manda la pestaña que tienes delante cuando pulsas: no recorre perfiles
+  ni pide nada a ninguna red. No cambia nada de tus vídeos.
+
 **El Studio pasa a la versión 5.1 (28 de octubre)**
 - La versión se ve en el pie del Studio, en la página de acceso y en
   Configuración → Novedades. Lo de debajo de este apartado es lo que trajo la 3.1.

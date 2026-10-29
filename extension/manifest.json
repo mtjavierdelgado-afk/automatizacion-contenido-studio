@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Enviar a CrearIA Studio",
+  "version": "1.0.0",
+  "description": "Manda al Studio el post que estás viendo (enlace, texto, cifras y una captura) para escribir guiones con esa referencia.",
+  "action": {
+    "default_title": "Enviar al Studio",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "iconos/icono16.png",
+      "32": "iconos/icono32.png",
+      "48": "iconos/icono48.png"
+    }
+  },
+  "icons": {
+    "16": "iconos/icono16.png",
+    "32": "iconos/icono32.png",
+    "48": "iconos/icono48.png",
+    "128": "iconos/icono128.png"
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"]
+}

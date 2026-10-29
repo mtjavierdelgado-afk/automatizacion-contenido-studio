@@ -7761,9 +7761,18 @@ def insertar_imagen(pid: str, sid: str, cuerpo: dict = Body(default=None)):
                 if p6._texto_clave(escenas_ahora[j]) != texto:
                     raise ErrorApi(409, f"{sid} ha cambiado mientras se preparaba: vuelve a pedirla")
                 antes = ip.leer(ctx.proyecto.raiz)
+                # NI UNA LETRA CON PARAMS DE OTRA INSERTADA (revisión del 28-10):
+                # S004B dirigida, deshecha a medias y vuelta a insertar heredaría
+                # la dirección vieja en vez de lo que se acaba de escribir
+                declaradas = (ctx.estado.params("assets") or {}).get("unidades") or {}
+                ocupadas = {u[len(f"escena:{sid}"):] for u in declaradas
+                            if u.startswith(f"escena:{sid}") and len(u) == len(f"escena:{sid}") + 1}
+                letra = ip.letra_libre(antes, texto, n, ocupadas)
+                if not letra:
+                    raise ErrorApi(409, f"{sid} ya tiene todas las imágenes insertadas que admite")
                 entradas = ip.insertar(ctx.proyecto.raiz, texto, n, palabra, sid, que=que,
                                        direccion=pedido["direccion"],
-                                       personas=pedido["personas"])
+                                       personas=pedido["personas"], letra=letra)
                 nueva = next(e for e in entradas if (e["texto"], e["n"], e["palabra"]) == (texto, n, palabra))
                 nuevo = f"{sid}{nueva['letra']}"
                 try:
@@ -7958,7 +7967,7 @@ def leer_previsualizacion(pid: str):
                 texto=PASOS_MODULOS.p7_callouts.texto_subtitulo_de(
                     params_callouts, f"escena:{sid}"),
                 ancla=PASOS_MODULOS.p7_callouts.ancla_subtitulo_de(
-                    params_callouts, f"escena:{sid}")) or []
+                    params_callouts, f"escena:{sid}", escena)) or []
         except Exception:                                     # noqa: BLE001
             trozos = []
         escenas.append({
@@ -9867,6 +9876,16 @@ def _aplicar_cambios_del_repaso(ctx, reparto, avisos):
         # que escribir sólo el subtítulo borraría sus zonas a evitar y su
         # `sin_callout`.
         previas = (ctx.estado.params("callouts") or {}).get("unidades") or {}
+        # LA NARRACION DE AHORA DE CADA PLANO, que es su ancla (28-10): si
+        # después cambia lo que dice ese plano --se quita la imagen de al lado
+        # y se lleva su voz, o se inserta una dentro--, lo escrito a mano se
+        # deja de usar en vez de repetir o perder palabras (ver de_escena)
+        try:
+            dichas = {f"escena:{e.get('id')}": " ".join(str(e.get("narracion") or "").split())
+                      for e in (PASOS_MODULOS.p6_assets.plan_actual(
+                          ctx.proyecto, "assets", estado=ctx.estado) or {}).get("escenas") or []}
+        except Exception:                                   # noqa: BLE001
+            dichas = {}
         bloque = {}
         for uid, texto in unidades_callouts.items():
             actual = previas.get(uid)
@@ -9874,7 +9893,10 @@ def _aplicar_cambios_del_repaso(ctx, reparto, avisos):
             actual["subtitulo_texto"] = texto
             # escrito a mano contra la narracion de AHORA: el ancla de una
             # corrección de ortografía anterior ya no vale (ver de_escena)
-            actual.pop("subtitulo_ancla", None)
+            if dichas.get(uid):
+                actual["subtitulo_ancla"] = dichas[uid]
+            else:
+                actual.pop("subtitulo_ancla", None)
             bloque[uid] = actual
         params_callouts["unidades"] = bloque
     if params_callouts:

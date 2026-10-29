@@ -10,6 +10,17 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Quitar e insertar imágenes: los dos detalles que quedaban (28 de octubre)**
+- **Un subtítulo corregido a mano ya no repite ni pierde palabras** cuando partes
+  esa imagen (insertar) o le pasas la voz de otra (quitar): si lo escribiste
+  para la frase de antes, se deja de usar y sale el subtítulo de la voz; si lo
+  escribiste para la frase de ahora, se sigue usando.
+  Desde ahora, cada subtítulo que corriges recuerda la frase para la que lo
+  escribiste: si esa frase cambia más adelante, vuelve el de la voz en vez de
+  enseñar un texto que ya no es el que se oye.
+- **«Dirigir» funciona en una imagen insertada** (S004B): lo que escribas ahí
+  cambia su dibujo al rehacerla, como en cualquier otra imagen.
+
 **El Studio pasa a la versión 5.1 (28 de octubre)**
 - La versión se ve en el pie del Studio, en la página de acceso y en
   Configuración → Novedades. Lo de debajo de este apartado es lo que trajo la 3.1.

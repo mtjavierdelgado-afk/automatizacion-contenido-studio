@@ -342,7 +342,10 @@ def _nueva(pedido):
         "revisar": [], "avisos": [], "portadas": [], "portada_puesta": "",
         "redes": [], "coste_usd": None, "previsto_usd": None,
         "creado": ahora(), "empezado": "", "terminado": "", "intentos": 0,
-        "forzar_seguir": False,
+        # LA PUERTA QUE SE SALTA UNA VEZ: «Seguir igualmente» salta SOLO la
+        # parada que la persona ha mirado (`tipo_parada`): tope, interruptor,
+        # vistos u ocupado. Nunca todas a la vez.
+        "tipo_parada": "", "saltar": "", "cancelar": False,
     }
 
 
@@ -354,9 +357,14 @@ def encolar(raiz, pedido):
         datos = _leer(raiz)
         for v in datos["videos"]:
             if (v.get("gid") == ficha["gid"] and v.get("cid") == ficha["cid"]
-                    and int(v.get("indice") or 0) == ficha["indice"]
-                    and v.get("estado") in ("en_cola", "trabajando")):
-                raise ErrorPiloto("ese guion ya está en el piloto: mira la cola", 409)
+                    and int(v.get("indice") or 0) == ficha["indice"]):
+                if v.get("estado") in ("en_cola", "trabajando"):
+                    raise ErrorPiloto("ese guion ya está en el piloto: mira la cola", 409)
+                if v.get("estado") in RETOMABLES:
+                    # otro vídeo del mismo guion volvería a pagarlo todo: el
+                    # que hay se retoma donde iba
+                    raise ErrorPiloto("ese guion ya tiene un vídeo parado en el piloto: usa "
+                                      "«Reintentar» o «Seguir igualmente» (o quítalo de la lista)", 409)
         datos["videos"].append(ficha)
         _guardar(raiz, datos)
     return dict(ficha)
@@ -378,7 +386,8 @@ def leer(raiz, vid):
 #: Lo único que se puede cambiar de una ficha desde fuera de este módulo.
 CAMPOS = ("estado", "etapa", "pid", "nombre", "trabajo", "mensaje", "porque", "donde",
           "revisar", "avisos", "portadas", "portada_puesta", "redes", "coste_usd",
-          "previsto_usd", "empezado", "terminado", "intentos", "forzar_seguir")
+          "previsto_usd", "empezado", "terminado", "intentos", "tipo_parada", "saltar",
+          "cancelar")
 
 
 def cambiar(raiz, vid, **campos):
@@ -444,8 +453,8 @@ def preparar_reintento(raiz, vid, forzar_seguir=False):
                 if v.get("estado") not in RETOMABLES:
                     raise ErrorPiloto("este vídeo no está parado: no hay nada que retomar", 409)
                 v.update(estado="en_cola", mensaje="esperando su turno (retomado)",
-                         porque="", donde="", trabajo="", terminado="",
-                         forzar_seguir=bool(forzar_seguir) or bool(v.get("forzar_seguir")))
+                         porque="", donde="", trabajo="", terminado="", cancelar=False,
+                         saltar=(v.get("tipo_parada") or "") if forzar_seguir else "")
                 _guardar(raiz, datos)
                 return dict(v)
     raise ErrorPiloto("ese vídeo ya no está en el piloto", 404)
@@ -459,6 +468,22 @@ def siguientes(raiz, a_la_vez=None):
     en_marcha = sum(1 for v in datos["videos"] if v.get("estado") in EN_MARCHA)
     libres = max(0, tope - en_marcha)
     return [dict(v) for v in datos["videos"] if v.get("estado") == "en_cola"][:libres]
+
+
+def arrancar(raiz, vid, **campos):
+    """en_cola -> trabajando, de una vez y SOLO si sigue en cola: si alguien lo
+    paró o lo quitó entre mirar y arrancar, no arranca. -> la ficha o None"""
+    _vid(vid)
+    with _LOCK:
+        datos = _leer(raiz)
+        for v in datos["videos"]:
+            if v.get("id") == vid:
+                if v.get("estado") != "en_cola":
+                    return None
+                v.update(campos, estado="trabajando", cancelar=False)
+                _guardar(raiz, datos)
+                return dict(v)
+    return None
 
 
 def al_arrancar(raiz):

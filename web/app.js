@@ -32772,7 +32772,7 @@ function tarjetaVideoPiloto(v) {
   if (v.pid && ['listo', 'revisar'].includes(v.estado)) {
     botones.appendChild(h('button', { clase: 'mini primario', onclick: () => abrirPublicarVideo(v.pid) }, 'Publicar ›'));
   }
-  if (v.estado === 'parado') {
+  if (v.estado === 'parado' && v.tipo_parada) {
     botones.appendChild(h('button', { clase: 'mini primario', title: 'Ya lo has mirado: sigue desde donde se paró',
       onclick: () => seguirPiloto(v, true) }, 'Seguir igualmente'));
   }
@@ -32815,8 +32815,10 @@ async function elegirPortadaPiloto(v, c) {
 }
 
 async function seguirPiloto(v, forzar) {
-  if (forzar && !await preguntarParrilla('Seguir igualmente', 'El piloto sigue desde donde se paró y esta vez no se '
-    + 'detiene por lo mismo (el tope o las imágenes marcadas). ¿Sigo?', 'Seguir')) return;
+  const por = { tope: 'el tope de gasto', interruptor: 'las imágenes que siguen marcadas',
+    vistos: 'los vistos buenos (ya los has dado tú)', ocupado: 'lo que tenía en marcha el vídeo' }[v.tipo_parada] || 'lo mismo';
+  if (forzar && !await preguntarParrilla('Seguir igualmente', `El piloto sigue desde donde se paró y esta vez no se `
+    + `detiene por ${por}. Las demás comprobaciones siguen. ¿Sigo?`, 'Seguir')) return;
   try {
     await pedir(rutaPiloto(`/videos/${encodeURIComponent(v.id)}/seguir`), { method: 'POST', cuerpo: { forzar: !!forzar } });
     toast('vuelve a la cola del piloto');

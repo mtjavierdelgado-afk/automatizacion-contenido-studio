@@ -114,8 +114,23 @@ def probar_cola(raiz):
     igual(P.leer(raiz, a["id"])["estado"], "interrumpido", "y no arranca solo")
     ok(lanza(P.preparar_reintento, raiz, b["id"], codigo=409), "uno en cola no se «retoma»")
     r = P.preparar_reintento(raiz, a["id"], forzar_seguir=True)
-    igual((r["estado"], r["forzar_seguir"]), ("en_cola", True),
-          "«Seguir igualmente» lo devuelve a la cola, con la decisión saltada")
+    igual((r["estado"], r["saltar"]), ("en_cola", ""),
+          "«Seguir igualmente» sin una parada con tipo no salta nada")
+    P.cambiar(raiz, a["id"], estado="parado", tipo_parada="tope")
+    r = P.preparar_reintento(raiz, a["id"], forzar_seguir=True)
+    igual((r["estado"], r["saltar"]), ("en_cola", "tope"),
+          "«Seguir igualmente» tras el tope salta SOLO el tope")
+    P.cambiar(raiz, a["id"], estado="error")
+    igual(P.preparar_reintento(raiz, a["id"])["saltar"], "",
+          "y «Reintentar» (sin forzar) no salta nada")
+    ok(P.arrancar(raiz, a["id"]) is not None, "arrancar lo pasa a trabajando")
+    ok(P.arrancar(raiz, a["id"]) is None, "y no arranca dos veces")
+    P.cambiar(raiz, b["id"], estado="cancelado")
+    ok(P.arrancar(raiz, b["id"]) is None, "uno parado entre mirar y arrancar no arranca")
+    ok(lanza(P.encolar, raiz, {"cid": "c1", "gid": "g2", "estilo": "e1"}, codigo=409),
+       "un guion con un vídeo parado no crea otro (se retoma el que hay)")
+    P.cambiar(raiz, b["id"], estado="en_cola")
+    P.cambiar(raiz, a["id"], estado="trabajando")
     P.cambiar(raiz, c["id"], estado="parado")
     s = P.resumen(raiz)
     igual(s["cuenta"]["parado"], 1, "el resumen cuenta los parados")

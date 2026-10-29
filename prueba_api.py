@@ -8605,6 +8605,53 @@ def probar_el_piloto():
         fh = esperar(e["id"], P.TERMINADOS)
         igual(fh["estado"], "listo", "al volver el cupo, sigue solo")
 
+        # ---- 7b. «Parar» mientras se crea el vídeo: no se lanza nada ----------
+        suelta = threading.Event()
+        crear_lento = servidor.crear_video_light
+
+        def crear_que_espera(estilo, cuerpo):
+            suelta.wait(10)
+            return crear_lento(estilo, cuerpo)
+        servidor.crear_video_light = crear_que_espera
+        try:
+            _mid, nuevos = PAR.anadir_en_formato(base, sin, "", texto.replace("P01", "P09"))
+            k = mandar(nuevos[0])
+            esperar(k["id"], ("trabajando",), 5)
+            servidor.piloto_parar(k["id"], peticion)
+            suelta.set()
+            fk = esperar(k["id"], ("cancelado", "listo", "revisar", "error", "parado"))
+            igual(fk["estado"], "cancelado", "«Parar» mientras se crea el vídeo lo para")
+            igual([t for p_, t in tandas if p_ == fk["pid"]], [], "sin escribir el guion ni gastar nada")
+            try:
+                mandar(nuevos[0])
+                ok(False, "un guion con un vídeo parado no crea otro")
+            except servidor.ErrorApi as fallo:
+                igual(fallo.codigo, 409, "un guion con un vídeo parado no crea otro (se retoma)")
+        finally:
+            servidor.crear_video_light = crear_lento
+
+        # ---- 7c. la cola de notas con el revisor forzado no se bloquea sola ---
+        dobles = {n: getattr(servidor, n) for n in ("_correr_notas_imagenes", "_mi_trabajo",
+                                                    "_huellas_de_planos", "_revisor_tras_tanda")}
+        servidor._correr_notas_imagenes = lambda a, c: {}
+        servidor._mi_trabajo = lambda c: "t1"
+        servidor._huellas_de_planos = lambda c: {}
+        servidor._revisor_tras_tanda = lambda a, c, antes: None
+        with servidor._REVISOR_LOCK:
+            servidor._REVISOR_FORZADO["piloto_cerrojo"] = {"revisor_modo": "automatico"}
+        hilo = threading.Thread(target=servidor._correr_notas_y_revisar, daemon=True,
+                                args=(lambda *a, **k: None, type("C", (), {"id": "piloto_cerrojo"})()))
+        try:
+            hilo.start()
+            hilo.join(5)
+            ok(not hilo.is_alive(), "la cola de notas con el revisor en automático no se queda "
+                                    "bloqueada en su propio cerrojo")
+        finally:
+            for n, v in dobles.items():
+                setattr(servidor, n, v)
+            with servidor._REVISOR_LOCK:
+                servidor._REVISOR_FORZADO.pop("piloto_cerrojo", None)
+
         # ---- 8. la ruta del estado -------------------------------------------
         foto = servidor.piloto_estado(peticion)
         ok(foto["a_revisar"] >= 3, f"GET /api/piloto cuenta la bandeja «Necesita revisión» ({foto['a_revisar']})")

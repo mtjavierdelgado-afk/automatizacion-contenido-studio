@@ -9377,8 +9377,11 @@ def _correr_notas_y_revisar(avisar, ctx):
         return resultado
     # YA, antes de mirar que cambio: la pantalla pregunta en cuanto la cola se
     # vacia, y tiene que saber que el revisor viene detras
+    # FUERA del cerrojo: `_ajustes_revisor` toma `_REVISOR_LOCK`, que no es
+    # reentrante (dentro, el hilo se bloqueaba a si mismo)
+    modo_revisor = _ajustes_revisor(ctx).get("revisor_modo")
     with _REVISOR_LOCK:
-        _REVISOR_AUTO[ctx.id] = {"desde": time.time(), "modo": _ajustes_revisor(ctx).get("revisor_modo"),
+        _REVISOR_AUTO[ctx.id] = {"desde": time.time(), "modo": modo_revisor,
                                  "planos": 0, "mensaje": "comprobando qué imágenes cambiaron",
                                  "trabajo": mio}
     try:
@@ -21634,11 +21637,18 @@ _PILOTO_TRAMOS = {"guion": (0.0, 0.15), "voz": (0.15, 0.10), "vistos": (0.25, 0.
 
 
 class _PilotoPara(Exception):
-    """El piloto se detiene y espera a una persona. `donde` es donde se arregla."""
+    """El piloto se detiene y espera a una persona. `donde` es donde se arregla;
+    `tipo` es la puerta que «Seguir igualmente» salta UNA vez (tope,
+    interruptor, vistos, ocupado). Sin tipo, no hay nada que saltar."""
 
-    def __init__(self, porque, donde=""):
+    def __init__(self, porque, donde="", tipo=""):
         super().__init__(porque)
         self.donde = str(donde or "")
+        self.tipo = str(tipo or "")
+
+
+class _PilotoCancelado(Exception):
+    """«Parar» pulsado antes de que el video tuviera trabajo."""
 
 
 class _SinPeticion:
@@ -21747,11 +21757,16 @@ def _piloto_una_vuelta():
         motivo = _piloto_cupo_lleno(P.ajustes_del_video(raiz, ficha)["cupo_max_pct"])
         if motivo:
             if ficha.get("mensaje") != motivo:
-                P.cambiar(raiz, ficha["id"], mensaje=motivo)
+                try:
+                    P.cambiar(raiz, ficha["id"], mensaje=motivo)
+                except P.ErrorPiloto:
+                    pass                          # lo acaban de quitar
             break                                 # el orden de llegada se respeta
-        P.cambiar(raiz, ficha["id"], estado="trabajando", empezado=ahora(),
-                  mensaje="arrancando", porque="",
-                  intentos=int(ficha.get("intentos") or 0) + 1)
+        # SOLO SI SIGUE EN COLA: si lo pararon o lo quitaron entre mirar y
+        # arrancar, no arranca (y no se paga nada)
+        if P.arrancar(raiz, ficha["id"], empezado=ahora(), mensaje="arrancando", porque="",
+                      intentos=int(ficha.get("intentos") or 0) + 1) is None:
+            continue
         hilo = threading.Thread(target=_piloto_correr, args=(raiz, ficha["id"]),
                                 daemon=True, name=f"piloto-{ficha['id']}")
         with _PILOTO_LOCK:
@@ -21766,39 +21781,49 @@ def _piloto_correr(raiz, vid):
         ficha = P.leer(raiz, vid)
         pid = ficha.get("pid") or ""
         if not pid:
+            if P.leer(raiz, vid).get("cancelar"):
+                raise _PilotoCancelado()
             pid = _piloto_crear_video(raiz, vid)
         ctx = contexto(pid)
         with _cerrojo_de_cadena(ctx.id):
+            if P.leer(raiz, vid).get("cancelar"):
+                raise _PilotoCancelado()
             activo = _trabajo_de_cadena(ctx)
             if activo is not None or ctx.gestor.listar(activos=True):
                 raise _PilotoPara("ese vídeo tiene algo en marcha: cuando acabe, pulsa «Reintentar»",
-                                  "el vídeo")
+                                  "el vídeo", "ocupado")
             with _COLA_LOCK:
                 if _cola_dibujando(ctx):
                     raise _PilotoPara("se están rehaciendo imágenes con tus notas en ese vídeo: "
-                                      "cuando acaben, pulsa «Reintentar»", "Imágenes")
+                                      "cuando acaben, pulsa «Reintentar»", "Imágenes", "ocupado")
             trabajo_id = ctx.gestor.lanzar("generar:piloto", _piloto_cadena, ctx, raiz, vid,
                                            paso="ingesta", toca=[p["id"] for p in PASOS])
         _registrar_trabajo(trabajo_id, ctx.id)
         P.cambiar(raiz, vid, trabajo=trabajo_id)
+        # «Parar» pulsado mientras se creaba el video: llega ahora al trabajo
+        if P.leer(raiz, vid).get("cancelar"):
+            ctx.gestor.cancelar(trabajo_id)
         final = ctx.gestor.esperar(trabajo_id)
         ahora_ficha = P.leer(raiz, vid)
         if final["estado"] == "cancelado":
-            P.cambiar(raiz, vid, estado="cancelado", trabajo="", terminado=ahora(),
-                      mensaje="lo has parado tú: «Reintentar» sigue donde iba")
+            P.cambiar(raiz, vid, estado="cancelado", trabajo="", terminado=ahora(), saltar="",
+                      cancelar=False, mensaje="lo has parado tú: «Reintentar» sigue donde iba")
         elif final["estado"] == "error":
-            P.cambiar(raiz, vid, estado="error", trabajo="", terminado=ahora(),
+            P.cambiar(raiz, vid, estado="error", trabajo="", terminado=ahora(), saltar="",
                       mensaje=str(final.get("error") or "falló")[:400],
                       porque=f"falló en «{_piloto_nombre_etapa(ahora_ficha.get('etapa'))}»")
         elif ahora_ficha.get("estado") == "trabajando":
             # el trabajo acabo sin decir como: se cierra como listo
             P.cambiar(raiz, vid, estado="listo", trabajo="", terminado=ahora(), etapa="fin")
+    except _PilotoCancelado:
+        P.cambiar(raiz, vid, estado="cancelado", trabajo="", terminado=ahora(), saltar="",
+                  cancelar=False, mensaje="lo has parado tú: «Reintentar» sigue donde iba")
     except _PilotoPara as parada:
         _piloto_parar(raiz, vid, parada)
     except Exception as fallo:                              # noqa: BLE001
         mensaje = fallo.mensaje if isinstance(fallo, ErrorApi) else str(fallo)
         try:
-            P.cambiar(raiz, vid, estado="error", trabajo="", terminado=ahora(),
+            P.cambiar(raiz, vid, estado="error", trabajo="", terminado=ahora(), saltar="",
                       mensaje=str(mensaje)[:400])
         except Exception:                                   # noqa: BLE001
             pass
@@ -21815,8 +21840,8 @@ def _piloto_parar(raiz, vid, parada):
     P = _piloto()
     # EL PORQUE Y EL DONDE VAN EN LA FICHA, no en «Para revisar»: al retomarlo
     # se borran (ya no son verdad), y lo apuntado para revisar se queda
-    P.cambiar(raiz, vid, estado="parado", trabajo="", terminado=ahora(),
-              porque=str(parada)[:400], donde=parada.donde[:80],
+    P.cambiar(raiz, vid, estado="parado", trabajo="", terminado=ahora(), saltar="",
+              tipo_parada=parada.tipo, porque=str(parada)[:400], donde=parada.donde[:80],
               mensaje=("Detenido: " + str(parada))[:400])
 
 
@@ -21866,8 +21891,8 @@ def _piloto_crear_video(raiz, vid):
     duracion = ficha.get("duracion_s") or encargo.get("duracion_objetivo_s")
     formato = ficha.get("formato") or encargo.get("formato")
     if not duracion or formato not in ("vertical", "horizontal"):
-        raise _PilotoPara("al guion le falta la duración o el formato: elígelos al mandarlo "
-                          "al piloto (o escríbelos en el guion)", "Parrilla")
+        raise _PilotoPara("al guion le falta la duración o el formato: escríbelos en el guion "
+                          "y pulsa «Reintentar»", "Parrilla")
     cuerpo = {"nombre": encargo.get("nombre") or ficha.get("titulo") or "Vídeo del piloto",
               "duracion_objetivo_s": int(duracion), "formato": formato,
               "material": encargo["material"], "guion_propio": bool(encargo.get("guion_propio")),
@@ -21934,19 +21959,22 @@ def _piloto_gastado(ctx):
         return 0.0
 
 
+def _piloto_usd_portada(aj):
+    if aj.get("portadas") not in ("ambas", "ia"):
+        return 0.0
+    return float(AJUSTES.precio_por_imagen(aj.get("calidad_portada_ia") or "low").get("usd") or 0.0)
+
+
 def _piloto_previsto(ctx, aj):
-    """Lo que se prevé que cueste el video entero, en dolares."""
+    """Lo que se prevé que cueste el video entero, en dolares. SIN CIFRA NO SE
+    SIGUE: un cotizador que falla daba 0 $ y el tope dejaba pasarlo todo."""
     try:
         coste = _coste_previsto(ctx, ["guion", "voz", "video", "render"])
         total = float(coste.get("usd_por_generar") or coste.get("usd_total") or 0.0)
-    except Exception:                                       # noqa: BLE001
-        total = 0.0
-    if aj.get("portadas") in ("ambas", "ia"):
-        try:
-            total += float(AJUSTES.precio_por_imagen(aj.get("calidad_portada_ia") or "low")
-                           .get("usd") or 0.0)
-        except Exception:                                   # noqa: BLE001
-            pass
+        total += _piloto_usd_portada(aj)
+    except Exception as fallo:                              # noqa: BLE001
+        raise _PilotoPara(f"no se ha podido calcular lo que costaría ({str(fallo)[:160]}): sin "
+                          "esa cifra el tope no protege", "Piloto → Ajustes", "tope") from None
     return round(total, 3)
 
 
@@ -21954,7 +21982,8 @@ def _piloto_vistos_buenos(avisar, ctx, raiz, vid, modo):
     """Lo que un video pide aprobar antes de dibujar, aprobado por el piloto
     (en «seguir» y «mezcla») o pedido a la persona (en «parar»)."""
     P = _piloto()
-    da = P.da_vistos_buenos(modo)
+    # «Seguir igualmente» tras pedir los vistos buenos: ya los has mirado tú
+    da = P.da_vistos_buenos(modo) or P.leer(raiz, vid).get("saltar") == "vistos"
     # 1. EL GUION VISUAL: con «lo que dice el guion» y sin aprobar, no se dibuja
     gv = _guion_visual()
     params_a = ctx.estado.params("assets") or {}
@@ -21965,7 +21994,7 @@ def _piloto_vistos_buenos(avisar, ctx, raiz, vid, modo):
         if falta:
             if not da:
                 raise _PilotoPara("el guion visual espera tu visto bueno: revísalo, apruébalo "
-                                  "y pulsa «Seguir igualmente»", "Guion visual")
+                                  "y pulsa «Seguir igualmente»", "Guion visual", "vistos")
             try:
                 guardado = gv.normalizar(params_a.get("guion_visual"))
             except ValueError:
@@ -21993,7 +22022,7 @@ def _piloto_vistos_buenos(avisar, ctx, raiz, vid, modo):
         return
     if not da:
         raise _PilotoPara("la imagen base del tipo de relato espera tu visto bueno: apruébala "
-                          "y pulsa «Seguir igualmente»", "Imágenes → La imagen base")
+                          "y pulsa «Seguir igualmente»", "Imágenes → La imagen base", "vistos")
     # los estados salen del reparto de sitios: se reparte antes (es la misma
     # tarea de la tanda de imagenes, que despues se la salta por estar al dia)
     receta = _receta_de_video(ctx, "video")
@@ -22066,11 +22095,16 @@ def _piloto_aprobar_bases(ctx, sitio, estado=""):
         ctx.estado.actualizar_params("assets", {"tipo_relato": tr.normalizar(guardado)})
 
 
-def _piloto_imagenes(avisar, ctx, aj):
-    """La tanda de imagenes con el revisor en «automatico» y el tope del piloto."""
+def _piloto_imagenes(avisar, ctx, aj, queda_usd=None):
+    """La tanda de imagenes con el revisor en «automatico» y el tope del piloto.
+    Lo que el revisor puede gastar rehaciendo es lo que quede del tope (o lo de
+    Configuracion, si es menos): asi rehacer no pasa el tope por detras."""
+    forzado = {"revisor_modo": "automatico", "revisor_vueltas": int(aj.get("vueltas") or 2)}
+    if queda_usd is not None:
+        de_config = float(AJUSTES.leer().get("revisor_max_usd") or 0.0)
+        forzado["revisor_max_usd"] = round(max(0.0, min(de_config, float(queda_usd))), 3)
     with _REVISOR_LOCK:
-        _REVISOR_FORZADO[ctx.id] = {"revisor_modo": "automatico",
-                                    "revisor_vueltas": int(aj.get("vueltas") or 2)}
+        _REVISOR_FORZADO[ctx.id] = forzado
     try:
         return _piloto_tanda(avisar, ctx, "video")
     finally:
@@ -22089,7 +22123,10 @@ def _piloto_decidir(ctx, raiz, vid, aj, forzar):
     except Exception:                                       # noqa: BLE001
         resumen = {"pendientes": [], "sin_revisar": None}
     marcadas = sorted({p["plano"] for p in resumen.get("pendientes") or [] if p["plano"] in imagenes})
-    decision, porque = P.decidir(aj["si_falla"], len(marcadas), len(imagenes), aj["umbral_pct"])
+    # en «parar», una imagen que nadie pudo revisar cuenta como marcada: no se
+    # monta lo que no ha mirado ni el revisor ni la persona
+    sin_mirar = int(resumen.get("sin_revisar") or 0) if aj["si_falla"] == "parar" else 0
+    decision, porque = P.decidir(aj["si_falla"], len(marcadas) + sin_mirar, len(imagenes), aj["umbral_pct"])
     if marcadas:
         lista = ", ".join(marcadas[:12]) + (" y más" if len(marcadas) > 12 else "")
         P.apuntar_revision(raiz, vid, f"El revisor sigue marcando {len(marcadas)} "
@@ -22214,6 +22251,9 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj):
             P.apuntar_revision(raiz, vid, f"La portada con IA no salió: {str(fallo)[:160]}",
                                "Publicar → Portada")
     puesta = ""
+    # LAS CANDIDATAS SE APUNTAN ANTES DE PONER UNA: si poner falla, al retomar
+    # ya estan y la de IA (pagada) no se vuelve a dibujar
+    P.cambiar(raiz, vid, portadas=candidatos)
     if candidatos:
         _piloto_usar_portada(ctx, candidatos[0]["diseno"])
         puesta = candidatos[0]["id"]
@@ -22248,7 +22288,8 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
     P = _piloto()
     ficha = P.leer(raiz, vid)
     aj = P.ajustes_del_video(raiz, ficha)
-    forzar = bool(ficha.get("forzar_seguir"))
+    # la UNICA puerta que «Seguir igualmente» salta esta vez
+    saltar = str(ficha.get("saltar") or "")
     salida = {"piloto": vid, "avisos": []}
 
     def etapa(nombre, mensaje):
@@ -22263,12 +22304,13 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
 
     try:
         # 0. LO QUE VA A COSTAR, antes de gastar nada
-        previsto = _piloto_previsto(ctx, aj)
-        P.cambiar(raiz, vid, previsto_usd=previsto)
-        if previsto > aj["tope_usd"] and not forzar:
+        previsto = _piloto_previsto(ctx, aj) if saltar != "tope" else None
+        if previsto is not None:
+            P.cambiar(raiz, vid, previsto_usd=previsto)
+        if previsto is not None and previsto > aj["tope_usd"]:
             raise _PilotoPara(f"costaría unos {previsto:.2f} $ y tu tope por vídeo es "
                               f"{aj['tope_usd']:.2f} $: sube el tope o pulsa «Seguir igualmente»",
-                              "Piloto → Ajustes")
+                              "Piloto → Ajustes", "tope")
         # 1-2. GUION Y VOZ
         tanda("guion", "guion", "escribiendo el guion")
         tanda("voz", "voz", "poniéndole voz")
@@ -22276,26 +22318,32 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
         etapa("vistos", "preparando lo que hay que aprobar antes de dibujar")
         _piloto_vistos_buenos(_piloto_tramo(avisar, "vistos"), ctx, raiz, vid, aj["si_falla"])
         # el tope, ahora con los planos de verdad
-        try:
-            por_dibujar = float(_coste_previsto(ctx, ["video"]).get("usd_por_generar") or 0.0)
-        except Exception:                                   # noqa: BLE001
-            por_dibujar = 0.0
-        gastado = _piloto_gastado(ctx)
-        if gastado + por_dibujar > aj["tope_usd"] and not forzar:
-            raise _PilotoPara(f"las imágenes costarían unos {por_dibujar:.2f} $ (ya van "
-                              f"{gastado:.2f} $) y tu tope es {aj['tope_usd']:.2f} $",
-                              "Piloto → Ajustes")
+        queda = None
+        if saltar != "tope":
+            try:
+                por_dibujar = float(_coste_previsto(ctx, ["video"]).get("usd_por_generar") or 0.0)
+                portada = _piloto_usd_portada(aj)
+            except Exception as fallo:                      # noqa: BLE001
+                raise _PilotoPara(f"no se ha podido calcular lo que costarían las imágenes "
+                                  f"({str(fallo)[:160]})", "Piloto → Ajustes", "tope") from None
+            gastado = _piloto_gastado(ctx)
+            if gastado + por_dibujar + portada > aj["tope_usd"]:
+                raise _PilotoPara(f"las imágenes costarían unos {por_dibujar:.2f} $ (ya van "
+                                  f"{gastado:.2f} $) y tu tope es {aj['tope_usd']:.2f} $",
+                                  "Piloto → Ajustes", "tope")
+            # lo que queda del tope es lo que puede gastar el revisor rehaciendo
+            queda = aj["tope_usd"] - gastado - por_dibujar - portada
         # 4. LAS IMAGENES, con el revisor y su tope de rehacer
         etapa("imagenes", f"dibujando las imágenes (el revisor rehace lo marcado, "
                           f"hasta {aj['vueltas']} {'ronda' if aj['vueltas'] == 1 else 'rondas'})")
-        hecho = _piloto_imagenes(_piloto_tramo(avisar, "imagenes"), ctx, aj)
+        hecho = _piloto_imagenes(_piloto_tramo(avisar, "imagenes"), ctx, aj, queda)
         for aviso in (hecho or {}).get("avisos") or []:
             P.apuntar_revision(raiz, vid, str(aviso), "Imágenes")
         # 5. EL INTERRUPTOR
         etapa("decidir", "mirando lo que dejó marcado el revisor")
-        decision, porque = _piloto_decidir(ctx, raiz, vid, aj, forzar)
+        decision, porque = _piloto_decidir(ctx, raiz, vid, aj, saltar == "interruptor")
         if decision == "parar":
-            raise _PilotoPara(porque, "Imágenes")
+            raise _PilotoPara(porque, "Imágenes", "interruptor")
         # 6. EL MONTAJE, en la cola de montaje
         tanda("montaje", "render", "montando el vídeo (espera su turno en la cola de montaje)")
         # 7-8. EL PAQUETE DE PUBLICACION
@@ -22304,7 +22352,7 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
         etapa("portadas", "preparando las portadas")
         _piloto_portadas(_piloto_tramo(avisar, "portadas"), ctx, raiz, vid, aj)
     except _PilotoPara as parada:
-        P.cambiar(raiz, vid, coste_usd=round(_piloto_gastado(ctx), 3), forzar_seguir=False)
+        P.cambiar(raiz, vid, coste_usd=round(_piloto_gastado(ctx), 3))
         _piloto_parar(raiz, vid, parada)
         salida["parado"] = str(parada)
         avisar(1.0, f"el piloto se ha detenido: {parada}", "Detenido")
@@ -22312,7 +22360,7 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
     final = P.leer(raiz, vid)
     estado = "revisar" if final.get("revisar") else "listo"
     P.cambiar(raiz, vid, estado=estado, etapa="fin", trabajo="", terminado=ahora(),
-              coste_usd=round(_piloto_gastado(ctx), 3), forzar_seguir=False,
+              coste_usd=round(_piloto_gastado(ctx), 3), saltar="",
               mensaje=("listo para publicar" if estado == "listo"
                        else "listo para publicar, con cosas que revisar"))
     ctx.bitacora.anotar("piloto_terminado", None, {"piloto": vid, "estado": estado})
@@ -22432,12 +22480,15 @@ def piloto_parar(vid: str, peticion: Request):
                                                terminado=ahora(), mensaje="lo has parado tú"))
     if ficha["estado"] != "trabajando":
         raise ErrorApi(409, "este vídeo no está trabajando")
+    # LA MARCA PRIMERO: si todavia se esta creando el video (sin trabajo), el
+    # hilo la mira antes y despues de lanzarlo (`_piloto_correr`)
+    ficha = P.cambiar(raiz_proyectos(), vid, cancelar=True, mensaje="parando…")
     if ficha.get("trabajo") and ficha.get("pid"):
         try:
             contexto(ficha["pid"]).gestor.cancelar(ficha["trabajo"])
         except (KeyError, ErrorApi):
             pass
-    return _piloto_para_pantalla(P.cambiar(raiz_proyectos(), vid, mensaje="parando…"))
+    return _piloto_para_pantalla(ficha)
 
 
 @app.post("/api/piloto/videos/{vid}/seguir")

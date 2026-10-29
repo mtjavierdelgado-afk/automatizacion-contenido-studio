@@ -173,7 +173,7 @@ def simulando():
 
 def _simulado(negocio, estilo):
     """El doble de Claude: ni CLI ni cupo. Cada par que comparte palabras sale
-    como choque (el primero «contradicen», el resto «repiten")."""
+    como choque (el primero «contradicen», el resto «repiten»)."""
     pares = []
     for k, p in enumerate(hablan_de_lo_mismo(negocio, estilo)):
         pares.append({"tipo": "contradicen" if k == 0 else "repiten",

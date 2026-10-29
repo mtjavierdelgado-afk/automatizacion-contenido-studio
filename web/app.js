@@ -32905,6 +32905,11 @@ function contadorDeReglas(ficha) {
         'Cuando generes el estilo gráfico (las láminas), aquí verás cuántas reglas recibe cada imagen.'));
       return caja;
     }
+    if (q.negocio === undefined && NEGOCIOS.fallo[q.cid]) {
+      caja.appendChild(h('div', { clase: 'meta' },
+        'No se puede contar: no se ha podido leer la ficha del negocio (abajo, «Reintentar»).'));
+      return caja;
+    }
     if (!q.cargadas || q.negocio === undefined) {
       caja.appendChild(h('div', { clase: 'cargando' }, 'contando las reglas…'));
       return caja;
@@ -32922,7 +32927,8 @@ function contadorDeReglas(ficha) {
         ? `Este estilo es de dibujo: las ${cifra(enLaFicha)} reglas del negocio no se le aplican (solo valen para foto).`
         : 'Este estilo es de dibujo: las reglas del negocio no se le aplican (solo valen para foto).');
     } else if (q.negocio && !q.llega) {
-      notas.push('La ficha del negocio todavía no le ha llegado a este estilo: se le pone al guardar la ficha.');
+      notas.push('La ficha del negocio de este proyecto todavía no le ha llegado a este estilo (o lleva '
+        + 'otra guardada): se pone al día al guardar la ficha.');
     }
     const condicionales = q.delNegocio.filter(tienePalabras).length + q.delEstilo.filter(tienePalabras).length;
     if (condicionales) {
@@ -33015,11 +33021,12 @@ function pistaDeReglasParecidas(ficha) {
 /* «REVISAR SI SE CONTRADICEN» (capa A): Claude por la membresía, con aviso
    antes. Lee lo GUARDADO (lo pendiente se manda primero) y no escribe nada:
    el resultado vive en esta página y se pierde al cambiar de estilo. */
-const CHOQUES_REGLAS = { preset: '', estado: 'nada', previo: '', pares: [], negocio: [], estilo: [], error: '', simulado: false };
+const CHOQUES_REGLAS = { preset: '', turno: 0, estado: 'nada', previo: '', pares: [], negocio: [], estilo: [], error: '', simulado: false };
 
 function choquesDe(ficha) {
   if (CHOQUES_REGLAS.preset !== ficha.id) {
-    Object.assign(CHOQUES_REGLAS, { preset: ficha.id, estado: 'nada', previo: '', pares: [], negocio: [], estilo: [],
+    // el turno sube: una revisión de antes que siga viva ya no escribe aquí
+    Object.assign(CHOQUES_REGLAS, { preset: ficha.id, turno: CHOQUES_REGLAS.turno + 1, estado: 'nada', previo: '', pares: [], negocio: [], estilo: [],
       error: '', simulado: false });
   }
   return CHOQUES_REGLAS;
@@ -33031,15 +33038,23 @@ function repintarChoquesDeReglas() {
   const ficha = fichaLight(CHOQUES_REGLAS.preset);
   if (!ficha) return;
   document.querySelectorAll('.revisar-choques').forEach(viejo => {
+    // el foco solo se devuelve si estaba aquí: quien escribe una regla mientras
+    // Claude revisa no lo pierde cuando llega el resultado
+    const teniaFoco = viejo.contains(document.activeElement);
     const nuevo = pintarRevisarChoques(ficha);
     viejo.replaceWith(nuevo);
     const boton = nuevo.querySelector('button');
-    if (boton) boton.focus();
+    if (teniaFoco && boton) boton.focus({ preventScroll: true });
   });
 }
 
 async function revisarChoquesDeReglas(ficha) {
   const c = choquesDe(ficha);
+  /* UN TURNO POR REVISIÓN: si cambias de estilo y vuelves mientras una sigue
+     en marcha, la vieja ya no escribe en la de ahora. */
+  c.turno = (c.turno || 0) + 1;
+  const turno = c.turno;
+  const sigue = () => CHOQUES_REGLAS.preset === ficha.id && CHOQUES_REGLAS.turno === turno;
   c.estado = 'pensando';
   c.error = '';
   repintarChoquesDeReglas();
@@ -33047,12 +33062,21 @@ async function revisarChoquesDeReglas(ficha) {
     // lo escrito y aún sin mandar, primero: Claude lee lo guardado
     if (REGLAS_LIGHT.temporizador) { clearTimeout(REGLAS_LIGHT.temporizador); await volcarReglasLight(); }
     if (REGLAS_LIGHT.enVuelo && REGLAS_LIGHT.promesa) await REGLAS_LIGHT.promesa;
+    if (/^no se ha podido guardar/.test(REGLAS_LIGHT.estado || '')) {
+      throw new Error(`las reglas del estilo no se han guardado (${REGLAS_LIGHT.estado}); arréglalo antes de revisar`);
+    }
+    if (!sigue()) return;
     const r = await pedir(`${BASE}/api/reglas-estilo/choques`, { method: 'POST', cuerpo: { preset: ficha.id } });
     let listo = false;
-    for (let i = 0; i < 90 && !listo; i += 1) {
+    /* Se pregunta MIENTRAS SIGA PENSANDO: el servidor puede reintentar o pasar
+       a la cuenta de respaldo y tardar más de tres minutos; con un tope más
+       corto la pantalla se rendía y volver a pulsar daba «ya está revisando».
+       Diez minutos es solo un techo de seguridad. */
+    for (let i = 0; i < 300 && !listo; i += 1) {
       await new Promise(seguir => setTimeout(seguir, 2000));
-      if (CHOQUES_REGLAS.preset !== ficha.id) return;       // cambiaste de estilo
+      if (!sigue()) return;                                  // cambiaste de estilo
       const f = await pedir(`${BASE}/api/reglas-estilo/choques/${encodeURIComponent(r.id)}`);
+      if (!sigue()) return;
       if (f.estado === 'listo') {
         Object.assign(c, { estado: 'hecho', pares: f.pares || [], negocio: f.negocio || [],
           estilo: f.estilo || [], simulado: !!f.simulado });
@@ -33062,9 +33086,9 @@ async function revisarChoquesDeReglas(ficha) {
         listo = true;
       }
     }
-    if (!listo) Object.assign(c, { estado: 'error', error: 'Claude está tardando demasiado: vuelve a pulsar en un momento' });
+    if (!listo) Object.assign(c, { estado: 'error', error: 'Claude lleva diez minutos sin contestar: vuelve a pulsar más tarde' });
   } catch (err) {
-    if (CHOQUES_REGLAS.preset !== ficha.id) return;
+    if (!sigue()) return;
     Object.assign(c, { estado: 'error', error: err.message });
   }
   repintarChoquesDeReglas();

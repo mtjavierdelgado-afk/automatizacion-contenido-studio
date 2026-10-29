@@ -8366,6 +8366,8 @@ def probar_tipos_de_negocio():
             os.environ.pop("ESTUDIO_DOMINIOS", None)
         else:
             os.environ["ESTUDIO_DOMINIOS"] = antes_env
+
+
 def probar_choques_de_reglas():
     """Rama reglas-claras (28-10-2026): «Revisar si se contradicen» compara las
     reglas del negocio que RECIBE un estilo de foto con las suyas, con Claude

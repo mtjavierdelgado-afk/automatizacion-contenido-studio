@@ -17166,20 +17166,29 @@ def _choques_reglas():
 
 
 @app.post("/api/reglas-estilo/choques", status_code=202)
-def revisar_choques_reglas(cuerpo: dict = Body(default=None)):
+def revisar_choques_reglas(cuerpo: dict = Body(default=None), peticion: Request = None):
     """{preset} -> {id}; el resultado ({pares, negocio, estilo}) en GET."""
     datos = _cuerpo(cuerpo)
     preset_id = str(datos.get("preset") or "").strip()
     if not preset_id:
         raise ErrorApi(400, "manda {preset: id del estilo}")
+    # la respuesta trae los textos de la ficha: un proyecto con clave, abierto
+    if peticion is not None:
+        cid = CLIENTES.cliente_de(raiz_proyectos(), estilo_id=preset_id) or ""
+        if cid and cid in _cerrados(peticion):
+            raise ErrorApi(403, "este proyecto tiene clave: ábrelo primero")
     ficha = _preset_o_400(lambda p: p.leer(preset_id))
     if ficha.get("tipo") != "canal":
         raise ErrorApi(400, "esto no es un preset de canal")
     estilo = (ficha.get("datos") or {}).get("estilo") or {}
     if estilo.get("modo") != "foto":
         raise ErrorApi(400, "este estilo es de dibujo: las reglas del negocio no le llegan")
+    # lo ESCRITO en la ficha que recibe el estilo (`fijado`, la misma fuente
+    # que `reglas_de_foto`): `reglas_de_foto` las da ya en el formato del
+    # prompt (inglés, sin «solo si…»), que no es lo que hay que comparar
+    tipo = PASOS_MODULOS.dominios.fijado(estilo)
     negocio = [{"texto": r.get("texto") or "", "palabras": list(r.get("palabras") or [])}
-               for r in PASOS_MODULOS.dominios.reglas_de_foto(estilo)
+               for r in ((tipo or {}).get("crudo") or {}).get("reglas") or []
                if str(r.get("texto") or "").strip()]
     propias = [{"texto": r.get("texto") or "", "palabras": list(r.get("palabras") or [])}
                for r in _reglas_estilo().de_estilo(estilo)]

@@ -8559,6 +8559,7 @@ const BLOQUES_DEL_ENCARGO = [
     ? bloqueLight('Qué dibujan las imágenes', 'la voz o el guion visual (opcional)', bloqueImagenesLight(c.e, c.ficha))
     : bloqueLight('Qué dibujan las imágenes', 'la voz o el guion visual: se aplica como corrección',
       bloqueImagenesDelVideo())) },
+  { id: 'diagramas', pinta: c => bloqueLight('Diagramas', 'cuánto se explica dibujando (opcional)', c.nuevo ? bloqueDiagramasLight(c.e, c.ficha) : bloqueDiagramasDelVideo()) },
   { id: 'reparto-sitios', pinta: c => (c.nuevo ? null
     : bloqueLight('El reparto y los sitios', 'quién sale y dónde ocurre, deducido del guion',
       bloquePedidoSitiosDelVideo())) },
@@ -9914,6 +9915,7 @@ function opcionesParaCrear(e) {
   if (relato) salida.tipo_relato = relato;
   const imagenes = imagenesParaCrear(e);
   if (imagenes) Object.assign(salida, imagenes);
+  if (diagramasParaCrear(e)) salida.diagramas = diagramasParaCrear(e);
   return salida;
 }
 
@@ -16637,6 +16639,8 @@ const GUIA_DE_BLOQUE = {
   'Las llamadas a la acción': 'cta',
   'El tipo de relato': 'tipo_relato',
   '🧭 Tipo de relato': 'tipo_relato',
+  'Diagramas': 'diagramas',
+  '📊 Diagramas': 'diagramas',
 };
 
 /* «REVISAR»: lo escrito en el campo, contra su guía (pasos/revisar_campo.py).
@@ -18049,6 +18053,144 @@ function bloqueImagenesEstiloLight(ficha) {
   return caja;
 }
 
+/* ---------------------------------------------------------------- DIAGRAMAS
+   Rama diagramas-por-contenido (28-10-2026): cuánto se explica dibujando.
+   En el estilo (por defecto en sus vídeos) y en cada vídeo, que manda. Elegir
+   no dibuja nada: en la siguiente tanda Claude marca lo que se explica (sin
+   volver a repartir los sitios) y los
+   planos que cambien se ofrecen para rehacer. Pintar no escribe (regla 1). */
+const MODOS_DIAGRAMAS = [
+  { valor: 'ninguna', nombre: 'Ninguno', ayuda: 'Ningún diagrama, ni siquiera por sorteo.' },
+  { valor: 'solo_si_lo_pide', nombre: 'Solo si el guion lo pide',
+    ayuda: 'Solo donde el propio guion dice que enseña algo («fíjate en este gráfico», «paso a paso»).' },
+  { valor: 'equilibrada', nombre: 'Equilibrado',
+    ayuda: 'Donde la voz explica algo (una medida, un proceso, una comparación). Como mucho 1 de cada 8 planos.' },
+  { valor: 'didactica', nombre: 'Didáctico',
+    ayuda: 'Para vídeos que enseñan: todos los tramos que explican. Como mucho 1 de cada 4 planos.' },
+];
+const AYUDA_DIAGRAMAS = 'Con un ajuste elegido, los tramos que explican algo llevan un diagrama en vez de '
+  + 'salir al azar, y las cifras del guion pueden salir en un gráfico dibujado exacto y gratis (solo si cada '
+  + 'cifra está escrita en el guion). Sin elegir nada, todo sale como siempre.';
+
+function nombreDiagramas(valor) {
+  const m = MODOS_DIAGRAMAS.find(x => x.valor === valor);
+  return m ? m.nombre.toLowerCase() : 'como siempre (al azar)';
+}
+
+function ayudaDiagramas(valor) {
+  const m = MODOS_DIAGRAMAS.find(x => x.valor === valor);
+  return (m ? m.ayuda + ' ' : '') + AYUDA_DIAGRAMAS;
+}
+
+/* EN EL ESTILO: se lee de la ficha (`datos.estilo.diagramas`), sin pedir nada */
+const DIAGRAMAS_LIGHT = { id: '', estado: '' };
+
+async function guardarDiagramasEstiloLight(ficha, valor) {
+  DIAGRAMAS_LIGHT.id = ficha.id;
+  DIAGRAMAS_LIGHT.estado = 'guardando…';
+  pintarLight();
+  try {
+    const r = await pedir(`${API.presetLight(ficha.id)}/diagramas`, { method: 'PUT', cuerpo: { diagramas: valor || null } });
+    ficha.datos = ficha.datos || {};
+    ficha.datos.estilo = ficha.datos.estilo || {};
+    if (r.diagramas) ficha.datos.estilo.diagramas = r.diagramas;
+    else delete ficha.datos.estilo.diagramas;
+    DIAGRAMAS_LIGHT.estado = r.cambiado ? 'guardado ✓' : 'sin cambios';
+  } catch (err) {
+    DIAGRAMAS_LIGHT.estado = `no se ha podido guardar: ${err.message}`;
+  }
+  pintarLight();
+}
+
+function bloqueDiagramasEstiloLight(ficha) {
+  const caja = h('div', { clase: 'diagramas' });
+  if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Primero genera el estilo gráfico (las láminas); después podrás elegir cuántos diagramas llevan sus vídeos.'));
+    return caja;
+  }
+  const valor = ((ficha.datos || {}).estilo || {}).diagramas || '';
+  const opciones = [{ valor: '', nombre: 'Como siempre (al azar)' }, ...MODOS_DIAGRAMAS];
+  caja.appendChild(campoSelect('Diagramas', valor, opciones,
+    v => guardarDiagramasEstiloLight(ficha, v), ayudaDiagramas(valor)));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Es el punto de partida de los vídeos nuevos de este '
+    + 'estilo; cada vídeo puede cambiarlo en su Encargo, y el del vídeo manda.'));
+  if (DIAGRAMAS_LIGHT.id === ficha.id && DIAGRAMAS_LIGHT.estado) {
+    caja.appendChild(h('div', { clase: 'meta' }, DIAGRAMAS_LIGHT.estado));
+  }
+  return caja;
+}
+
+/* EN EL ENCARGO de un vídeo NUEVO: va con lo demás al crear (`diagramas`) */
+function bloqueDiagramasLight(e, ficha) {
+  const delEstilo = (((ficha || {}).datos || {}).estilo || {}).diagramas || '';
+  const opciones = [{ valor: '', nombre: `Lo que diga el estilo (${nombreDiagramas(delEstilo)})` },
+    ...MODOS_DIAGRAMAS];
+  return h('div', { clase: 'diagramas' },
+    campoSelect('Diagramas', e.diagramas || '', opciones,
+      v => { e.diagramas = v; pintarLight(); }, ayudaDiagramas(e.diagramas || delEstilo)));
+}
+
+function diagramasParaCrear(e) {
+  return MODOS_DIAGRAMAS.some(m => m.valor === e.diagramas) ? e.diagramas : '';
+}
+
+/* EN UN VÍDEO HECHO: la ficha del servidor */
+function diagramasDelVideoLight() {
+  const v = APP.light.video;
+  if (v.dg && v.dg.pid === v.pid) return v.dg;
+  const pid = v.pid;
+  v.dg = { pid, cargado: false, ficha: null, ocupado: false, error: '' };
+  pedir(`${API.proyecto(pid)}/diagramas`).then(d => {
+    const est = APP.light.video.dg;
+    if (!est || est.pid !== pid) return;
+    Object.assign(est, { cargado: true, ficha: d || {}, error: '' });
+    pintarLight();
+  }).catch(err => {
+    const est = APP.light.video.dg;
+    if (!est || est.pid !== pid) return;
+    Object.assign(est, { cargado: true, error: err.message });
+    pintarLight();
+  });
+  return v.dg;
+}
+
+async function guardarDiagramasDelVideo(valor) {
+  const est = diagramasDelVideoLight();
+  est.ocupado = true;
+  pintarLight();
+  try {
+    est.ficha = await pedir(`${API.proyecto(est.pid)}/diagramas`, { method: 'PUT', cuerpo: { diagramas: valor || null } });
+    est.error = '';
+    toast('guardado: no se dibuja nada; en la siguiente tanda se marca lo que se explica dibujando');
+    cargarVideoLight(est.pid).then(() => pintarLight()).catch(() => {});
+  } catch (err) {
+    est.error = err.message;
+  }
+  est.ocupado = false;
+  pintarLight();
+}
+
+function bloqueDiagramasDelVideo() {
+  const est = diagramasDelVideoLight();
+  if (!est.cargado) return h('div', { clase: 'cargando' }, 'cargando…');
+  const f = est.ficha || {};
+  const opciones = [{ valor: '', nombre: `Lo que diga el estilo (${nombreDiagramas(f.del_estilo || '')})` },
+    ...MODOS_DIAGRAMAS];
+  const caja = h('div', { clase: 'diagramas' },
+    h('div', { clase: 'meta' }, `Ahora: ${nombreDiagramas(f.modo || '')}`),
+    campoSelect('Diagramas', f.del_video || '', opciones,
+      v => guardarDiagramasDelVideo(v), ayudaDiagramas(f.modo || '')));
+  if (f.modo && f.modo !== 'ninguna') {
+    caja.appendChild(h('div', { clase: 'pista' }, f.deducido_con === f.modo
+      ? `Deducido del guion: ${f.explicativos || 0} tramo(s) que explican y ${f.graficos || 0} gráfico(s) con cifras.`
+      : 'Los tramos que explican se marcan en la siguiente tanda de imágenes, sin volver a '
+        + 'repartir los sitios (lo lee Claude con la membresía; no se paga ninguna imagen).'));
+  }
+  if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
+  return caja;
+}
+
 function bloqueReglasLight(ficha) {
   const caja = h('div', {});
   caja.appendChild(bloqueNegocioDelEstilo(ficha));  // Etapa Foto C
@@ -18246,6 +18388,7 @@ function vistaPresetLight() {
       bloqueRelatoEstiloLight(ficha)),
     bloqueLight('🎬 Qué dibujan las imágenes', 'la voz o el guion visual, por defecto en sus vídeos',
       bloqueImagenesEstiloLight(ficha)),
+    bloqueLight('📊 Diagramas', 'cuánto se explica dibujando, por defecto en sus vídeos', bloqueDiagramasEstiloLight(ficha)),
     bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué', tono));
 
   // ⏱️ el ritmo: se cambia y ya, no rehace nada

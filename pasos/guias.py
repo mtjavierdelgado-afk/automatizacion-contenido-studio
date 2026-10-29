@@ -504,6 +504,63 @@ GUIAS = {
         ),
     },
 
+    # --------------------------------------------------------------- diagramas
+    "diagramas": {
+        "titulo": "Diagramas",
+        "donde": "Un vídeo nuevo → Diagramas; un vídeo hecho → Diagramas; "
+                 "el estilo → 📊 Diagramas",
+        "usa": "pasos/diagramas.py (el ajuste, los tramos que explican, las cifras y "
+               "las cartas), pasos/catalogo_visual.py (proponer), pasos/p6_assets.py "
+               "(_asignar_cartas y los componentes) y motores/capa_vectorial/grafico.py",
+        "que_hace": [
+            "Dice CUÁNTO se explica dibujando en el vídeo: Ninguno, Solo si el guion "
+            "lo pide, Equilibrado (como mucho 1 de cada 8 planos) o Didáctico (como "
+            "mucho 1 de cada 4).",
+            "Con un ajuste elegido, al deducir el reparto y los sitios Claude marca los "
+            "tramos donde la voz EXPLICA algo (una medida, un proceso, una comparación, "
+            "un porcentaje, un paso a paso). En ilustración, el plano «diagrama» sale en "
+            "esos tramos y deja de salir al azar; los demás planos salen como siempre.",
+            "Si el guion da cifras que se comparan, puede salir un GRÁFICO (barras, "
+            "comparación, proporción o antes y después) dibujado por código: exacto y "
+            "gratis, sin pagar ninguna imagen. Solo si cada cifra está escrita en el "
+            "guion; si una no lo está, el gráfico entero se descarta.",
+            "Qué manda: lo elegido en el vídeo; si no, lo del estilo. Sin elegir nada, "
+            "el vídeo sale exactamente como antes (los diagramas, al azar).",
+            "Cambiarlo no dibuja nada: en la siguiente tanda Claude lee el guion (con "
+            "la membresía) y marca lo que se explica, SIN volver a repartir los sitios; "
+            "los planos que cambien se ofrecen para rehacer con su precio.",
+            "En foto todavía no cambia los planos: la «foto explicada» (cotas y flechas "
+            "dibujadas encima) llega en una segunda vuelta. Los gráficos con cifras sí "
+            "salen también en foto.",
+        ],
+        "si": [
+            "«Didáctico» para clases, tutoriales y vídeos de cómo se hace algo.",
+            "«Equilibrado» para vídeos de negocio que explican un servicio o un precio.",
+            "Escribe las cifras en el guion tal y como quieres verlas («12 soles», «el "
+            "35 %»): son las que salen en el gráfico.",
+        ],
+        "no": [
+            "Esperar un gráfico con cifras que no dice la voz: no se inventa ninguna.",
+            "«Didáctico» en un vídeo de ambiente o de marca: un plano de cada cuatro "
+            "sería un diagrama.",
+            "Cambiarlo con una tanda en marcha: no se deja hasta que termine.",
+        ],
+        "plantilla": "Diagramas: [ninguna | solo_si_lo_pide | equilibrada | didactica]",
+        "ejemplo": (
+            "Diagramas: equilibrada\n"
+            "\n"
+            "(en el guion) «Una hora de PS5 cuesta 12 soles y una de simulador, 25 "
+            "soles.» → sale un gráfico de barras con S/ 12 y S/ 25."
+        ),
+        "prompt_ia": (
+            "Lee este guion y dime cuántos diagramas le van: ninguna (es de ambiente), "
+            "solo_si_lo_pide, equilibrada (explica algo de vez en cuando) o didactica "
+            "(es para enseñar). Dime también qué frases dan cifras que se comparan, "
+            "copiadas tal cual. Contesta con una línea «Diagramas: …» y la lista de "
+            "frases.\n\nGUION:\n[pega aquí]"
+        ),
+    },
+
     # --------------------------------------------------------------------- cta
     "cta": {
         "titulo": "Las llamadas a la acción",
@@ -1576,7 +1633,8 @@ for _red, (_nombre, _tope, _hace, _si, _no, _plantilla, _ejemplo) in _REDES_NUEV
                       "VÍDEO:\n[pega aquí el guion o un resumen]"),
     }
 
-ORDEN = ("estilo_grafico", "tipo_negocio", "tono", "voz", "material", "indicaciones", "tipo_relato", "cta",
+ORDEN = ("estilo_grafico", "tipo_negocio", "tono", "voz", "material", "indicaciones", "tipo_relato",
+         "diagramas", "cta",
          "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
          "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente",
          "chat_guiones", "analizar_cuenta", "conexiones_cuentas",

@@ -356,6 +356,17 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   aprobar, Claude avisa de los planos que contradicen lo fijo (el sitio, el
   reparto, los estados): manda lo fijo. Quién manda: el vídeo, luego el estilo
   («🎬 Qué dibujan las imágenes» en «Cómo se cuenta»), luego la voz.
+- **Diagramas** (opcional): cuánto se explica dibujando. **Ninguno**, **Solo si
+  el guion lo pide**, **Equilibrado** (como mucho 1 de cada 8 planos) o
+  **Didáctico** (como mucho 1 de cada 4). Con uno elegido, los tramos donde la
+  voz explica algo (una medida, un proceso, una comparación, un porcentaje, un
+  paso a paso) llevan el plano «diagrama» en vez de sacarlo al azar, y las
+  cifras del guion pueden salir en un **gráfico** dibujado por el Studio, exacto
+  y gratis, solo si cada cifra está escrita en el guion. Quién manda: el vídeo,
+  luego el estilo («📊 Diagramas» en «Cómo se cuenta»); sin elegir nada, todo
+  sale como siempre. Cambiarlo no dibuja nada: en la siguiente tanda Claude
+  marca lo que se explica, sin volver a repartir los sitios, y los planos que
+  cambien se ofrecen para rehacer.
 - **El reparto y los sitios** (en un vídeo hecho): «Pedido para el reparto de
   sitios» es una frase para Claude al repartir; «Volver a repartir con este
   pedido» no paga imágenes.

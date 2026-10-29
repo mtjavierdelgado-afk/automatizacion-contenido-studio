@@ -362,7 +362,7 @@ def _repartidas(escalera=ESCALERA):
 
 
 def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
-             servicios=None, dominio=None):
+             servicios=None, dominio=None, excluir=None):
     """Que clase de plano es este. Determinista, y nunca la familia de al lado.
 
     'previas' son los ids de carta de los planos que van justo antes, en orden.
@@ -381,6 +381,12 @@ def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
     antes de pasar el estilo a foto no tiene sentido en una foto, y se reparte
     como si no se hubiera forzado. Forzar a mano si salta el filtro de
     servicios: es una decision tomada mirando.
+
+    'excluir' son ids de carta que no salen por SORTEO (rama
+    diagramas-por-contenido: el «diagrama» sale por contenido). Se quitan
+    DESPUES de barajar, no del mazo: el mazo y el arranque son los mismos, asi
+    que un plano que no sacaba una carta excluida saca la de siempre. Forzada,
+    una carta excluida sigue valiendo. Sin pasarlo, nada cambia.
     """
     lookup = por_id_de(modo)
     if modo == "foto" and dominio is not None and dominio.get("escalera"):
@@ -397,6 +403,8 @@ def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
     fondo = _repartidas(escalera_para(modo, servicios, dominio))
     arranque = medios.desempatar(semilla, sid, "carta") % len(fondo)
     orden = [fondo[(arranque + i) % len(fondo)] for i in range(len(fondo))]
+    if excluir:
+        orden = [c for c in orden if c["id"] not in excluir] or orden
     libres = [c for c in orden if c["familia"] not in vetadas]
     if not libres:
         return orden[0]
@@ -405,7 +413,7 @@ def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
 
 
 def repartir(escenas, semilla=0, forzadas=None, modo="ilustracion",
-             servicios=None, dominio=None):
+             servicios=None, dominio=None, excluir=None):
     """Una carta por plano, en orden y con las dos reglas puestas.
 
     Va aparte de `carta_de` porque el reparto depende del ORDEN -- cada plano
@@ -418,7 +426,8 @@ def repartir(escenas, semilla=0, forzadas=None, modo="ilustracion",
         if not sid:
             continue
         carta = carta_de(sid, previas, semilla, forzadas.get(sid, ""),
-                         modo=modo, servicios=servicios, dominio=dominio)
+                         modo=modo, servicios=servicios, dominio=dominio,
+                         excluir=excluir)
         cartas[sid] = carta
         previas.append(carta["id"])
     return cartas

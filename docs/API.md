@@ -160,6 +160,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/guion_visual` | Qué dibujan las imágenes de un vídeo, su guion visual y lo que hay que revisar. |
 | `PUT` | `/api/proyectos/{pid}/guion_visual` | {planos: [{bloque, visual, camara?, estado?, personajes?}]}: el guion visual |
 | `POST` | `/api/proyectos/{pid}/guion_visual/aprobar` | {aprobado: true|false}. Aprobar lanza también la comprobación contra lo |
+| `GET` | `/api/proyectos/{pid}/diagramas` | El ajuste «Diagramas» de un vídeo: el que manda, el del vídeo, el del estilo y lo deducido (tramos que explican y gráficos). |
+| `PUT` | `/api/proyectos/{pid}/diagramas` | {diagramas: ninguna | solo_si_lo_pide | equilibrada | didactica | null}: el de ESTE vídeo; null vuelve al del estilo. No dibuja nada. |
 | `PUT` | `/api/proyectos/{pid}/guion_visual/modo` | {imagenes: "guion" | "voz" | null}: qué dibujan las imágenes de ESTE vídeo. |
 | `POST` | `/api/proyectos/{pid}/guion_visual/proponer` | Claude escribe el guion visual leyendo el guion entero (solo texto, no se |
 
@@ -290,6 +292,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/presets-light/{preset_id}/aportadas` | Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}. |
 | `GET` | `/api/presets-light/{preset_id}/aportadas/{nombre}/imagen` | Una de tus imagenes de referencia, tal cual la subiste. |
 | `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costo hacer este estilo (su taller), desglosado. |
+| `PUT` | `/api/presets-light/{preset_id}/diagramas` | {diagramas: ninguna | solo_si_lo_pide | equilibrada | didactica | null}: el defecto de los vídeos NUEVOS de este estilo. |
 | `PUT` | `/api/presets-light/{preset_id}/dominio` | Fija el negocio de un estilo: {dominio: «general», el id de una ficha del negocio o null}. null vuelve a automático. |
 | `POST` | `/api/presets-light/{preset_id}/duplicar` | Una copia del estilo, con su taller. |
 | `GET` | `/api/presets-light/{preset_id}/imagenes` | Qué dibujan por defecto las imágenes de los vídeos de un estilo. |

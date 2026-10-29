@@ -488,19 +488,43 @@ def _coordenada(crudo):
     return [lat, lon]
 
 
-def _limpiar_componentes(crudos, regiones, avisos):
+def _diagramas():
+    try:
+        from . import diagramas
+    except ImportError:
+        import diagramas
+    return diagramas
+
+
+def _limpiar_componentes(crudos, regiones, avisos, guion="", diagramas=""):
     """Mapas y graficos que se pueden dibujar de verdad. Lo demas, fuera.
 
     Aqui no vale degradar: `mapa.construir` indexa REGIONES sin red y un
     componente mal formado tumbaria el paso de assets a mitad, despues de haber
     pagado las imagenes anteriores.
+
+    'diagramas' es el ajuste del video (rama diagramas-por-contenido). Solo con
+    el puesto se admite un GRAFICO CON CIFRAS (`config.clase`), y solo si cada
+    cifra esta escrita en 'guion' (ver `diagramas.limpiar_grafico`). Sin el,
+    todo sigue el camino de siempre.
     """
+    dg = _diagramas() if diagramas else None
     limpios = {}
     for crudo, ficha in (crudos or {}).items():
         nombre = _identificador(crudo)
         if not nombre or not isinstance(ficha, dict):
             continue
         config = ficha.get("config") if isinstance(ficha.get("config"), dict) else {}
+        if dg is not None and dg.activo(diagramas) \
+                and str(ficha.get("tipo") or "") == "grafico" and config.get("clase"):
+            if not dg.admite_graficos(diagramas):
+                avisos.append(f"grafico '{nombre}': con «diagramas: "
+                              f"{diagramas}» no van graficos, se descarta")
+                continue
+            grafico = dg.limpiar_grafico(nombre, ficha, guion, avisos)
+            if grafico:
+                limpios[nombre] = grafico
+            continue
         region = str(config.get("region") or "").strip().lower()
         if region not in regiones:
             avisos.append(f"componente '{nombre}': la region "
@@ -533,6 +557,8 @@ def _limpiar_componentes(crudos, regiones, avisos):
             "config": {"region": region, **puntos},
             "descripcion": str(ficha.get("descripcion") or "").strip(),
         }
+    if dg is not None and dg.admite_graficos(diagramas):
+        limpios = dg.recortar_graficos(limpios, diagramas, avisos)
     return limpios
 
 
@@ -628,8 +654,13 @@ def _lista_de_palabras(crudo, por_defecto):
     return palabras or [str(por_defecto).replace("_", " ")]
 
 
-def _limpiar(datos, ids_bloque):
+def _limpiar(datos, ids_bloque, diagramas="", guion=""):
     """Valida la propuesta y la deja en la forma que espera p6_assets.
+
+    'diagramas' y 'guion' (rama diagramas-por-contenido): con el ajuste puesto
+    se validan los graficos con cifras contra el guion y se anaden los tramos
+    que explican ('explicativos'). Sin el, la salida es la de siempre, sin una
+    clave de mas.
 
     Lo que no cuadra se DESCARTA y se dice en 'avisos'. Un beat que apunta a un
     bloque que no existe, o a un set que no se ha declarado, no se puede aplicar:
@@ -794,16 +825,24 @@ def _limpiar(datos, ids_bloque):
             + f"). Se quedan porque hay {len(sin_sitio) + len(huecos)} tramo(s) "
               f"sin sitio y ahi se pueden elegir por sus palabras.")
 
-    return {"reparto": reparto, "sets": sets, "beats": beats,
-            "capitulos": capitulos,
-            "componentes": _limpiar_componentes(datos.get("componentes"),
-                                                regiones_de_mapa(), avisos),
-            "lugares": _limpiar_lugares(datos.get("lugares"), avisos),
-            # lo que existe de verdad y hay que ensenar en vez de imaginar; de
-            # aqui salen las imagenes que se bajan de Commons (pasos/wikimedia.py)
-            "reales": _limpiar_reales(datos.get("reales"), reparto, avisos),
-            "avisos": avisos,
-            "cobertura": round(len(cubiertos) / max(1, len(ids_bloque)), 3)}
+    salida = {"reparto": reparto, "sets": sets, "beats": beats,
+              "capitulos": capitulos,
+              "componentes": _limpiar_componentes(datos.get("componentes"),
+                                                  regiones_de_mapa(), avisos,
+                                                  guion=guion, diagramas=diagramas),
+              "lugares": _limpiar_lugares(datos.get("lugares"), avisos),
+              # lo que existe de verdad y hay que ensenar en vez de imaginar; de
+              # aqui salen las imagenes que se bajan de Commons (pasos/wikimedia.py)
+              "reales": _limpiar_reales(datos.get("reales"), reparto, avisos),
+              "avisos": avisos,
+              "cobertura": round(len(cubiertos) / max(1, len(ids_bloque)), 3)}
+    if diagramas and _diagramas().activo(diagramas):
+        # LOS TRAMOS QUE EXPLICAN, solo con el ajuste: sin el no hay clave, y
+        # el catalogo guardado (que entra en la firma de assets) no se mueve
+        salida["explicativos"] = _diagramas().limpiar_explicativos(
+            datos.get("explicativos"), ids_bloque, avisos, diagramas)
+        salida["diagramas"] = diagramas
+    return salida
 
 
 def _guion_legible(bloques):
@@ -1242,6 +1281,80 @@ def proponer_cambios(bloques, catalogo, relato, ajuste=None, avisar=None,
     return salida, avisos
 
 
+INSTRUCCION_DIAGRAMAS = """Eres el director de arte de un video. El reparto y los
+sitios ya estan decididos y NO se tocan: aqui solo se marca lo que se explica
+dibujando.
+{tramo}
+GUION COMPLETO, BLOQUE A BLOQUE
+<<<
+{guion}
+>>>
+
+DEVUELVE EXACTAMENTE ESTE JSON, sin nada alrededor (listas vacias si no hay nada):
+
+{{
+  "explicativos": [],
+  "componentes": {{}}
+}}
+"""
+
+
+def proponer_diagramas(bloques, diagramas, ajuste=None, avisar=None, proyecto_id=None,
+                       cwd=None):
+    """Los tramos que explican y los graficos con cifras de un video YA REPARTIDO.
+
+    Es lo que hace falta cuando se elige el ajuste «Diagramas» en un video que
+    ya tiene sus sitios (rama diagramas-por-contenido): volver a deducir el
+    catalogo entero renombraria los sitios y dejaria por rehacer -- y por
+    pagar -- todos los planos. Esto no reparte nada: solo lee el guion. Va por
+    la membresia de Claude; ninguna imagen.
+    -> {diagramas, explicativos, componentes (solo graficos), avisos}"""
+    dg = _diagramas()
+    diagramas = dg.normalizar(diagramas)
+    if not dg.admite_graficos(diagramas):
+        raise ValueError("solo un ajuste que dibuja diagramas se lee del guion")
+    bloques = [b for b in (bloques or []) if str(b.get("id") or "").strip()]
+    if not bloques:
+        raise RuntimeError("no hay guion que leer: genera el guion antes")
+    ids_bloque = [str(b["id"]).strip().upper() for b in bloques]
+    ajuste = ajuste or {}
+    modelo = ajuste.get("modelo") or MODELO_POR_DEFECTO
+    esfuerzo = ajuste.get("esfuerzo") or ESFUERZO_POR_DEFECTO
+    guion, _ = comun.recortar(_guion_legible(bloques), 90000,
+                              "[...guion recortado por longitud...]")
+    instruccion = INSTRUCCION_DIAGRAMAS.format(tramo=dg.tramo_criterio(diagramas),
+                                               guion=guion)
+    avance = None
+    if avisar is not None:
+        avance = estadisticas.Avance(
+            avisar, 0.05, 0.9, estadisticas.estimar(PASO, tamano=len(guion) // 6,
+                                                    ajuste={"modelo": modelo,
+                                                            "esfuerzo": esfuerzo}),
+            f"leyendo el guion para marcar lo que se explica dibujando, con {modelo}")
+        avance.arrancar()
+    arranque = time.time()
+    try:
+        texto, _sobre = _llamar_claude(instruccion, modelo, esfuerzo, cwd, avance)
+    finally:
+        if avance is not None:
+            avance.parar()
+    estadisticas.anotar(PASO, time.time() - arranque, ajuste={"modelo": modelo,
+                                                              "esfuerzo": esfuerzo},
+                        proyecto=proyecto_id, unidades=len(ids_bloque),
+                        detalle={"que": "diagramas", "diagramas": diagramas})
+    crudo = comun.extraer_json(texto, "los diagramas") or {}
+    avisos = []
+    texto_guion = "\n".join(str(b.get("texto") or "") for b in bloques)
+    componentes = _limpiar_componentes(crudo.get("componentes"), regiones_de_mapa(),
+                                       avisos, guion=texto_guion, diagramas=diagramas)
+    return {"diagramas": diagramas,
+            "explicativos": dg.limpiar_explicativos(crudo.get("explicativos"),
+                                                    ids_bloque, avisos, diagramas),
+            "componentes": {n: c for n, c in componentes.items()
+                            if dg.es_grafico_con_cifras(c)},
+            "avisos": avisos}
+
+
 def _especie_legible(regla):
     regla = " ".join(str(regla or "").split())
     return ESPECIE.format(regla=regla) if regla else ""
@@ -1249,7 +1362,7 @@ def _especie_legible(regla):
 
 def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
              cwd=None, peticion="", planos=0, min_s=None, max_s=None,
-             regla_personajes="", espacio_fijo=None, relato=None):
+             regla_personajes="", espacio_fijo=None, relato=None, diagramas=""):
     """Propone el catalogo visual del video. NO lo guarda: eso lo hace una persona.
 
     'bloques' son los del guion, con id y texto, EN ORDEN. Se manda el guion
@@ -1269,7 +1382,13 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
     'relato' es el tipo de relato resuelto (`tipo_relato.resolver`). Solo si es
     EXPLICITO y no documental cambia algo: un solo sitio y lo que el modo pide
     (ver `_criterio` y `_aplicar_relato`).
+
+    'diagramas' es el ajuste «Diagramas» del video (`diagramas.modo_de`, rama
+    diagramas-por-contenido). Sin el ("") el prompt y el resultado son los de
+    siempre; con el, el criterio lleva su tramo tras COMPONENTES y la salida
+    sus 'explicativos' y sus graficos con cifras.
     """
+    diagramas = _diagramas().normalizar(diagramas) if diagramas else ""
     espacio = normalizar_espacio_fijo(espacio_fijo)
     relato = relato if tipo_relato.activo(relato) else None
     ajuste = ajuste or {}
@@ -1290,7 +1409,9 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
         tema=(brief or {}).get("resumen") or (brief or {}).get("tema") or "sin brief",
         peticion=PETICION.format(texto=peticion) if peticion else "",
         especie=_especie_legible(regla_personajes),
-        criterio=_criterio(planos, min_s, max_s, espacio, relato),
+        criterio=(_diagramas().con_tramo(_criterio(planos, min_s, max_s, espacio,
+                                                    relato), diagramas)
+                  if diagramas else _criterio(planos, min_s, max_s, espacio, relato)),
         guion=guion)
 
     palabras = sum(comun.contar_palabras(b.get("texto", "")) for b in bloques)
@@ -1315,7 +1436,11 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
     segundos = avance.parar() if avance is not None else time.time() - arranque
 
     crudo = comun.extraer_json(texto, "el catalogo")
-    catalogo = _limpiar(crudo, ids_bloque)
+    if diagramas:
+        catalogo = _limpiar(crudo, ids_bloque, diagramas=diagramas,
+                            guion="\n".join(str(b.get("texto") or "") for b in bloques))
+    else:
+        catalogo = _limpiar(crudo, ids_bloque)
     if espacio:
         catalogo = _aplicar_espacio_fijo(catalogo, espacio, ids_bloque)
     if relato:

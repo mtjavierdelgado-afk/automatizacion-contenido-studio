@@ -9379,5 +9379,57 @@ def insertar_una_imagen(navegador, datos):
     pg.sin_errores("insertar una imagen")
     pg.cerrar()
 
+
+# ================================================================= DIAGRAMAS
+# diagramas-por-contenido (28-10-2026): «Diagramas» en el Encargo de un vídeo
+# hecho. Elegir lo guarda sin tocar ninguna imagen; volver a «lo que diga el
+# estilo» quita la clave. No dibuja ni paga nada.
+@escenario
+def diagramas_en_el_encargo(navegador, datos):
+    """Encargo → Diagramas «Equilibrado» → se guarda, ninguna imagen cambia →
+    «Lo que diga el estilo» → la clave se va."""
+    api = datos["api"]
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="diagramas")
+    try:
+        pg.sin_trabajo(300)
+        antes = _huellas_de_planos(datos, pid)
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; "
+              "APP.light.video.dg = null; pintarLight();")
+        ok(pg.esperar(".bloque-light h3", "Diagramas", 15), "(1) el Encargo trae «Diagramas»")
+        caja = pg.p.locator(".bloque-light").filter(has_text="cuánto se explica dibujando").first
+        ok(pg.esperar(".diagramas select", segundos=15), "(1) con su selector")
+        caja.locator(".diagramas select").first.select_option("equilibrada")
+        fin = time.time() + 15
+        modo = ""
+        while time.time() < fin and modo != "equilibrada":
+            pg.p.wait_for_timeout(500)
+            _r, f = api.get(f"/api/proyectos/{pid}/diagramas")
+            modo = (f or {}).get("modo")
+        ok(modo == "equilibrada", f"(2) elegir «Equilibrado» lo guarda ({modo})")
+        ok(_huellas_de_planos(datos, pid) == antes, "(2) y no toca ninguna imagen")
+        ok(pg.esperar(".diagramas .meta", "Ahora: equilibrado", 15), "(2) y la pantalla lo dice")
+        ok(pg.visible(".diagramas .pista", "explican"),
+           "(2) con lo que falta para que se marquen los tramos que explican")
+        pg.captura("diagramas_equilibrado")
+        caja = pg.p.locator(".bloque-light").filter(has_text="cuánto se explica dibujando").first
+        caja.locator(".diagramas select").first.select_option("")
+        fin = time.time() + 15
+        sigue = True
+        while time.time() < fin and sigue:
+            pg.p.wait_for_timeout(500)
+            _r, f = api.get(f"/api/proyectos/{pid}/diagramas")
+            sigue = bool((f or {}).get("del_video"))
+        ok(not sigue, "(3) «Lo que diga el estilo» quita la clave del vídeo")
+        # EL ESTILO: el bloque «📊 Diagramas» se pinta con su selector
+        n = pg.js("const f = { id: 'x', datos: { estilo: { referencias: ['a.png'], "
+                  "diagramas: 'didactica' } } }; const b = bloqueDiagramasEstiloLight(f); "
+                  "const s = b.querySelector('select'); return s ? s.value : '';")
+        ok(n == "didactica", f"(4) el bloque del estilo enseña lo guardado en el estilo ({n})")
+    finally:
+        api.put(f"/api/proyectos/{pid}/diagramas", {"diagramas": None})
+        pg.sin_errores("los diagramas")
+        pg.cerrar()
+
 if __name__ == "__main__":
     sys.exit(main())

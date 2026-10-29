@@ -4333,7 +4333,10 @@ def _correr_catalogo(avisar, ctx, ajuste, peticion):
                               espacio_fijo=_espacio_fijo_guardado(ctx),
                               # como se cuenta (rama tipo-de-relato): solo un
                               # modo EXPLICITO cambia algo del catalogo
-                              relato=PASOS_MODULOS.tipo_relato.resolver(params))
+                              relato=PASOS_MODULOS.tipo_relato.resolver(params),
+                              # cuanto se explica dibujando (rama
+                              # diagramas-por-contenido): sin ajuste, ""
+                              diagramas=_diagramas_del_video(ctx))
     ctx.bitacora.anotar("catalogo_propuesto", "assets", {
         "personajes": len(ficha.get("reparto") or {}),
         "sets": len(ficha.get("sets") or {}),
@@ -4415,6 +4418,9 @@ def guardar_catalogo(pid: str, cuerpo: dict = Body(default=None)):
             limpio[clave] = previo[clave]
     if isinstance(catalogo.get("relato"), dict) and catalogo["relato"]:
         limpio["relato"] = catalogo["relato"]
+    # los tramos que explican y los graficos (rama diagramas-por-contenido):
+    # solo si el catalogo los trae, o el guardado los tenia
+    limpio.update(_catalogo_de_diagramas(catalogo) or _catalogo_de_diagramas(previo))
     ctx.estado.actualizar_params("assets", {"catalogo": limpio})
     ctx.bitacora.anotar("catalogo_guardado", "assets", {
         "personajes": len(limpio["reparto"]), "sets": len(limpio["sets"]),
@@ -4705,6 +4711,11 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
     if firma and PASOS_MODULOS.tipo_relato.activo(relato):
         firma += "+relato:" + relato["modo"] + (
             ":" + relato["cambia"] if relato.get("cambia") else "")
+    # EL AJUSTE «DIAGRAMAS» NO VA EN LA FIRMA (rama diagramas-por-contenido):
+    # cambiarlo no reparte otra vez los sitios, que renombrarlos dejaria por
+    # pagar todos los planos. Se pone al dia aparte, al final
+    # (`_diagramas_al_dia`), leyendo solo lo que se explica dibujando.
+    diagramas = _diagramas_del_video(ctx)
     cambio = bool(firma) and guardado.get("_firma_guion") != firma
     # Y tambien se vuelve a leer si el catalogo guardado es de ANTES de que el
     # catalogo supiera deducir algo que ahora deduce. La clave 'reales' se
@@ -4753,6 +4764,10 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
         if pedido:
             # el ultimo pedido con el que se repartio, para enseñarlo
             limpio["_pedido"] = pedido[:400]
+        if diagramas:
+            # CON EL AJUSTE «DIAGRAMAS», sus tramos y SOLO los graficos con
+            # cifras (los mapas siguen fuera, como siempre). Sin el, nada.
+            limpio.update(_catalogo_de_diagramas(ficha))
         if not limpio["reparto"] and not limpio["sets"]:
             raise RuntimeError(
                 "del guion no ha salido ni un personaje ni un sitio. Sin eso no "
@@ -4764,6 +4779,9 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
             "beats": len(limpio["beats"]), "automatico": True})
     else:
         avisar(0.35, "los sitios ya estaban deducidos del guion")
+    # LOS DIAGRAMAS, al dia con el ajuste de ahora y sin tocar los sitios. Sin
+    # ajuste y sin nada guardado de el, no hace nada (regla 1)
+    _diagramas_al_dia(_tramo(0.4, 0.5), ctx, ajuste_catalogo)
 
     avisar(1.0, "reparto y sitios deducidos del guion: el encuadre de cada "
                 "plano va en texto, asi que no hay nada mas que construir")
@@ -16905,6 +16923,188 @@ def guardar_relato_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
     return {"relato": relato, "cambiado": True}
 
 
+# ---------------------------------------------------------------- DIAGRAMAS
+#
+# Rama diagramas-por-contenido (28-10-2026). El ajuste «Diagramas» dice cuanto
+# se explica dibujando: en el estilo (`estilo.diagramas`) y, por video, en los
+# params de assets (`diagramas`), que manda. Lo de cada modo vive en
+# `pasos/diagramas.py`. Sin ajuste guardado no cambia nada (regla 1): estas
+# rutas solo escriben cuando alguien elige algo, y "" lo quita.
+
+import diagramas as DIAGRAMAS  # noqa: E402  (solo biblioteca estandar)
+
+
+def _diagramas_del_video(ctx):
+    """El ajuste de ESTE video ("" sin ajuste). Lee, no escribe."""
+    return DIAGRAMAS.modo_de(ctx.estado.params("assets") or {})
+
+
+def _catalogo_de_diagramas(ficha):
+    """Lo que el catalogo guarda del ajuste: sus tramos que explican y SOLO los
+    graficos con cifras. {} si la ficha no los trae (sin ajuste, nada)."""
+    ficha = ficha if isinstance(ficha, dict) else {}
+    if not ficha.get("diagramas"):
+        return {}
+    graficos = {n: c for n, c in (ficha.get("componentes") or {}).items()
+                if DIAGRAMAS.es_grafico_con_cifras(c)}
+    salida = {"diagramas": ficha["diagramas"],
+              "explicativos": list(ficha.get("explicativos") or [])}
+    if graficos:
+        salida["componentes"] = graficos
+    return salida
+
+
+def _diagramas_al_dia(avisar, ctx, ajuste):
+    """Pone el catalogo guardado al dia con el ajuste «Diagramas», SIN volver a
+    repartir los sitios. -> True si ha cambiado algo.
+
+    Con el mismo ajuste con el que se dedujo (o sin ajuste y sin nada de el
+    guardado), no hace nada. Al quitarlo, se quitan sus tramos y sus graficos
+    sin llamar a nadie; con «ninguna», igual; con uno que dibuja, Claude lee el
+    guion (membresia, ninguna imagen) con `catalogo.proponer_diagramas`."""
+    params = ctx.estado.params("assets") or {}
+    guardado = params.get("catalogo") or {}
+    if not (guardado.get("sets") or guardado.get("reparto")):
+        return False
+    modo = DIAGRAMAS.modo_de(params)
+    if (guardado.get("diagramas") or "") == modo:
+        return False
+    nuevo = {k: v for k, v in guardado.items()
+             if k not in ("diagramas", "explicativos", "componentes")}
+    otros = {n: c for n, c in (guardado.get("componentes") or {}).items()
+             if not DIAGRAMAS.es_grafico_con_cifras(c)}
+    if otros:
+        nuevo["componentes"] = otros
+    if modo == "ninguna":
+        nuevo.update({"diagramas": "ninguna", "explicativos": []})
+    elif modo:
+        avisar(0.0, "leyendo el guion para marcar lo que se explica dibujando")
+        try:
+            ficha = _catalogo_visual().proponer_diagramas(
+                _bloques_del_guion(ctx), modo, ajuste=ajuste, avisar=avisar,
+                proyecto_id=ctx.id)
+        except _Cancelado:
+            raise
+        except Exception as fallo:                          # noqa: BLE001
+            # SIN DIAGRAMAS NO SE PARA LA TANDA: se sigue como estaba (sin
+            # tocar el catalogo) y se vuelve a intentar en la siguiente
+            anotar_global("aviso", {"diagramas": str(fallo), "proyecto": ctx.id})
+            avisar(1.0, f"no se han podido marcar los diagramas ({fallo}): "
+                        f"las imágenes siguen como estaban")
+            return False
+        nuevo.update(_catalogo_de_diagramas(ficha))
+        if otros:
+            nuevo["componentes"] = dict(otros, **(nuevo.get("componentes") or {}))
+    ctx.estado.actualizar_params("assets", {"catalogo": nuevo})
+    ctx.bitacora.anotar("diagramas_al_dia", "assets", {
+        "diagramas": modo or "sin ajuste",
+        "explicativos": len(nuevo.get("explicativos") or []),
+        "graficos": sum(1 for c in (nuevo.get("componentes") or {}).values()
+                        if DIAGRAMAS.es_grafico_con_cifras(c))})
+    return True
+
+
+def _ficha_diagramas(ctx):
+    params = ctx.estado.params("assets") or {}
+    estilo = params.get("estilo") if isinstance(params.get("estilo"), dict) else {}
+    catalogo = params.get("catalogo") or {}
+    try:
+        del_video = DIAGRAMAS.normalizar(params.get("diagramas"))
+    except ValueError:
+        del_video = ""
+    try:
+        del_estilo = DIAGRAMAS.normalizar(estilo.get("diagramas"))
+    except ValueError:
+        del_estilo = ""
+    modo = DIAGRAMAS.modo_de(params)
+    return {"modo": modo, "del_video": del_video, "del_estilo": del_estilo,
+            "opciones": DIAGRAMAS.opciones(),
+            # con que ajuste se dedujeron los sitios: si no es el de ahora, hay
+            # que volver a deducirlos para que se marquen los tramos
+            "deducido_con": catalogo.get("diagramas") or "",
+            "explicativos": len(catalogo.get("explicativos") or []),
+            "graficos": sum(1 for c in (catalogo.get("componentes") or {}).values()
+                            if DIAGRAMAS.es_grafico_con_cifras(c))}
+
+
+@app.get("/api/proyectos/{pid}/diagramas")
+def ver_diagramas(pid: str):
+    return _ficha_diagramas(contexto(pid))
+
+
+@app.put("/api/proyectos/{pid}/diagramas")
+def guardar_diagramas(pid: str, cuerpo: dict = Body(default=None)):
+    """{diagramas: modo | null}: cuanto se explica dibujando en ESTE video.
+
+    null (o "") vuelve a lo que diga el estilo y quita la clave. No dibuja
+    nada: en la siguiente tanda Claude marca lo que se explica dibujando, sin
+    volver a repartir los sitios (`_diagramas_al_dia`), y los planos que
+    cambien se ofrecen para rehacer con su precio."""
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    if "diagramas" not in datos:
+        raise ErrorApi(400, "manda {diagramas: " + " | ".join(DIAGRAMAS.MODOS) + " | null}")
+    try:
+        valor = DIAGRAMAS.normalizar(datos.get("diagramas"))
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo en marcha en este vídeo: espera a que termine")
+        params = ctx.estado.params("assets") or {}
+        if (params.get("diagramas") or "") != valor:
+            if valor:
+                ctx.estado.actualizar_params("assets", {"diagramas": valor})
+            else:
+                ctx.estado.set_params("assets", {k: v for k, v in params.items()
+                                                 if k != "diagramas"})
+    ctx.bitacora.anotar("diagramas", "assets", {"diagramas": valor or "estilo"})
+    return _ficha_diagramas(ctx)
+
+
+@app.put("/api/presets-light/{preset_id}/diagramas")
+def guardar_diagramas_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
+    """{diagramas: modo | null}: el ajuste por defecto de un estilo. null lo
+    quita. No toca ningun video: llega a los nuevos al crearlos y a los hechos
+    con «Traer el estilo»."""
+    presets = _presets()
+    datos = _cuerpo(cuerpo)
+    if "diagramas" not in datos:
+        raise ErrorApi(400, "manda {diagramas: " + " | ".join(DIAGRAMAS.MODOS) + " | null}")
+    try:
+        valor = DIAGRAMAS.normalizar(datos.get("diagramas"))
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    with presets.lock_de(presets.FICHERO):
+        ficha = _preset_o_400(lambda p: p.leer(preset_id))
+        if ficha.get("tipo") != "canal":
+            raise ErrorApi(400, "esto no es un preset de canal")
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        estilo = dict(contenido.get("estilo") or {})
+        try:
+            antes = DIAGRAMAS.normalizar(estilo.get("diagramas"))
+        except ValueError:
+            antes = ""
+        if valor == antes:
+            return {"diagramas": valor, "cambiado": False}
+        if valor:
+            estilo["diagramas"] = valor
+        else:
+            estilo.pop("diagramas", None)
+        if estilo:
+            contenido["estilo"] = estilo
+        else:
+            contenido.pop("estilo", None)
+        try:
+            presets.guardar("canal", ficha.get("nombre") or "", contenido,
+                            nota=ficha.get("nota") or "",
+                            miniatura=ficha.get("miniatura") or "", pid=preset_id)
+        except presets.ErrorPreset as fallo:
+            raise ErrorApi(400, str(fallo))
+    anotar_global("diagramas_estilo", {"preset": preset_id, "diagramas": valor})
+    return {"diagramas": valor, "cambiado": True}
+
+
 # ------------------------------------------------------------------ DOMINIOS
 #
 # Rama dominio-negocio (21-10-2026). Lo de cada negocio (servicios, cartas de
@@ -18941,6 +19141,15 @@ def _opciones_al_crear(ctx, preset_id, opciones):
         # lleguen: si el estilo dice «guion», o se elige despues, no se pierden
         cambios["guion_visual"] = {"origen": "parrilla", "planos": [],
                                    "aprobado": False, "visuales": visuales}
+    # CUANTO SE EXPLICA DIBUJANDO (rama diagramas-por-contenido): solo si se
+    # eligio uno en el encargo; sin elegir manda el del estilo (regla 1)
+    if opciones.get("diagramas") not in (None, ""):
+        try:
+            diagramas = DIAGRAMAS.normalizar(opciones.get("diagramas"))
+        except ValueError as fallo:
+            raise ErrorApi(400, f"diagramas: {fallo}")
+        if diagramas:
+            cambios["diagramas"] = diagramas
     if cambios:
         ctx.estado.actualizar_params("assets", cambios)
     presencia = opciones.get("presencia")

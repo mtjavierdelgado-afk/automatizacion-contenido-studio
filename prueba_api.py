@@ -2245,7 +2245,8 @@ def probar_sistema(cliente):
     respuesta, datos = cliente.get("/api/sistema/guias")
     igual(respuesta.status_code, 200, "GET /api/sistema/guias responde 200")
     ids = [g.get("id") for g in datos.get("guias") or []]
-    igual(ids, ["estilo_grafico", "tipo_negocio", "tono", "voz", "material", "indicaciones", "tipo_relato", "cta",
+    igual(ids, ["estilo_grafico", "tipo_negocio", "tono", "voz", "material", "indicaciones", "tipo_relato",
+                "diagramas", "cta",
                 "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
                 "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente", "chat_guiones",
                 "analizar_cuenta", "conexiones_cuentas",
@@ -2253,7 +2254,7 @@ def probar_sistema(cliente):
                 "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
                 "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business",
                 "emojis_redes"],
-          "estan las treinta y tres guias (ocho de Crear, diecinueve de Publicar y seis de la Parrilla), en orden")
+          "estan las treinta y cuatro guias (nueve de Crear, diecinueve de Publicar y seis de la Parrilla), en orden")
     ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
            for g in datos.get("guias") or []),
        "cada guia trae plantilla, prompt para otra IA y que hace el sistema")
@@ -8478,6 +8479,176 @@ def probar_guion_visual():
         servidor._bloques_del_guion = real
 
 
+def probar_diagramas():
+    """Rama diagramas-por-contenido (28-10-2026): el ajuste «Diagramas» del vídeo
+    y del estilo, y que el catálogo lo recibe. Sin él, nada se escribe y el
+    prompt del catálogo es el de siempre (regla 1).
+
+    En este proceso y sin el CLI: `_llamar_claude` del catálogo es un doble que
+    apunta la instrucción y corta. Nada se paga."""
+    seccion("DIAGRAMAS: EL AJUSTE DEL VÍDEO Y DEL ESTILO")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    catalogo = servidor.PASOS_MODULOS.catalogo_visual
+
+    class _Cortar(Exception):
+        pass
+
+    vistas = []
+
+    def claude_falso(instruccion, *_a, **_k):
+        vistas.append(instruccion)
+        raise _Cortar()
+
+    bloques = [{"id": "B001", "texto": "Una hora de PS5 cuesta 12 soles.", "personaje": False},
+               {"id": "B002", "texto": "Primero eliges la consola y luego pagas.", "personaje": False}]
+    base = tempfile.mkdtemp(prefix="estudio_diagramas_")
+    servidor.fijar_raiz_proyectos(base)
+    real_bloques, real_claude = servidor._bloques_del_guion, catalogo._llamar_claude
+    servidor._bloques_del_guion = lambda _ctx: bloques
+    catalogo._llamar_claude = claude_falso
+    try:
+        pid = Proyecto.crear(base, "diagramas").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+
+        def proponer():
+            vistas.clear()
+            try:
+                servidor._correr_catalogo(lambda *_a, **_k: None, ctx,
+                                          {"modelo": "sonnet", "esfuerzo": "medium"}, "")
+            except _Cortar:
+                pass
+            return vistas[0] if vistas else ""
+
+        sin_nada = proponer()
+        firma = ctx.estado.firma("assets")
+        for nada in ({}, {"diagramas": None}, {"diagramas": ""}):
+            servidor._opciones_al_crear(ctx, "", nada)
+        ok("diagramas" not in (ctx.estado.params("assets") or {}),
+           "DIAGRAMAS: sin elegir, no se escribe nada en assets (regla 1)")
+        igual(ctx.estado.firma("assets"), firma, "DIAGRAMAS: y la firma no se mueve")
+        ok(sin_nada and "DIAGRAMAS —" not in sin_nada,
+           "DIAGRAMAS: y el prompt del catálogo no lleva su tramo")
+        igual(proponer(), sin_nada, "DIAGRAMAS: el prompt, el de siempre")
+        codigo, f = _llamar(servidor.ver_diagramas, pid)
+        ok(codigo == 200 and f["modo"] == "" and [o["id"] for o in f["opciones"]][:1] == ["ninguna"],
+           f"DIAGRAMAS: GET sin ajuste ({codigo})")
+        igual(ctx.estado.firma("assets"), firma, "DIAGRAMAS: leer la ficha no escribe nada")
+        codigo, _m = _llamar(servidor._opciones_al_crear, ctx, "", {"diagramas": "muchísimos"})
+        igual(codigo, 400, "DIAGRAMAS: un ajuste que no existe da 400 al crear")
+        servidor._opciones_al_crear(ctx, "", {"diagramas": "Didáctico"})
+        igual((ctx.estado.params("assets") or {}).get("diagramas"), "didactica",
+              "DIAGRAMAS: elegido en el encargo, se guarda por clave")
+        prompt = proponer()
+        ok("DIAGRAMAS —" in prompt and "explicativos" in prompt,
+           "DIAGRAMAS: _correr_catalogo le pasa el ajuste al catálogo")
+        codigo, _m = _llamar(servidor.guardar_diagramas, pid, {})
+        igual(codigo, 400, "DIAGRAMAS: PUT sin 'diagramas', 400")
+        codigo, _m = _llamar(servidor.guardar_diagramas, pid, {"diagramas": "x"})
+        igual(codigo, 400, "DIAGRAMAS: PUT con un ajuste que no existe, 400")
+        codigo, f = _llamar(servidor.guardar_diagramas, pid, {"diagramas": "equilibrada"})
+        ok(codigo == 200 and f["modo"] == "equilibrada" and f["del_video"] == "equilibrada",
+           "DIAGRAMAS: PUT lo cambia")
+        ctx.estado.actualizar_params("assets", {"estilo": {"diagramas": "ninguna"}})
+        codigo, f = _llamar(servidor.guardar_diagramas, pid, {"diagramas": None})
+        ok(codigo == 200 and "diagramas" not in (ctx.estado.params("assets") or {})
+           and f["modo"] == "ninguna" and f["del_estilo"] == "ninguna",
+           "DIAGRAMAS: null vuelve a lo del estilo y quita la clave")
+        guardado = {"reparto": {"a": {}}, "sets": {}, "beats": [],
+                    "diagramas": "didactica",
+                    "explicativos": [{"desde": "B002", "hasta": "B002", "bloques": ["B002"]}],
+                    "componentes": {"g": {"tipo": "grafico", "config": {"clase": "barras"}},
+                                    "m": {"tipo": "mapa", "config": {"region": "america"}}}}
+        igual(sorted(servidor._catalogo_de_diagramas(guardado)),
+              ["componentes", "diagramas", "explicativos"],
+              "DIAGRAMAS: el catálogo guarda sus tramos y sus gráficos")
+        igual(list(servidor._catalogo_de_diagramas(guardado)["componentes"]), ["g"],
+              "DIAGRAMAS: y solo los gráficos con cifras (los mapas, fuera como siempre)")
+        igual(servidor._catalogo_de_diagramas({"reparto": {}}), {},
+              "DIAGRAMAS: un catálogo sin ajuste no guarda nada de más")
+        # AL DÍA SIN VOLVER A REPARTIR: sin ajuste y sin nada guardado, nada
+        ctx.estado.set_params("assets", {k: v for k, v in (ctx.estado.params("assets") or {}).items()
+                                         if k not in ("diagramas", "estilo")})
+        sitios = {"reparto": {"ana": {"descripcion": "a woman"}},
+                  "sets": {"sala": {"descripcion": "a room"}}, "beats": [], "reales": []}
+        ctx.estado.actualizar_params("assets", {"catalogo": dict(sitios)})
+        firma = ctx.estado.firma("assets")
+        llamadas = []
+        real_diag = catalogo.proponer_diagramas
+
+        def diag_falso(bloques, modo, **_k):
+            llamadas.append(modo)
+            return {"diagramas": modo, "avisos": [],
+                    "explicativos": [{"desde": "B002", "hasta": "B002", "bloques": ["B002"]}],
+                    "componentes": {"g": {"tipo": "grafico", "config": {"clase": "barras"}}}}
+        catalogo.proponer_diagramas = diag_falso
+        try:
+            nada = servidor._diagramas_al_dia(lambda *_a, **_k: None, ctx, {})
+            ok(nada is False and not llamadas and ctx.estado.firma("assets") == firma,
+               "DIAGRAMAS AL DÍA: sin ajuste no hace nada ni llama a nadie (regla 1)")
+            ctx.estado.actualizar_params("assets", {"diagramas": "didactica"})
+            ok(servidor._diagramas_al_dia(lambda *_a, **_k: None, ctx, {}) and llamadas == ["didactica"],
+               "DIAGRAMAS AL DÍA: con ajuste, Claude lee solo lo que se explica")
+            guardado = (ctx.estado.params("assets") or {}).get("catalogo") or {}
+            ok(guardado.get("sets") == sitios["sets"] and guardado.get("reparto") == sitios["reparto"],
+               "DIAGRAMAS AL DÍA: y los sitios y el reparto, intactos")
+            ok(guardado.get("diagramas") == "didactica" and len(guardado.get("explicativos")) == 1
+               and "g" in (guardado.get("componentes") or {}),
+               "DIAGRAMAS AL DÍA: con sus tramos y su gráfico")
+            ok(servidor._diagramas_al_dia(lambda *_a, **_k: None, ctx, {}) is False
+               and llamadas == ["didactica"], "DIAGRAMAS AL DÍA: repetirlo no vuelve a llamar")
+            ctx.estado.actualizar_params("assets", {"diagramas": "ninguna"})
+            servidor._diagramas_al_dia(lambda *_a, **_k: None, ctx, {})
+            guardado = (ctx.estado.params("assets") or {}).get("catalogo") or {}
+            ok(llamadas == ["didactica"] and guardado.get("diagramas") == "ninguna"
+               and not guardado.get("explicativos") and "componentes" not in guardado,
+               "DIAGRAMAS AL DÍA: «ninguna» quita tramos y gráficos sin llamar a nadie")
+            ctx.estado.set_params("assets", {k: v for k, v in (ctx.estado.params("assets") or {}).items()
+                                             if k != "diagramas"})
+            servidor._diagramas_al_dia(lambda *_a, **_k: None, ctx, {})
+            guardado = (ctx.estado.params("assets") or {}).get("catalogo") or {}
+            igual(guardado, sitios, "DIAGRAMAS AL DÍA: quitar el ajuste deja el catálogo como estaba")
+        finally:
+            catalogo.proponer_diagramas = real_diag
+        codigo, _m = _llamar(servidor.guardar_diagramas_estilo, "no-existe", {"diagramas": "equilibrada"})
+        ok(codigo in (400, 404), f"DIAGRAMAS: el estilo que no existe da error ({codigo})")
+        codigo, _m = _llamar(servidor.guardar_diagramas_estilo, "x", {})
+        igual(codigo, 400, "DIAGRAMAS: estilo sin 'diagramas', 400")
+    finally:
+        servidor._bloques_del_guion = real_bloques
+        catalogo._llamar_claude = real_claude
+    # EL CAMINO BUENO EN EL ESTILO, con un estilo de verdad en un almacén aparte
+    from PIL import Image as _Imagen                          # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_diagramas_estilo_")
+    presets = servidor._presets()
+    antes = presets.FICHERO
+    try:
+        presets.FICHERO = os.path.join(base, "presets.json")
+        refs = []
+        for i in range(3):
+            ruta = os.path.join(base, f"r{i}.png")
+            _Imagen.new("RGB", (64, 40), (40 * i, 90, 160)).save(ruta)
+            refs.append(ruta)
+        ficha = presets.guardar("canal", "Con diagramas", {"estilo": {"referencias": refs},
+                                                           "guion": {"instrucciones": "x"}})
+        eid = ficha["id"]
+        codigo, r = _llamar(servidor.guardar_diagramas_estilo, eid, {"diagramas": "Equilibrado"})
+        ok(codigo == 200 and r == {"diagramas": "equilibrada", "cambiado": True},
+           f"DIAGRAMAS: fijarlo en el estilo lo guarda ({codigo} {r})")
+        igual(presets.leer(eid)["datos"]["estilo"].get("diagramas"), "equilibrada",
+              "DIAGRAMAS: y queda en el estilo")
+        codigo, r = _llamar(servidor.guardar_diagramas_estilo, eid, {"diagramas": "equilibrada"})
+        ok(codigo == 200 and r.get("cambiado") is False, "DIAGRAMAS: repetirlo no cambia nada")
+        codigo, r = _llamar(servidor.guardar_diagramas_estilo, eid, {"diagramas": None})
+        estilo = presets.leer(eid)["datos"]["estilo"]
+        ok(codigo == 200 and "diagramas" not in estilo and len(estilo.get("referencias") or []) == 3,
+           "DIAGRAMAS: null lo quita y el resto del estilo se queda")
+    finally:
+        presets.FICHERO = antes
+
+
 def _video_montado_de_prueba(servidor, base, nombre):
     """Un vídeo con todos los pasos hechos y su MP4: «montado y al día»."""
     from nucleo import Estado, Proyecto                       # noqa: PLC0415
@@ -8719,6 +8890,7 @@ def main():
         probar_dominios()
         probar_tipos_de_negocio()
         probar_guion_visual()
+        probar_diagramas()
     finally:
         parar(proceso)
         if not argumentos.conservar:

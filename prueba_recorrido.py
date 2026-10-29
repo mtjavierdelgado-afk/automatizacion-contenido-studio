@@ -4893,9 +4893,10 @@ def parrilla_de_guiones(navegador, datos):
     pg = Pagina(navegador, datos)
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
     ok(pg.esperar(".parrilla h2", "Automatizar"), "Automatizar abre la Parrilla (ya no es una pestaña vacía)")
-    # rediseno-automatizar (22-10): el piloto, una tarjeta «próximamente» (no una pestaña que no se pulsa)
-    ok(pg.esperar(".piloto-parrilla", "Piloto automático", 10) and pg.visible(".piloto-parrilla .pastilla", "próximamente"),
-       "el piloto automático sale como «próximamente»")
+    # rediseno-automatizar (22-10): el piloto bajo el tablero, no una pestaña; desde
+    # la rama video-completo (28-10) ya es de verdad (su tramo: `piloto_video_completo`)
+    ok(pg.esperar(".panel-piloto h3", "Piloto automático", 10),
+       "el piloto automático sale bajo la Parrilla")
     pg.pulsar(".cab-automatizar .boton-i")
     ok(pg.visible(".parrilla-opcional", "opcional"), "y la «i» dice que la Parrilla es opcional")
     pg.js(f"elegirProyectoParrilla('{cid}');")
@@ -9297,6 +9298,120 @@ def insertar_una_imagen(navegador, datos):
     ok(set(assets.get("unidades_obsoletas") or []) <= set(assets_antes.get("unidades_obsoletas") or []),
        f"sin dejar nada por rehacer ({assets.get('unidades_obsoletas')})")
     pg.sin_errores("insertar una imagen")
+    pg.cerrar()
+
+
+# ======================================================================
+# EL PILOTO (rama `video-completo`, 28-10-2026). Tramo propio y al final. El
+# servidor corre con ESTUDIO_SIMULAR=1 y Claude falso: el vídeo que crea el
+# piloto no llega a montarse (el guion falso no da para tanto), y eso también
+# vale: lo que se mira es la pantalla, que lo manda, lo enseña en su panel,
+# y que un vídeo que se para o falla sale en «Necesita revisión» con su botón.
+
+@escenario
+def piloto_video_completo(navegador, datos):
+    """Automatizar → un guion → «🤖 Hacer el vídeo completo»: el diálogo con
+    el interruptor de tres opciones (y el umbral solo en «mezcla»), mandarlo,
+    verlo en el panel del piloto y los ajustes de siempre."""
+    api, cid = datos["api"], datos["cliente"]
+    guion = ("PI01 — Piloto\nCliente / proyecto: Prueba\nUso: exacto\nRed: Reels\n"
+             "Formato: vertical\nDuración: 30 s\nObjetivo: probar\nCTA: Escríbenos\n"
+             "Tono: cercano\n\nESCENA 1\nVoz: «El piloto hace el vídeo entero.»\n\n"
+             "PARA EL ENCARGO\n- Material: El piloto hace el vídeo entero.\n"
+             "- Indicaciones: cercano\n- Llamadas a la acción: Escríbenos\n"
+             "- Duración: 30 s · Formato: vertical\n\nAVISOS\n- ninguno")
+    r, hecho = api.post(f"/api/parrilla/proyectos/{cid}/guiones", {"texto": guion, "nombre": "Piloto"})
+    ok(r.status_code == 201 and (hecho or {}).get("guiones"), f"el guion del piloto se guarda ({r.status_code})")
+    r, antes = api.get("/api/piloto")
+    ok(r.status_code == 200 and "ajustes" in (antes or {}), f"GET /api/piloto contesta ({r.status_code})")
+    pg = Pagina(navegador, datos, nombre="piloto")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    pg.p.wait_for_timeout(900)
+    ok(pg.esperar(".panel-piloto h3", "Piloto automático", 10), "el panel del piloto está bajo la Parrilla")
+    pg.pulsar(".tarjeta-guion .titulo-guion", "PI01")
+    pg.pulsar(".pestanas-cajon button", "Al Encargo")
+    pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
+    pg.p.wait_for_timeout(300)
+    ok(pg.visible(".pie-cajon .boton-piloto-guion", "Hacer el vídeo completo"),
+       "la ficha del guion tiene «🤖 Hacer el vídeo completo» junto a «Pasar al Encargo»")
+    pg.captura("piloto_ficha", entera=False)
+    pg.pulsar(".pie-cajon .boton-piloto-guion")
+    ok(pg.esperar(".dialogo-piloto h3", "Hacer el vídeo completo", 6), "abre su diálogo")
+    ok(pg.p.locator(".dialogo-piloto .opcion-piloto").count() == 3, "con las tres opciones del interruptor")
+    pg.pulsar(".dialogo-piloto .opcion-piloto", "Detenerse y avisar")
+    ok(pg.visible(".dialogo-piloto .opcion-piloto.elegida", "Detenerse y avisar")
+       and not pg.visible(".dialogo-piloto .campo-piloto", "Umbral"),
+       "«Detenerse y avisar» se elige y no pide umbral")
+    ok(pg.visible(".dialogo-piloto .pista", "apruebes tú"), "y avisa de que también para en los vistos buenos")
+    pg.pulsar(".dialogo-piloto .opcion-piloto", "Mezcla con regla")
+    ok(pg.visible(".dialogo-piloto .campo-piloto", "Umbral"), "«Mezcla con regla» pide el umbral")
+    pg.p.locator(".dialogo-piloto .campo-piloto", has_text="Umbral").locator("input").fill("30")
+    pg.captura("piloto_dialogo", entera=False)
+    pg.pulsar(".dialogo-piloto button", "Mandar al piloto")
+    ok(pg.esperar(".tarjeta-piloto .titulo-piloto", "PI01", 15), "el vídeo sale en el panel del piloto")
+    ok(not pg.visible(".dialogo-piloto"), "y el diálogo se cierra")
+    _r, ahora_ = api.get("/api/piloto")
+    mio = next((v for v in (ahora_ or {}).get("videos") or [] if "PI01" in (v.get("titulo") or "")), {})
+    ok(mio.get("ajustes", {}).get("si_falla") == "mezcla" and mio.get("ajustes", {}).get("umbral_pct") == 30,
+       f"con los ajustes elegidos en el diálogo ({mio.get('ajustes')})")
+    # los ajustes de siempre
+    pg.pulsar(".panel-piloto button", "Ajustes del piloto")
+    ok(pg.esperar(".ajustes-piloto .opcion-piloto", "Seguir y marcar", 5), "«⚙ Ajustes del piloto» enseña el interruptor")
+    pg.pulsar(".ajustes-piloto .opcion-piloto", "Seguir y marcar")
+    pg.pulsar(".ajustes-piloto button", "Guardar los ajustes")
+    pg.p.wait_for_timeout(800)
+    _r, aj = api.get("/api/piloto")
+    ok(((aj or {}).get("ajustes") or {}).get("si_falla") == "seguir", "y se guarda")
+    api.put("/api/piloto/ajustes", {"si_falla": "mezcla"})
+    # el vídeo acaba (o se para) y su tarjeta lo dice, con su botón
+    fin = time.time() + 120
+    estado = ""
+    while time.time() < fin:
+        _r, foto = api.get("/api/piloto")
+        mio = next((v for v in (foto or {}).get("videos") or [] if v.get("id") == mio.get("id")), mio)
+        estado = mio.get("estado")
+        if estado not in ("en_cola", "trabajando"):
+            break
+        pg.p.wait_for_timeout(1500)
+    ok(estado in ("listo", "revisar", "parado", "error"),
+       f"el vídeo del piloto termina o se para solo ({estado}: {mio.get('porque') or ''} {mio.get('mensaje') or ''})")
+    pg.p.wait_for_timeout(5000)
+    if estado in ("parado", "error"):
+        ok(pg.esperar(".grupo-revisar .tarjeta-piloto", "PI01", 15), "un vídeo parado sale en «Necesita revisión»")
+        ok(pg.visible(".grupo-revisar .tarjeta-piloto button", "Reintentar"), "con «Reintentar»")
+    elif estado in ("listo", "revisar"):
+        ok(pg.visible(".tarjeta-piloto button", "Publicar"), "uno listo lleva a Publicar")
+    if mio.get("pid"):
+        _r, lista = api.get("/api/proyectos")
+        ok(any(p_.get("id") == mio["pid"] for p_ in (lista or {}).get("proyectos") or []),
+           "el vídeo que creó el piloto está en Tus proyectos")
+    pg.captura("piloto_panel")
+    pg.pulsar(".tarjeta-piloto button", "Quitar de la lista")
+    if pg.esperar(".capa-dialogo", "Quitar de la lista", 4):
+        pg.pulsar(".capa-dialogo button[type=submit]")
+    pg.p.wait_for_timeout(1200)
+    _r, foto = api.get("/api/piloto")
+    ok(all(v.get("id") != mio.get("id") for v in (foto or {}).get("videos") or []), "«Quitar de la lista» lo quita")
+    # en el móvil, el diálogo cabe
+    movil = Pagina(navegador, datos, ancho=390, alto=844, nombre="piloto móvil")
+    movil.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    movil.js(f"elegirProyectoParrilla('{cid}');")
+    movil.p.wait_for_timeout(900)
+    movil.js(f"const g = (PAR.datos.matrices || []).flatMap(m => m.guiones || []).find(x => (x.codigo || '') === 'PI01'); "
+             f"if (g) await abrirGuionParrilla(g.id);")
+    movil.p.wait_for_timeout(900)
+    ok(movil.visible(".pie-cajon .boton-piloto-guion"), "en el móvil la ficha también tiene el botón del piloto")
+    movil.captura("piloto_ficha_movil", entera=False)
+    movil.js("PAR.estiloElegido = (estilosParaPasarParrilla()[0] || {}).id || ''; "
+             "abrirDialogoPiloto(PAR.guion, 0, PAR.estiloElegido);")
+    ok(movil.esperar(".dialogo-piloto", None, 6), "en el móvil el diálogo se abre")
+    ancho = movil.p.evaluate("() => document.documentElement.scrollWidth")
+    ok(ancho <= 392, f"y no se sale por los lados ({ancho} px)")
+    movil.captura("piloto_dialogo_movil")
+    movil.sin_errores("piloto en el móvil")
+    movil.cerrar()
+    pg.sin_errores("piloto")
     pg.cerrar()
 
 if __name__ == "__main__":

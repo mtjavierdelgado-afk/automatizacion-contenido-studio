@@ -5240,8 +5240,6 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .tarjeta-guion .datos-guion, .tarjeta-guion .video-guion { overflow-wrap: anywhere; min-width: 0; }
 .pie-tarjeta-guion { gap: 6px 8px; }
 .pie-tarjeta-guion .chip-enlace { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.piloto-parrilla { border-style: dashed; gap: 8px 10px; }
-.piloto-parrilla .meta { min-width: 0; }
 
 /* ---- la ficha de un guion: un panel a la derecha */
 .capa-cajon-guion {
@@ -5485,3 +5483,77 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .tabla-consumo-claude th:first-child, .tabla-consumo-claude td.que { text-align: left; white-space: normal; overflow-wrap: anywhere; }
 /* medidor-claude-2: Claude de un vídeo, por tarea, en «Coste del vídeo» */
 .claude-del-video { margin: 6px 0 12px; }
+
+/* ===================================================================== PILOTO
+   rama video-completo (28-10-2026): «🤖 Hacer el vídeo completo». El panel
+   bajo el tablero de la Parrilla, sus tarjetas por vídeo, las portadas
+   candidatas y el diálogo con el interruptor. */
+.panel-piloto { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.panel-piloto > .meta { margin: 0; }
+.cab-piloto { gap: 8px; align-items: center; flex-wrap: wrap; }
+.cab-piloto h3 { margin: 0; }
+.mini.activo { border-color: var(--acento); color: var(--acento); }
+.grupo-piloto { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cab-grupo-piloto { gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.grupo-revisar .tarjeta-piloto { border-color: var(--aviso-borde); }
+.tarjeta-piloto { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; min-width: 0;
+  border: 1px solid var(--linea); border-radius: 12px; background: var(--hueco); }
+.tarjeta-piloto.estado-trabajando { border-color: var(--acento-borde); }
+.tarjeta-piloto.estado-error { border-color: var(--malo-borde); }
+.cab-tarjeta-piloto { gap: 8px; align-items: center; flex-wrap: wrap; }
+.titulo-piloto { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.lineas-piloto { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.lineas-piloto .meta { overflow-wrap: anywhere; }
+.porque-piloto { overflow-wrap: anywhere; }
+.para-revisar-piloto { padding: 6px 10px; border-radius: 8px; border: 1px dashed var(--aviso-borde); }
+.para-revisar-piloto ul { margin: 4px 0 0; padding-left: 18px; }
+.para-revisar-piloto li { overflow-wrap: anywhere; }
+.botones-piloto { gap: 6px; flex-wrap: wrap; }
+.portadas-piloto { display: flex; gap: 10px; flex-wrap: wrap; }
+.portada-piloto { margin: 0; display: flex; flex-direction: column; gap: 4px; width: 140px; max-width: 45%;
+  padding: 6px; border: 1px solid var(--linea); border-radius: 10px; }
+.portada-piloto.puesta { border-color: var(--ok-borde); }
+.portada-piloto img { width: 100%; height: auto; border-radius: 6px; display: block; background: var(--panel); }
+.portada-piloto figcaption { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.ajustes-piloto { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--linea); border-radius: 10px; }
+.interruptor-piloto { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.interruptor-piloto .titulo-campo { font-weight: 600; }
+.opciones-piloto { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.opcion-piloto { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left;
+  padding: 10px; border-radius: 10px; border: 1px solid var(--linea); background: var(--panel); color: var(--texto);
+  cursor: pointer; min-width: 0; }
+.opcion-piloto .meta { white-space: normal; overflow-wrap: anywhere; }
+.opcion-piloto.elegida { border-color: var(--acento); background: var(--acento-relleno); }
+.campos-piloto { gap: 10px 14px; flex-wrap: wrap; align-items: flex-start; }
+.campo-piloto { display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  min-width: 0; max-width: 260px; }
+.campo-piloto > span:first-child { text-transform: none; letter-spacing: 0; font-weight: 600; }
+.campo-piloto .meta { text-transform: none; letter-spacing: 0; }
+.casilla-piloto { display: flex; gap: 8px; align-items: center; justify-content: flex-start;
+  text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--texto); cursor: pointer; }
+.casilla-piloto input { width: auto; margin: 0; flex: none; }
+.campo-portadas-piloto { max-width: none; width: 100%; }
+.campo-portadas-piloto select { max-width: 100%; }
+.mensaje-error-piloto { overflow-wrap: anywhere; }
+.dialogo-piloto { width: min(680px, 100%); max-height: calc(100vh - 32px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px; }
+.cab-dialogo-piloto { align-items: center; gap: 8px; flex-wrap: nowrap; }
+.cab-dialogo-piloto h3 { flex: 1; min-width: 0; }
+.pasos-piloto { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 2px; }
+.acciones-dialogo { justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.boton-piloto-guion { border-color: var(--acento); }
+.vacio-piloto { padding: 6px 0; }
+@media (max-width: 700px) {
+  .opciones-piloto { grid-template-columns: 1fr; }
+  .portada-piloto { width: calc(50% - 5px); max-width: none; }
+  .campo-piloto { max-width: none; flex: 1 1 140px; }
+  .pie-cajon .boton-piloto-guion { font-size: 13px; padding-left: 10px; padding-right: 10px; }
+}
+/* con los dos botones («🤖 Hacer el vídeo completo» y «Pasar al Encargo») el
+   estado de la ficha se quedaba en una columna de una palabra: en pantalla
+   ancha va en su renglón y los botones debajo, a la derecha */
+@media (min-width: 701px) {
+  .cajon-guion .pie-cajon .dentro { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .cajon-guion .pie-cajon .derecha { justify-content: flex-end; }
+}

@@ -10,6 +10,34 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**🤖 Hacer el vídeo completo, desde la Parrilla (28 de octubre)**
+- En la ficha de un guion, junto a «Pasar al Encargo», está **«🤖 Hacer el vídeo
+  completo»**. Lo manda al **piloto automático**, que sin más clics crea el
+  vídeo con su estilo, escribe el guion, pone la voz, dibuja las imágenes (el
+  revisor rehace solo lo que marca, hasta el tope de rondas que elijas), lo
+  monta en la cola de montaje y deja el **paquete de publicación**: títulos,
+  descripciones y hashtags de cada red, y dos portadas, una con un plano del
+  vídeo (gratis) y otra hecha con IA (una imagen). Queda puesta la primera y
+  cambias con «Usar esta». **No publica nada**: eso lo haces tú en Publicar.
+- **El interruptor**, por si quedan imágenes que siguen mal después de
+  rehacer: **Seguir y marcar** (monta igual y te las deja marcadas),
+  **Detenerse y avisar** (para antes de montar) o **Mezcla con regla** (para si
+  pasan del 25 %, que puedes cambiar). Se elige al mandar cada vídeo y se puede
+  guardar como el de siempre en «⚙ Ajustes del piloto».
+- **La cola sigue**: un vídeo con problemas pasa a **«Necesita revisión»** con
+  lo que hay que mirar y el siguiente arranca. Trabaja con dos vídeos a la vez
+  (ajustable); las imágenes y el montaje van igual por turnos en todo el Studio.
+- **Frena antes de gastar**: no arranca un vídeo con el cupo de Claude por
+  encima del 90 % (espera solo a que se libere) ni si lo previsto pasa tu tope
+  por vídeo (5 $ de fábrica).
+- La **imagen base** y el **guion visual**, si el vídeo los lleva, los aprueba el
+  piloto y te los apunta para revisar (en «Detenerse y avisar» te los pide).
+- Lo ves todo en el panel **«🤖 Piloto automático»**, bajo el tablero de la
+  Parrilla: lo que está en marcha con su barra, lo que necesita revisión
+  («Seguir igualmente», «Reintentar») y lo que está listo para publicar.
+- Si el servidor se reinicia con un vídeo a medias, no sigue solo: queda
+  «interrumpido» y «Reintentar» sigue donde iba, sin volver a pagar lo hecho.
+
 **El Studio pasa a la versión 5.1 (28 de octubre)**
 - La versión se ve en el pie del Studio, en la página de acceso y en
   Configuración → Novedades. Lo de debajo de este apartado es lo que trajo la 3.1.

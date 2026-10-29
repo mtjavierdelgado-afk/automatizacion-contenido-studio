@@ -22368,38 +22368,6 @@ def piloto_guardar_ajustes(cuerpo: dict = Body(default=None)):
     return hecho
 
 
-@app.post("/api/piloto/previa")
-def piloto_previa(peticion: Request, cuerpo: dict = Body(default=None)):
-    """Lo que hará el piloto con un guion, SIN mandarlo: {cid, gid, indice?,
-    estilo} -> {encargo, falta, avisos, coste}. No marca ni crea nada."""
-    datos = _cuerpo(cuerpo)
-    PAR = _parrilla()
-    cid = _proyecto_parrilla(datos.get("cid") or PAR.SIN_PROYECTO, peticion)
-    guion = _por_parrilla(PAR.leer, raiz_proyectos(), cid, str(datos.get("gid") or ""))
-    encargos = guion.get("encargo") or []
-    try:
-        indice = int(datos.get("indice") or 0)
-    except (TypeError, ValueError):
-        indice = 0
-    enc = encargos[indice] if 0 <= indice < len(encargos) else (encargos[0] if encargos else {})
-    if not isinstance(enc, dict):
-        enc = {}
-    falta = []
-    if not enc.get("material"):
-        falta.append("material")
-    if not enc.get("duracion_objetivo_s"):
-        falta.append("duracion")
-    if enc.get("formato") not in ("vertical", "horizontal"):
-        falta.append("formato")
-    estilos = {e["id"]: e for e in _estilos_para_parrilla(peticion)}
-    estilo = str(datos.get("estilo") or "")
-    return {"encargo": {k: enc.get(k) for k in ("nombre", "duracion_objetivo_s", "formato",
-                                                 "uso", "tipo_relato", "imagenes")},
-            "falta": falta, "avisos": list(enc.get("avisos") or [])[:8],
-            "estilo": estilos.get(estilo), "estilos": list(estilos.values()),
-            "ajustes": _piloto().ajustes(raiz_proyectos())}
-
-
 @app.post("/api/piloto/videos", status_code=201)
 def piloto_encolar(peticion: Request, cuerpo: dict = Body(default=None)):
     """Manda un guion de la Parrilla al piloto: {cid, gid, indice?, estilo,

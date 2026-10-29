@@ -419,6 +419,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/parrilla/proyectos/{cid}/subir` | Una matriz en Word, Excel, PDF o texto (multipart: «documento», «modo», |
 | `DELETE` | `/api/parrilla/trabajos/{tid}` | Quita de la pantalla un trabajo terminado (el aviso de listo o de error). |
 | `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
+| `GET` | `/api/piloto` | La cola del piloto, la bandeja «Necesita revisión», los ajustes y el cupo. |
+| `PUT` | `/api/piloto/ajustes` | {si_falla?, umbral_pct?, vueltas?, tope_usd?, a_la_vez?, portadas?, |
+| `POST` | `/api/piloto/videos` | Manda un guion de la Parrilla al piloto: {cid, gid, indice?, estilo, |
+| `DELETE` | `/api/piloto/videos/{vid}` | Lo quita de la lista. El video, si se creo, se queda en Tus proyectos. |
+| `POST` | `/api/piloto/videos/{vid}/parar` | Para un video: si espera, sale de la cola; si trabaja, se cancela su |
+| `POST` | `/api/piloto/videos/{vid}/portada` | {id}: deja esa portada candidata como portada del video (gratis). |
+| `GET` | `/api/piloto/videos/{vid}/portadas/{cual}.png` | La imagen de una portada candidata. |
+| `POST` | `/api/piloto/videos/{vid}/seguir` | «Seguir igualmente» ({forzar: true}: salta el tope y el interruptor una |
 | `GET` | `/api/portadas/catalogo` | Plantillas, paletas, fuentes, elementos y formatos de las portadas. |
 | `GET` | `/api/pronunciaciones` | Las palabras que la voz dice como se escriben aqui (sobre todo en ingles). |
 | `PUT` | `/api/pronunciaciones` | {lista: [{escrito, dicho}]} -> la lista guardada. No graba nada ni paga nada. |
@@ -499,4 +507,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**385 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**393 endpoints.** Escrito por `generar_api.py` desde `app.py`.

@@ -856,7 +856,46 @@ botones, con cuántos guiones tiene cada una.
     guion» (antes no se crea ni se gasta nada). Si no se puede (el texto está a
     medio cambiar, no hay estilo…), la barra dice por qué.
   - Se cierra con «×», con Escape o pulsando fuera.
-- El **piloto automático** llegará más adelante: sale como «próximamente».
+  - Al lado, **«🤖 Hacer el vídeo completo»**: lo manda al piloto automático
+    (ver abajo) con el estilo elegido en «Al Encargo».
+
+### Piloto automático
+
+Bajo el tablero de la Parrilla. **«🤖 Hacer el vídeo completo»** (en la ficha de
+un guion) abre un diálogo con el guion y el estilo, lo que va a hacer, la
+duración y el formato si el guion no los dice, y:
+
+- **Si después de rehacer quedan imágenes que siguen mal**: **Seguir y marcar**
+  (monta igual y te las marca), **Detenerse y avisar** (para antes de montar;
+  también para a pedirte la imagen base y el guion visual) o **Mezcla con
+  regla** (para si pasan del **umbral**, 25 % de fábrica).
+- **Rondas de rehacer** (el revisor rehace lo marcado hasta ese tope), **tope por
+  vídeo** en dólares (si se prevé más, se para antes de gastar) y las
+  **portadas**: las dos (una con un plano del vídeo, gratis, y otra con IA, una
+  imagen), solo la del plano o solo la de IA.
+- «Usar estos ajustes también para los próximos vídeos» los guarda como los de
+  siempre. **«Mandar al piloto»** lo pone en la cola.
+
+El piloto crea el vídeo, guion, voz, imágenes con el revisor, montaje (en la
+cola de montaje), textos de cada red y portadas. **No publica.** El panel tiene
+tres grupos:
+
+- **Necesita revisión**: los que se pararon (y por qué y dónde se arregla), los
+  que fallaron y los que acabaron con cosas **para revisar** (imágenes que
+  siguen marcadas, vistos buenos que dio el piloto, avisos del guion). Botones:
+  **Seguir igualmente** (ya lo has mirado: no se para otra vez por lo mismo),
+  **Reintentar** (sigue donde iba; lo hecho no se paga otra vez), **Abrir el
+  vídeo**, **Publicar ›** y **Quitar de la lista** (el vídeo se queda en Tus
+  proyectos).
+- **En marcha y en cola**, con su etapa, su barra y **Parar**.
+- **Listos para publicar**, con sus **portadas**: «✓ puesta» y «Usar esta» para
+  cambiar a la otra.
+
+**⚙ Ajustes del piloto**: lo mismo del diálogo como los de siempre, cuántos
+vídeos trabajan **a la vez** (2 de fábrica; dibujar y montar van igual de uno
+en uno) y el **cupo de Claude** por encima del cual no arranca un vídeo nuevo
+(90 %: espera solo a que se libere). Con el servidor reiniciado a mitad, el
+vídeo queda **interrumpido** y no sigue hasta que pulses «Reintentar».
 
 ### Añadir guiones
 

@@ -30266,7 +30266,8 @@ function pistaPalabraClaveEncargo(v) {
  *     irá al Encargo y «Pasar al Encargo»).
  *   - Lo que hace Claude va en un hilo del servidor: la pantalla pregunta por el
  *     trabajo cada dos segundos (detrás del proxy, una petición larga se corta).
- *   - El piloto automático NO está: sale como «próximamente».
+ *   - El piloto automático (rama video-completo) va en el bloque PILOTO del
+ *     final: su panel bajo el tablero y su botón en la ficha de un guion.
  */
 const PAR = {
   seccion: 'parrilla', cid: '', proyectos: null, estilos: [], datos: null, guion: null,
@@ -30637,10 +30638,10 @@ function lineaMarcaParrilla() {
     h('button', { clase: 'mini fantasma', onclick: () => irASeccionParrilla('marca') }, 'Editar ›'));
 }
 
+/* EL PILOTO AUTOMÁTICO (rama video-completo): su panel vive en el bloque
+   PILOTO del final del fichero. */
 function tarjetaPilotoParrilla() {
-  return h('div', { clase: 'bloque fila piloto-parrilla' },
-    h('b', {}, '🤖 Piloto automático'), h('span', { clase: 'pastilla' }, 'próximamente'),
-    h('span', { clase: 'meta crece' }, 'Llega en una rama posterior (lala-2). No ocupa una pestaña hasta que exista.'));
+  return panelPilotoParrilla();
 }
 
 /* EL TABLERO: tres columnas por estado (en el móvil, una a la vista y las
@@ -31146,7 +31147,8 @@ function pieCajonParrilla(g, sinGuardar) {
     onclick: () => pasarAlEncargoParrilla(g, i, PAR.estiloElegido),
   }, estilo ? `Pasar al Encargo con «${recortar(estilo.nombre, 30)}» ›` : 'Pasar al Encargo ›');
   boton.className = 'primario principal boton-pasar-encargo';
-  return barraAutomatizar({ clase: 'pie-cajon', estado: motivoPasarParrilla(g, sinGuardar), botones: [boton] });
+  return barraAutomatizar({ clase: 'pie-cajon', estado: motivoPasarParrilla(g, sinGuardar),
+    botones: [botonPilotoGuion(g, i, sinGuardar), boton] });
 }
 
 /* «Guion»: uso, formato y duración (cambian su línea del texto), el texto
@@ -32580,4 +32582,471 @@ function bloqueMejoresPublicar() {
     b.appendChild(h('div', { clase: 'meta' }, `Solo publicaciones con ${r.minimo_vistas} vistas o más.`));
   }
   return b;
+}
+
+/* ===================================================================== PILOTO
+ *
+ * «🤖 HACER EL VÍDEO COMPLETO» (rama `video-completo`, 28-10-2026). Un botón en
+ * la ficha de un guion de la Parrilla lo manda a la COLA DEL PILOTO, que sin
+ * más clics crea el vídeo, escribe el guion, pone la voz, dibuja con el
+ * revisor detrás, monta en la cola de montaje y deja el paquete de
+ * publicación (textos por red y dos portadas). NO publica. El servidor es
+ * `pasos/piloto.py` y el bloque PILOTO de `app.py` (rutas `/api/piloto*`).
+ *
+ *   - EL INTERRUPTOR, elegido en el diálogo (y guardable como de siempre):
+ *     seguir y marcar · detenerse y avisar · mezcla con regla (umbral en %).
+ *     En los tres, un vídeo con problemas va a «Necesita revisión» y el
+ *     siguiente de la cola arranca.
+ *   - Aquí solo se pinta y se pide: nada de esto se guarda en un vídeo ni en
+ *     sus params (regla 1). El panel se pregunta cada 4 s con algo en marcha
+ *     y cada 30 s si no, solo con Automatizar a la vista.
+ */
+const PIL = {
+  datos: null, cargando: false, error: '', reloj: null, vuelta: 0, huella: '',
+  verAjustes: false, borrador: null, verListos: false, guardando: false,
+  capa: null, form: null, enviando: false,
+};
+const NOMBRES_SI_FALLA = {
+  seguir: ['Seguir y marcar', 'Monta igual y te deja marcadas las imágenes que siguen mal para revisarlas.'],
+  parar: ['Detenerse y avisar', 'Se para antes de montar y te avisa. No gasta nada más en ese vídeo.'],
+  mezcla: ['Mezcla con regla', 'Si las marcadas pasan del umbral, se para; si no, sigue y las marca.'],
+};
+const NOMBRES_PORTADAS = {
+  ambas: 'Las dos: una con un plano del vídeo (gratis) y otra con IA (se paga una imagen)',
+  plano: 'Solo con un plano del vídeo (gratis)',
+  ia: 'Solo hecha con IA (se paga una imagen)',
+};
+const CLASE_ESTADO_PILOTO = {
+  en_cola: '', trabajando: 'ejecutando', listo: 'ok', revisar: 'obsoleto', parado: 'obsoleto',
+  error: 'error', interrumpido: 'obsoleto', cancelado: '',
+};
+
+function rutaPiloto(resto) { return `${BASE}/api/piloto${resto || ''}`; }
+
+function videosPiloto(estados) {
+  return ((PIL.datos || {}).videos || []).filter(v => estados.includes(v.estado));
+}
+
+async function cargarPiloto() {
+  if (PIL.cargando) return;
+  PIL.cargando = true;
+  try {
+    const datos = await pedir(rutaPiloto());
+    const huella = JSON.stringify(datos, (k, v) => (k === 'segundos' ? undefined : v));
+    PIL.datos = datos;
+    PIL.error = '';
+    if (huella !== PIL.huella) {
+      PIL.huella = huella;
+      repintarPanelPiloto();
+    }
+  } catch (e) {
+    PIL.error = e.message;
+  } finally {
+    PIL.cargando = false;
+  }
+}
+
+/* SOLO EL PANEL, no la Parrilla entera: con un vídeo trabajando cambia cada
+   pocos segundos, y repintar el módulo cerraba lo que se tuviera abierto. Con
+   un campo con el foco no se toca (se pinta en la vuelta siguiente). */
+function repintarPanelPiloto() {
+  if (MODULOS.actual !== 'automatizar' || PAR.seccion !== 'parrilla') return;
+  const viejo = document.querySelector('#modulo .panel-piloto');
+  if (!viejo) return;
+  if (campoPublicarConFoco()) { PIL.huella = ''; return; }
+  viejo.replaceWith(panelPilotoParrilla());
+}
+
+/* LA VUELTA DEL PANEL: rápida con algo en marcha, lenta si no, y nada fuera
+   de Automatizar o con la pestaña escondida. */
+/* `ya`: después de mandar, parar o retomar un vídeo, la vuelta lenta (30 s)
+   que hubiera se tira y se pregunta enseguida. Cada arranque lleva su número
+   (`PIL.vuelta`): una vuelta vieja que despierta después no sigue. */
+function arrancarPiloto(ya) {
+  if (ya && PIL.reloj) { clearTimeout(PIL.reloj); PIL.reloj = null; }
+  if (PIL.reloj) return;
+  const mia = (PIL.vuelta = (PIL.vuelta || 0) + 1);
+  const vuelta = async () => {
+    if (mia !== PIL.vuelta) return;
+    if (MODULOS.actual !== 'automatizar') { PIL.reloj = null; return; }
+    if (!document.hidden) await cargarPiloto();
+    if (mia !== PIL.vuelta) return;
+    const vivo = videosPiloto(['trabajando', 'en_cola']).length > 0;
+    PIL.reloj = setTimeout(vuelta, vivo ? 4000 : 30000);
+  };
+  PIL.reloj = setTimeout(vuelta, PIL.datos && !ya ? 4000 : 0);
+}
+
+/* EL PANEL «🤖 Piloto automático», debajo del tablero de la Parrilla. */
+function panelPilotoParrilla() {
+  arrancarPiloto();
+  const d = PIL.datos;
+  const caja = h('section', { clase: 'bloque panel-piloto', 'aria-label': 'Piloto automático' });
+  const c = (d && d.cuenta) || {};
+  const enMarcha = (c.trabajando || 0) + (c.en_cola || 0);
+  caja.appendChild(h('div', { clase: 'fila cab-piloto' },
+    h('h3', {}, '🤖 Piloto automático'),
+    enMarcha ? h('span', { clase: 'pastilla ejecutando' }, `${c.trabajando || 0} trabajando · ${c.en_cola || 0} en cola`) : null,
+    d && d.a_revisar ? h('span', { clase: 'pastilla obsoleto' }, `⚠ ${d.a_revisar} para revisar`) : null,
+    h('span', { clase: 'crece' }),
+    h('button', { clase: `mini fantasma${PIL.verAjustes ? ' activo' : ''}`, 'aria-expanded': PIL.verAjustes ? 'true' : 'false',
+      onclick: () => { PIL.verAjustes = !PIL.verAjustes; PIL.borrador = null; pintarModulo(); } }, '⚙ Ajustes del piloto')));
+  caja.appendChild(h('p', { clase: 'meta' }, 'Abre un guion y pulsa «🤖 Hacer el vídeo completo»: el piloto crea el vídeo, '
+    + 'escribe el guion, pone la voz, dibuja las imágenes (el revisor rehace lo que salga mal), lo monta y deja '
+    + 'los textos de cada red y las portadas. No publica nada: eso lo haces tú en Publicar.'));
+  if (PIL.error) caja.appendChild(h('div', { clase: 'caja-error' }, `El piloto no contesta: ${PIL.error}`));
+  if (!d) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  if (d.cupo) caja.appendChild(h('div', { clase: 'caja-aviso' }, `⏸ ${d.cupo}. Sigue solo cuando se libere.`));
+  if (PIL.verAjustes) caja.appendChild(ajustesPiloto(d));
+  const revisar = videosPiloto(['revisar', 'parado', 'error', 'interrumpido']);
+  const vivos = videosPiloto(['trabajando', 'en_cola']).reverse();
+  const listos = videosPiloto(['listo']);
+  const cancelados = videosPiloto(['cancelado']);
+  if (!revisar.length && !vivos.length && !listos.length && !cancelados.length) {
+    caja.appendChild(h('div', { clase: 'meta vacio-piloto' }, 'Todavía no has mandado ningún guion al piloto.'));
+    return caja;
+  }
+  const grupo = (titulo, lista, explica, clase) => {
+    if (!lista.length) return null;
+    return h('div', { clase: `grupo-piloto ${clase || ''}`.trim() },
+      h('div', { clase: 'fila cab-grupo-piloto' }, h('b', {}, titulo),
+        h('span', { clase: 'pastilla' }, String(lista.length)), h('span', { clase: 'meta' }, explica)),
+      lista.map(v => tarjetaVideoPiloto(v)));
+  };
+  const verListos = PIL.verListos ? listos : listos.slice(0, 3);
+  [grupo('Necesita revisión', revisar, 'mira lo apuntado y decide', 'grupo-revisar'),
+    grupo('En marcha y en cola', vivos, 'por orden de llegada'),
+    grupo('Listos para publicar', verListos, 'vídeo montado, textos y portada puestos', 'grupo-listos'),
+    listos.length > 3 ? h('button', { clase: 'mini fantasma', onclick: () => { PIL.verListos = !PIL.verListos; pintarModulo(); } },
+      PIL.verListos ? 'Ver menos' : `Ver los ${listos.length} listos`) : null,
+    grupo('Parados por ti', cancelados, '«Reintentar» sigue donde iba'),
+  ].filter(Boolean).forEach(n => caja.appendChild(n));
+  return caja;
+}
+
+function nombreEtapaPiloto(id) {
+  const e = ((PIL.datos || {}).etapas || []).find(x => x.id === id);
+  return e ? e.nombre : (id || '');
+}
+
+function tarjetaVideoPiloto(v) {
+  const nombres = (PIL.datos || {}).estados || {};
+  const marco = { trabajando: ' estado-trabajando', error: ' estado-error' }[v.estado] || '';
+  const tarjeta = h('article', { clase: `tarjeta-piloto${marco}`, datos: { piloto: v.id } });
+  tarjeta.appendChild(h('div', { clase: 'fila cab-tarjeta-piloto' },
+    h('b', { clase: 'titulo-piloto' }, v.nombre || v.titulo || 'Vídeo del piloto'),
+    h('span', { clase: `pastilla ${CLASE_ESTADO_PILOTO[v.estado] || ''}`.trim() }, nombres[v.estado] || v.estado)));
+  const lineas = h('div', { clase: 'lineas-piloto' });
+  if (v.estado === 'trabajando' || v.estado === 'en_cola') {
+    lineas.appendChild(h('span', { clase: 'meta' }, v.estado === 'trabajando'
+      ? `${nombreEtapaPiloto(v.etapa)} · ${legibleCorto((v.vivo && v.vivo.mensaje) || v.mensaje || '')}`
+      : legibleCorto(v.mensaje || 'esperando su turno')));
+    if (v.vivo) {
+      lineas.appendChild(barraDeProgreso(v.vivo.progreso || 0));
+      lineas.appendChild(h('span', { clase: 'meta' }, `${Math.round((v.vivo.progreso || 0) * 100)} %`
+        + (v.vivo.segundos ? ` · lleva ${duracionCorta(v.vivo.segundos)}` : '')
+        + (v.vivo.cancelando ? ' · parando…' : '')));
+    }
+  }
+  if (v.porque && ['parado', 'error', 'interrumpido'].includes(v.estado)) {
+    lineas.appendChild(h('div', { clase: 'porque-piloto' }, h('b', {}, v.estado === 'error' ? 'Qué pasó: ' : 'Por qué se paró: '),
+      v.porque, v.donde ? h('span', { clase: 'meta' }, ` · se arregla en ${v.donde}`) : null));
+  }
+  if (v.estado === 'error' && v.mensaje) lineas.appendChild(h('div', { clase: 'meta mensaje-error-piloto' }, String(v.mensaje).slice(0, 400)));
+  if (v.estado === 'interrumpido') lineas.appendChild(h('div', { clase: 'meta' }, v.mensaje || ''));
+  if ((v.revisar || []).length) {
+    lineas.appendChild(h('div', { clase: 'para-revisar-piloto' }, h('b', {}, 'Para revisar'),
+      h('ul', {}, v.revisar.map(r => h('li', {}, r.que, r.donde ? h('span', { clase: 'meta' }, ` · ${r.donde}`) : null)))));
+  }
+  const dinero = [];
+  if (typeof v.previsto_usd === 'number') dinero.push(`previsto ≈ ${usdCorto(v.previsto_usd)}`);
+  if (typeof v.coste_usd === 'number') dinero.push(`gastado ${usdCorto(v.coste_usd)}`);
+  if (dinero.length) lineas.appendChild(h('span', { clase: 'meta' }, dinero.join(' · ')));
+  tarjeta.appendChild(lineas);
+  if ((v.portadas || []).length) tarjeta.appendChild(portadasPiloto(v));
+  const botones = h('div', { clase: 'fila botones-piloto' });
+  if (v.pid) botones.appendChild(h('button', { clase: 'mini', onclick: () => abrirVideoDeLaCola(v.pid) }, 'Abrir el vídeo'));
+  if (v.pid && ['listo', 'revisar'].includes(v.estado)) {
+    botones.appendChild(h('button', { clase: 'mini primario', onclick: () => abrirPublicarVideo(v.pid) }, 'Publicar ›'));
+  }
+  if (v.estado === 'parado') {
+    botones.appendChild(h('button', { clase: 'mini primario', title: 'Ya lo has mirado: sigue desde donde se paró',
+      onclick: () => seguirPiloto(v, true) }, 'Seguir igualmente'));
+  }
+  if (['error', 'interrumpido', 'cancelado', 'parado'].includes(v.estado)) {
+    botones.appendChild(h('button', { clase: 'mini', title: 'Vuelve a la cola y sigue donde iba (lo hecho no se paga otra vez)',
+      onclick: () => seguirPiloto(v, false) }, 'Reintentar'));
+  }
+  if (['trabajando', 'en_cola'].includes(v.estado)) {
+    botones.appendChild(h('button', { clase: 'mini fantasma peligro', disabled: v.vivo && v.vivo.cancelando ? true : null,
+      onclick: () => pararPiloto(v) }, 'Parar'));
+  } else {
+    botones.appendChild(h('button', { clase: 'mini fantasma', title: 'Quitar de esta lista (el vídeo se queda en Tus proyectos)',
+      onclick: () => quitarPiloto(v) }, 'Quitar de la lista'));
+  }
+  tarjeta.appendChild(botones);
+  return tarjeta;
+}
+
+function portadasPiloto(v) {
+  const caja = h('div', { clase: 'portadas-piloto' });
+  (v.portadas || []).forEach(c => {
+    const puesta = v.portada_puesta === c.id;
+    caja.appendChild(h('figure', { clase: `portada-piloto${puesta ? ' puesta' : ''}` },
+      h('img', { src: `${rutaPiloto(`/videos/${encodeURIComponent(v.id)}/portadas/${encodeURIComponent(c.id)}.png`)}?t=${encodeURIComponent(v.terminado || '')}`,
+        alt: c.nombre, loading: 'lazy' }),
+      h('figcaption', {}, h('span', {}, c.nombre),
+        puesta ? h('span', { clase: 'pastilla ok' }, '✓ puesta')
+          : h('button', { clase: 'mini', onclick: () => elegirPortadaPiloto(v, c) }, 'Usar esta'))));
+  });
+  return caja;
+}
+
+async function elegirPortadaPiloto(v, c) {
+  try {
+    await pedir(rutaPiloto(`/videos/${encodeURIComponent(v.id)}/portada`), { method: 'POST', cuerpo: { id: c.id } });
+    toast(`portada cambiada: ${c.nombre.toLowerCase()}`);
+    await cargarPiloto();
+    pintarModulo();
+  } catch (e) { toast(`no se ha podido cambiar la portada: ${e.message}`, true); }
+}
+
+async function seguirPiloto(v, forzar) {
+  if (forzar && !await preguntarParrilla('Seguir igualmente', 'El piloto sigue desde donde se paró y esta vez no se '
+    + 'detiene por lo mismo (el tope o las imágenes marcadas). ¿Sigo?', 'Seguir')) return;
+  try {
+    await pedir(rutaPiloto(`/videos/${encodeURIComponent(v.id)}/seguir`), { method: 'POST', cuerpo: { forzar: !!forzar } });
+    toast('vuelve a la cola del piloto');
+    await cargarPiloto();
+    pintarModulo();
+    arrancarPiloto(true);
+  } catch (e) { toast(`no se ha podido: ${e.message}`, true); }
+}
+
+async function pararPiloto(v) {
+  if (!await preguntarParrilla('Parar', v.estado === 'en_cola' ? 'Sale de la cola sin hacer nada. ¿Lo paro?'
+    : 'Lo que ya se esté pagando se acaba y se guarda; lo demás no se hace. Luego puedes «Reintentar» y '
+      + 'sigue donde iba. ¿Lo paro?', 'Parar', true)) return;
+  try {
+    await pedir(rutaPiloto(`/videos/${encodeURIComponent(v.id)}/parar`), { method: 'POST' });
+    toast('parando…');
+    await cargarPiloto();
+    pintarModulo();
+    arrancarPiloto(true);
+  } catch (e) { toast(`no se ha podido parar: ${e.message}`, true); }
+}
+
+async function quitarPiloto(v) {
+  if (!await preguntarParrilla('Quitar de la lista', 'Sale de la lista del piloto. El vídeo (si se llegó a crear) '
+    + 'se queda en Tus proyectos tal como está. ¿Lo quito?', 'Quitar')) return;
+  try {
+    await pedir(rutaPiloto(`/videos/${encodeURIComponent(v.id)}`), { method: 'DELETE' });
+    await cargarPiloto();
+    pintarModulo();
+  } catch (e) { toast(`no se ha podido quitar: ${e.message}`, true); }
+}
+
+/* LOS AJUSTES DEL PILOTO, los de siempre (cada vídeo puede llevar los suyos al
+   mandarlo). Se edita una copia y se guarda con su botón. */
+function ajustesPiloto(d) {
+  if (!PIL.borrador) PIL.borrador = Object.assign({}, d.ajustes || {});
+  const b = PIL.borrador;
+  const caja = h('div', { clase: 'ajustes-piloto' });
+  caja.appendChild(camposInterruptorPiloto(b, () => pintarModulo()));
+  const lim = d.limites || {};
+  caja.appendChild(h('div', { clase: 'fila campos-piloto' },
+    campoNumeroPiloto('Vídeos a la vez', b, 'a_la_vez', lim.a_la_vez, 'las imágenes y el montaje van igual de uno en uno'),
+    campoNumeroPiloto('No arrancar con el cupo de Claude por encima de (%)', b, 'cupo_max_pct', lim.cupo_max_pct)));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'primario', disabled: PIL.guardando ? true : null, onclick: () => guardarAjustesPiloto() },
+      PIL.guardando ? 'Guardando…' : 'Guardar los ajustes'),
+    h('button', { clase: 'mini fantasma', onclick: () => { PIL.borrador = null; PIL.verAjustes = false; pintarModulo(); } }, 'Cerrar')));
+  return caja;
+}
+
+async function guardarAjustesPiloto() {
+  PIL.guardando = true;
+  pintarModulo();
+  try {
+    const b = PIL.borrador || {};
+    const ajustes = await pedir(rutaPiloto('/ajustes'), { method: 'PUT', cuerpo: {
+      si_falla: b.si_falla, umbral_pct: b.umbral_pct, vueltas: b.vueltas, tope_usd: b.tope_usd,
+      a_la_vez: b.a_la_vez, portadas: b.portadas, cupo_max_pct: b.cupo_max_pct } });
+    if (PIL.datos) PIL.datos.ajustes = ajustes;
+    PIL.borrador = Object.assign({}, ajustes);
+    toast('ajustes del piloto guardados');
+  } catch (e) {
+    toast(`no se han podido guardar: ${e.message}`, true);
+  } finally {
+    PIL.guardando = false;
+    pintarModulo();
+  }
+}
+
+function campoNumeroPiloto(etiqueta, objeto, clave, limites, pista, paso) {
+  const [min, max] = limites || [0, 9999];
+  return h('label', { clase: 'campo campo-piloto' }, h('span', {}, etiqueta),
+    h('input', { type: 'number', min, max, step: paso || 1, clase: 'numero-corto', value: objeto[clave] ?? '',
+      oninput: ev => { objeto[clave] = ev.target.value === '' ? '' : Number(ev.target.value); } }),
+    pista ? h('span', { clase: 'meta' }, pista) : null);
+}
+
+/* EL INTERRUPTOR Y LOS TOPES: los mismos campos en los ajustes y en el diálogo
+   de un vídeo. `repintar` vuelve a dibujar quien los contiene. */
+function camposInterruptorPiloto(b, repintar) {
+  const lim = ((PIL.datos || {}).limites) || {};
+  const caja = h('div', { clase: 'interruptor-piloto' });
+  caja.appendChild(h('div', { clase: 'titulo-campo' }, 'Si después de rehacer quedan imágenes que siguen mal'));
+  caja.appendChild(h('div', { clase: 'opciones-piloto', role: 'radiogroup', 'aria-label': 'Si quedan imágenes marcadas' },
+    Object.entries(NOMBRES_SI_FALLA).map(([id, [nombre, explica]]) => h('button', {
+      type: 'button', role: 'radio', clase: `opcion-piloto${b.si_falla === id ? ' elegida' : ''}`,
+      'aria-checked': b.si_falla === id ? 'true' : 'false',
+      onclick: () => { b.si_falla = id; repintar(); },
+    }, h('b', {}, nombre), h('span', { clase: 'meta' }, explica)))));
+  const fila = h('div', { clase: 'fila campos-piloto' });
+  if (b.si_falla === 'mezcla') {
+    fila.appendChild(campoNumeroPiloto('Umbral (% de imágenes marcadas)', b, 'umbral_pct', lim.umbral_pct, 'por encima, se para'));
+  }
+  fila.appendChild(campoNumeroPiloto('Rondas de rehacer', b, 'vueltas', lim.vueltas, 'el revisor rehace lo marcado hasta este tope'));
+  fila.appendChild(campoNumeroPiloto('Tope por vídeo ($)', b, 'tope_usd', lim.tope_usd, 'si se prevé más, se para antes de gastar', 0.5));
+  caja.appendChild(fila);
+  caja.appendChild(h('label', { clase: 'campo campo-piloto campo-portadas-piloto' }, h('span', {}, 'Portadas'),
+    h('select', { onchange: ev => { b.portadas = ev.target.value; } },
+      Object.entries(NOMBRES_PORTADAS).map(([id, nombre]) => h('option', { value: id, selected: b.portadas === id ? true : null }, nombre)))));
+  caja.appendChild(h('div', { clase: 'pista' }, b.si_falla === 'parar'
+    ? 'En «Detenerse y avisar» también se para para que apruebes tú la imagen base y el guion visual, si el vídeo los lleva.'
+    : 'La imagen base y el guion visual, si el vídeo los lleva, los aprueba el piloto y te los deja en «Para revisar».'));
+  return caja;
+}
+
+/* EL BOTÓN DE LA FICHA DEL GUION, junto a «Pasar al Encargo». */
+function botonPilotoGuion(g, indice, sinGuardar) {
+  const encargos = g.encargo || [];
+  const e = encargos[indice] || {};
+  const lista = estilosParaPasarParrilla();
+  const motivo = sinGuardar ? 'Guarda antes el texto' : !lista.length ? 'No hay ningún estilo'
+    : !e.material ? 'El guion no tiene material' : '';
+  const boton = h('button', {
+    disabled: motivo ? true : null, title: motivo || 'Crea el vídeo entero sin más clics y deja listo el paquete para publicar',
+    onclick: () => abrirDialogoPiloto(g, indice, PAR.estiloElegido),
+  }, '🤖 Hacer el vídeo completo');
+  boton.className = 'boton-piloto-guion';
+  return boton;
+}
+
+async function abrirDialogoPiloto(g, indice, estiloId) {
+  if (!estiloId) { toast('elige con qué estilo (pestaña «Al Encargo»)', true); return; }
+  if (!PIL.datos) {
+    try { await cargarPiloto(); } catch (e) { /* se dice abajo */ }
+  }
+  const ajustes = (PIL.datos || {}).ajustes || {};
+  const e = (g.encargo || [])[indice] || {};
+  PIL.form = {
+    g, indice, estilo: estiloId,
+    duracion_s: e.duracion_objetivo_s || '', formato: ['vertical', 'horizontal'].includes(e.formato) ? e.formato : '',
+    pideDuracion: !e.duracion_objetivo_s, pideFormato: !['vertical', 'horizontal'].includes(e.formato),
+    si_falla: ajustes.si_falla || 'mezcla', umbral_pct: ajustes.umbral_pct ?? 25, vueltas: ajustes.vueltas ?? 2,
+    tope_usd: ajustes.tope_usd ?? 5, portadas: ajustes.portadas || 'ambas', guardar: false, error: '',
+  };
+  if (PIL.form.pideFormato) PIL.form.formato = 'vertical';
+  pintarDialogoPiloto();
+}
+
+function cerrarDialogoPiloto() {
+  if (PIL.capa) PIL.capa.remove();
+  PIL.capa = null;
+  PIL.form = null;
+  document.removeEventListener('keydown', teclaDialogoPiloto);
+}
+
+function teclaDialogoPiloto(ev) { if (ev.key === 'Escape' && !PIL.enviando) cerrarDialogoPiloto(); }
+
+function pintarDialogoPiloto() {
+  const f = PIL.form;
+  if (!f) return;
+  const estilo = (PAR.estilos || []).find(x => x.id === f.estilo);
+  const titulo = [f.g.codigo, f.g.titulo].filter(Boolean).join(' — ') || 'este guion';
+  const dialogoP = h('div', { clase: 'dialogo dialogo-piloto', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Hacer el vídeo completo' });
+  dialogoP.appendChild(h('div', { clase: 'fila cab-dialogo-piloto' }, h('h3', {}, '🤖 Hacer el vídeo completo'),
+    h('span', { clase: 'crece' }),
+    h('button', { type: 'button', clase: 'mini fantasma', 'aria-label': 'Cerrar', disabled: PIL.enviando ? true : null,
+      onclick: () => cerrarDialogoPiloto() }, '×')));
+  dialogoP.appendChild(h('p', {}, h('b', {}, titulo), ` con «${(estilo || {}).nombre || f.estilo}».`));
+  dialogoP.appendChild(h('ol', { clase: 'pasos-piloto' },
+    h('li', {}, 'Crea el vídeo y escribe el guion'), h('li', {}, 'Le pone la voz'),
+    h('li', {}, 'Dibuja las imágenes; el revisor rehace lo que salga mal'),
+    h('li', {}, 'Lo monta (espera su turno en la cola de montaje)'),
+    h('li', {}, 'Escribe títulos, descripciones y hashtags de cada red y prepara las portadas')));
+  if (f.pideDuracion || f.pideFormato) {
+    const fila = h('div', { clase: 'fila campos-piloto' });
+    if (f.pideDuracion) {
+      fila.appendChild(h('label', { clase: 'campo campo-piloto' }, h('span', {}, 'Duración (segundos)'),
+        h('input', { type: 'number', min: 5, max: 3600, clase: 'numero-corto', value: f.duracion_s,
+          placeholder: '30', oninput: ev => { f.duracion_s = ev.target.value; } }),
+        h('span', { clase: 'meta' }, 'el guion no lo dice')));
+    }
+    if (f.pideFormato) {
+      fila.appendChild(h('label', { clase: 'campo campo-piloto' }, h('span', {}, 'Formato'),
+        h('select', { onchange: ev => { f.formato = ev.target.value; } },
+          ['vertical', 'horizontal'].map(x => h('option', { value: x, selected: f.formato === x ? true : null }, x))),
+        h('span', { clase: 'meta' }, 'el guion no lo dice')));
+    }
+    dialogoP.appendChild(fila);
+  }
+  dialogoP.appendChild(camposInterruptorPiloto(f, () => pintarDialogoPiloto()));
+  dialogoP.appendChild(h('label', { clase: 'casilla-piloto' },
+    h('input', { type: 'checkbox', checked: f.guardar ? true : null, onchange: ev => { f.guardar = ev.target.checked; } }),
+    ' Usar estos ajustes también para los próximos vídeos'));
+  dialogoP.appendChild(h('div', { clase: 'pista' }, 'No publica nada. Si algo sale mal, el vídeo va a «Necesita revisión» '
+    + 'y el siguiente de la cola arranca. Lo ves abajo en la Parrilla, en «🤖 Piloto automático».'));
+  if (f.error) dialogoP.appendChild(h('div', { clase: 'caja-error' }, f.error));
+  dialogoP.appendChild(h('div', { clase: 'fila acciones-dialogo' },
+    h('button', { clase: 'fantasma', disabled: PIL.enviando ? true : null, onclick: () => cerrarDialogoPiloto() }, 'Cancelar'),
+    h('button', { clase: 'primario', disabled: PIL.enviando ? true : null, onclick: () => mandarAlPiloto() },
+      PIL.enviando ? 'Mandando…' : 'Mandar al piloto')));
+  const capa = h('div', { clase: 'capa-dialogo capa-piloto', onclick: ev => { if (ev.target === capa && !PIL.enviando) cerrarDialogoPiloto(); } }, dialogoP);
+  if (PIL.capa) PIL.capa.replaceWith(capa);
+  else {
+    document.body.appendChild(capa);
+    document.addEventListener('keydown', teclaDialogoPiloto);
+  }
+  PIL.capa = capa;
+}
+
+async function mandarAlPiloto() {
+  const f = PIL.form;
+  if (!f || PIL.enviando) return;
+  if (f.pideDuracion && !(Number(f.duracion_s) >= 5)) { f.error = 'Escribe cuánto dura (5 s o más).'; pintarDialogoPiloto(); return; }
+  PIL.enviando = true;
+  f.error = '';
+  pintarDialogoPiloto();
+  const ajustes = { si_falla: f.si_falla, umbral_pct: f.umbral_pct, vueltas: f.vueltas, tope_usd: f.tope_usd, portadas: f.portadas };
+  try {
+    if (f.guardar) {
+      const guardados = await pedir(rutaPiloto('/ajustes'), { method: 'PUT', cuerpo: ajustes });
+      if (PIL.datos) PIL.datos.ajustes = guardados;
+    }
+    await pedir(rutaPiloto('/videos'), { method: 'POST', cuerpo: {
+      cid: PAR.cid, gid: f.g.id, indice: f.indice, estilo: f.estilo,
+      duracion_s: f.pideDuracion ? Number(f.duracion_s) : undefined,
+      formato: f.pideFormato ? f.formato : undefined, ajustes } });
+    PIL.enviando = false;
+    cerrarDialogoPiloto();
+    PAR.fichaAbierta = false;
+    toast(`«${recortar([f.g.codigo, f.g.titulo].filter(Boolean).join(' — ') || 'El guion', 40)}» va al piloto: lo ves abajo, en «🤖 Piloto automático»`);
+    await cargarPiloto();
+    pintarModulo();
+    arrancarPiloto(true);
+    setTimeout(() => {
+      const panel = document.querySelector('#modulo .panel-piloto');
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  } catch (e) {
+    PIL.enviando = false;
+    f.error = `No se ha podido mandar: ${e.message}`;
+    pintarDialogoPiloto();
+  }
 }

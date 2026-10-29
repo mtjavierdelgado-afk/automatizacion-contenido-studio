@@ -796,8 +796,9 @@ def contexto_de_nota(nota, escenas_por_id, bloques_por_id, orden,
         candidata = os.path.join(carpeta_escenas, f"{sid}.png")
         imagen = candidata if os.path.exists(candidata) else ""
     try:
+        escrito = (textos_subtitulo or {}).get(sid, "")
         trozos = subtitulos.de_escena(
-            escena, texto=(textos_subtitulo or {}).get(sid, ""))
+            escena, texto=escrito, ancla=subtitulos.ancla_implicita(escena, escrito))
     except Exception:                                          # noqa: BLE001
         trozos = []
     return {

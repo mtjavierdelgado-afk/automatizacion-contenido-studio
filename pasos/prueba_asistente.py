@@ -14,7 +14,7 @@ puede romper en silencio:
   - que una charla admita un turno a la vez y se pueda cancelar;
   - que `onboarding_visto` se lea, se guarde y rechace lo que no sea booleano.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe pasos\\prueba_asistente.py
+    python pasos/prueba_asistente.py
 """
 import os
 import shutil
@@ -93,6 +93,9 @@ def prueba_prompt():
               "y no lleva acentos ni enies: va como argumento y la consola lo recodifica")
     comprobar("secretos" in sistema and "Configuracion" in sistema,
               "dice que no lea secretos y donde se cambian las claves")
+    comprobar("Latinoamerica" in sistema and "nunca vosotros" in sistema
+              and "castellano" not in sistema,
+              "habla en espanol de Latinoamerica, no de Espana (notas del duenio, 24-10)")
 
     vetos = asistente.vetos_de_lectura("C:/estudio")
     comprobar("Read(./secretos/**)" in vetos, "veta secretos/ relativa al cwd")

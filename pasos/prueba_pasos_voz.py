@@ -6,7 +6,7 @@ sinteticas y reescritura local, para no gastar creditos de Cartesia ni del CLI d
 Claude. Al final se hace UNA sola llamada real y corta a Cartesia para verificar
 que el envoltorio con __experimental_controls habla de verdad con la API.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_pasos_voz.py
+    python pasos/prueba_pasos_voz.py
     ... --sin-red      solo simulado, no toca la red
     ... --con-claude   ademas, una reescritura real con el CLI (cuesta unos centimos)
 """
@@ -953,7 +953,7 @@ def prueba_toma_cortada_no_se_paga_dos_veces(base):
         igual([e.get("operacion") for e in nuevos], ["toma_cortada"],
               "EL INTENTO CORTADO QUEDA APUNTADO EN EL GASTO")
         if nuevos:
-            igual(nuevos[0]["cantidad"]["caracteres"], sum(len(t) for t in falso.enviados),
+            igual(nuevos[0]["cantidad"]["caracteres"], sum(coste.caracteres_cobrados(t) for t in falso.enviados),
                   "con los caracteres que se llegaron a mandar")
             comprobar((nuevos[0].get("detalle") or {}).get("audio_recibido_s", 0) > 0,
                       "y cuanto audio habia llegado")

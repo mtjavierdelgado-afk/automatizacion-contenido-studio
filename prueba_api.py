@@ -4,7 +4,7 @@ Prueba del servicio HTTP del Estudio.
 Arranca app.py en un puerto libre contra una carpeta de proyectos temporal,
 ejerce los endpoints principales y comprueba codigos y formas de respuesta.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\prueba_api.py
+    python prueba_api.py
 
 Corre con ESTUDIO_SIMULAR=1: la sintesis de voz no llama a Cartesia, asi que la
 prueba ejercita el camino real de ejecutar -> trabajo -> SSE -> version sin
@@ -288,6 +288,49 @@ def probar_salud_y_proyectos(cliente):
     respuesta, datos = cliente.get("/api/proyectos/..%2F..%2Fetc")
     igual(respuesta.status_code, 404, "un id con rutas dentro da 404")
     return pid, (gemelo.get("proyecto") or {}).get("id")
+
+
+def probar_resumen_de_tarjetas(cliente, carpeta, pid, virgen):
+    """GET /api/proyectos/_resumen (rediseño de Tus proyectos, 22-10-2026): lo
+    mismo que dice abrir el vídeo, y DE SOLO LECTURA de verdad: llamarla no
+    cambia la fecha de ningún fichero de los vídeos ni crea un estado.json."""
+    seccion("EL RESUMEN DE LAS TARJETAS (solo lectura)")
+    suelto = os.path.join(carpeta, "sin_estado_todavia")
+    os.makedirs(suelto, exist_ok=True)
+    with open(os.path.join(suelto, "proyecto.json"), "w", encoding="utf-8") as fh:
+        json.dump({"id": "sin_estado_todavia", "nombre": "Sin estado"}, fh)
+
+    def fechas():
+        vistas = {}
+        for raiz, _dirs, ficheros in os.walk(carpeta):
+            for nombre in ficheros:
+                ruta = os.path.join(raiz, nombre)
+                try:
+                    vistas[ruta] = os.stat(ruta).st_mtime_ns
+                except OSError:
+                    pass
+        return vistas
+    antes = fechas()
+    time.sleep(0.05)
+    r, d = cliente.get(f"/api/proyectos/_resumen?ids={pid},{virgen},sin_estado_todavia,no_existe,_sistema")
+    despues = fechas()
+    igual(r.status_code, 200, "GET /api/proyectos/_resumen responde 200")
+    videos = d.get("videos") or {}
+    ok(pid in videos and virgen in videos, f"resume los vídeos pedidos ({sorted(videos)})")
+    ok("sin_estado_todavia" not in videos and "no_existe" not in videos and "_sistema" not in videos,
+       "y salta los que no tienen estado.json, los que no existen y las carpetas del sistema")
+    cambiados = sorted(x for x in set(antes) | set(despues) if antes.get(x) != despues.get(x))
+    ok(not cambiados, f"llamarla no cambia ni crea ningún fichero de los vídeos -- {cambiados[:5]}")
+    ok(not os.path.exists(os.path.join(suelto, "estado.json")), "ni crea el estado.json de un vídeo que no lo tiene")
+    _r, ficha = cliente.get(f"/api/proyectos/{pid}")
+    reales = {p.get("id"): p.get("estado") for p in ficha.get("pasos") or []}
+    igual(videos.get(pid, {}).get("pasos"), {k: reales.get(k) for k in ("guion", "voz", "assets", "render")},
+          "y dice lo mismo que abrir el vídeo (estado de guion, voz, imágenes y montaje)")
+    muchos = ",".join(f"falso_{i}" for i in range(130)) + f",{pid}"
+    r, d = cliente.get(f"/api/proyectos/_resumen?ids={muchos}")
+    ok(r.status_code == 200 and pid not in (d.get("videos") or {}),
+       "con más de 120 ids solo mira los 120 primeros (la pantalla pide de 40 en 40)")
+    shutil.rmtree(suelto, ignore_errors=True)
 
 
 def probar_renombrar(cliente, pid):
@@ -2202,7 +2245,7 @@ def probar_sistema(cliente):
     respuesta, datos = cliente.get("/api/sistema/guias")
     igual(respuesta.status_code, 200, "GET /api/sistema/guias responde 200")
     ids = [g.get("id") for g in datos.get("guias") or []]
-    igual(ids, ["estilo_grafico", "tono", "voz", "material", "indicaciones", "tipo_relato", "cta",
+    igual(ids, ["estilo_grafico", "tipo_negocio", "tono", "voz", "material", "indicaciones", "tipo_relato", "cta",
                 "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
                 "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente", "chat_guiones",
                 "analizar_cuenta", "conexiones_cuentas",
@@ -2210,7 +2253,7 @@ def probar_sistema(cliente):
                 "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
                 "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business",
                 "emojis_redes"],
-          "estan las treinta y dos guias (siete de Crear, diecinueve de Publicar y seis de la Parrilla), en orden")
+          "estan las treinta y tres guias (ocho de Crear, diecinueve de Publicar y seis de la Parrilla), en orden")
     ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
            for g in datos.get("guias") or []),
        "cada guia trae plantilla, prompt para otra IA y que hace el sistema")
@@ -4521,6 +4564,20 @@ def probar_coste_en_detalle(cliente, pid):
     img = d.get("imagenes") or {}
     ok(all(k in img for k in ("nuevas", "rehechas", "personajes")),
        "las imágenes separadas en nuevas, rehechas y personajes")
+    ok(all(k in img for k in ("base", "portadas")),
+       "y aparte la imagen base del tipo de relato y las portadas (notas del dueño, 24-10)")
+    import app as servidor                                    # noqa: PLC0415
+    falsos = [{"proveedor": "openai", "unidad": u, "usd": usd, "paso": paso,
+               "cantidad": {"imagenes": 1}}
+              for u, usd, paso in (("escena:S001", 0.05, "assets"), ("escena:S001", 0.05, "assets"),
+                                   ("asset:base_sala", 0.08, "assets"),
+                                   ("asset:estado_sala_despues", 0.08, "assets"),
+                                   ("asset:rosa", 0.04, "assets"), ("portada", 0.2, "publicar"),
+                                   ("", 0.01, "estilo"))]
+    partes = servidor._desglose_de_eventos(falsos)["imagenes"]
+    igual({k: v["cuantas"] for k, v in partes.items()},
+          {"nuevas": 1, "rehechas": 1, "base": 2, "personajes": 1, "portadas": 1, "otras": 1},
+          "cada imagen va a su tipo: plano nuevo, rehecho, base y estados, reparto, portada, otra")
     _r, total = cliente.get(f"/api/proyectos/{pid}/coste")
     ok(abs(float(d.get("total_usd") or 0) - float(total.get("total_usd") or 0)) < 0.01,
        f"y el total cuadra con el de la cabecera ({d.get('total_usd')} / {total.get('total_usd')})")
@@ -4549,6 +4606,158 @@ def probar_coste_en_detalle(cliente, pid):
     igual(r.status_code, 404, "un fichero no preparado es un 404")
     r, _d = cliente.get(f"/api/proyectos/{pid}/exportes/..%2F..%2Festado.json")
     ok(r.status_code in (404, 400), f"y no se sale de la carpeta de exportes ({r.status_code})")
+
+
+def probar_medidor_claude(cliente):
+    """Rama medidor-claude (25-10-2026): GET /api/claude/consumo lee el cupo y
+    el resumen sin salir al CLI, y «Medir ahora» con ESTUDIO_SIMULAR da un cupo
+    simulado con sus ventanas y sus avisos."""
+    seccion("EL MEDIDOR DE CLAUDE (25-10)")
+    respuesta, datos = cliente.get("/api/claude/consumo")
+    igual(respuesta.status_code, 200, "GET /api/claude/consumo responde 200")
+    ok({"cupo", "avisos", "resumen", "umbrales"} <= set(datos or {}),
+       "con el cupo, los avisos, el resumen y los umbrales")
+    igual((datos or {}).get("umbrales"), {"ojo": 0.7, "malo": 0.9}, "avisa al 70 % y al 90 %")
+    ok(isinstance(((datos or {}).get("resumen") or {}).get("por_tarea"), list), "el resumen trae lo de cada tarea")
+    ok(not (datos or {}).get("midiendo"), "con ESTUDIO_SIMULAR no mide solo al mirar")
+    respuesta, datos = cliente.post("/api/claude/consumo/medir", {})
+    igual(respuesta.status_code, 200, "«Medir ahora» responde 200")
+    cupo = ((datos or {}).get("cupo") or [{}])[0]
+    ok(cupo.get("simulado") and set(cupo.get("ventanas") or {}) >= {"five_hour", "seven_day"},
+       f"simulado: un cupo con la ventana de 5 h y la semana ({sorted(cupo.get('ventanas') or {})})")
+    ok(all(0 <= v.get("uso", -1) <= 1 and v.get("reinicia") for v in (cupo.get("ventanas") or {}).values()),
+       "cada ventana con su fracción usada y su hora de reinicio")
+    ok(isinstance((datos or {}).get("avisos"), list), "y la lista de avisos")
+
+
+def probar_claude_en_coste(cliente, pid):
+    """Rama medidor-claude-2 (26-10-2026): «Coste del vídeo» trae lo de Claude
+    con los tokens nuevos y los de caché aparte, y el desglose del coste separa
+    la caché leída (de los eventos con el detalle nuevo)."""
+    seccion("CLAUDE EN EL COSTE DEL VÍDEO (26-10)")
+    respuesta, datos = cliente.get(f"/api/proyectos/{pid}/coste/detalle")
+    igual(respuesta.status_code, 200, "GET /coste/detalle responde 200")
+    ok("claude_consumo" in (datos or {}), "trae «claude_consumo» (None si el vídeo es de antes del medidor)")
+    ok(isinstance((datos or {}).get("claude_cache"), int), "y la caché de Claude aparte de los tokens nuevos")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    d = servidor._desglose_de_eventos([
+        {"proveedor": "claude_cli", "operacion": "guion",
+         "tokens": {"entrada": 10, "salida": 90, "cache": 31000},
+         "detalle": {"cache_leida": 30000, "cache_creada": 1000}},
+        {"proveedor": "claude_cli", "operacion": "guion",
+         "tokens": {"entrada": 5, "salida": 5, "cache": 2000}}])
+    igual((d["claude_tokens"], d["claude_cache"]), (1110, 32000),
+          "nuevos = entrada + salida + caché creada; la leída (y la de eventos viejos sin desglose) va aparte")
+
+
+def probar_cola_de_montaje(cliente):
+    """Rama cola-montaje (25-10-2026): montar va de uno en uno en todo el
+    Studio y por orden de llegada, «Solo montar» no espera, y
+    GET /api/cola_studio enseña quién trabaja y quién espera."""
+    seccion("LA COLA DE MONTAJE Y LA COLA DEL STUDIO (25-10)")
+    import threading                                          # noqa: PLC0415
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo.trabajos import Cancelado                     # noqa: PLC0415
+
+    class _Bitacora:
+        def anotar(self, *_a, **_k):
+            pass
+
+    class _Ctx:
+        def __init__(self, nombre):
+            self.id = nombre.lower().replace(" ", "_")
+            self.proyecto = type("P", (), {"config": {"nombre": nombre}})()
+            self.bitacora = _Bitacora()
+
+    turno = servidor._TURNO_MONTAJE
+    orden, mensajes = [], {}
+    suelta = threading.Event()
+
+    def montar(nombre, funcion):
+        mensajes[nombre] = []
+        servidor._con_turno_de_montaje(
+            lambda v, m="", publico="": mensajes[nombre].append(m), _Ctx(nombre), funcion)
+
+    hilos = [threading.Thread(target=montar, args=("Vídeo A", lambda: (suelta.wait(20), orden.append("A"))))]
+    hilos[0].start()
+    time.sleep(0.4)
+    for nombre in ("Vídeo B", "Vídeo C"):
+        hilos.append(threading.Thread(target=montar, args=(nombre, lambda n=nombre[-1]: orden.append(n))))
+        hilos[-1].start()
+        time.sleep(0.4)
+    time.sleep(2.5)
+    # el servidor de las pruebas es OTRO proceso (con sus turnos vacíos): por
+    # HTTP se mira la forma, y lo de estos turnos, llamando a la ruta aquí
+    respuesta, por_http = cliente.get("/api/cola_studio")
+    igual(respuesta.status_code, 200, "GET /api/cola_studio responde 200")
+    ok({"imagenes", "montaje", "trabajando"} <= set(por_http or {}),
+       "con imágenes, montaje y lo que está en marcha")
+    cola = servidor.cola_del_studio(type("Peticion", (), {"headers": {}})())
+    m = (cola or {}).get("montaje") or {}
+    igual(((m.get("ahora") or {}).get("nombre")), "Vídeo A", "la cola dice quién se está montando")
+    igual([x.get("nombre") for x in m.get("fila") or []], ["Vídeo B", "Vídeo C"],
+          "y quién espera, por orden de llegada")
+    ok(isinstance((cola or {}).get("trabajando"), list) and not (m.get("ahora") or {}).get("video"),
+       "un turno de algo que no es un vídeo abierto no ofrece «Abrir»")
+    ok(not orden, "con otro vídeo montándose, los demás esperan su turno")
+    ok(any("se está montando «Vídeo A»" in x for x in mensajes.get("Vídeo B", [])),
+       f"la barra dice a quién espera ({(mensajes.get('Vídeo B') or [''])[:1]})")
+    ok(any("2.º en la fila" in x for x in mensajes.get("Vídeo C", [])),
+       f"y en qué puesto va ({(mensajes.get('Vídeo C') or [''])[:1]})")
+    suelta.set()
+    for hilo in hilos:
+        hilo.join(20)
+    igual(orden, ["A", "B", "C"], "se montan de uno en uno y por orden de llegada")
+    ok(not turno["cerrojo"].locked() and not turno["fila"] and not turno["quien"],
+       "y al acabar el turno queda libre")
+
+    def _cancelado(*_a, **_k):
+        raise Cancelado("parado")
+    turno["cerrojo"].acquire()
+    turno["quien"] = "Otro"
+    try:
+        servidor._con_turno_de_montaje(_cancelado, _Ctx("Vídeo D"), lambda: "no")
+        ok(False, "parar mientras espera el montaje corta la espera")
+    except Cancelado:
+        ok(True, "parar mientras espera el montaje corta la espera")
+    finally:
+        turno["quien"] = ""
+        turno["cerrojo"].release()
+    ok(not turno["fila"], "y sale de la fila")
+
+    # CANCELAR ES EN EL ACTO: con `al_cancelar`, la espera no aguanta al latido
+    turno["cerrojo"].acquire()
+    turno["quien"] = "Otro"
+    pedido = {"si": False, "fn": None}
+
+    def _avisar(*_a, **_k):
+        if pedido["si"]:
+            raise Cancelado("parado")
+    _avisar.al_cancelar = lambda fn: (pedido.update(fn=fn), (lambda: None))[1]
+
+    def _pedir_cancelar():
+        time.sleep(1.5)
+        pedido["si"] = True
+        pedido["fn"]()
+    threading.Thread(target=_pedir_cancelar).start()
+    empezo = time.time()
+    try:
+        servidor._con_turno_de_montaje(_avisar, _Ctx("Vídeo E"), lambda: "no")
+        ok(False, "cancelar en el acto")
+    except Cancelado:
+        tardo = time.time() - empezo - 1.5
+        ok(tardo < 1.2, f"cancelar mientras espera es en el acto ({tardo:.1f} s)")
+    finally:
+        turno["quien"] = ""
+        turno["cerrojo"].release()
+
+    # «Solo montar» no espera: se mira en _correr_paso_marcado
+    import inspect                                            # noqa: PLC0415
+    fuente = inspect.getsource(servidor._correr_paso_marcado)
+    ok('paso_id == "render" and not extra.get("solo_montar")' in fuente,
+       "«Solo montar» (remezclar, segundos) no hace cola; montar entero sí")
 
 
 def probar_turno_y_notas_de_otro_texto():
@@ -6022,6 +6231,7 @@ def probar_audio_y_musica_de_la_previa(cliente, carpeta):
         def __init__(self):
             self.proyecto = Proyecto(os.path.join(carpeta, pid))
             self.estado = Estado(self.proyecto)
+            self.id = pid   # como Contexto.id: lo pide _ficha_descripciones
 
     guardado = servidor.contexto
     servidor.contexto = lambda _pid: _Ctx()
@@ -7395,14 +7605,540 @@ def probar_tipo_relato():
             setattr(servidor, nombre, valor)
 
 
+def probar_relato_en_espanol():
+    """Rama estados-en-espanol (22-10-2026): cada estado en español, dónde se usa
+    y reescribirlo en español.
+
+    En este proceso y sin el CLI: `al_espanol`/`al_ingles` son dobles. Lo que se
+    mira: traducir no mueve NINGUNA firma ni param (regla 1), «dónde se usa»
+    sale de los bloques y del plan, y editar reescribe solo los tramos de ese
+    estado, con la misma etiqueta, y su imagen deja de valer. Nada se paga.
+    """
+    seccion("TIPO DE RELATO EN ESPAÑOL: TRADUCIR, DÓNDE SE USA Y EDITAR")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    from PIL import Image as _Imagen                          # noqa: PLC0415
+
+    mod = servidor._traducciones()
+    p6 = servidor.PASOS_MODULOS.p6_assets
+    bloques = [{"id": "B001", "texto": "Este baño era el más feo de la casa.", "personaje": False},
+               {"id": "B002", "texto": "Cambiamos el piso y el mueble.", "personaje": False},
+               {"id": "B003", "texto": "Y quedó el más bonito de la casa.", "personaje": False}]
+    abierta = "floor and all walls in the same ivory porcelain tile"
+    inicial = "grey floor tiles across the whole floor"
+    llamadas = []
+
+    def espanol_falso(textos, cwd=None):
+        llamadas.append(("es", list(textos)))
+        return {t: "ES " + t for t in textos}
+
+    def ingles_falso(texto, anterior="", cwd=None):
+        llamadas.append(("en", texto, anterior))
+        return "EN " + texto
+
+    def esperar():
+        for _ in range(200):
+            with servidor._LOCK_TRADUCIENDO:
+                estado = (servidor._TRADUCIENDO.get(pid) or {}).get("estado")
+            if estado != "pensando":
+                return estado
+            time.sleep(0.02)
+        return "pensando"
+
+    base = tempfile.mkdtemp(prefix="estudio_relato_es_")
+    servidor.fijar_raiz_proyectos(base)
+    reales = {"_bloques_del_guion": servidor._bloques_del_guion}
+    reales_mod = {"al_espanol": mod.al_espanol, "al_ingles": mod.al_ingles}
+    real_plan = p6.plan_actual
+    servidor._bloques_del_guion = lambda _ctx: bloques
+    mod.al_espanol, mod.al_ingles = espanol_falso, ingles_falso
+    try:
+        pid = Proyecto.crear(base, "relato en español").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        espacio = {"sitio": "Baño", "descripcion": "a small bathroom", "luz": "day",
+                   "secundarios": []}
+        servidor._opciones_al_crear(ctx, "", {"espacio_fijo": espacio, "tipo_relato": {
+            "modo": "espacio_que_cambia", "cambia": "acabados"}})
+        os.makedirs(ctx.proyecto.ruta("espacio_fijo"), exist_ok=True)
+        _Imagen.new("RGB", (64, 40), (200, 200, 200)).save(
+            ctx.proyecto.ruta("espacio_fijo", "0123456789abcdef.png"))
+        ctx.estado.actualizar_params("assets", {"espacio_fijo": dict(
+            espacio, imagen="espacio_fijo/0123456789abcdef.png")})
+        _llamar(servidor.usar_subida_como_base, pid)
+        ctx.estado.actualizar_params("assets", {"catalogo": {
+            "sets": {"bano": {"descripcion": "a small bathroom"}}, "reparto": {},
+            "relato": {"modo": "espacio_que_cambia", "cambia": "acabados", "inicial": inicial},
+            "beats": [{"desde": "B001", "hasta": "B001", "set": "bano", "cambio": "",
+                       "estado": "antes"},
+                      {"desde": "B002", "hasta": "B003", "set": "bano", "cambio": abierta,
+                       "estado": "despues"}]}})
+        _Imagen.new("RGB", (64, 40), (90, 90, 90)).save(
+            ctx.proyecto.ruta("espacio_fijo", "fedcba9876543210.png"))
+        guardado = dict((ctx.estado.params("assets") or {}).get("tipo_relato") or {})
+        guardado["bases"]["bano"]["estados"] = {"despues": {
+            "imagen": "espacio_fijo/fedcba9876543210.png", "aprobada": True, "cambio": abierta}}
+        ctx.estado.actualizar_params("assets", {"tipo_relato": guardado})
+        p6.plan_actual = lambda *_a, **_k: {"escenas": [
+            {"id": "S001", "editar_base": True, "cambio": ""},
+            {"id": "S002", "editar_base": True, "cambio": abierta, "base_clave": "bano#despues"},
+            {"id": "S003", "editar_base": True, "cambio": "algo viejo", "base_clave": "bano#despues"},
+            {"id": "S004", "carta": "detalle"}]}
+
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        igual(codigo, 200, f"LEER: 200 ({ficha if codigo != 200 else ''})")
+        if codigo != 200:
+            return
+        ok("cambios" in ficha, "LEER: la lectura normal trae los planos que cambian")
+        _c, ligera = _llamar(servidor.leer_tipo_relato, pid, True)
+        ok("cambios" not in ligera and "traduccion" in ligera,
+           "LEER: ?ligero=1 (lo que pregunta la pantalla mientras traduce) no los calcula")
+        estado = ficha["estados"][0]
+        igual((estado["estado"], estado["cambio_es"], ficha["inicial_es"]), ("despues", "", ""),
+              "LEER: sin traducir, el español va vacío (la pantalla enseña el inglés)")
+        igual(ficha["traduccion"]["faltan"], 2, "LEER: faltan el cambio y lo que trae la base")
+        igual([b["id"] for b in estado["donde"]["bloques"]], ["B002", "B003"],
+              "DÓNDE: los bloques del tramo, desde..hasta")
+        igual(estado["donde"]["bloques"][0]["n"], 2, "DÓNDE: con su número de bloque")
+        igual(estado["donde"]["planos"], ["S002", "S003"],
+              "DÓNDE: los planos por la clave de su imagen (también el de texto viejo)")
+        igual(([b["id"] for b in ficha["donde_base"]["bloques"]], ficha["donde_base"]["planos"]),
+              (["B001"], ["S001"]), "DÓNDE: la base, con los tramos y planos del «antes»")
+
+        firma = ctx.estado.firma("assets")
+        params = json.loads(json.dumps(ctx.estado.params("assets")))
+        llamadas.clear()
+        codigo, ficha = _llamar(servidor.traducir_tipo_relato, pid, {"auto": True})
+        igual(codigo, 200, f"TRADUCIR: 200 ({ficha if codigo != 200 else ''})")
+        igual(esperar(), "listo", "TRADUCIR: termina")
+        igual(sorted(llamadas[0][1]) if llamadas else None, sorted([abierta, inicial]),
+              "TRADUCIR: pide solo lo que falta, en una llamada")
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        igual((ficha["estados"][0]["cambio_es"], ficha["inicial_es"],
+               ficha["traduccion"]["faltan"]), ("ES " + abierta, "ES " + inicial, 0),
+              "TRADUCIR: la ficha trae el español")
+        igual(ctx.estado.firma("assets"), firma, "TRADUCIR: la firma de assets NO se mueve")
+        igual(ctx.estado.params("assets"), params, "TRADUCIR: y ningún param cambia (regla 1)")
+        ok(os.path.exists(os.path.join(ctx.proyecto.raiz, "traducciones.json")),
+           "TRADUCIR: va al fichero del proyecto")
+        llamadas.clear()
+        _llamar(servidor.traducir_tipo_relato, pid, {})
+        igual((esperar(), llamadas), ("listo", []), "TRADUCIR: sin nada que falte, no llama a Claude")
+
+        # tras un error, la pantalla (auto) no reintenta sola; el botón sí
+        with servidor._LOCK_TRADUCIENDO:
+            servidor._TRADUCIENDO[pid] = {"estado": "error", "tipo": "traducir", "error": "x"}
+        os.remove(os.path.join(ctx.proyecto.raiz, "traducciones.json"))
+        llamadas.clear()
+        _llamar(servidor.traducir_tipo_relato, pid, {"auto": True})
+        igual((esperar(), llamadas), ("error", []), "ERROR: «auto» no se relanza tras un error")
+        _llamar(servidor.traducir_tipo_relato, pid, {})
+        igual((esperar(), len(llamadas)), ("listo", 1), "ERROR: el botón «Traducir» sí")
+
+        # EDITAR EN ESPAÑOL
+        for cuerpo, esperado in (({"estado": "despues"}, 400),
+                                 ({"estado": "volando", "es": "algo"}, 404),
+                                 ({"estado": "despues", "es": "x" * 1300}, 400)):
+            codigo, _m = _llamar(servidor.editar_estado_relato, pid, cuerpo)
+            igual(codigo, esperado, f"EDITAR: {str(cuerpo)[:40]} da {esperado} ({_m})")
+        firma = ctx.estado.firma("assets")
+        llamadas.clear()
+        nuevo = "piso y paredes de porcelanato marfil, mueble de nogal"
+        codigo, ficha = _llamar(servidor.editar_estado_relato, pid,
+                                {"estado": "despues", "es": nuevo})
+        igual(codigo, 200, f"EDITAR: 200 ({ficha if codigo != 200 else ''})")
+        igual(esperar(), "listo", "EDITAR: termina")
+        igual(llamadas[:1], [("en", nuevo, abierta)],
+              "EDITAR: Claude recibe el español y la instrucción anterior")
+        beats = (ctx.estado.params("assets") or {})["catalogo"]["beats"]
+        igual([(b["cambio"], b["estado"]) for b in beats],
+              [("", "antes"), ("EN " + nuevo, "despues")],
+              "EDITAR: solo los tramos de ese estado, con la MISMA etiqueta")
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        e = ficha["estados"][0]
+        igual((e["estado"], e["cambio"], e["cambio_es"], e["vigente"], e["aprobada"]),
+              ("despues", "EN " + nuevo, nuevo, False, False),
+              "EDITAR: el estado lleva lo escrito en español y su imagen deja de valer")
+        ok(not ficha["listo"], "EDITAR: y ya no está todo listo para dibujar")
+        ok(ctx.estado.firma("assets") != firma, "EDITAR: (la firma se mueve: el estado cambió)")
+        igual(e["donde"]["planos"], ["S002", "S003"],
+              "EDITAR: dónde se usa sigue saliendo con el plan viejo (por la clave)")
+
+        # con algo generándose no se edita
+        reales_t = servidor._trabajo_de_cadena
+        servidor._trabajo_de_cadena = lambda _ctx: {"id": "x"}
+        try:
+            codigo, _m = _llamar(servidor.editar_estado_relato, pid,
+                                 {"estado": "despues", "es": "otra cosa"})
+        finally:
+            servidor._trabajo_de_cadena = reales_t
+        igual(codigo, 409, f"EDITAR: con algo generándose, 409 ({_m})")
+    finally:
+        mod.al_espanol, mod.al_ingles = reales_mod["al_espanol"], reales_mod["al_ingles"]
+        p6.plan_actual = real_plan
+        for nombre, valor in reales.items():
+            setattr(servidor, nombre, valor)
+
+
+def probar_quitar_imagen():
+    """Rama unir-planos (26-10-2026): «Quitar esta imagen» y «Deshacer».
+
+    En este proceso: el plan es un doble y la pasada que vuelve a cortar se
+    apunta en vez de lanzarse. Lo que se mira: lo que se rechaza, que lo
+    quitado va a un fichero del proyecto y NO a params (ni una firma se
+    mueve), y que deshacer lo quita del fichero. Nada se paga."""
+    seccion("QUITAR UNA IMAGEN: LA VOZ AL VECINO, Y DESHACER")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    p6 = servidor.PASOS_MODULOS.p6_assets
+    qp = servidor._quitar_planos()
+    base = tempfile.mkdtemp(prefix="estudio_quitar_")
+    servidor.fijar_raiz_proyectos(base)
+    lanzadas = []
+    real_plan, real_pasada = p6.plan_actual, servidor._pasada_sin_dibujar
+    plan = {"escenas": [
+        {"id": "S001", "narracion": "Este baño era el más feo."},
+        {"id": "S002", "narracion": "Con baldosas grises."},
+        {"id": "S003", "narracion": "Y llega el cambio.", "cartela": {"plantilla": "cifra", "fondo": "negro"}},
+        {"id": "S004", "narracion": "Así quedó."},
+        {"id": "S005", "narracion": "El más bonito."}]}
+    p6.plan_actual = lambda *_a, **_k: plan
+    servidor._pasada_sin_dibujar = lambda ctx, nombre, restaurar=None: (
+        lanzadas.append(nombre) or {"trabajo": "t1", "trabajo_id": "t1"})
+    try:
+        pid = Proyecto.crear(base, "quitar imagen").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        firma = ctx.estado.firma("assets")
+        params = json.loads(json.dumps(ctx.estado.params("assets") or {}))
+        for sid, cuerpo, esperado in (("S002", {}, 400), ("S002", {"hacia": "arriba"}, 400),
+                                      ("S099", {"hacia": "anterior"}, 404),
+                                      ("S001", {"hacia": "anterior"}, 409),
+                                      ("S003", {"hacia": "anterior"}, 409),
+                                      ("S002", {"hacia": "siguiente"}, 409),
+                                      ("S004", {"hacia": "anterior"}, 409)):
+            codigo, _m = _llamar(servidor.quitar_imagen, pid, sid, cuerpo)
+            igual(codigo, esperado, f"QUITAR: {sid} {cuerpo} da {esperado} ({_m})")
+        igual(lanzadas, [], "QUITAR: lo rechazado no lanza nada")
+        vecinos = servidor._vecinos_para_quitar(plan, "S002")
+        igual(vecinos, {"anterior": "S001", "siguiente": None},
+              "QUITAR: S002 puede ir a S001, no a una cartela")
+        igual(servidor._quitar_en_la_previa(plan, plan["escenas"][2]), {},
+              "PREVIA: una cartela no ofrece quitarse")
+        codigo, ficha = _llamar(servidor.quitar_imagen, pid, "S002", {"hacia": "anterior"})
+        igual(codigo, 200, f"QUITAR: S002 hacia la anterior, 200 ({ficha if codigo != 200 else ''})")
+        igual(lanzadas, ["quitar_imagen"], "QUITAR: lanza la pasada que no dibuja")
+        # SI LA PASADA NO SE PUEDE LANZAR, lo apuntado se deshace
+        def no_se_puede(*_a, **_k):
+            raise servidor.ErrorApi(409, "'assets' ya se está ejecutando")
+        servidor._pasada_sin_dibujar = no_se_puede
+        codigo, _m = _llamar(servidor.quitar_imagen, pid, "S005", {"hacia": "anterior"})
+        igual(codigo, 409, "QUITAR: sin poder lanzar la pasada, 409")
+        ok(all(e["id"] != "S005" for e in qp.leer(ctx.proyecto.raiz)),
+           "QUITAR: y S005 no se queda apuntado como quitado")
+        servidor._pasada_sin_dibujar = lambda ctx, nombre, restaurar=None: (
+            lanzadas.append(nombre) or {"trabajo": "t1", "trabajo_id": "t1"})
+        if codigo == 200:
+            igual((ficha.get("trabajo"), ficha.get("hacia")), ("t1", "S001"), "QUITAR: dice el trabajo y a quién va")
+        igual(qp.leer(ctx.proyecto.raiz),
+              [{"texto": p6._texto_clave(plan["escenas"][1]), "hacia": "anterior", "id": "S002", "n": 0,
+                "fresca": True}],
+              "QUITAR: va al fichero del proyecto, por su texto")
+        igual(ctx.estado.firma("assets"), firma, "QUITAR: la firma de assets NO se mueve")
+        igual(ctx.estado.params("assets") or {}, params, "QUITAR: ni un param cambia (regla 1)")
+        reales_t = servidor._trabajo_de_cadena
+        servidor._trabajo_de_cadena = lambda _ctx: {"id": "x"}
+        try:
+            codigo, _m = _llamar(servidor.quitar_imagen, pid, "S004", {"hacia": "siguiente"})
+        finally:
+            servidor._trabajo_de_cadena = reales_t
+        igual(codigo, 409, f"QUITAR: con algo en marcha, 409 ({_m})")
+        codigo, _m = _llamar(servidor.devolver_imagen, pid, {})
+        igual(codigo, 400, "DESHACER: sin la frase, 400")
+        codigo, _m = _llamar(servidor.devolver_imagen, pid, {"narracion": "otra cosa"})
+        igual(codigo, 404, "DESHACER: algo que no está quitado, 404")
+        codigo, _m = _llamar(servidor.devolver_imagen, pid, {"narracion": "Con  baldosas grises."})
+        igual(codigo, 200, f"DESHACER: con lo que decía, 200 ({_m if codigo != 200 else ''})")
+        igual((qp.leer(ctx.proyecto.raiz), lanzadas[-1]), ([], "devolver_imagen"),
+              "DESHACER: sale del fichero y vuelve a cortar")
+        igual(ctx.estado.firma("assets"), firma, "DESHACER: la firma sigue igual")
+        # UNA FRASE REPETIDA CON UNA YA QUITADA (revisión del 26-10): S002 dice
+        # lo mismo que S004 y ya está quitada (vive en S001): S004 es la
+        # SEGUNDA vez que se dice, no la primera
+        plan_rep = {"escenas": [
+            {"id": "S001", "narracion": "Este baño era el más feo. Con baldosas grises.",
+             "narracion_imagen": "Este baño era el más feo.",
+             "absorbe": [{"id": "S002", "lado": "despues", "narracion": "Con baldosas grises.", "n": 0}]},
+            {"id": "S003", "narracion": "Y llega el cambio."},
+            {"id": "S004", "narracion": "Con baldosas grises."},
+            {"id": "S005", "narracion": "El más bonito."}]}
+        p6.plan_actual = lambda *_a, **_k: plan_rep
+        qp.reponer(ctx.proyecto.raiz, [{"texto": "con baldosas grises", "hacia": "anterior",
+                                        "id": "S002", "n": 0}])
+        codigo, _m = _llamar(servidor.quitar_imagen, pid, "S004", {"hacia": "anterior"})
+        igual(codigo, 200, f"REPETIDA: quitar S004, 200 ({_m if codigo != 200 else ''})")
+        igual(sorted((e["id"], e["n"]) for e in qp.leer(ctx.proyecto.raiz)),
+              [("S002", 0), ("S004", 1)],
+              "REPETIDA: S004 se apunta como la segunda vez (n=1), sin pisar a S002")
+        qp.reponer(ctx.proyecto.raiz, [])
+        p6.plan_actual = lambda *_a, **_k: plan
+        # lo apuntado que el plan no refleja sale en la previa, con su deshacer
+        qp.quitar(ctx.proyecto.raiz, "así quedó", "anterior", "S004")
+        igual([x["id"] for x in servidor._quitados_sin_aplicar(ctx, plan)], ["S004"],
+              "PREVIA: lo quitado que el corte no refleja se enseña para deshacerlo")
+        qp.reponer(ctx.proyecto.raiz, [])
+    finally:
+        p6.plan_actual, servidor._pasada_sin_dibujar = real_plan, real_pasada
+
+
+def probar_descripcion_planos():
+    """Rama descripcion-planos (26-10-2026): lo que se pidió dibujar, en español.
+
+    En este proceso: el plan es un doble y `describir` también. Lo que se mira:
+    que pide solo lo que falta, una vez, que «auto» no se relanza tras un
+    error y el botón sí, que va a `descripciones.json` y NO a params (ni una
+    firma se mueve), y que un prompt que cambia vuelve a faltar."""
+    seccion("DESCRIPCIÓN DE CADA PLANO, EN ESPAÑOL")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    p6 = servidor.PASOS_MODULOS.p6_assets
+    mod = servidor._traducciones()
+    base = tempfile.mkdtemp(prefix="estudio_describir_")
+    servidor.fijar_raiz_proyectos(base)
+    plan = {"escenas": [
+        {"id": "S001", "narracion": "Este baño era el más feo.", "prompt": "A small grey bathroom, wide shot"},
+        {"id": "S002", "narracion": "Y llega el cambio.", "prompt": "",
+         "cartela": {"plantilla": "cifra", "fondo": "negro"}},
+        {"id": "S003", "narracion": "Así quedó.", "prompt": "The same bathroom, renovated"},
+        {"id": "S004", "narracion": "Así quedó.", "prompt": "The same bathroom, renovated", "sigue_a": "S003"}]}
+    pedidos = []
+    respuesta = {"modo": "bien"}
+
+    def describir_falso(prompts, cwd=None):
+        pedidos.append(list(prompts))
+        if respuesta["modo"] == "mal":
+            raise mod.ErrorTraduccion("la sesión de Claude no responde")
+        return {pr: "ES " + pr for pr in prompts}
+
+    real_plan, real_describir = p6.plan_actual, mod.describir
+    p6.plan_actual = lambda *_a, **_k: plan
+    mod.describir = describir_falso
+
+    def esperar(pid):
+        for _ in range(100):
+            if (servidor._DESCRIBIENDO.get(pid) or {}).get("estado") != "pensando":
+                return
+            time.sleep(0.05)
+
+    try:
+        pid = Proyecto.crear(base, "describir planos").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        firma = ctx.estado.firma("assets")
+        params = json.loads(json.dumps(ctx.estado.params("assets") or {}))
+        codigo, ficha = _llamar(servidor.leer_descripciones_planos, pid)
+        igual((codigo, ficha.get("faltan"), ficha.get("total"), ficha.get("descripciones")),
+              (200, 2, 2, {}), "LEER: dos prompts distintos (la cartela no, la continuación es el mismo)")
+        respuesta["modo"] = "mal"
+        codigo, ficha = _llamar(servidor.describir_planos, pid, {"auto": True})
+        igual(codigo, 200, "DESCRIBIR: arranca")
+        esperar(pid)
+        codigo, ficha = _llamar(servidor.leer_descripciones_planos, pid)
+        igual((ficha.get("estado"), "no responde" in str(ficha.get("error"))), ("error", True),
+              "DESCRIBIR: un error se queda con su motivo")
+        _llamar(servidor.describir_planos, pid, {"auto": True})
+        igual(len(pedidos), 1, "DESCRIBIR: «auto» tras un error no vuelve a llamar a Claude")
+        respuesta["modo"] = "bien"
+        _llamar(servidor.describir_planos, pid, {})
+        esperar(pid)
+        igual(sorted(pedidos[-1]), ["A small grey bathroom, wide shot", "The same bathroom, renovated"],
+              "DESCRIBIR: el botón sí, con cada prompt una vez")
+        codigo, ficha = _llamar(servidor.leer_descripciones_planos, pid)
+        igual((ficha.get("estado"), ficha.get("faltan"), ficha.get("descripciones")),
+              ("listo", 0, {"S001": "ES A small grey bathroom, wide shot",
+                            "S003": "ES The same bathroom, renovated",
+                            "S004": "ES The same bathroom, renovated"}),
+              "LEER: todas descritas, también la continuación")
+        igual(ficha.get("prompts", {}).get("S003"), "The same bathroom, renovated",
+              "LEER: cada descripción viaja con el prompt para el que se escribió")
+        ok(os.path.exists(os.path.join(ctx.proyecto.raiz, "descripciones.json")),
+           "DESCRIBIR: van a descripciones.json del proyecto")
+        igual(ctx.estado.firma("assets"), firma, "DESCRIBIR: la firma de assets NO se mueve")
+        igual(ctx.estado.params("assets") or {}, params, "DESCRIBIR: ni un param cambia (regla 1)")
+        _llamar(servidor.describir_planos, pid, {"auto": True})
+        igual(len(pedidos), 2, "DESCRIBIR: sin nada que falte no se llama a Claude")
+        plan["escenas"][0]["prompt"] = "A small grey bathroom, close-up of the sink"
+        codigo, ficha = _llamar(servidor.leer_descripciones_planos, pid)
+        igual((ficha.get("faltan"), "S001" in ficha.get("descripciones")), (1, False),
+              "LEER: un prompt que cambia vuelve a faltar (nunca la de otro prompt)")
+        _llamar(servidor.describir_planos, pid, {"auto": True})
+        esperar(pid)
+        igual(pedidos[-1], ["A small grey bathroom, close-up of the sink"], "DESCRIBIR: y se pide solo ese")
+    finally:
+        p6.plan_actual, mod.describir = real_plan, real_describir
+
+
+def probar_insertar_imagen():
+    """Rama insertar-imagen (26-10-2026): «Insertar una imagen aquí…» y deshacer.
+
+    En este proceso: el plan es un doble, Claude también y la tanda se apunta
+    en vez de lanzarse. Lo que se mira: lo que se rechaza (sin precio, otro
+    precio, una cartela, la primera palabra), que se pide UNA unidad nueva con
+    su letra, que va a un fichero y NO a params (ni una firma se mueve), que si
+    la tanda no se puede lanzar no queda nada apuntado, y que deshacer vuelve a
+    cortar gratis."""
+    seccion("INSERTAR UNA IMAGEN: PARTIR UN PLANO Y DESHACER")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    p6 = servidor.PASOS_MODULOS.p6_assets
+    ip = servidor._insertar_planos()
+    base = tempfile.mkdtemp(prefix="estudio_insertar_")
+    servidor.fijar_raiz_proyectos(base)
+
+    def plano(sid, texto, **extra):
+        palabras = texto.split()
+        return dict({"id": sid, "narracion": texto, "prompt": f"prompt {sid}", "t_in": 0.0,
+                     "t_out": len(palabras) * 0.5,
+                     "marcas": [[i * 0.5, i * 0.5 + 0.4] for i in range(len(palabras))]}, **extra)
+    plan = {"escenas": [plano("S001", "Este baño era el más feo con baldosas grises."),
+                        plano("S002", "Y llega el cambio.", cartela={"plantilla": "cifra", "fondo": "negro"}),
+                        plano("S003", "Así quedó.")]}
+    lanzadas, pasadas = [], []
+    real = {"plan": p6.plan_actual, "lanzar": servidor.lanzar_paso,
+            "pasada": servidor._pasada_sin_dibujar, "ingles": ip.al_ingles,
+            "ruta": servidor._ruta_de_version}
+    dibujadas = {"S001", "S003"}
+    servidor._ruta_de_version = lambda ctx, paso, *partes: (
+        f"pasos/{paso}/v1/{'/'.join(partes)}" if partes and partes[-1][:-4] in dibujadas else None)
+    p6.plan_actual = lambda *_a, **_k: plan
+    servidor.lanzar_paso = lambda ctx, paso, unidades, **k: (
+        lanzadas.append((paso, unidades, k.get("nombre"), k.get("opciones"))) or "t-insertar")
+    servidor._pasada_sin_dibujar = lambda ctx, nombre, restaurar=None: (
+        pasadas.append(nombre) or {"trabajo": "t-corte", "trabajo_id": "t-corte"})
+    ip.al_ingles = lambda que, prompt="", narracion="", cwd=None: (
+        (_ for _ in ()).throw(ip.ErrorDireccion("Claude no contesta")) if "ROMPER" in que
+        else {"direccion": f"close-up, EN: {que}", "personas": False})
+
+    def esperar(pid):
+        for _ in range(100):
+            if (servidor._INSERTANDO.get(pid) or {}).get("estado") != "pensando":
+                return servidor._INSERTANDO.get(pid) or {}
+            time.sleep(0.05)
+        return {}
+
+    try:
+        pid = Proyecto.crear(base, "insertar imagen").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        firma = ctx.estado.firma("assets")
+        params = json.loads(json.dumps(ctx.estado.params("assets") or {}))
+        _codigo, ficha = _llamar(servidor.leer_insercion, pid)
+        usd = ficha["precio"]["usd"]
+        ok(usd > 0, f"LEER: dice lo que cuesta una imagen ({usd} $)")
+        bien = {"palabra": 6, "que": "las baldosas de cerca", "usd": usd}
+        for sid, cuerpo, esperado in (("S001", {"palabra": 6, "que": "x"}, 400),
+                                      ("S001", dict(bien, usd=usd + 1), 409),
+                                      ("S001", dict(bien, que=""), 400),
+                                      ("S001", dict(bien, palabra=0), 400),
+                                      ("S001", dict(bien, palabra=9), 400),
+                                      ("S002", bien, 409),
+                                      ("S099", bien, 404)):
+            codigo, _m = _llamar(servidor.insertar_imagen, pid, sid, cuerpo)
+            igual(codigo, esperado, f"INSERTAR: {sid} {cuerpo} da {esperado} ({_m})")
+        igual(lanzadas, [], "INSERTAR: lo rechazado no lanza nada")
+        previa = servidor._quitar_en_la_previa(plan, plan["escenas"][0])
+        igual(((previa.get("insertar") or {}).get("validas"), len((previa.get("insertar") or {}).get("palabras") or [])),
+              ([2, 3, 4, 5, 6, 7], 9),
+              "PREVIA: S001 ofrece insertar, con sus nueve palabras y las que dejan un segundo a cada lado")
+        codigo, _m = _llamar(servidor.insertar_imagen, pid, "S001", dict(bien, palabra=1))
+        igual(codigo, 400, f"INSERTAR: en una palabra que deja menos de un segundo, 400 ({_m})")
+        codigo, _m = _llamar(servidor.insertar_imagen, pid, "S003", dict(bien, palabra=1))
+        igual(codigo, 400, "INSERTAR: en un plano demasiado corto, 400")
+        dibujadas.discard("S001")
+        codigo, _m = _llamar(servidor.insertar_imagen, pid, "S001", bien)
+        igual(codigo, 409, f"INSERTAR: en una imagen sin dibujar, 409 ({_m})")
+        dibujadas.add("S001")
+        ok("insertar" not in servidor._quitar_en_la_previa(plan, plan["escenas"][1]),
+           "PREVIA: una cartela no")
+        # CLAUDE NO CONTESTA: nada apuntado ni lanzado, y el motivo se ve
+        codigo, ficha = _llamar(servidor.insertar_imagen, pid, "S001", dict(bien, que="ROMPER"))
+        ok(codigo == 200 and ficha.get("estado") in ("pensando", "error"),
+           f"INSERTAR: arranca (el hilo puede acabar antes de contestar: {ficha.get('estado')})")
+        final = esperar(pid)
+        igual((final.get("estado"), "no contesta" in str(final.get("error"))), ("error", True),
+              "INSERTAR: si Claude falla, error con su motivo")
+        igual((lanzadas, ip.leer(ctx.proyecto.raiz)), ([], []), "INSERTAR: y no se apunta ni se lanza nada")
+        # LA TANDA NO SE PUEDE LANZAR: lo apuntado se deshace
+        servidor.lanzar_paso = lambda *a, **k: (_ for _ in ()).throw(
+            servidor.ErrorApi(409, "'assets' ya se está ejecutando"))
+        _llamar(servidor.insertar_imagen, pid, "S001", bien)
+        final = esperar(pid)
+        igual((final.get("estado"), ip.leer(ctx.proyecto.raiz)), ("error", []),
+              "INSERTAR: sin poder lanzar la tanda, no queda nada apuntado")
+        servidor.lanzar_paso = lambda ctx, paso, unidades, **k: (
+            lanzadas.append((paso, unidades, k.get("nombre"), k.get("opciones"))) or "t-insertar")
+        codigo, _f = _llamar(servidor.insertar_imagen, pid, "S001", bien)
+        final = esperar(pid)
+        igual((final.get("estado"), final.get("nuevo"), final.get("trabajo_id")),
+              ("lanzado", "S001B", "t-insertar"), "INSERTAR: lanzada, como S001B")
+        igual(lanzadas, [("assets", ["escena:S001B"], "insertar_imagen", {"solo_pedidas": True})],
+              "INSERTAR: una tanda con UNA unidad pedida, y solo esa (no dibuja otras que falten)")
+        igual([(e["texto"], e["n"], e["palabra"], e["letra"], e["direccion"]) for e in ip.leer(ctx.proyecto.raiz)],
+              [(p6._texto_clave(plan["escenas"][0]), 0, 6, "B", "close-up, EN: las baldosas de cerca")],
+              "INSERTAR: apuntada en el fichero del proyecto, con su dirección en inglés")
+        igual(ctx.estado.firma("assets"), firma, "INSERTAR: la firma de assets NO se mueve")
+        igual(ctx.estado.params("assets") or {}, params, "INSERTAR: ni un param cambia (regla 1)")
+        # LA PREVIA DE DESPUÉS: la insertada trae lo de deshacer
+        partido = {"escenas": [dict(plan["escenas"][0], narracion="Este baño era el más feo",
+                                    narracion_imagen=plan["escenas"][0]["narracion"], partida_en=["S001B"]),
+                               plano("S001B", "con baldosas grises.", insertada={
+                                   "en": "S001", "texto": p6._texto_clave(plan["escenas"][0]), "n": 0,
+                                   "palabra": 6, "que": "las baldosas de cerca"})] + plan["escenas"][1:]}
+        previa = servidor._quitar_en_la_previa(partido, partido["escenas"][1])
+        igual(((previa.get("insertada") or {}).get("palabra"), "insertar" in previa), (6, False),
+              "PREVIA: la insertada se puede deshacer y no se vuelve a partir")
+        ok("insertar" not in servidor._quitar_en_la_previa(partido, partido["escenas"][0]),
+           "PREVIA: la partida tampoco se vuelve a partir")
+        # LA TANDA FALLÓ (el plan no tiene S001B): sale para deshacerla, y
+        # mientras tanto no se inserta otra
+        igual([x["palabra"] for x in servidor._insertados_sin_aplicar(ctx, plan)], [6],
+              "PREVIA: lo insertado que no llegó a dibujarse se enseña para deshacerlo")
+        codigo, _m = _llamar(servidor.insertar_imagen, pid, "S001", dict(bien, palabra=3))
+        igual(codigo, 409, "INSERTAR: con una sin dibujar pendiente, no se inserta otra")
+        igual(servidor._insertados_sin_aplicar(ctx, partido), [],
+              "PREVIA: con S001B en el corte, no hay nada pendiente")
+        # DESHACER
+        codigo, _m = _llamar(servidor.deshacer_imagen_insertada, pid, {"texto": "otra", "palabra": 6})
+        igual(codigo, 404, "DESHACER: algo que no está insertado, 404")
+        codigo, _m = _llamar(servidor.deshacer_imagen_insertada, pid, {"texto": "x"})
+        igual(codigo, 400, "DESHACER: sin la palabra, 400")
+        codigo, ficha = _llamar(servidor.deshacer_imagen_insertada, pid,
+                                {"texto": p6._texto_clave(plan["escenas"][0]), "n": 0, "palabra": 6})
+        igual((codigo, pasadas, ip.leer(ctx.proyecto.raiz)), (200, ["deshacer_insertada"], []),
+              "DESHACER: sale del fichero y vuelve a cortar, sin dibujar")
+        igual(ctx.estado.firma("assets"), firma, "DESHACER: la firma sigue igual")
+    finally:
+        p6.plan_actual, servidor.lanzar_paso = real["plan"], real["lanzar"]
+        servidor._pasada_sin_dibujar, ip.al_ingles = real["pasada"], real["ingles"]
+        servidor._ruta_de_version = real["ruta"]
+
+
 def probar_dominios():
     """Rama dominio-negocio (21-10-2026): listar los dominios y fijar el de un estilo."""
     seccion("DOMINIOS: EL NEGOCIO DE UN ESTILO")
     sys.path.insert(0, RAIZ_ESTUDIO)
     import app as servidor                                    # noqa: PLC0415
     codigo, d = _llamar(servidor.listar_dominios)
-    ok(codigo == 200 and {x["id"] for x in d.get("dominios") or []} == {"general", "estadoplay"},
-       f"GET /api/dominios: general y estadoplay ({codigo})")
+    ok(codigo == 200 and [x["id"] for x in d.get("dominios") or []][:1] == ["general"]
+       and "estadoplay" not in {x["id"] for x in d.get("dominios") or []},
+       f"GET /api/dominios: el general, y ningún negocio de fábrica ({codigo})")
     codigo, _m = _llamar(servidor.guardar_dominio_estilo, "no-existe", {"dominio": "general"})
     ok(codigo in (400, 404), f"fijar el dominio de un estilo que no existe: {codigo}")
     codigo, _m = _llamar(servidor.guardar_dominio_estilo, "x", {})
@@ -7436,6 +8172,230 @@ def probar_dominios():
            "null vuelve a automático: se quita la clave y el resto del estilo se queda")
     finally:
         presets.FICHERO = antes
+
+
+def probar_tipos_de_negocio():
+    """Etapa Foto C (21-10-2026): la ficha del negocio de cada proyecto y que
+    sus estilos la lleven."""
+    seccion("LA FICHA DEL NEGOCIO DE CADA PROYECTO")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from PIL import Image as _Imagen                          # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_negocio_")
+    antes_env = os.environ.get("ESTUDIO_DOMINIOS")
+    os.environ["ESTUDIO_DOMINIOS"] = os.path.join(base, "_sistema", "dominios.json")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(os.path.join(base, "proyectos"))
+    presets = servidor._presets()
+    antes = presets.FICHERO
+    try:
+        presets.FICHERO = os.path.join(base, "presets.json")
+        cid = servidor.crear_cliente({"nombre": "Suyu"})["cliente"]["id"]
+        otro = servidor.crear_cliente({"nombre": "Otro"})["cliente"]["id"]
+        refs = []
+        for i in range(3):
+            ruta = os.path.join(base, f"r{i}.png")
+            _Imagen.new("RGB", (64, 40), (40 * i, 90, 160)).save(ruta)
+            refs.append(ruta)
+        pid = presets.guardar("canal", "Reformas foto", {"estilo": {"referencias": refs, "modo": "foto"},
+                                                         "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(pid, {"cliente": cid})
+        estilo = lambda: presets.leer(pid)["datos"]["estilo"]      # noqa: E731
+        codigo, r = _llamar(servidor.leer_negocio_cliente, cid)
+        ok(codigo == 200 and r.get("negocio") is None and r.get("estilos") == 1,
+           f"GET …/negocio de un proyecto sin ficha: null ({codigo} {r})")
+        codigo, _m = _llamar(servidor.leer_negocio_cliente, "no-existe")
+        igual(codigo, 404, "un proyecto que no existe, 404")
+        cuerpo = {"nombre": "Mamparas y baños a medida",
+                  "reglas": [{"texto": "Mamparas de vidrio transparente", "palabras": ["mampara"]}],
+                  "revisor": {"equipo": "la mampara no es de vidrio"}}
+        codigo, r = _llamar(servidor.guardar_negocio_cliente, cid, cuerpo)
+        ok(codigo == 200 and r["negocio"]["id"] == f"cliente-{cid}" and r.get("estilos") == 1,
+           f"PUT …/negocio la guarda y se la pone a su estilo ({codigo} {r})")
+        igual(estilo().get("dominio"), f"cliente-{cid}", "el estilo la lleva en estilo.dominio")
+        igual(len(estilo().get("referencias") or []), 3, "sin tocar el resto del estilo")
+        codigo, _m = _llamar(servidor.guardar_negocio_cliente, cid, {"nombre": ""})
+        igual(codigo, 400, "sin decir qué hace, 400")
+        servidor.asignar_estilo_a_cliente(pid, {"cliente": otro})
+        ok("dominio" not in estilo(), "moverlo a un proyecto sin ficha se la quita")
+        servidor.asignar_estilo_a_cliente(pid, {"cliente": cid})
+        igual(estilo().get("dominio"), f"cliente-{cid}", "y volverlo a su proyecto se la pone")
+        codigo, r = _llamar(servidor.borrar_negocio_cliente, cid)
+        ok(codigo == 200 and "dominio" not in estilo(),
+           "DELETE …/negocio la quita y su estilo vuelve a lo general")
+        codigo, _m = _llamar(servidor.borrar_negocio_cliente, cid)
+        igual(codigo, 404, "quitar una que ya no está, 404")
+        _llamar(servidor.guardar_negocio_cliente, cid, cuerpo)
+        servidor.borrar_cliente(cid)
+        ok("dominio" not in estilo(), "borrar el proyecto deja su estilo en lo general")
+        igual(servidor.PASOS_MODULOS.dominios.de_cliente(cid), None, "y su ficha se va con él")
+        # LA RUTA DE FIJAR A MANO solo acepta la ficha del propio proyecto
+        _llamar(servidor.guardar_negocio_cliente, otro, cuerpo)
+        pid2 = presets.guardar("canal", "Otro foto", {"estilo": {"referencias": refs, "modo": "foto"},
+                                                      "guion": {"instrucciones": "x"}})["id"]
+        codigo, _m = _llamar(servidor.guardar_dominio_estilo, pid2, {"dominio": f"cliente-{otro}"})
+        igual(codigo, 400, "fijar la ficha de un proyecto que no es el del estilo, 400")
+        # UNA COPIA no se lleva la ficha del original
+        servidor.asignar_estilo_a_cliente(pid2, {"cliente": otro})
+        ok(presets.leer(pid2)["datos"]["estilo"].get("dominio") == f"cliente-{otro}",
+           "un estilo de foto del proyecto la recibe")
+        pid3 = presets.guardar("canal", "Dibujo", {"estilo": {"referencias": refs},
+                                                   "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(pid3, {"cliente": otro})
+        ok("dominio" not in presets.leer(pid3)["datos"]["estilo"],
+           "uno de dibujo no la lleva (no movería sus firmas)")
+        codigo, copia = _llamar(servidor.duplicar_preset_light, pid2, {})
+        nuevo = ((copia if isinstance(copia, dict) else {}).get("preset") or {}).get("id")
+        ok(nuevo and "dominio" not in presets.leer(nuevo)["datos"]["estilo"],
+           "duplicarlo: la copia, sin proyecto, no se lleva la ficha")
+        # EL REVISOR recibe las mismas reglas de la casa que el generador
+        foto = {"modo": "foto", "referencias": ["a.png"]}
+        plan = {"escenas": [{"prompt": "two kids hold game controllers"}]}
+        ok("GAME CONTROLLERS" not in servidor._reglas_para_revisor(foto, plan),
+           "sin ficha, el revisor no recibe reglas de consolas")
+        _llamar(servidor.guardar_negocio_cliente, otro, cuerpo)
+        ok("Mamparas de vidrio" in servidor._reglas_para_revisor(
+            dict(foto, dominio=f"cliente-{otro}"), {"escenas": [{"prompt": "una mampara"}]}),
+           "con ficha, recibe sus reglas")
+        # AL MOMENTO (28-10): guardar el estilo por la ruta general (p. ej.
+        # «Guardar como estilo» desde un vídeo) sin el negocio no lo pierde
+        codigo, r = _llamar(servidor.guardar_preset_canal, {
+            "tipo": "canal", "nombre": "Otro foto", "id": pid2,
+            "datos": {"estilo": {"referencias": refs, "modo": "foto"},
+                      "guion": {"instrucciones": "x"}}})
+        ok(codigo == 200 and (r["preset"]["datos"]["estilo"] or {}).get("dominio") == f"cliente-{otro}",
+           f"guardar un estilo de foto de un proyecto con ficha se la pone al momento ({codigo})")
+        codigo, r = _llamar(servidor.guardar_preset_canal, {
+            "tipo": "canal", "nombre": "Dibujo", "id": pid3,
+            "datos": {"estilo": {"referencias": refs}, "guion": {"instrucciones": "x"}}})
+        ok(codigo == 200 and "dominio" not in (r["preset"]["datos"]["estilo"] or {}),
+           "y a uno de dibujo no se la pone")
+        sin = servidor.crear_cliente({"nombre": "Sin ficha"})["cliente"]["id"]
+        pid4 = presets.guardar("canal", "Foto sin ficha", {"estilo": {"referencias": refs, "modo": "foto"},
+                                                           "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(pid4, {"cliente": sin})
+        codigo, r = _llamar(servidor.guardar_preset_canal, {
+            "tipo": "canal", "nombre": "Foto sin ficha", "id": pid4,
+            "datos": {"estilo": {"referencias": refs, "modo": "foto"}, "guion": {"instrucciones": "x"}}})
+        ok(codigo == 200 and "dominio" not in (r["preset"]["datos"]["estilo"] or {}),
+           "sin ficha en su proyecto no se escribe nada: lo general")
+    finally:
+        presets.FICHERO = antes
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        if antes_env is None:
+            os.environ.pop("ESTUDIO_DOMINIOS", None)
+        else:
+            os.environ["ESTUDIO_DOMINIOS"] = antes_env
+def probar_guion_visual():
+    """Rama guion-visual (22-10-2026): qué dibujan las imágenes y el guion visual.
+
+    En este proceso y sin el CLI: nada se paga y ninguna ruta de aquí llama a
+    Claude (proponer y comprobar se prueban en su suite con el CLI falso)."""
+    seccion("GUION VISUAL: QUÉ DIBUJAN LAS IMÁGENES")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    bloques = [{"id": "B001", "texto": "Este error de mampara te deja sin espacio.", "personaje": False},
+               {"id": "B002", "texto": "Una corrediza te devuelve el espacio.", "personaje": False}]
+    base = tempfile.mkdtemp(prefix="estudio_gv_")
+    servidor.fijar_raiz_proyectos(base)
+    real = servidor._bloques_del_guion
+    servidor._bloques_del_guion = lambda _ctx: bloques
+    try:
+        pid = Proyecto.crear(base, "guion visual").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        firma = ctx.estado.firma("assets")
+        for nada in ({}, {"imagenes": None}, {"imagenes": ""}, {"visuales": "no es una lista"}):
+            servidor._opciones_al_crear(ctx, "", nada)
+        ok("imagenes" not in (ctx.estado.params("assets") or {})
+           and "guion_visual" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: sin elegir nada, no se escribe nada (regla 1)")
+        codigo, _m = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": False})
+        ok("guion_visual" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: retirar la aprobación de nada no escribe nada")
+        igual(ctx.estado.firma("assets"), firma, "GUION VISUAL: y la firma no se mueve")
+        codigo, _m = _llamar(servidor._opciones_al_crear, ctx, "", {"imagenes": "telenovela"})
+        igual(codigo, 400, "GUION VISUAL: un modo que no existe da 400")
+        servidor._opciones_al_crear(ctx, "", {"imagenes": "guion", "visuales": [
+            {"voz": "Este error de mampara te deja sin espacio.", "visual": ["la batiente choca"]},
+            {"voz": "Una corrediza te devuelve el espacio.", "visual": ["la corrediza", "el riel"]}]})
+        codigo, f = _llamar(servidor.leer_guion_visual, pid)
+        ok(codigo == 200 and f["modo"] == "guion" and f["aprobado"] and f["aprobado_solo"],
+           "GUION VISUAL: elegido al crear, rige, y las líneas de la Parrilla valen solas (decisión B)")
+        igual([(p["bloque"], p["visual"]) for p in f["propuesta"]],
+              [("B001", "la batiente choca"), ("B002", "la corrediza"), ("B002", "el riel")],
+              "GUION VISUAL: las líneas de la Parrilla, casadas con el guion (sin guardarlas)")
+        igual(((ctx.estado.params("assets") or {}).get("guion_visual") or {}).get("planos"), [],
+              "GUION VISUAL: leer la ficha no escribe nada")
+        imp = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+        ok(not any("guion visual" in (x.get("que") or "") for x in imp),
+           "GUION VISUAL: con las líneas de la Parrilla, generar no se para a esperar")
+        igual(servidor._planos_previstos(ctx)["con_imagen"], 3,
+              "GUION VISUAL: el precio cuenta una imagen por línea")
+        # LO YA DIBUJADO NO SE VUELVE A COBRAR (arreglo del 26-10): con el guion
+        # visual mandando, «Montar el vídeo» pedía dibujar las 6 imágenes de un
+        # vídeo con las 6 al día («6 imágenes que han quedado viejas»), porque
+        # `_imagenes_ya_generadas` solo contaba lo hecho con el plan cortado
+        trabajo = ctx.proyecto.ruta_trabajo("assets", crear=True)
+        os.makedirs(os.path.join(trabajo, "escenas"), exist_ok=True)
+        with open(os.path.join(trabajo, "plan.json"), "w", encoding="utf-8") as fh:
+            json.dump({"escenas": [{"id": f"S00{n}"} for n in (1, 2, 3)]}, fh)
+        for n in (1, 2, 3):
+            with open(os.path.join(trabajo, "escenas", f"S00{n}.png"), "wb") as fh:
+                fh.write(b"png")
+        coste = servidor._coste_previsto(ctx, ["video"])
+        igual((coste["imagenes_hechas"], coste["imagenes_por_generar"]), (3, 0),
+              "GUION VISUAL: con las 3 imágenes ya dibujadas, montar no pide dibujar ninguna")
+        os.remove(os.path.join(trabajo, "escenas", "S003.png"))
+        igual(servidor._coste_previsto(ctx, ["video"])["imagenes_por_generar"], 1,
+              "GUION VISUAL: y si falta una, pide esa sola")
+        # un plan cortado antes y MÁS LARGO (5 planos) con un hueco en S002: sus
+        # PNG de sobra (S004, S005) no tapan el que p6 sí dibujará
+        with open(os.path.join(trabajo, "plan.json"), "w", encoding="utf-8") as fh:
+            json.dump({"escenas": [{"id": f"S00{n}"} for n in (1, 2, 3, 4, 5)]}, fh)
+        os.remove(os.path.join(trabajo, "escenas", "S002.png"))
+        for n in (3, 4, 5):
+            with open(os.path.join(trabajo, "escenas", f"S00{n}.png"), "wb") as fh:
+                fh.write(b"png")
+        igual(servidor._coste_previsto(ctx, ["video"])["imagenes_por_generar"], 1,
+              "GUION VISUAL: un plan viejo más largo no tapa la imagen que falta")
+        shutil.rmtree(trabajo)
+        codigo, _m = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": True})
+        igual(codigo, 409, "GUION VISUAL: no se aprueba uno vacío")
+        codigo, _m = _llamar(servidor.guardar_guion_visual, pid,
+                             {"planos": [{"bloque": "B009", "visual": "x"}]})
+        igual(codigo, 400, "GUION VISUAL: un bloque que no existe da 400")
+        codigo, f = _llamar(servidor.guardar_guion_visual, pid, {"planos": f["propuesta"]})
+        ok(codigo == 200 and len(f["guion_visual"]["planos"]) == 3 and not f["aprobado"],
+           "GUION VISUAL: guardarlo lo deja sin aprobar")
+        imp = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+        ok(any("guion visual" in (x.get("que") or "") for x in imp),
+           "GUION VISUAL: guardado a mano y sin aprobar, generar dice que falta aprobarlo")
+        real_listo = servidor._asistente_listo
+        servidor._asistente_listo = lambda: (False, "", None, [], False)  # sin Claude aquí
+        try:
+            codigo, f = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": True})
+        finally:
+            servidor._asistente_listo = real_listo
+        ok(codigo == 200 and f["aprobado"], "GUION VISUAL: aprobado")
+        imp = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+        ok(not any("guion visual" in (x.get("que") or "") for x in imp),
+           "GUION VISUAL: aprobado, ya no lo pide")
+        codigo, f = _llamar(servidor.guardar_modo_guion_visual, pid, {"imagenes": None})
+        ok(codigo == 200 and f["modo"] == "voz" and "imagenes" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: null vuelve a lo del estilo y quita la clave")
+        codigo, f = _llamar(servidor.guardar_modo_guion_visual, pid, {"imagenes": "voz"})
+        ok(codigo == 200 and "imagenes" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: «voz» con un estilo que no dice guion no escribe nada (regla 1)")
+        ctx.estado.actualizar_params("assets", {"estilo": {"imagenes": "guion"}})
+        codigo, f = _llamar(servidor.guardar_modo_guion_visual, pid, {"imagenes": "voz"})
+        ok(codigo == 200 and (ctx.estado.params("assets") or {}).get("imagenes") == "voz",
+           "GUION VISUAL: con un estilo que dice guion, «voz» explícito se guarda y manda")
+        codigo, _m = _llamar(servidor.guardar_imagenes_estilo, "no-existe", {"imagenes": "guion"})
+        ok(codigo in (400, 404), f"GUION VISUAL: el estilo que no existe da error ({codigo})")
+    finally:
+        servidor._bloques_del_guion = real
 
 
 def _video_montado_de_prueba(servidor, base, nombre):
@@ -7586,6 +8546,7 @@ def main():
 
         sembrar(os.path.join(carpeta, pid))
         tid, salidas = probar_ejecucion(cliente, base, pid)
+        probar_resumen_de_tarjetas(cliente, carpeta, pid, virgen)
         probar_versiones(cliente, pid)
         probar_archivos(cliente, pid, salidas)
         probar_feedback(cliente, pid)
@@ -7632,7 +8593,10 @@ def main():
         probar_la_foto_del_asistente(cliente, pid)
         probar_onboarding(cliente)
         probar_turno_y_notas_de_otro_texto()
+        probar_cola_de_montaje(cliente)
+        probar_medidor_claude(cliente)
         probar_coste_en_detalle(cliente, pid)
+        probar_claude_en_coste(cliente, pid)
         probar_sistema(cliente)
         probar_lo_que_lleva(cliente)
         probar_salud_de_las_cuentas(cliente)
@@ -7667,7 +8631,13 @@ def main():
         probar_publicar_20oct(cliente, pid)
         probar_espacio_fijo()
         probar_tipo_relato()
+        probar_relato_en_espanol()
+        probar_quitar_imagen()
+        probar_descripcion_planos()
+        probar_insertar_imagen()
         probar_dominios()
+        probar_tipos_de_negocio()
+        probar_guion_visual()
     finally:
         parar(proceso)
         if not argumentos.conservar:

@@ -150,7 +150,10 @@ TIPOS = {
                    "relato",
                    # el negocio (rama dominio-negocio): id de uno de fabrica de
                    # pasos/dominios.py; solo se guarda si no es automatico
-                   "dominio"),
+                   "dominio",
+                   # que dibujan las imagenes (rama guion-visual): solo "guion"
+                   # se guarda; la voz es no tenerlo
+                   "imagenes"),
         "pasos": ("assets",),
     },
     # El id se queda en 'rotulos' aunque ya no haya rotulos: es la clave con la
@@ -250,6 +253,14 @@ def _reglas_estilo():
     return reglas_estilo
 
 
+def _guion_visual():
+    try:
+        from . import guion_visual                                # noqa: PLC0415
+    except ImportError:                                           # pragma: no cover
+        import guion_visual                                       # noqa: PLC0415
+    return guion_visual
+
+
 def _tipo_relato():
     try:
         from . import tipo_relato                                 # noqa: PLC0415
@@ -308,6 +319,15 @@ def _limpiar_datos(tipo, datos):
             limpios["dominio"] = dominio
         else:
             limpios.pop("dominio")
+    if tipo == "estilo" and "imagenes" in limpios:
+        try:
+            imagenes = _guion_visual().normalizar_modo(limpios["imagenes"])
+        except ValueError as fallo:
+            raise ErrorPreset(f"qué dibujan las imágenes: {fallo}") from None
+        if imagenes:
+            limpios["imagenes"] = imagenes
+        else:
+            limpios.pop("imagenes")
     if tipo == "canal":
         # un canal es un paquete de los otros tipos: cada bloque se valida con
         # las reglas de SU tipo, o el paquete se convierte en el agujero por
@@ -492,6 +512,8 @@ def resumen_de(ficha):
         if (datos.get("relato") or {}).get("modo"):
             trozos.append(_tipo_relato().nombre(datos["relato"]["modo"],
                                                 datos["relato"].get("cambia")).lower())
+        if datos.get("imagenes") == "guion":
+            trozos.append("las imágenes siguen el guion")
         trozos.append(f"guía de {guia.get('palabras', '?')} palabras" if guia
                       else "sin guía escrita")
         dibujadas = len((datos.get("moodboard") or {}).get("ejes") or [])
@@ -1187,6 +1209,11 @@ def cambios_para(ficha, params_actuales=None):
             estilo["dominio"] = datos["dominio"]
         else:
             estilo.pop("dominio", None)
+        # QUE DIBUJAN LAS IMAGENES, igual (rama guion-visual)
+        if datos.get("imagenes") == "guion":
+            estilo["imagenes"] = "guion"
+        else:
+            estilo.pop("imagenes", None)
         cambios["assets"] = {"estilo": estilo}
         # la calidad y la duracion de plano son params sueltos de assets, no van
         # dentro del diccionario 'estilo'
@@ -1282,6 +1309,8 @@ def datos_de_params(params_por_paso, incluir=ORDEN):
             bloque["relato"] = copy.deepcopy(estilo["relato"])
         if estilo.get("dominio"):
             bloque["dominio"] = estilo["dominio"]
+        if estilo.get("imagenes") == "guion":
+            bloque["imagenes"] = "guion"
         for clave in ("calidad", "min_s", "max_s", "min_s_rotulos"):
             if assets.get(clave) not in (None, ""):
                 bloque[clave] = copy.deepcopy(assets[clave])

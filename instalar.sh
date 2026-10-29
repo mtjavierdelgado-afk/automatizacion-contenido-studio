@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  Automatización Contenido Studio — instalador para un VPS con Ubuntu.
+#  CrearIA Studio — instalador para un VPS con Ubuntu.
 #
 #  Se pega UNA linea en la consola del servidor y esto deja el estudio montado,
 #  con su acceso por contrasena y su HTTPS:
@@ -450,7 +450,7 @@ el_login() {
     local secreto id_vps esquema="https"
     secreto="$(openssl rand -hex 48 2>/dev/null || head -c 48 /dev/urandom | od -An -tx1 | tr -d ' \n')"
     # El id del VPS en el panel de Hostinger sale del propio nombre de la
-    # maquina (srv1982300.hstgr.cloud -> 1982300). Solo sirve para el enlace de
+    # maquina (srv1234567.hstgr.cloud -> 1234567). Solo sirve para el enlace de
     # «he olvidado la contrasena»; si no cuadra, el enlace va al listado.
     id_vps="$(hostname | sed -n 's/^srv\([0-9]\{4,\}\).*/\1/p')"
     [ "${ASVS_SIN_TLS:-0}" = "1" ] && esquema="http"
@@ -746,7 +746,7 @@ despedida() {
 
   printf '\n%s' "$VERDE"
   printf '  ┌────────────────────────────────────────────────────────────┐\n'
-  printf '  │  Automatización Contenido Studio está listo                │\n'
+  printf '  │  CrearIA Studio está listo                                 │\n'
   printf '  └────────────────────────────────────────────────────────────┘\n'
   printf '%s\n' "$N"
   printf '   Entra aqui:   %s%s://%s%s\n' "$B" "$ESQUEMA" "$DOMINIO" "$N"
@@ -770,7 +770,7 @@ despedida() {
 ESQUEMA="https"
 
 cabecera() {
-  printf '\n%s  Automatización Contenido Studio%s  ·  instalador %s\n' "$B" "$N" "$VERSION_INSTALADOR"
+  printf '\n%s  CrearIA Studio%s  ·  instalador %s\n' "$B" "$N" "$VERSION_INSTALADOR"
   printf '%s  Convierte lo que escribas en un video narrado y animado.%s\n' "$GRIS" "$N"
   printf '%s  Esto tarda unos 5 minutos. No hay que hacer nada mientras.%s\n' "$GRIS" "$N"
 }

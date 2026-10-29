@@ -1030,11 +1030,15 @@ def bloque_emojis(ajustes, redes):
     if nivel == "vistoso":
         lineas += [
             "  - SIEMPRE con emojis: un texto sin ellos o con menos de los pedidos está MAL.",
-            "  - Título (donde lo hay): un emoji al principio o al final, NUNCA en lugar de "
-            "la palabra clave ni partiéndola. En YouTube, uno solo y al final.",
+            "  - Título (donde lo hay): repartidos, no solo al final: al principio, ENTRE "
+            "palabras (justo después de la palabra que ilustran: «Alquila consolas 🎮 para tu "
+            "fiesta 🎉») o al final. NUNCA en lugar de la palabra clave ni partiéndola. En "
+            "YouTube, la palabra clave va antes que cualquier emoji.",
             "  - La primera línea (el gancho) EMPIEZA con un emoji.",
             "  - Cada párrafo o beneficio empieza con su emoji de viñeta, distinto en cada "
             "uno y a juego con lo que dice (🎮 la consola, 🍿 el ambiente, 🚚 la entrega).",
+            "  - Y DENTRO de las frases, no solo al principio o al final de la línea: alguno "
+            "justo después de la palabra que ilustra («llevamos el simulador 🏎️ a tu casa»).",
             "  - El CTA lleva un emoji de acción (👉 📩 📲 📅).",
             "  - La ubicación o la zona, si se nombra, va con 📍.",
             "  - Cuando ayude a contar algo, COMBINA dos emojis como si fueran uno "
@@ -1045,7 +1049,9 @@ def bloque_emojis(ajustes, redes):
         lineas += [
             "  - El gancho lleva un emoji; si hay una lista de beneficios, cada punto con "
             "su emoji de viñeta; el CTA con uno de acción (👉 📩).",
-            "  - En el título, uno al final si encaja (nunca en lugar de la palabra clave).",
+            "  - En el título, uno al principio, entre palabras (después de la que ilustra) o "
+            "al final si encaja; nunca en lugar de la palabra clave.",
+            "  - Alguno puede ir dentro de la frase, justo después de la palabra que ilustra.",
             "  - Si ayuda a contar algo, una combinación de dos (🎮➕🎉).",
         ]
     else:
@@ -1180,11 +1186,19 @@ def vestir_con_emojis(raiz, info, red, campo, texto, ajustes, proyecto=None, cwd
     objetivo = (f"{max(mx, hay + 1)}" if campo == "titulo" and red == "youtube"
                 else f"entre {max(mn, hay + 1)} y {max(mx, hay + 2)}")
     if campo == "titulo":
-        donde = ("\n- Es un TÍTULO: el emoji va al principio o al final, nunca en lugar de "
-                 "la palabra clave ni en medio de ella." + (" En YouTube, al final." if red == "youtube" else ""))
+        # notas del dueño, 24-10-2026: «no solo al final, también entre palabras o
+        # al inicio», en el título y en el texto
+        donde = ("\n- Es un TÍTULO: reparte los emojis, NO los pongas todos al final: al "
+                 "principio, ENTRE palabras (justo después de la palabra que ilustran: "
+                 "«Alquila consolas 🎮 para tu fiesta 🎉») y al final. Nunca en lugar de la "
+                 "palabra clave ni en medio de ella."
+                 + (" En YouTube, la palabra clave va antes que cualquier emoji; el último, al final."
+                    if red == "youtube" else ""))
     else:
-        donde = ("\n- Uno abriendo la primera línea, uno de viñeta al empezar cada párrafo "
-                 "o punto, 📍 junto a la zona si se nombra.")
+        donde = ("\n- Repártelos, NO los pongas todos al final: uno abriendo la primera "
+                 "línea, uno de viñeta al empezar cada párrafo o punto, y también DENTRO de "
+                 "las frases, justo después de la palabra que ilustran («llevamos el "
+                 "simulador 🏎️ a tu casa»); 📍 junto a la zona si se nombra.")
     marca = str(ajustes.get("emojis_marca") or "").strip()
     tema = (f"Nombre: {info.get('nombre') or ''}\n"
             + "\n".join(f"- {b.get('texto', '')}" for b in (info.get("guion") or []))[:1500])

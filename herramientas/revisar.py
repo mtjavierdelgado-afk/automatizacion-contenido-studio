@@ -72,6 +72,11 @@ QUE_PRUEBA = {
     "pasos/prueba_seo_real.py": "el SEO real",
     "pasos/prueba_seo_canal.py": "el canal de YouTube",
     "pasos/prueba_dominios.py": "el negocio de cada estilo (dominios)",
+    "pasos/prueba_guion_visual.py": "qué dibujan las imágenes (la voz o el guion)",
+    "pasos/prueba_traducciones.py": "lo pedido al dibujante, en español",
+    "pasos/prueba_quitar_planos.py": "quitar una imagen e igualar con la vecina",
+    "pasos/prueba_insertar_planos.py": "insertar una imagen dentro de otra",
+    "pasos/prueba_consumo_claude.py": "el medidor del cupo de Claude",
     "herramientas/prueba_herramientas_prueba.py": "estas mismas herramientas de prueba",
     "prueba_recorrido.py": "la pantalla entera, botón por botón",
 }

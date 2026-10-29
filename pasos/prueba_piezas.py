@@ -25,7 +25,7 @@ factura. Hizo falta: `prueba_rehacer_de_verdad` se calculaba a mano el nombre
 del fichero de la cache, el codigo le anadio `tamano` a la firma, la copia se
 quedo atras y la llamada siguio camino hasta OpenAI.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_piezas.py
+    python pasos/prueba_piezas.py
 """
 import io
 import json
@@ -4865,6 +4865,36 @@ def prueba_ortografia_por_tandas():
             ok("JSON" in detalle, f"y el detalle técnico va aparte ({detalle[:60]!r})")
         except RuntimeError as fallo:
             ok(False, f"si no sale ninguna tanda, el error es para la persona ({fallo})")
+        # 4) notas del dueño, 24-10: las comillas rectas del guion, copiadas sin
+        #    escapar, ya no rompen la revisión (rompían los dos intentos)
+        comillas = ('{"correcciones": {"A": {"texto": "Comenta "BAÑO" y él dijo "hola", y ya",'
+                    ' "cambios": [["el", "él"]]}}}')
+        llamadas = []
+
+        def con_comillas(instruccion, **_k):
+            llamadas.append(instruccion)
+            return comillas, {}
+        cli_claude.ejecutar = con_comillas
+        salida = ortografia.revisar({"A": 'Comenta "BAÑO" y el dijo "hola", y ya'})
+        ok(salida.get("A", {}).get("texto") == 'Comenta "BAÑO" y él dijo "hola", y ya'
+           and len(llamadas) == 1,
+           f"un texto con comillas sin escapar se lee a la primera ({len(llamadas)} llamadas, {salida})")
+        editorial = ('{"propuestas": {"B1": [{"original": "un "mueble" negro", '
+                     '"propuesta": "un mueble negro", "motivo": "sobran las comillas", "tipo": ""}]}}')
+        ok((ortografia.leer_json(editorial, "x") or {}).get("propuestas", {}).get("B1", [{}])[0].get("original")
+           == 'un "mueble" negro', "y lo mismo en la revisión editorial")
+        # 5) 26-10: el modelo contesta, se corrige a sí mismo y manda OTRO JSON
+        #    (respuesta copiada del CLI de verdad): vale el último
+        dos = ('{"correcciones": {"B001": {"texto": "Nunca contrates a un maestro de obra.", '
+               '"cambios": []}}}\n\nWait — that text is already correct. Correct output:\n\n'
+               '{"correcciones": {}}')
+        llamadas.clear()
+        comillas = dos
+        salida = ortografia.revisar({"B001": "Nunca contrates a un maestro de obra."})
+        ok(salida == {} and len(llamadas) == 1,
+           f"dos JSON seguidos (el modelo se corrige): vale el último, a la primera ({len(llamadas)} llamadas, {salida})")
+        ok(ortografia.leer_json('{"propuestas": {"B1": []}} y luego {"otra": 1}', "x", "propuestas")
+           == {"propuestas": {"B1": []}}, "y se queda con el que trae la clave pedida")
     finally:
         cli_claude.ejecutar = original
 
@@ -6058,6 +6088,45 @@ def prueba_cancelar_montaje():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def prueba_costes_menores():
+    """Costes-menores (26-10): la tabla de respaldo y los caracteres de la voz.
+
+    (1) Sin `usage`, una imagen apaisada o vertical en calidad baja cuesta lo
+    que dice la tabla oficial de gpt-image-2 (0,005 $), no la del cuadrado.
+    (2) La voz apunta lo que COBRA Cartesia: cada pausa <break> es un caracter;
+    las demas etiquetas, enteras (por arriba)."""
+    titulo("coste: tabla de respaldo por tamano y caracteres cobrados de la voz")
+    from motores.imagen_openai import imagen as motor_imagen   # noqa: PLC0415
+    with open(os.path.join(RAIZ, "tarifas.json"), encoding="utf-8") as fh:
+        tabla = json.load(fh)["openai"]["usd_por_imagen"]
+    igual((tabla["1536x1024"]["low"], tabla["1024x1536"]["low"], tabla["1024x1024"]["low"]),
+          (0.005, 0.005, 0.006), "la tabla de respaldo baja: 0,005 apaisada y vertical, 0,006 cuadrada")
+    igual((motor_imagen._precio("low", "apaisado"), motor_imagen._precio("medium", "vertical"),
+           motor_imagen._precio("high", "cuadrado")), (0.005, 0.041, 0.211),
+          "el motor lleva el precio de su tamano")
+    igual(coste.caracteres_cobrados("Hola mundo."), 11, "un texto sin marcas cuenta todo")
+    igual(coste.caracteres_cobrados('Hola<break time="1200ms"/> mundo.'), 12,
+          "una pausa cuenta como UN caracter, no como los 23 de la etiqueta")
+    igual(coste.caracteres_cobrados('<speed ratio="0.8"/>Uno'), 23,
+          "las demas etiquetas se cuentan enteras: Cartesia no dice como las cobra")
+    igual(coste.caracteres_cobrados("a < b y <breakfast>"), 19, "el texto normal con «<» no se toca")
+    igual(coste.caracteres_cobrados(None), 0, "sin texto, cero")
+    apuntes = []
+    original = coste._anotar
+    try:
+        coste._anotar = lambda *a, **k: apuntes.append(k) or {}       # noqa: SLF001
+        envuelta = coste._medir_toma_por_contexto(lambda *a, **k: "ok")  # noqa: SLF001
+        envuelta(['Uno.<break time="500ms"/>', "Dos."], {"modelo": "sonic-3"})
+    finally:
+        coste._anotar = original
+    igual((apuntes[0]["cantidad"]["caracteres"], apuntes[0]["detalle"]["enviados"]),
+          (9, 29), "la toma apunta los cobrados y guarda los enviados en el detalle")
+    import p4_voz                                                   # noqa: PLC0415
+    cortada = p4_voz._cortada(RuntimeError("corte"), ['Uno.<break time="500ms"/>', "Dos."],
+                              [b"\x00\x00" * 10], [])             # noqa: SLF001
+    igual(cortada.caracteres, 9, "una toma cortada cuenta igual que una entera")
+
+
 def main():
     _prohibir_pagar()
     # EL HISTORICO DE TIEMPOS, A UNA COPIA. Guarda 30 muestras por paso, asi
@@ -6126,6 +6195,7 @@ def main():
     prueba_montaje_por_plano()
     prueba_cancelar_montaje()
     prueba_revision_editorial()
+    prueba_costes_menores()
 
     print("\n" + "=" * 70)
     if _fallos:

@@ -71,6 +71,9 @@ import corrector  # noqa: E402
 import reglas_estilo  # noqa: E402
 import tipo_relato  # noqa: E402
 import dominios  # noqa: E402
+import guion_visual  # noqa: E402
+import quitar_planos  # noqa: E402
+import insertar_planos  # noqa: E402
 import cta  # noqa: E402
 import encuadres  # noqa: E402
 import estadisticas  # noqa: E402
@@ -555,7 +558,11 @@ def _marcar_origen(escenas, meta):
 
 
 def _texto_clave(escena):
-    return medios.normalizar_texto(escena.get("narracion") or "")
+    # `narracion_imagen`: la frase para la que se DIBUJO un plano que ademas
+    # lleva la voz de un vecino quitado (`quitar_planos`). Es con la que se le
+    # reconoce: su PNG no se mueve ni sale «obsoleto» por llevar mas voz.
+    return medios.normalizar_texto(escena.get("narracion_imagen")
+                                   or escena.get("narracion") or "")
 
 
 def _emparejar_con_previo(escenas, anteriores):
@@ -804,7 +811,11 @@ def _inventario_para_nota(escena, plan, dirs, p, trabajo, notas, proyecto):
                   f"el plano {vecino['id']}, {abs(j - i)} {donde} a este; sitio "
                   f"'{vecino.get('set') or '-'}'; personajes "
                   f"{', '.join(vecino.get('personajes') or []) or 'nadie'}; "
-                  f"dice: {' '.join(str(vecino.get('narracion') or '').split())[:160]}",
+                  # en modo guion, lo que SE VE en el vecino (su linea), no lo
+                  # que dice la voz (rama guion-visual-2)
+                  + (f"se ve: {' '.join(str(vecino['linea_gv'].get('visual') or '').split())[:160]}"
+                   if vecino.get("linea_gv") else
+                   f"dice: {' '.join(str(vecino.get('narracion') or '').split())[:160]}"),
                   "vecino", "continuidad",
                   mismo_set=bool(vecino.get("set")
                                  and vecino.get("set") == escena.get("set")),
@@ -1167,6 +1178,33 @@ def _asignar_cartas(escenas, p, texto=""):
     return cartas
 
 
+def _aplicar_lineas_gv(escenas, catalogo):
+    """La camara y la gente de cada linea del guion visual (rama guion-visual).
+
+    La camara de la linea va LITERAL como encuadre (el SHOT TYPE del prompt) y
+    el plano deja de ser abstracto; sin camara, la carta repartida de siempre.
+    Los personajes de la linea mandan sobre los del tramo, pero solo los que
+    estan en el reparto (lo fijo manda: uno inventado no tiene hoja)."""
+    reparto = (catalogo or {}).get("reparto") or {}
+    for escena in escenas:
+        linea = escena.get("linea_gv")
+        if not linea:
+            continue
+        if linea.get("camara"):
+            escena["encuadre"] = linea["camara"]
+        # la linea dice lo que SE VE: una carta abstracta («not a physical
+        # location») le llevaria la contraria (guion-visual-2)
+        escena.pop("abstracta", None)
+        if linea.get("personajes"):
+            gente = [q for q in linea["personajes"] if q in reparto]
+            escena["personajes"] = gente
+        else:
+            # SIN GENTE EN LA LINEA, SIN GENTE EN EL PLANO (prueba real, 23-10): la
+            # del tramo sale de la frase de la voz, que en modo guion no manda;
+            # con ella aparecia una persona en planos que nadie la pedia.
+            escena["personajes"] = []
+
+
 def _repartir_zoom(escenas, modo="ilustracion", servicios=None, dominio=None):
     """El zoom de cada plano, alternado. Se juega en el CORTE, sobre la imagen.
 
@@ -1264,18 +1302,54 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # donde cortaba de verdad, heredar del resultado es exactamente el fallo de
     # arriba.
     crudo = [{"narracion": x} for x in ((previo or {}).get("corte") or [])]
-    segmentos = segmentar.heredar(palabras, crudo,
-                                  adelanto=adelanto, cola=cola,
-                                  minimo=p["min_s"], maximo=p["max_s"],
-                                  reparto=reparto_corte)
-    if not segmentos:
-        segmentos = segmentar.segmentar(palabras, p["min_s"], p["max_s"],
-                                        adelanto=adelanto, cola=cola, muros=muros,
-                                        reparto=reparto_corte)
+    # EL GUION VISUAL MANDA EN EL CORTE (rama guion-visual): con «lo que dice el
+    # guion» y el guion visual aprobado, un plano por linea visual, sobre el
+    # reloj de la voz. Sin el, `lineas_gv` es None y el corte es el de siempre.
+    # aprobado a mano, o las lineas de la Parrilla que casan limpias (guion-visual-2)
+    lineas_gv, origen_gv = guion_visual.efectivo(
+        p, [{"id": b.get("id"), "texto": b.get("texto")}
+            for b in ((meta or {}).get("bloques") or []) if isinstance(b, dict)])
+    avisos_gv = []
+    if lineas_gv:
+        tramos_b = tramos_de_bloque(meta)
+        bloque_de = [(tramos_b[i][2] if i >= 0 else "")
+                     for i in (_bloque_en(w, tramos_b) for w in palabras)]
+        # VIGENTE SOLO SI CASA CON LA VOZ DE AHORA: si el guion se rehizo y algun
+        # bloque del guion visual ya no esta, se corta como siempre (voz) y el
+        # pago se para en `ejecutar` hasta volver a aprobarlo (revision 22-10)
+        fuera = guion_visual.fuera_de_la_voz(lineas_gv, [t[2] for t in tramos_b])
+        if fuera:
+            avisos_gv = [f"el guion visual nombra bloques que ya no están en la voz "
+                         f"({', '.join(fuera)}): vuelve a revisarlo y aprobarlo"]
+            lineas_gv = None
+        else:
+            segmentos, lineas_gv, avisos_gv = guion_visual.segmentos(palabras, bloque_de,
+                                                                      lineas_gv)
+            if not segmentos:
+                lineas_gv = None
+    if not lineas_gv:
+        segmentos = segmentar.heredar(palabras, crudo,
+                                      adelanto=adelanto, cola=cola,
+                                      minimo=p["min_s"], maximo=p["max_s"],
+                                      reparto=reparto_corte)
+        if not segmentos:
+            segmentos = segmentar.segmentar(palabras, p["min_s"], p["max_s"],
+                                            adelanto=adelanto, cola=cola, muros=muros,
+                                            reparto=reparto_corte)
     escenas = [dict(e) for e in segmentar.construir_escenas(segmentos)]
+    guion_ok = bool(lineas_gv)
+    if lineas_gv:
+        for escena, linea in zip(escenas, lineas_gv):
+            if linea:
+                escena["linea_gv"] = dict(linea)
     # EL CORTE, TAL CUAL SALIO. Se guarda antes de que nadie lo toque: es lo
     # unico contra lo que la proxima pasada puede reconocer donde cortaba.
     corte_crudo = [e.get("narracion") or "" for e in escenas]
+    if lineas_gv:
+        # EL CORTE DE LA VOZ SE CONSERVA: el de las lineas no se apunta como
+        # «el corte de antes», o al volver a «lo que dice la voz» se heredaria
+        # y las imagenes ya pagadas en modo voz no se reconocerian (revision 22-10)
+        corte_crudo = list((previo or {}).get("corte") or [])
     _marcar_origen(escenas, meta)
     reparto = _heredar_ids(escenas, previo)
     # Los beats vienen por rango de BLOQUES y los planos van por reloj: se
@@ -1290,6 +1364,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # simuladores...): lo que el guion ha decidido que sale, en el catalogo
     texto_video = json.dumps(catalogo or {}, ensure_ascii=False)
     _asignar_cartas(escenas, p, texto=texto_video)
+    if lineas_gv:
+        _aplicar_lineas_gv(escenas, catalogo)
     modo = modo_de(p["estilo"])
     # EL TIPO DE RELATO (rama tipo-de-relato). Solo con un modo EXPLICITO que
     # edita: sin el, `relato_edita` es False y ningun plano cambia.
@@ -1310,6 +1386,9 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     informe = segmentar.informe(escenas, p["min_s"], p["max_s"],
                                 reparto=reparto_corte)
     informe["camaras"] = camaras
+    if lineas_gv or avisos_gv:
+        informe["guion_visual"] = {"planos": len(lineas_gv or []), "avisos": avisos_gv,
+                                   "origen": origen_gv if lineas_gv else ""}
     # Las marcas de palabra viajan con el plano: son lo que permite que un
     # rotulo entre cuando se dice lo que rotula y no al empezar el plano. Van
     # ANTES de repartir las cartelas porque ahora las cartelas tambien las usan:
@@ -1318,7 +1397,14 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     for escena, segmento in zip(escenas, segmentos):
         escena["marcas"] = [[round(float(w["s"]), 3), round(float(w["e"]), 3)]
                             for w in segmento[2]]
-    informe["cartelas"] = _marcar_cartelas(escenas, beats, p)
+    if lineas_gv:
+        # EN MODO GUION NO HAY CARTELAS NI RETOQUES POR PLANO DE ANTES: se
+        # anclaban a planos de la voz y con otro corte se tragarian lineas del
+        # guion visual sin avisar (revision 22-10). Lo que se ve se escribe en
+        # el guion visual.
+        informe["cartelas"] = {"puestas": [], "avisos": [], "idioma": ""}
+    else:
+        informe["cartelas"] = _marcar_cartelas(escenas, beats, p)
 
     # QUE SE VE EN CADA PLANO, si alguien lo ha dirigido. Va ANTES de escribir
     # los prompts porque es una linea mas del prompt (ver `_con_direccion`), y
@@ -1332,7 +1418,7 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # si no esta, no cambia nada. Los dos viven en los params POR UNIDAD, que es
     # lo que hace que escribir uno ensucie SU plano y no los 299.
     for escena in escenas:
-        ajustes = _ajustes_unidad(p, f"escena:{escena['id']}")
+        ajustes = {} if escena.get("linea_gv") else _ajustes_unidad(p, f"escena:{escena['id']}")
         linea = " ".join(str(ajustes.get("direccion") or "").split())
         if linea:
             escena["direccion"] = linea
@@ -1392,6 +1478,17 @@ def planificar(proyecto, params, inventario=None, replantear=False,
             escena["accion"] = str(beat["accion"]).strip()
         if beat.get("tono"):
             escena["tono"] = str(beat["tono"]).strip()
+        linea = escena.get("linea_gv")
+        if linea:
+            # LO QUE SE VE LO DICE EL GUION VISUAL, no la voz: su linea es la
+            # accion y la direccion del plano (una direccion escrita a mano
+            # para ESTE plano sigue mandando), y el estado del objeto sale de
+            # la linea, no del tramo de voz
+            escena["accion"] = linea["visual"]
+            escena["direccion"] = linea["visual"]
+            beat = dict(beat, **guion_visual.estado_de_linea(
+                linea, tipo_relato.estados_del_catalogo(catalogo, principal)
+                if principal else {}))
         if relato_edita:
             _marcar_edicion(escena, beat, relato, principal, modo, bases_rel)
         escena["prompt"] = _prompt_visual(escena, beat, catalogo, modo=modo)
@@ -1412,6 +1509,37 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # hay cabeceras de sitio. Lo que sigue estirando --y ahora fundiendo-- son
     # las CARTELAS, y eso lo descuenta `_marcar_cartelas` mas arriba.
     informe["estirados"] = []
+
+    # LAS IMAGENES INSERTADAS A MANO (rama insertar-imagen): el plano se parte
+    # y la nueva lleva su prompt propio, con su direccion. Va ANTES de quitar
+    # (lo quitado se reconoce por el corte con las insertadas ya puestas) y
+    # sin `planos_insertados.json` no toca nada (ver `pasos/insertar_planos.py`).
+    beat_de = {id(e): b for e, b in zip(escenas, beats)}
+
+    def _preparar_insertada(nueva, partida):
+        beat = beat_de.get(id(partida)) or {}
+        if nueva.get("linea_gv"):
+            beat = dict(beat, **guion_visual.estado_de_linea(
+                nueva["linea_gv"], tipo_relato.estados_del_catalogo(catalogo, principal)
+                if principal else {}))
+        # el encuadre lo dice su direccion: la carta del plano partido no es suya
+        nueva.pop("encuadre", None)
+        nueva["prompt"] = _prompt_visual(nueva, beat, catalogo, modo=modo)
+
+    insertados = insertar_planos.aplicar(escenas, getattr(proyecto, "raiz", None), _texto_clave,
+                                         _sin_imagen, _preparar_insertada,
+                                         segmentar.tipo_de_corte)
+    if insertados["insertados"] or insertados["sin_casar"]:
+        informe["insertados"] = insertados
+
+    # LAS IMAGENES QUITADAS A MANO (rama unir-planos): su voz pasa al vecino,
+    # que conserva su dibujo. Va DESPUES de escribir los prompts --el del que
+    # se queda no cambia-- y de todo lo que se decide por plano. Sin
+    # `planos_quitados.json` no toca nada (ver `pasos/quitar_planos.py`).
+    quitados = quitar_planos.aplicar(escenas, getattr(proyecto, "raiz", None),
+                                     _texto_clave, _sin_imagen)
+    if quitados["absorbidos"] or quitados["sin_casar"]:
+        informe["quitados"] = quitados
 
     plan = {
         "proyecto": proyecto.id,
@@ -1455,6 +1583,9 @@ def planificar(proyecto, params, inventario=None, replantear=False,
         "corte": corte_crudo,
         "informe": informe,
     }
+    if guion_visual.modo_de(p) == "guion":
+        # si el guion visual aprobado cortó este plan (lo mira `ejecutar` antes de pagar)
+        plan["guion_visual_ok"] = guion_ok
     plan["assets"] = _assets_necesarios(plan, catalogo, p)
     plan["dependencias"] = {f"escena:{e['id']}": _assets_de_escena(e)
                             for e in escenas}
@@ -1478,7 +1609,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # que viajan los planos que deja fuera un recorte.
     absorbidos = sorted({f["absorbido"] for f in
                          (informe.get("cartelas") or {}).get("seguidas") or []
-                         if f.get("absorbido")})
+                         if f.get("absorbido")}
+                        | set(quitados["absorbidos"]))
     # EL PLAN ES LA VERDAD DE QUE PLANOS HAY: un id que sigue en el plan no se
     # retira aunque venga en las dos listas. Los ids son POSICIONALES, asi que
     # un S003 del plan anterior que ya no existe y un S003 del plan de ahora son
@@ -2034,7 +2166,10 @@ def _prompt_visual(escena, beat, catalogo, modo="ilustracion"):
         base = _con_narracion(redactado, escena)
         return (f"{base} SHOT TYPE, and this is not optional: "
                 f"{escena['encuadre']}." if _con_encuadre(escena) else base)
-    if beat.get("prompt"):
+    # EN MODO GUION EL PROMPT DEL BEAT NO ENTRA (rama guion-visual-2): lo escribe
+    # el catalogo desde la VOZ del tramo, y delante de la linea visual le decia
+    # al dibujante lo que la voz cuenta. Sin linea, como siempre.
+    if beat.get("prompt") and not escena.get("linea_gv"):
         base = _con_direccion(beat["prompt"], escena)
         return _con_narracion(base, escena)
     if escena.get("abstracta"):
@@ -2249,7 +2384,9 @@ def _con_narracion(base, escena):
     piso y no el foro de siempre con otro retoque.
     """
     linea = (escena.get("narracion") or "").strip()
-    if not linea:
+    # CON EL GUION VISUAL, LA FRASE NO LLEGA AL DIBUJANTE (rama guion-visual):
+    # lo que se ve lo dice su linea visual (ya en la direccion del plano)
+    if not linea or escena.get("linea_gv"):
         return base
     momento = (f'This shot accompanies the narration line: "{linea}". '
                f"Show the specific moment that line describes -- or, when the "
@@ -3033,9 +3170,17 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     # televisores en su tripode) solo si este plano va de eso. Lo decide el texto
     # de lo que se esta pidiendo: la guia del estilo, la escena y la nota del
     # revisor (ver `contexto_de_reglas`).
+    # Las del TIPO DE NEGOCIO (Etapa Foto C) entran en su hueco de
+    # `reglas_foto.json`: las de la ficha del negocio que lleve el estilo o, sin
+    # ficha, ninguna (ya no hay negocios de fabrica con reglas).
     bloque = (reglas.bloque_prompt("prompt_imagen", modo="foto",
                                    contexto=contexto_de_reglas(estilo, escena,
-                                                               feedback))
+                                                               feedback),
+                                   extra=dominios.reglas_de_foto(estilo),
+                                   contexto_plano=" ".join(
+                                       str(t) for t in ((escena or {}).get("prompt"),
+                                                        (escena or {}).get("luz"),
+                                                        feedback) if t))
               if foto else reglas.bloque_prompt("prompt_imagen"))
     if bloque:
         lineas.append(bloque)
@@ -3729,7 +3874,8 @@ def _recolocar_escenas(carpeta, escenas):
     return informe
 
 def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
-                     forzar=False, notas_repaso=None, proyecto=None):
+                     forzar=False, notas_repaso=None, proyecto=None,
+                     solo_conservar=False, solo_pedidas=None):
     """Genera los planos y devuelve el coste. En fila o en cadenas paralelas.
 
     Por que cadenas y no planos sueltos
@@ -3863,6 +4009,16 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                          != _texto_clave(escena)))
                 with cerrojo:
                     resultados[uid] = ficha
+                continue
+
+            # SOLO CONSERVAR (la pasada que vuelve a cortar tras quitar una
+            # imagen, rama unir-planos): lo que no esta hecho se queda como
+            # estaba --pendiente-- y no se dibuja ni se paga nada.
+            if solo_conservar:
+                continue
+            # SOLO LAS PEDIDAS (la imagen insertada, rama insertar-imagen): se
+            # confirmó el precio de UNA; otra que falte se queda pendiente
+            if solo_pedidas is not None and uid not in solo_pedidas:
                 continue
 
             if cartelas.sin_imagen(escena):
@@ -4036,7 +4192,9 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                      **({} if cartelas.sin_imagen(escena)
                         else {"png": os.path.relpath(destino, trabajo)}),
                      "cartela": (escena.get("cartela") or {}).get("plantilla"),
-                     "narracion": escena["narracion"],
+                     # la frase para la que se DIBUJA: en un plano que lleva
+                     # la voz de un quitado, la suya (unir-planos)
+                     "narracion": escena.get("narracion_imagen") or escena["narracion"],
                      "t_in": escena["t_in"], "t_out": escena["t_out"],
                      "set": escena.get("set"),
                      "componente": escena.get("componente"),
@@ -4903,7 +5061,7 @@ MOTOR_CAMBIOS = {
 }
 
 OPCIONES_EJECUCION = ("solo_assets", "replantear", "rehacer", "tipos",
-                      "conservar_piezas")
+                      "conservar_piezas", "solo_cortar", "restaurar", "solo_pedidas")
 
 
 def _anotar_tiempo(paso, arranque, hechas, detalle=None, proyecto=None):
@@ -4939,7 +5097,7 @@ def _anotar_tiempo(paso, arranque, hechas, detalle=None, proyecto=None):
 
 def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
              replantear=False, rehacer=False, tipos=None, previo=None,
-             conservar_piezas=False):
+             conservar_piezas=False, solo_cortar=False, restaurar=None, solo_pedidas=False):
     """Construye assets y escenas. Si unidades no es None, solo esas.
 
     Con solo_assets se para despues de los assets (sets, reparto, mapas y
@@ -5004,7 +5162,21 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     # cosa que editar: generarlos sin ella seria pagar un sitio reinventado en
     # cada plano, que es justo lo que este modo viene a quitar. Se para ANTES
     # de gastar nada y se dice donde se aprueba.
-    if not solo_assets:
+    # SOLO CORTAR (rama unir-planos): vuelve a cortar y conserva lo que ya
+    # esta dibujado. No pide ninguna unidad, no genera hojas ni planos y no
+    # paga nada: por eso tampoco hace falta que haya base ni guion visual
+    # aprobados (son los guardianes de lo que se PAGA).
+    if solo_cortar:
+        unidades = []
+    if not solo_assets and not solo_cortar:
+        # CON «LO QUE DICE EL GUION», SIN GUION VISUAL APROBADO NO SE PAGA NADA
+        # (rama guion-visual): se dibujaria lo que dice la voz, que es justo lo
+        # que se ha pedido que no pase
+        if guion_visual.modo_de(p) == "guion" and not plan.get("guion_visual_ok"):
+            raise RuntimeError("este vídeo dibuja lo que dice el guion y su guion visual "
+                               "no está aprobado o ya no casa con la voz: revísalo y "
+                               "apruébalo en «Guion visual» (paso Imágenes) antes de "
+                               "generar los planos")
         faltan = planos_sin_base(plan, dirs, unidades=unidades, rehacer=rehacer)
         if faltan:
             raise RuntimeError(
@@ -5058,6 +5230,17 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     inventario = {}
     pendientes = [(uid, ficha) for uid, ficha in sorted(necesarios.items())
                   if tipos is None or ficha["tipo"] in tipos]
+    if solo_cortar or solo_pedidas:
+        # ni una hoja ni una pieza: se hereda lo que ya habia (como en
+        # `solo_assets`, mas abajo) y lo que falte sigue faltando. Con
+        # `solo_pedidas` (la imagen insertada, rama insertar-imagen) tampoco:
+        # se paga la imagen confirmada y NADA mas
+        pendientes = []
+        previos = (medios.leer_json(os.path.join(trabajo, "assets.json"), {})
+                   or {}).get("resultados") or {}
+        for uid, salida in previos.items():
+            if uid in necesarios:
+                resultados[uid] = salida
     for indice, (uid, ficha) in enumerate(pendientes):
         # El numero va en el mensaje, no solo en la barra: "12 de 44" dice de
         # un vistazo cuanto queda; un porcentaje hay que traducirlo mentalmente.
@@ -5162,7 +5345,8 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     coste = _generar_escenas(plan, dirs, p, trabajo, toca, unidades,
                              resultados, avisar, forzar=rehacer,
                              notas_repaso=_notas_del_repaso(proyecto),
-                             proyecto=proyecto)
+                             proyecto=proyecto, solo_conservar=solo_cortar,
+                             solo_pedidas=set(unidades or []) if solo_pedidas else None)
 
     avisar(0.96, "comprobando que no hay planos repetidos")
     # Los que comparten imagen A PROPOSITO salen del PLAN: la segunda mitad de
@@ -5199,6 +5383,26 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
         rehechas = dict(resultados)
     else:
         rehechas = {uid: ficha for uid, ficha in resultados.items() if uid in pedidas}
+    # LO QUE SE DEVUELVE TRAS «QUITAR» (unir-planos): su imagen ya estaba
+    # dibujada para ESA frase y se conserva, pero al retirarla el estado
+    # olvido su registro. Se sella aqui --por su frase, nunca por su numero--
+    # para que no salga «por rehacer» y nadie la vuelva a pagar.
+    # `restaurar` = [{"uid", "texto"}]: SOLO esa unidad, SOLO si dice esa
+    # frase y SOLO si su imagen conservada no esta marcada obsoleta. Quien la
+    # pide (app.py) ya ha comprobado que estaba al dia cuando se quito.
+    if solo_cortar and restaurar:
+        por_id = {f"escena:{e.get('id')}": e for e in escenas}
+        for pedido_r in restaurar:
+            if not isinstance(pedido_r, dict):
+                continue
+            uid = str(pedido_r.get("uid") or "")
+            escena = por_id.get(uid)
+            ficha_r = resultados.get(uid) or {}
+            if (escena is not None and uid not in rehechas
+                    and _texto_clave(escena) == medios.normalizar_texto(pedido_r.get("texto"))
+                    and ficha_r.get("origen") == "conservado"
+                    and not ficha_r.get("obsoleta")):
+                rehechas[uid] = ficha_r
     conservadas = sorted(uid for uid in resultados if uid not in rehechas)
 
     generadas = sum(1 for r in resultados.values() if r.get("origen") == "generada")

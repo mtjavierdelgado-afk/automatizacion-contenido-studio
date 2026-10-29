@@ -154,6 +154,8 @@ class Falso(http.server.BaseHTTPRequestHandler):
             if self.headers.get("X-Goog-Api-Key") != CLAVE_YT:
                 return self._json(400, {"error": {"message": f"API key not valid: {self.headers.get('X-Goog-Api-Key')}",
                                                   "errors": [{"reason": "badRequest"}]}})
+            if url.path.endswith("/i18nRegions"):      # «Probar todas las claves»: 1 unidad, gratis
+                return self._json(200, {"items": [{"id": "PE", "snippet": {"gl": "PE", "name": "Perú"}}]})
             if url.path.endswith("/channels"):
                 if q.get("forHandle") == "@noexiste":
                     return self._json(200, {"items": []})
@@ -188,6 +190,10 @@ class Falso(http.server.BaseHTTPRequestHandler):
                 "media": {"data": [{"id": "m1", "caption": "Reel 1", "like_count": 50, "comments_count": 3,
                                     "view_count": 4000, "timestamp": "2026-10-02T20:00:00+0000",
                                     "permalink": "https://instagram.com/p/m1", "media_product_type": "REELS"}]}}})
+        if url.path == "/apify/users/me":           # quién soy: no corre ningún actor
+            if self._portador() != TOKEN_APIFY:
+                return self._json(401, {"error": {"message": f"token {self._portador()} no vale"}})
+            return self._json(200, {"data": {"id": "u1", "username": "ana"}})
         return self._json(404, {})
 
     def do_POST(self):
@@ -571,6 +577,54 @@ def prueba_studio():
         proceso.wait(timeout=15)
 
 
+def prueba_probar_conexiones(bases):
+    seccion("4b] «Probar todas las claves»: las tres de analizar cuentas, sin gastar")
+    os.environ["ESTUDIO_LECTURA_BASES"] = json.dumps(bases)
+    antes = C._claves()
+    try:
+        C.guardar_claves({"youtube_clave": "", "meta_token": "", "apify_token": ""})
+        Falso.vistas.clear()
+        fichas = C.probar_conexiones()
+        igual([(f["proveedor"], f["estado"]) for f in fichas],
+              [("lectura_youtube", "sin_clave"), ("lectura_instagram", "sin_clave"), ("lectura_apify", "sin_clave")],
+              "sin claves: las tres «sin clave», en el orden de Configuración")
+        igual(Falso.vistas, [], "y sin claves no se llama a nadie")
+
+        C.guardar_claves({"youtube_clave": CLAVE_YT, "meta_token": TOKEN_META, "apify_token": TOKEN_APIFY})
+        Falso.vistas.clear()
+        fichas = C.probar_conexiones()
+        igual([f["estado"] for f in fichas], ["ok", "ok", "ok"], "con las tres buenas: las tres «ok»")
+        igual([(v[0], v[1]) for v in Falso.vistas],
+              [("GET", "/yt/i18nRegions"), ("GET", f"/meta/{C._version_meta()}/me"), ("GET", "/apify/users/me")],
+              "tres GET, uno por servicio: i18nRegions, me y users/me")
+        ok(not any(v[0] == "POST" or "/acts/" in v[1] for v in Falso.vistas),
+           "ningún actor de Apify (los actores se pagan)")
+        ok(not any(clave in camino for camino in Falso.caminos for clave in (CLAVE_YT, TOKEN_META, TOKEN_APIFY)),
+           "ninguna clave va en la URL")
+
+        malas = {"youtube_clave": "AIzaSyCLAVEMALAMALAMALA0001", "meta_token": "EAABTOKENMALOMALOMALO0002",
+                 "apify_token": "apify_api_TOKENMALOMALO0003"}
+        C.guardar_claves(malas)
+        fichas = C.probar_conexiones()
+        igual([f["estado"] for f in fichas], ["mal", "mal", "mal"], "con las tres malas: las tres «mal»")
+        texto = json.dumps(fichas, ensure_ascii=False)
+        ok(not any(v in texto for v in malas.values()), "el servicio repite la clave en su error y sale tachada")
+        ok(all(v[-4:] in texto for v in malas.values()), "(se ven sus 4 últimos, para saber cuál es)")
+
+        C.guardar_claves({"youtube_clave": CLAVE_YT, "meta_token": TOKEN_META, "apify_token": TOKEN_APIFY})
+        os.environ["ESTUDIO_SIMULAR"] = "1"
+        Falso.vistas.clear()
+        try:
+            fichas = C.probar_conexiones()
+        finally:
+            os.environ.pop("ESTUDIO_SIMULAR", None)
+        igual([(f["estado"], f["mensaje"]) for f in fichas], [("ok", "simulado")] * 3,
+              "en modo simulado: puestas = funcionan")
+        igual(Falso.vistas, [], "y en modo simulado no sale a ningún sitio")
+    finally:
+        C.guardar_claves({k: antes.get(k) or "" for k in ("youtube_clave", "meta_token", "apify_token")})
+
+
 def main():
     print("PRUEBA DE ANALIZAR UNA CUENTA")
     prueba_piezas()
@@ -579,6 +633,7 @@ def main():
         prueba_fuentes(bases)
         prueba_orden(bases)
         prueba_claude(bases)
+        prueba_probar_conexiones(bases)
     finally:
         servidor.shutdown()
     try:

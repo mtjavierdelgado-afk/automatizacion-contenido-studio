@@ -123,6 +123,37 @@ def responder(entrada):
                     "sugerida": limpio + " (revisado)"}
         return {"veredicto": "sirve", "resumen": "Cumple la guía.", "problemas": [],
                 "sugerida": ""}
+    if "<traducir_al_espanol>" in entrada:
+        # lo que se manda a dibujar, en español (rama estados-en-espanol): cada
+        # texto con «ES:» delante, para que la pantalla enseñe que es la traducción
+        textos = re.findall(r'<t id="([^"]+)">(.*?)</t>', _entre(entrada, "traducir_al_espanol"), re.S)
+        return {"traducciones": {tid: "ES: " + texto.strip() for tid, texto in textos}}
+    if "<imagen_nueva>" in entrada:
+        # lo que se ve en una imagen insertada (rama insertar-imagen): «EN:» y el
+        # español; «ROMPER» en el texto, sin respuesta
+        que = _entre(entrada, "imagen_nueva")
+        return {"direccion": "" if "ROMPER" in que else "close-up, EN: " + que,
+                "personas": "persona" in que}
+    if "<describir_en_espanol>" in entrada:
+        # lo que se pidió dibujar en cada plano (rama descripcion-planos): «DESC:»
+        # y el principio del prompt; «ROMPER» en el prompt, sin respuesta
+        textos = re.findall(r'<t id="([^"]+)">(.*?)</t>', _entre(entrada, "describir_en_espanol"), re.S)
+        return {"descripciones": {tid: "DESC: " + texto.strip()[:60] for tid, texto in textos
+                                  if "ROMPER" not in texto}}
+    if "<pasar_al_ingles>" in entrada:
+        # el cambio reescrito en español, de vuelta al inglés que se manda
+        texto = _entre(entrada, "pasar_al_ingles")
+        # «ROMPER» en el texto: Claude no devuelve nada (el error en el acto)
+        return {"ingles": "" if "ROMPER" in texto else "EN: " + texto}
+    if "Escribe el GUION VISUAL" in entrada:
+        # el borrador del guion visual (rama guion-visual): un plano por bloque
+        bloques = re.findall(r"^\[([A-Z0-9_]+)\]", entrada, re.M)
+        return {"planos": [{"bloque": b, "visual": f"wide shot of the room while {b} is heard",
+                            "camara": "wide shot, eye level", "estado": "", "personajes": []}
+                           for b in bloques]}
+    if "script supervisor" in entrada:
+        # la comprobacion del guion visual contra lo fijo: nada que decir
+        return {"avisos": []}
     if "LOS TRAMOS (no los cambies" in entrada:
         # el «qué cambia en cada tramo» de un espacio que cambia (rama
         # tipo-de-relato): un cambio por tramo, con su estado

@@ -70,29 +70,66 @@ def aplica(regla, contexto=None):
     return any(re.search(p, texto, flags=re.IGNORECASE) for p in patrones)
 
 
-def para(ambito, como_texto=True, modo="ilustracion", contexto=None):
+def _con_negocio(lista, extra):
+    """Las reglas del fichero con las del TIPO DE NEGOCIO metidas en su hueco.
+
+    Etapa Foto C: las reglas de un negocio (las de consolas, por ejemplo) ya no
+    viven en `reglas_foto.json` sino en su tipo (`pasos/dominios_fabrica.json`
+    y los que crea el dueño), y llegan aqui como `extra`. Entran donde el
+    fichero tiene la entrada `{"hueco": "negocio"}` --donde estaban antes--, y
+    no al final: el orden de las reglas es el del prompt, y un video de antes
+    tiene que sacar el mismo prompt (y la misma firma) que antes. Sin hueco, al
+    final. La entrada del hueco no es una regla y no sale nunca.
+    """
+    extra = list(extra or [])
+    salida, puesto = [], False
+    for regla in lista:
+        if regla.get("hueco"):
+            if not puesto:
+                salida.extend(extra)
+                puesto = True
+            continue
+        salida.append(regla)
+    if not puesto:
+        salida.extend(extra)
+    return salida
+
+
+def para(ambito, como_texto=True, modo="ilustracion", contexto=None, extra=None,
+         contexto_plano=None):
     """Reglas de un ambito, ordenadas por prioridad.
 
     `contexto` solo decide las reglas con `solo_si` (ver `aplica`); las demas
-    salen igual se pase o no.
+    salen igual se pase o no. `extra` son las reglas del tipo de negocio (ver
+    `_con_negocio`); sin ellas, las del fichero solas.
     """
     datos = cargar(modo)
-    filtradas = [r for r in datos["reglas"]
-                 if r["ambito"] == ambito and aplica(r, contexto)]
+    # las de la FICHA DEL NEGOCIO con «solo si el plano habla de…» miran SOLO el
+    # plano (su escena y la nota), no la guía del estilo: si la guía nombra la
+    # palabra, entrarían en todos los planos (lo vio el dueño con VR y
+    # simuladores, 21-10). Sin `contexto_plano`, el de siempre.
+    filtradas = [r for r in _con_negocio(datos["reglas"], extra)
+                 if r.get("ambito") == ambito
+                 and aplica(r, contexto_plano if (r.get("solo_en_plano")
+                                                  and contexto_plano is not None)
+                            else contexto)]
     filtradas.sort(key=lambda r: r.get("prioridad", 9))
     if not como_texto:
         return filtradas
     return [r["regla"] for r in filtradas]
 
 
-def bloque_prompt(ambito="prompt_imagen", modo="ilustracion", contexto=None):
+def bloque_prompt(ambito="prompt_imagen", modo="ilustracion", contexto=None,
+                  extra=None, contexto_plano=None):
     """Devuelve las reglas como un parrafo listo para concatenar a un prompt.
 
     Con `modo="foto"` salen las de `reglas_foto.json` y ninguna de las de
     cartoon; sin decirlo, las de siempre, igual que antes. `contexto` es el
-    texto del encargo con el que se deciden las reglas con `solo_si`.
+    texto del encargo con el que se deciden las reglas con `solo_si`, y `extra`
+    las del tipo de negocio del video (`dominios.reglas_de_foto`).
     """
-    lineas = para(ambito, modo=modo, contexto=contexto)
+    lineas = para(ambito, modo=modo, contexto=contexto, extra=extra,
+                  contexto_plano=contexto_plano)
     if not lineas:
         return ""
     return " ".join(lineas)

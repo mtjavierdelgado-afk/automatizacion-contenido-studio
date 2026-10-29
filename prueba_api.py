@@ -8202,6 +8202,46 @@ def probar_detalles_insertar_quitar():
     ip = servidor._insertar_planos()
     igual(ip.letra_libre([], "x", 0, {"B"}), "C",
           "DIRIGIR: una letra que aún guarda params de otra insertada no se reutiliza")
+    # DESHACER NO PASA EL DIBUJO DE LA INSERTADA A SU PLANO (visto en el
+    # servidor el 28-10): S004 dibujado para una frase más vieja, S004B con el
+    # final de la de ahora; al deshacer, S004 se quedaba con las baldosas
+    carpeta = tempfile.mkdtemp(prefix="estudio_recolocar_")
+    for sid, texto, contenido in (("S004", "tres colores que cortaban la vista.", "BANO"),
+                                  ("S004B", "cortaban la vista. Por eso remodelamos.", "BALDOSAS")):
+        with open(os.path.join(carpeta, f"{sid}.json"), "w", encoding="utf-8") as fh:
+            json.dump({"id": sid, "narracion": texto, "png": f"escenas/{sid}.png"}, fh)
+        with open(os.path.join(carpeta, f"{sid}.png"), "w", encoding="utf-8") as fh:
+            fh.write(contenido)
+    p6._recolocar_escenas(carpeta, [{"id": "S004", "narracion":
+                                     "tres colores que se veían bien pero cortaban la vista. Por eso remodelamos."}])
+    igual(open(os.path.join(carpeta, "S004.png"), encoding="utf-8").read(), "BANO",
+          "DESHACER: S004 conserva su dibujo; no se queda con el de la insertada")
+    ok(not os.path.exists(os.path.join(carpeta, "S004B.png"))
+       and os.path.exists(os.path.join(carpeta, "_deshechas", "S004B.png")),
+       "DESHACER: el dibujo de la insertada deshecha se aparta (una nueva S004B no lo reutiliza)")
+    # Y SI EL PLANO DE ORIGEN CAMBIA DE NÚMERO, la insertada sigue con el suyo
+    carpeta = tempfile.mkdtemp(prefix="estudio_recolocar_")
+    for sid, texto, contenido in (("S004", "tres colores.", "BANO"),
+                                  ("S004B", "por eso remodelamos.", "BALDOSAS")):
+        with open(os.path.join(carpeta, f"{sid}.json"), "w", encoding="utf-8") as fh:
+            json.dump({"id": sid, "narracion": texto, "png": f"escenas/{sid}.png"}, fh)
+        with open(os.path.join(carpeta, f"{sid}.png"), "w", encoding="utf-8") as fh:
+            fh.write(contenido)
+    p6._recolocar_escenas(carpeta, [
+        {"id": "S005", "narracion": "tres colores.", "narracion_imagen": "tres colores."},
+        {"id": "S005B", "narracion": "por eso remodelamos.", "insertada": {"en": "S005"}}])
+    igual((open(os.path.join(carpeta, "S005.png"), encoding="utf-8").read(),
+           open(os.path.join(carpeta, "S005B.png"), encoding="utf-8").read()), ("BANO", "BALDOSAS"),
+          "RENUMERAR: S004→S005 y S004B→S005B, cada una con su dibujo y sin pagar")
+    carpeta = tempfile.mkdtemp(prefix="estudio_recolocar_")
+    with open(os.path.join(carpeta, "S007.json"), "w", encoding="utf-8") as fh:
+        json.dump({"id": "S007", "narracion": "la ducha nueva", "png": "escenas/S007.png"}, fh)
+    with open(os.path.join(carpeta, "S007.png"), "w", encoding="utf-8") as fh:
+        fh.write("DUCHA")
+    p6._recolocar_escenas(carpeta, [{"id": "S004B", "narracion": "la ducha nueva", "insertada": {"en": "S004"}},
+                                    {"id": "S008", "narracion": "la ducha nueva y la luz"}])
+    ok(not os.path.exists(os.path.join(carpeta, "S004B.png")),
+       "INSERTADA: no se lleva el dibujo de un plano normal (se dibuja para ella)")
     # «DIRIGIR» LA INSERTADA: de punta a punta en el recorrido
     # (`insertar_una_imagen`); aquí, que planificar lee su unidad
     fuente = open(os.path.join(RAIZ_ESTUDIO, "pasos", "p6_assets.py"), encoding="utf-8").read()

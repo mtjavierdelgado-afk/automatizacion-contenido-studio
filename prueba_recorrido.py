@@ -9282,6 +9282,19 @@ def insertar_una_imagen(navegador, datos):
     sid, nuevo = elegida["id"], elegida["id"] + "B"
     palabras = elegida["insertar"]["palabras"]
     k = elegida["insertar"]["validas"][0]
+    # COMO EN EL SERVIDOR (28-10): el dibujo de este plano se hizo para una
+    # frase más vieja (la voz se regrabó después). Al deshacer, la insertada
+    # --que dice el final de la frase de ahora-- «se parecía más» y S004 se
+    # quedaba con su dibujo
+    activa_v = _version_de(datos, "assets", "")
+    ver_v = activa_v.get("activa") or activa_v.get("n") or activa_v.get("version")
+    ficha_vieja = os.path.join(datos["proyectos"], pid, "pasos", "assets", f"v{ver_v}",
+                               "escenas", f"{sid}.json")
+    with open(ficha_vieja, encoding="utf-8") as fh:
+        fv = json.load(fh)
+    fv["narracion"] = "una frase vieja que la voz ya no dice"
+    with open(ficha_vieja, "w", encoding="utf-8") as fh:
+        json.dump(fv, fh, ensure_ascii=False)
     antes = _huellas_de_planos(datos, pid)
     # UNA IMAGEN QUE FALTA en otro plano (una tanda cancelada): la tanda de la
     # insertada NO la dibuja, se pagó UNA (revisión del 26-10)

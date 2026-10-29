@@ -10,6 +10,12 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Arreglo: «Deshacer» una imagen insertada le dejaba su dibujo a la de antes (28 de octubre)**
+- Si la imagen de antes (S004) se había dibujado para una frase algo distinta
+  (porque la voz se regrabó después), al deshacer la insertada (S004B) el Studio
+  le ponía a S004 el dibujo de S004B. Ya no: el dibujo de una imagen insertada
+  solo puede ser de una imagen insertada, y S004 recupera el suyo.
+
 **Quitar e insertar imágenes: los dos detalles que quedaban (28 de octubre)**
 - **Un subtítulo corregido a mano ya no repite ni pierde palabras** cuando partes
   esa imagen (insertar) o le pasas la voz de otra (quitar): si lo escribiste

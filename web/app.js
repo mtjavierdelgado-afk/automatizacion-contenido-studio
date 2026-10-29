@@ -18185,7 +18185,8 @@ function bloqueDiagramasDelVideo() {
     caja.appendChild(h('div', { clase: 'pista' }, f.deducido_con === f.modo
       ? `Deducido del guion: ${f.explicativos || 0} tramo(s) que explican y ${f.graficos || 0} gráfico(s) con cifras.`
       : 'Los tramos que explican se marcan en la siguiente tanda de imágenes, sin volver a '
-        + 'repartir los sitios (lo lee Claude con la membresía; no se paga ninguna imagen).'));
+        + 'repartir los sitios. Leerlo va por la membresía de Claude; los planos que cambien quedan '
+        + 'para rehacer, con su precio delante.'));
   }
   if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
   return caja;

@@ -1076,6 +1076,9 @@ def _asignar_sets(escenas, catalogo, p):
     beats = []
     set_previo, consecutivos = None, 0
     repartidos = _beats_por_escena(escenas, catalogo)
+    # los graficos con cifras no se eligen por palabras: van al plano que dice
+    # sus cifras (abajo). Sin graficos, es el MISMO catalogo.
+    por_palabras = diagramas.sin_graficos(catalogo)
     for indice, escena in enumerate(escenas):
         texto = medios.normalizar_texto(escena["narracion"])
         beat = repartidos[indice]
@@ -1086,7 +1089,7 @@ def _asignar_sets(escenas, catalogo, p):
         beat = beat or {}
         set_nombre, punto = _elegir_set(texto, catalogo, set_previo, consecutivos,
                                         p["semilla"], escena["id"])
-        componente = beat.get("componente") or _elegir_componente(texto, catalogo, punto)
+        componente = beat.get("componente") or _elegir_componente(texto, por_palabras, punto)
         if beat.get("set"):
             set_nombre, componente = beat["set"], None
         if componente:
@@ -1112,24 +1115,11 @@ def _asignar_sets(escenas, catalogo, p):
     # puesto; sin el, ningun catalogo los trae y esto no toca nada.
     por_grafico = diagramas.planos_de_graficos(escenas, catalogo.get("componentes"),
                                                diagramas.modo_de(p))
-    if por_grafico:
-        sitio_previo = None
-        for escena in escenas:
-            if escena["id"] in por_grafico:
-                escena["componente"] = por_grafico[escena["id"]]
-                escena["set"] = None
-                escena["personajes"] = []
-                continue
-            if diagramas.es_grafico_con_cifras(
-                    catalogo["componentes"].get(escena.get("componente") or "")):
-                # el mismo grafico, una sola vez: el plano que lo cogio por
-                # palabras se queda sin el y vuelve al sitio de su vecino
-                escena["componente"] = None
-                escena["set"] = sitio_previo
-                escena["personajes"] = _elegir_personajes(
-                    medios.normalizar_texto(escena["narracion"]), catalogo,
-                    bool(sitio_previo))
-            sitio_previo = escena.get("set") or sitio_previo
+    for escena in escenas:
+        if escena["id"] in por_grafico:
+            escena["componente"] = por_grafico[escena["id"]]
+            escena["set"] = None
+            escena["personajes"] = []
     return beats
 
 
@@ -1182,14 +1172,8 @@ def _asignar_cartas(escenas, p, texto=""):
     # En ilustracion, el «diagrama» deja de salir por sorteo y sale en los
     # tramos que explican; una carta forzada a mano sigue mandando. En foto no
     # cambia nada todavia (la foto explicada va en la segunda vuelta).
-    extra = {}
     modo_dg = diagramas.modo_de(p)
-    if diagramas.activo(modo_dg) and modo_de(p.get("estilo")) != "foto":
-        por_contenido = diagramas.cartas_de_diagrama(
-            escenas, (p.get("catalogo") or {}).get("explicativos") or [],
-            modo_dg, {k: v for k, v in forzadas.items() if v})
-        forzadas = {k: (v or por_contenido.get(k, "")) for k, v in forzadas.items()}
-        extra = {"excluir": diagramas.excluir_del_sorteo(modo_dg)}
+    retocar = diagramas.activo(modo_dg) and modo_de(p.get("estilo")) != "foto"
     # EN MODO FOTO, SU ESCALERA (Etapa Foto A). La de ilustracion no se toca:
     # sin `estilo.modo` se reparte con la llamada de siempre, sin un argumento
     # de mas. `servicios` (param de assets, opcional) solo filtra la de foto.
@@ -1202,7 +1186,18 @@ def _asignar_cartas(escenas, p, texto=""):
     else:
         cartas = encuadres.repartir(
             escenas, semilla=p.get("semilla", 0),
-            forzadas={k: v for k, v in forzadas.items() if v}, **extra)
+            forzadas={k: v for k, v in forzadas.items() if v})
+        if retocar:
+            # el reparto de siempre, y encima SOLO los planos que cambian: los
+            # del diagrama por contenido y los que lo sacaron por sorteo
+            fijas = {k for k, v in forzadas.items() if v}
+            cartas = encuadres.sin_arrastrar(
+                escenas, cartas, semilla=p.get("semilla", 0),
+                quitar=diagramas.excluir_del_sorteo(modo_dg),
+                poner=diagramas.cartas_de_diagrama(
+                    escenas, (p.get("catalogo") or {}).get("explicativos") or [],
+                    modo_dg, {k: v for k, v in forzadas.items() if v}),
+                fijas=fijas)
     for escena in escenas:
         carta = cartas.get(escena["id"])
         if not carta:
@@ -1399,7 +1394,9 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # regla de no repetir familia mira a los vecinos, no a un plano suelto.
     # el texto con el que se reconoce de que servicio va el video (consolas,
     # simuladores...): lo que el guion ha decidido que sale, en el catalogo
-    texto_video = json.dumps(catalogo or {}, ensure_ascii=False)
+    # (sin lo de los diagramas: sus textos no deciden de que servicio va el
+    # video. Sin ajuste, el mismo catalogo y el mismo texto de siempre)
+    texto_video = json.dumps(diagramas.sin_diagramas(catalogo or {}), ensure_ascii=False)
     _asignar_cartas(escenas, p, texto=texto_video)
     if lineas_gv:
         _aplicar_lineas_gv(escenas, catalogo)

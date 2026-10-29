@@ -16954,6 +16954,13 @@ def _catalogo_de_diagramas(ficha):
     return salida
 
 
+#: {proyecto: (ajuste, hora)} de la ultima vez que Claude no pudo marcar los
+#: diagramas: no se reintenta en cada tanda (gastaria cupo en silencio) hasta
+#: pasada una hora o con otro ajuste. En memoria: un reinicio lo olvida.
+_DIAGRAMAS_FALLIDOS = {}
+ESPERA_DIAGRAMAS_S = 3600
+
+
 def _diagramas_al_dia(avisar, ctx, ajuste):
     """Pone el catalogo guardado al dia con el ajuste «Diagramas», SIN volver a
     repartir los sitios. -> True si ha cambiado algo.
@@ -16969,15 +16976,14 @@ def _diagramas_al_dia(avisar, ctx, ajuste):
     modo = DIAGRAMAS.modo_de(params)
     if (guardado.get("diagramas") or "") == modo:
         return False
-    nuevo = {k: v for k, v in guardado.items()
-             if k not in ("diagramas", "explicativos", "componentes")}
-    otros = {n: c for n, c in (guardado.get("componentes") or {}).items()
-             if not DIAGRAMAS.es_grafico_con_cifras(c)}
-    if otros:
-        nuevo["componentes"] = otros
+    lo_nuevo = {}
     if modo == "ninguna":
-        nuevo.update({"diagramas": "ninguna", "explicativos": []})
+        lo_nuevo = {"diagramas": "ninguna", "explicativos": []}
     elif modo:
+        fallo_previo = _DIAGRAMAS_FALLIDOS.get(ctx.id)
+        if fallo_previo and fallo_previo[0] == modo \
+                and time.time() - fallo_previo[1] < ESPERA_DIAGRAMAS_S:
+            return False
         avisar(0.0, "leyendo el guion para marcar lo que se explica dibujando")
         try:
             ficha = _catalogo_visual().proponer_diagramas(
@@ -16987,14 +16993,24 @@ def _diagramas_al_dia(avisar, ctx, ajuste):
             raise
         except Exception as fallo:                          # noqa: BLE001
             # SIN DIAGRAMAS NO SE PARA LA TANDA: se sigue como estaba (sin
-            # tocar el catalogo) y se vuelve a intentar en la siguiente
+            # tocar el catalogo) y se vuelve a intentar pasada una hora
+            _DIAGRAMAS_FALLIDOS[ctx.id] = (modo, time.time())
             anotar_global("aviso", {"diagramas": str(fallo), "proyecto": ctx.id})
             avisar(1.0, f"no se han podido marcar los diagramas ({fallo}): "
                         f"las imágenes siguen como estaban")
             return False
-        nuevo.update(_catalogo_de_diagramas(ficha))
-        if otros:
-            nuevo["componentes"] = dict(otros, **(nuevo.get("componentes") or {}))
+        _DIAGRAMAS_FALLIDOS.pop(ctx.id, None)
+        lo_nuevo = _catalogo_de_diagramas(ficha)
+    # SE VUELVE A LEER el catalogo justo antes de escribir: Claude tarda
+    # minutos, y lo que alguien guardo mientras tanto no se pisa
+    guardado = (ctx.estado.params("assets") or {}).get("catalogo") or {}
+    nuevo = {k: v for k, v in guardado.items()
+             if k not in ("diagramas", "explicativos", "componentes")}
+    otros = {n: c for n, c in (guardado.get("componentes") or {}).items()
+             if not DIAGRAMAS.es_grafico_con_cifras(c)}
+    nuevo.update(lo_nuevo)
+    if otros:
+        nuevo["componentes"] = dict(otros, **(nuevo.get("componentes") or {}))
     ctx.estado.actualizar_params("assets", {"catalogo": nuevo})
     ctx.bitacora.anotar("diagramas_al_dia", "assets", {
         "diagramas": modo or "sin ajuste",

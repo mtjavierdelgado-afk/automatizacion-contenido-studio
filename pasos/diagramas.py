@@ -25,8 +25,8 @@ Con el ajuste puesto pasan tres cosas:
    `limpiar_grafico`.
 3. En ilustracion, la carta «diagrama» deja de salir por sorteo y sale en los
    tramos que explican (ver `cartas_de_diagrama`). Las demas cartas del sorteo
-   no se mueven: `encuadres.carta_de(..., excluir=...)` quita la carta DESPUES
-   de barajar, no del mazo.
+   no se mueven: el reparto es el de siempre y `encuadres.sin_arrastrar` solo
+   cambia los planos que tocan, sin arrastrar a los vecinos.
 
 Este modulo no importa nada del Estudio: lo usan el catalogo, p6 y app.py, y
 su prueba (`prueba_diagramas.py`) corre sin dependencias.
@@ -263,7 +263,7 @@ def limpiar_explicativos(crudos, ids_bloque, avisos, modo):
 
 # ---- las cifras: que esten en el guion
 _UNIDADES = {
-    "cero": 0, "un": 1, "uno": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4,
+    "cero": 0, "uno": 1, "dos": 2, "tres": 3, "cuatro": 4,
     "cinco": 5, "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
     "once": 11, "doce": 12, "trece": 13, "catorce": 14, "quince": 15,
     "dieciseis": 16, "diecisiete": 17, "dieciocho": 18, "diecinueve": 19,
@@ -278,44 +278,67 @@ _UNIDADES = {
     "seiscientos": 600, "seiscientas": 600, "setecientos": 700,
     "setecientas": 700, "ochocientos": 800, "ochocientas": 800,
     "novecientos": 900, "novecientas": 900,
-    "medio": 0.5, "media": 0.5,
 }
+#: «un»/«una» solo son un numero delante de mil o millon («un millon»): solos
+#: son articulos, y con ellos cualquier cita validaba la cifra 1.
+_ARTICULOS = {"un", "una"}
 _MULTIPLOS = {"mil": 1000, "millon": 10 ** 6, "millones": 10 ** 6}
 
 
 def _numeros_en_letras(palabras):
     """Los numeros escritos con letras («treinta y cinco», «dos mil»)."""
-    hallados, total, actual, hay = [], 0, 0, False
+    hallados, total, actual, hay, tras_y = [], 0, 0, False, False
 
     def cerrar():
-        nonlocal total, actual, hay
+        nonlocal total, actual, hay, tras_y
         if hay:
             hallados.append(total + actual)
-        total, actual, hay = 0, 0, False
+        total, actual, hay, tras_y = 0, 0, False, False
 
-    for palabra in palabras:
-        if palabra in _UNIDADES:
-            actual += _UNIDADES[palabra]
-            hay = True
-        elif palabra in _MULTIPLOS:
+    def cabe(valor):
+        """Si 'valor' sigue el numero que se esta leyendo («ciento» + «veinte»,
+        «treinta» + «y» + «cinco») o empieza otro («dos tres» son dos numeros)."""
+        if actual == 0:
+            return True
+        if tras_y:
+            return actual % 100 >= 30 and actual % 10 == 0 and valor < 10
+        return actual % 100 == 0 and valor < 100
+
+    previa = ""
+    for i, palabra in enumerate(palabras):
+        siguiente = palabras[i + 1] if i + 1 < len(palabras) else ""
+        if palabra in ("ciento", "cien") and previa == "por":
+            # «por ciento» es el signo %, no el numero cien
+            cerrar()
+        elif palabra in _ARTICULOS and siguiente in _MULTIPLOS and not hay:
+            actual, hay = 1, True
+        elif palabra in _UNIDADES:
+            valor = _UNIDADES[palabra]
+            if not cabe(valor):
+                cerrar()
+            actual += valor
+            hay, tras_y = True, False
+        elif palabra in _MULTIPLOS and hay:
             actual = (actual or 1) * _MULTIPLOS[palabra]
-            total, actual, hay = total + actual, 0, True
-        elif palabra == "y" and hay:
-            continue
+            total, actual, tras_y = total + actual, 0, False
+        elif palabra == "y" and hay and not tras_y:
+            tras_y = True
         else:
             cerrar()
+        previa = palabra
     cerrar()
     return hallados
 
 
 _DIGITOS = re.compile(r"\d+(?:[.,\s]\d+)*")
+_CIFRA = re.compile(r"\d+(?:[.,]\d+)*")
 
 
 def _numeros_en_cifras(texto):
     """Los numeros con digitos. «1.500» y «1,500» dan 1500 y tambien 1.5:
     se aceptan las dos lecturas, porque el guion mezcla las dos costumbres."""
-    hallados = [float(n) for n in re.findall(r"\d+", texto)]
-    for trozo in _DIGITOS.findall(texto):
+    hallados = []
+    for trozo in _CIFRA.findall(texto) + _DIGITOS.findall(texto):
         limpio = trozo.replace(" ", "")
         hallados.append(float(re.sub(r"[.,]", "", limpio)))
         for sep in (",", "."):
@@ -348,7 +371,9 @@ def cifra_en_guion(valor, cita, guion_buscable):
     sale en la cita (con digitos o con letras). 'guion_buscable' es el guion
     pasado por `para_buscar`."""
     cita_llana = para_buscar(cita)
-    if len(cita_llana.strip()) < 3 or cita_llana not in guion_buscable:
+    # tres palabras como poco: con una o dos («12», «12 soles») cualquier
+    # cifra que saliera en el guion validaria cualquier dato
+    if len(cita_llana.split()) < 3 or cita_llana not in guion_buscable:
         return False
     return any(math.isclose(valor, n, rel_tol=1e-9, abs_tol=1e-9)
                for n in numeros_de(cita))
@@ -425,6 +450,25 @@ def es_grafico_con_cifras(ficha):
             and bool((ficha.get("config") or {}).get("clase")))
 
 
+def sin_graficos(catalogo):
+    """El catalogo sin los graficos con cifras en 'componentes'. Si no trae
+    ninguno, el MISMO objeto: nada cambia sin ajuste."""
+    comps = (catalogo or {}).get("componentes") or {}
+    if not any(es_grafico_con_cifras(c) for c in comps.values()):
+        return catalogo
+    return dict(catalogo, componentes={n: c for n, c in comps.items()
+                                       if not es_grafico_con_cifras(c)})
+
+
+def sin_diagramas(catalogo):
+    """El catalogo sin nada de los diagramas (tramos, ajuste y graficos). Si no
+    trae nada de eso, el MISMO objeto, con sus claves en el mismo orden."""
+    catalogo = sin_graficos(catalogo)
+    if not any(k in (catalogo or {}) for k in ("explicativos", "diagramas")):
+        return catalogo
+    return {k: v for k, v in catalogo.items() if k not in ("explicativos", "diagramas")}
+
+
 def recortar_graficos(componentes, modo, avisos):
     """Como mucho MAX_GRAFICOS graficos con cifras; los mapas, intactos."""
     tope = MAX_GRAFICOS.get(modo, 0)
@@ -457,7 +501,9 @@ def planos_de_graficos(escenas, componentes, modo):
         return {}
     voces = []
     for escena in escenas or []:
-        if not escena.get("id") or escena.get("cartela") or escena.get("sigue_a"):
+        otro = escena.get("componente")
+        if not escena.get("id") or escena.get("cartela") or escena.get("sigue_a") \
+                or (otro and not es_grafico_con_cifras((componentes or {}).get(otro))):
             voces.append(None)
             continue
         texto = escena.get("narracion") or ""
@@ -541,7 +587,8 @@ def cartas_de_diagrama(escenas, explicativos, modo, forzadas=None):
 
 
 def excluir_del_sorteo(modo):
-    """Que cartas no salen por sorteo con este ajuste. () sin ajuste."""
+    """Que cartas no salen por sorteo con este ajuste. () sin ajuste. Se
+    quitan con `encuadres.sin_arrastrar`, que no mueve los demas planos."""
     if not activo(modo):
         return ()
     return (CARTA,)

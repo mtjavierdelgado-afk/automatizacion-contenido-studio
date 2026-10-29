@@ -185,8 +185,7 @@ def prueba_sin_ajuste_igual():
 
     escenas = [{"id": f"S{i:03d}"} for i in range(1, 61)]
     base = E.repartir(escenas, semilla=7)
-    igual(E.repartir(escenas, semilla=7, excluir=None), base, "repartir con excluir=None, igual")
-    igual(E.repartir(escenas, semilla=7, excluir=()), base, "y con excluir=(), igual")
+    igual(E.sin_arrastrar(escenas, base, semilla=7), base, "retocar sin nada que quitar ni poner, igual")
 
     import p6_assets as P6                                        # noqa: PLC0415
     for estilo in ({}, {"modo": "foto"}):
@@ -244,10 +243,17 @@ def prueba_graficos():
         raro["config"]["datos"] = datos
         igual(DG.limpiar_grafico("g5", raro, GUION, []), None,
               f"«{clase}» con {len(datos)} datos, fuera")
-    for texto, valor, sale in (("cuesta 1.500 soles", 1500, True),
+    for texto, valor, sale in (("veinte por ciento de", 100, False),
+                               ("una casa en la playa", 1, False),
+                               ("la media de edad", 0.5, False),
+                               ("son dos tres veces", 5, False),
+                               ("cuesta 1.500 soles", 1, False),
+                               ("un millón de personas", 1000000, True),
+                               ("doscientos treinta y cuatro metros", 234, True),
+                               ("cuesta 1.500 soles", 1500, True),
                                ("sube un 2,5 % al año", 2.5, True),
                                ("dos mil personas", 2000, True),
-                               ("en 2024 3 tiendas", 3, True),
+                               ("en 2024 abrimos 3 tiendas", 3, True),
                                ("cuesta 1.500 soles", 15, False)):
         igual(DG.cifra_en_guion(valor, texto, DG.para_buscar(texto)), sale,
               f"{valor:g} en «{texto}»: {'sí' if sale else 'no'}")
@@ -345,20 +351,24 @@ def prueba_cartas():
     seccion("5] las cartas: el diagrama, por contenido")
     escenas = [{"id": f"S{i:03d}"} for i in range(1, 121)]
     base = E.repartir(escenas, semilla=11)
-    sin = E.repartir(escenas, semilla=11, excluir=("diagrama",))
-    ok(any(c["id"] == "diagrama" for c in base.values()), "sin excluir, el sorteo saca diagramas")
-    ok(all(c["id"] != "diagrama" for c in sin.values()), "excluido, ninguno por sorteo")
-    primero = next(i for i, e in enumerate(escenas) if base[e["id"]]["id"] == "diagrama")
-    igual([sin[e["id"]]["id"] for e in escenas[:primero]],
-          [base[e["id"]]["id"] for e in escenas[:primero]],
-          "hasta el primer diagrama, las mismas cartas")
-    iguales = sum(1 for e in escenas if sin[e["id"]]["id"] == base[e["id"]]["id"])
-    diag = sum(1 for e in escenas if base[e["id"]]["id"] == "diagrama")
-    ok(iguales >= len(escenas) - 3 * diag,
-       f"las demás, casi todas iguales ({iguales} de {len(escenas)}; {diag} eran diagrama)")
-    forzado = E.repartir(escenas[:3], semilla=11, forzadas={"S002": "diagrama"},
-                         excluir=("diagrama",))
-    igual(forzado["S002"]["id"], "diagrama", "forzado a mano, el diagrama sigue valiendo")
+    sin = E.sin_arrastrar(escenas, base, semilla=11, quitar=("diagrama",))
+    diag = [e["id"] for e in escenas if base[e["id"]]["id"] == "diagrama"]
+    ok(diag, f"sin quitar, el sorteo saca diagramas ({len(diag)})")
+    ok(all(c["id"] != "diagrama" for c in sin.values()), "quitado, ninguno por sorteo")
+    igual(sorted(s for s in sin if sin[s]["id"] != base[s]["id"]), sorted(diag),
+          "y SOLO cambian los planos que lo habían sacado: nada se arrastra")
+    ids = [e["id"] for e in escenas]
+    choques = [s for i, s in enumerate(ids) if s in diag and any(
+        sin[ids[j]]["familia"] == sin[s]["familia"]
+        for j in range(max(0, i - 2), min(len(ids), i + 3)) if j != i)]
+    igual(choques, [], "y la sustituta no repite la familia de ningún vecino")
+    puesto = E.sin_arrastrar(escenas, base, semilla=11, quitar=("diagrama",),
+                             poner={"S005": "diagrama"}, fijas={diag[0]})
+    igual((puesto["S005"]["id"], puesto[diag[0]]["id"]), ("diagrama", "diagrama"),
+          "el puesto por contenido lleva diagrama, y el forzado a mano no se toca")
+    igual(sorted(s for s in puesto if puesto[s]["id"] != base[s]["id"]),
+          sorted(set(diag[1:]) | ({"S005"} if base["S005"]["id"] != "diagrama" else set())),
+          "y no cambia nada más")
 
     tramos = [{"desde": "B004", "hasta": "B004", "bloques": ["B004"]}]
     planos = _escenas(16, explica=range(4, 10))
@@ -393,6 +403,17 @@ def prueba_cartas():
        f"en p6, el diagrama sale en el tramo que explica ({con})")
     ok(all(planos[int(s[1:]) - 1].get("abstracta") for s in con),
        "y es abstracto, como siempre")
+    base = _escenas(24, explica=(9, 10, 11))
+    P6._asignar_cartas(base, {"semilla": 5, "estilo": {}, "catalogo": {}})  # noqa: SLF001
+    sorteados = {e["id"] for e in base if e.get("carta") == "diagrama"}
+    cambian = {a["id"] for a, b in zip(planos, base) if a.get("carta") != b.get("carta")}
+    ok(cambian <= sorteados | set(con),
+       f"en p6, solo cambian el del tramo y los que lo sacaban por sorteo ({sorted(cambian)})")
+    cat = {"sets": {}, "componentes": {"m": {"tipo": "mapa"}}}
+    ok(DG.sin_diagramas(cat) is cat, "sin nada de diagramas, el catálogo para los servicios es el mismo")
+    con_dg = dict(cat, explicativos=[1], diagramas="didactica",
+                  componentes={"m": {"tipo": "mapa"}, "g": GRAFICO_BUENO})
+    igual(DG.sin_diagramas(con_dg), cat, "y con ellos, se le quitan antes de mirar los servicios")
     foto = _escenas(24, explica=(9, 10, 11))
     foto_sin = copy.deepcopy(foto)
     P6._asignar_cartas(foto, dict(p, estilo={"modo": "foto"}))     # noqa: SLF001

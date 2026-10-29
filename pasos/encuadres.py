@@ -362,7 +362,7 @@ def _repartidas(escalera=ESCALERA):
 
 
 def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
-             servicios=None, dominio=None, excluir=None):
+             servicios=None, dominio=None):
     """Que clase de plano es este. Determinista, y nunca la familia de al lado.
 
     'previas' son los ids de carta de los planos que van justo antes, en orden.
@@ -381,12 +381,6 @@ def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
     antes de pasar el estilo a foto no tiene sentido en una foto, y se reparte
     como si no se hubiera forzado. Forzar a mano si salta el filtro de
     servicios: es una decision tomada mirando.
-
-    'excluir' son ids de carta que no salen por SORTEO (rama
-    diagramas-por-contenido: el «diagrama» sale por contenido). Se quitan
-    DESPUES de barajar, no del mazo: el mazo y el arranque son los mismos, asi
-    que un plano que no sacaba una carta excluida saca la de siempre. Forzada,
-    una carta excluida sigue valiendo. Sin pasarlo, nada cambia.
     """
     lookup = por_id_de(modo)
     if modo == "foto" and dominio is not None and dominio.get("escalera"):
@@ -403,8 +397,6 @@ def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
     fondo = _repartidas(escalera_para(modo, servicios, dominio))
     arranque = medios.desempatar(semilla, sid, "carta") % len(fondo)
     orden = [fondo[(arranque + i) % len(fondo)] for i in range(len(fondo))]
-    if excluir:
-        orden = [c for c in orden if c["id"] not in excluir] or orden
     libres = [c for c in orden if c["familia"] not in vetadas]
     if not libres:
         return orden[0]
@@ -413,7 +405,7 @@ def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
 
 
 def repartir(escenas, semilla=0, forzadas=None, modo="ilustracion",
-             servicios=None, dominio=None, excluir=None):
+             servicios=None, dominio=None):
     """Una carta por plano, en orden y con las dos reglas puestas.
 
     Va aparte de `carta_de` porque el reparto depende del ORDEN -- cada plano
@@ -426,8 +418,53 @@ def repartir(escenas, semilla=0, forzadas=None, modo="ilustracion",
         if not sid:
             continue
         carta = carta_de(sid, previas, semilla, forzadas.get(sid, ""),
-                         modo=modo, servicios=servicios, dominio=dominio,
-                         excluir=excluir)
+                         modo=modo, servicios=servicios, dominio=dominio)
         cartas[sid] = carta
         previas.append(carta["id"])
     return cartas
+
+
+def sin_arrastrar(escenas, cartas, semilla=0, quitar=(), poner=None, fijas=()):
+    """Retoca un reparto YA HECHO sin mover los demas planos (rama
+    diagramas-por-contenido). -> cartas nuevas
+
+    `repartir` decide cada plano mirando a los de delante, asi que quitar una
+    carta del sorteo y volver a repartir arrastra el cambio en cadena: en un
+    video de 86 planos, quitar cinco diagramas movia quince cartas, y con
+    cuatro puestos por contenido, treinta y cuatro. Aqui el reparto es el de
+    siempre y solo cambian:
+
+      - los planos de `poner` ({sid: id de carta}), que llevan esa carta;
+      - los que sacaron una carta de `quitar`, que llevan la siguiente de SU
+        propio orden de sorteo cuya familia no sea la de ningun vecino (dos
+        delante y dos detras) y, si se puede, que no este entre las cercanas.
+
+    `fijas` son los planos con carta forzada a mano: no se tocan nunca. Solo
+    ilustracion: la escalera de foto no tiene cartas que quitar todavia.
+    """
+    poner = poner or {}
+    salida = dict(cartas or {})
+    ids = [e.get("id") for e in escenas or [] if e.get("id") in salida]
+    for sid, carta in poner.items():
+        if sid in salida and sid not in fijas and carta in POR_ID:
+            salida[sid] = POR_ID[carta]
+    if not quitar:
+        return salida
+    fondo = _repartidas(ESCALERA)
+    for i, sid in enumerate(ids):
+        if sid in fijas or sid in poner or salida[sid]["id"] not in quitar:
+            continue
+        cerca = [salida[ids[j]] for j in range(max(0, i - VENTANA_FAMILIA),
+                                                 min(len(ids), i + VENTANA_FAMILIA + 1))
+                 if j != i]
+        vetadas = {c["familia"] for c in cerca}
+        recientes = {salida[ids[j]]["id"] for j in range(max(0, i - VENTANA_CARTA),
+                                                          min(len(ids), i + VENTANA_CARTA + 1))
+                     if j != i}
+        arranque = medios.desempatar(semilla, sid, "carta") % len(fondo)
+        orden = [fondo[(arranque + k) % len(fondo)] for k in range(len(fondo))]
+        orden = [c for c in orden if c["id"] not in quitar] or orden
+        libres = [c for c in orden if c["familia"] not in vetadas] or orden
+        frescas = [c for c in libres if c["id"] not in recientes]
+        salida[sid] = (frescas or libres)[0]
+    return salida

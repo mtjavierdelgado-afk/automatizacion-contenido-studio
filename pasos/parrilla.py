@@ -385,6 +385,75 @@ def instruccion_resultados(posts, cuantos, modo, contexto=None, peticion="", ya=
             + ("LO QUE PIDE ADEMÁS QUIEN LO ENCARGA:\n" + extra if extra else ""))
 
 
+def instruccion_temas(temas, modo, contexto=None, desde=1):
+    """[[TAREA:temas]] Un guion por cada tema APROBADO por el dueño (rama
+    cuentas-gustan-2): el tema, el gancho, el espacio y la fórmula ya están
+    decididos; los vídeos de referencia son de otras cuentas y no se copian."""
+    modo = modo if modo in USOS else "adaptar"
+    bloques = []
+    for n, t in enumerate(temas, 1):
+        lineas = [f"TEMA {n}: {t.get('tema')}",
+                  f"- Gancho (la idea; dilo con tus palabras): {t.get('gancho') or '—'}",
+                  f"- Tipo de vídeo: {t.get('tipo_video') or '—'}",
+                  f"- Espacio (dónde ocurre; distinto en cada guion): {t.get('espacio') or '—'}",
+                  f"- Problema que resuelve: {t.get('problema') or '—'}",
+                  f"- Fórmula que repite: {t.get('formula') or '—'}",
+                  f"- Por qué: {t.get('por_que') or '—'}"]
+        if t.get("duracion"):
+            lineas.append(f"- Duración sugerida: {t['duracion']}")
+        if t.get("inspiracion"):
+            lineas.append("- Vídeos de referencia (de OTRAS cuentas; NO copies sus frases):")
+            lineas += [f"    · {x}" for x in t["inspiracion"][:4]]
+        bloques.append("\n".join(lineas))
+    return ("[[TAREA:temas]]\n"
+            f"Escribe {len(temas)} guion(es), UNO POR CADA TEMA de abajo y en el MISMO orden. Los temas ya "
+            "los aprobó quien los encarga: respeta su tema, su gancho, su espacio y su fórmula.\n"
+            "Inspírate sin copiar: no reutilices frases de los vídeos de referencia (ni 8 palabras seguidas "
+            "iguales), ni su marca, ni sus datos. Respeta MI marca, su vocabulario y sus reglas.\n"
+            "En la línea «Objetivo:» di qué fórmula repite y de qué vídeo sale (por ejemplo: «fórmula pregunta "
+            "en el gancho, como @x#3»). Si el espacio es un solo sitio, ponlo en ESPACIO FIJO.\n\n"
+            f"Uso: {modo} (como lo tratará el Studio). Escribe la locución final, completa.\n\n"
+            + _REGLAS + "\n\n" + _AJUSTE_RED + "\n\n" + _FORMATO_SALIDA + "\n\n" + _SALIDA_STUDIO + "\n"
+            f"- Los ID, correlativos desde G{int(desde):02d}.\n\n"
+            + _contexto_texto(contexto) + "LOS TEMAS\n" + "\n\n".join(bloques))
+
+
+#: Cuántas palabras seguidas iguales a un vídeo de referencia hacen «copiada».
+PALABRAS_COPIA = 8
+
+
+def _palabras_llanas(texto):
+    import unicodedata                                     # noqa: PLC0415
+    llano = "".join(c for c in unicodedata.normalize("NFD", str(texto or "").lower())
+                    if unicodedata.category(c) != "Mn")
+    return re.findall(r"[a-z0-9ñ]+", llano)
+
+
+def frases_copiadas(texto, fuentes, n=PALABRAS_COPIA, maximo=5):
+    """Las frases de `texto` que repiten `n` palabras seguidas o más de alguna
+    fuente (los vídeos de referencia). -> [frase] (sin repetir)."""
+    trozos = set()
+    for fuente in fuentes or []:
+        p = _palabras_llanas(fuente)
+        trozos.update(" ".join(p[i:i + n]) for i in range(len(p) - n + 1))
+    if not trozos:
+        return []
+    p = _palabras_llanas(texto)
+    salida, i = [], 0
+    while i <= len(p) - n:
+        if " ".join(p[i:i + n]) in trozos:
+            j = i + n
+            while j < len(p) and " ".join(p[j - n + 1:j + 1]) in trozos:
+                j += 1
+            salida.append(" ".join(p[i:j]))
+            i = j
+            if len(salida) >= maximo:
+                break
+        else:
+            i += 1
+    return salida
+
+
 SISTEMA = ("Eres el editor de guiones del Studio: conviertes y escribes guiones de vídeo "
            "corto y largo para redes en un formato fijo que luego lee un programa. Escribes "
            "en español. No inventas datos (teléfonos, precios, enlaces) que no estén en lo "
@@ -1153,12 +1222,20 @@ def _matriz_destino(datos, mid, nombre, origen):
     return m
 
 
-def _anadir_textos(raiz, cid, mid, nombre, textos, origen, crear_si_falta=False):
+def _anadir_textos(raiz, cid, mid, nombre, textos, origen, crear_si_falta=False, origenes=None):
     """Guarda los guiones de golpe. -> (mid, [gid])
+
+    `origenes`: uno por texto (rama cuentas-gustan-2: cada guion de un tema
+    aprobado lleva el suyo); si no, todos llevan `origen`.
 
     `crear_si_falta`: lo que convirtió Claude no se pierde porque alguien
     borrara la matriz de destino mientras tanto; va a una matriz nueva."""
-    textos = [t for t in textos if str(t or "").strip()]
+    if origenes is not None and len(origenes) == len(textos):
+        pares = [(t, o) for t, o in zip(textos, origenes) if str(t or "").strip()]
+        textos, origenes = [t for t, _o in pares], [o for _t, o in pares]
+    else:
+        origenes = None
+        textos = [t for t in textos if str(t or "").strip()]
     if not textos:
         raise ErrorParrilla("no hay ningún guion que guardar")
     with _lock(_cid(cid)):
@@ -1166,7 +1243,8 @@ def _anadir_textos(raiz, cid, mid, nombre, textos, origen, crear_si_falta=False)
         if mid and crear_si_falta and not any(x.get("id") == mid for x in datos["matrices"]):
             mid = ""
         m = _matriz_destino(datos, mid, nombre, origen)
-        nuevos = [_nuevo_guion(t, origen) for t in textos]
+        nuevos = [_nuevo_guion(t, dict(origen or {}, **o) if origenes else origen)
+                  for t, o in zip(textos, origenes or [None] * len(textos))]
         m.setdefault("guiones", []).extend(nuevos)
         _guardar(raiz, cid, datos)
     return m["id"], [g["id"] for g in nuevos]
@@ -1720,6 +1798,21 @@ def _claude_simulado(instruccion, para, cwd=None):
             guiones.append({"id": f"S{i:02d}", "titulo": trozo.split("\n")[0][:60],
                             "primera_linea": trozo.split("\n")[0][:80]})
         return json.dumps({"guiones": guiones}, ensure_ascii=False)
+    if tarea == "temas":
+        # uno por TEMA; el primero copia a propósito su vídeo de referencia
+        # (para que se vea el aviso de frases copiadas)
+        desde = int((re.search(r"desde G(\d+)", instruccion) or [0, 1])[1])
+        modo = "exacto" if "Uso: exacto" in instruccion else "adaptar"
+        bloques = re.split(r"^TEMA \d+: ", instruccion.split("LOS TEMAS\n", 1)[-1], flags=re.M)[1:]
+        salida = []
+        for i, bloque in enumerate(bloques):
+            tema = bloque.split("\n", 1)[0].strip()
+            inspira = re.search(r"·\s*@[\w.\-]+#\d+:\s*(.+)", bloque)
+            voz = f"Hoy te cuento {tema}."
+            if i == 0 and inspira:
+                voz += " " + inspira.group(1)
+            salida.append(f"{SEPARADOR}\n" + _guion_simulado(desde + i, tema, voz, modo))
+        return "\n".join(salida)
     if tarea in ("pedir", "resultados"):
         cuantos = int((re.search(r"Escribe (\d+) guion", instruccion, re.I) or [0, 1])[1])
         desde = int((re.search(r"desde G(\d+)", instruccion) or [0, 1])[1])
@@ -1837,11 +1930,13 @@ def lanzar(raiz, cid, tipo, datos, en_hilo=True):
     tipo «pegar»: {texto, modo, matriz?, nombre?, contexto?}
     tipo «pedir»: {peticion, cuantos, modo, matriz?, nombre?, contexto?}
     tipo «resultados»: {posts, cuantos, modo, peticion?, matriz?, nombre?, contexto?}
+    tipo «temas»: {temas: [{tema, gancho, …, inspiracion, fuentes, origen}], modo, nombre?, contexto?}
+      (rama cuentas-gustan-2: un guion por tema aprobado, cada uno con su origen)
     Un trabajo por proyecto a la vez: un doble clic no convierte dos veces.
     La marca guardada del proyecto entra sola en el contexto."""
     cid = _cid(cid)
     d = datos if isinstance(datos, dict) else {}
-    if tipo not in ("subir", "pegar", "pedir", "resultados"):
+    if tipo not in ("subir", "pegar", "pedir", "resultados", "temas"):
         raise ErrorParrilla("no sé hacer eso")
     modo = d.get("modo") if d.get("modo") in USOS else ""
     if not modo:
@@ -1865,6 +1960,11 @@ def lanzar(raiz, cid, tipo, datos, en_hilo=True):
         if not 1 <= cuantos <= MAX_PEDIR:
             raise ErrorParrilla(f"pide de 1 a {MAX_PEDIR} guiones de una vez")
         d["cuantos"] = cuantos
+    if tipo == "temas":
+        temas = [t for t in (d.get("temas") or []) if isinstance(t, dict) and str(t.get("tema") or "").strip()]
+        if not 1 <= len(temas) <= MAX_PEDIR:
+            raise ErrorParrilla(f"aprueba de 1 a {MAX_PEDIR} temas")
+        d["temas"] = temas
     if tipo == "subir" and not os.path.isfile(str(d.get("ruta") or "")):
         raise ErrorParrilla("no ha llegado el documento")
     if d.get("matriz"):
@@ -1916,8 +2016,32 @@ def _trabajar(raiz, cid, tid, tipo, d):
             cambios["total"] = total
         _apuntar(tid, **cambios)
 
+    origenes = None
     try:
-        if tipo in ("pedir", "resultados"):
+        if tipo == "temas":
+            temas = d["temas"]
+            origenes = []
+            for i in range(0, len(temas), POR_LOTE_PEDIR):
+                lote = temas[i:i + POR_LOTE_PEDIR]
+                avance(f"Claude está escribiendo los guiones {i + 1}–{i + len(lote)} de {len(temas)}",
+                       len(textos), len(temas))
+                respuesta = _claude(instruccion_temas(lote, modo, contexto, desde=i + 1),
+                                    "escribir guiones de temas aprobados", cwd=cwd)
+                nuevos = [t for t in separar(respuesta)
+                          if (lambda g: g["escenas"] or g["encargos"])(leer_guion(t))][:len(lote)]
+                if len(nuevos) < len(lote):
+                    aviso = (aviso + " " if aviso else "") + (
+                        f"Claude devolvió {len(nuevos)} de {len(lote)} guiones en una tanda: "
+                        "los temas que faltan siguen aprobados para volver a pedirlos.")
+                for texto, tema in zip(nuevos, lote):
+                    o = dict(tema.get("origen") or {})
+                    copiadas = frases_copiadas(texto, tema.get("fuentes") or [])
+                    if copiadas:
+                        o["avisos_copia"] = copiadas
+                    textos.append(texto)
+                    origenes.append(o)
+            origen["tipo"] = "temas"
+        elif tipo in ("pedir", "resultados"):
             cuantos = d["cuantos"]
             ya = []
             lotes = [min(POR_LOTE_PEDIR, cuantos - i) for i in range(0, cuantos, POR_LOTE_PEDIR)]
@@ -1969,12 +2093,14 @@ def _trabajar(raiz, cid, tid, tipo, d):
                     break
         leidos = [leer_guion(t) for t in textos]
         # una frase suelta («Lo siento, no puedo») tiene «título» pero no es un guion
+        if origenes is not None:
+            origenes = [o for o, g in zip(origenes, leidos) if g["escenas"] or g["encargos"]]
         textos = [t for t, g in zip(textos, leidos) if g["escenas"] or g["encargos"]]
         if not textos:
             raise RuntimeError("Claude ha contestado, pero sin ningún guion en el formato del Studio")
         mid, gids = _anadir_textos(raiz, cid, d.get("matriz") or "",
                                    d.get("nombre") or origen.get("fichero") or "", textos, origen,
-                                   crear_si_falta=True)
+                                   crear_si_falta=True, origenes=origenes)
         _apuntar(tid, estado="listo", matriz=mid, guiones=gids, aviso=aviso,
                  avance=f"{len(gids)} guion(es) guardados", hechos=len(gids), total=len(gids),
                  segundos=round(time.time() - inicio, 1), reloj=time.time())

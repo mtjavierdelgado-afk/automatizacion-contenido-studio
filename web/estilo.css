@@ -5501,3 +5501,60 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .tabla-consumo-claude th:first-child, .tabla-consumo-claude td.que { text-align: left; white-space: normal; overflow-wrap: anywhere; }
 /* medidor-claude-2: Claude de un vídeo, por tarea, en «Coste del vídeo» */
 .claude-del-video { margin: 6px 0 12px; }
+
+/* ======================================= CUENTAS QUE TE GUSTAN 2 (01-11-2026)
+   rama cuentas-gustan-2: casillas en «Ya leídas», cifras relativas de una
+   cuenta, el análisis de varias juntas y los temas propuestos. */
+.cab-leidas { gap: 6px; flex-wrap: wrap; align-items: center; }
+.cab-leidas h3 { margin: 4px 0; }
+.tarjeta-cuenta-sel { display: flex; align-items: stretch; gap: 0; min-width: 0; }
+.tarjeta-cuenta-sel .tarjeta-cuenta { flex: 1 1 auto; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.casilla-cuenta { display: flex; align-items: center; justify-content: center; padding: 0 10px; cursor: pointer;
+  border: 1px solid var(--linea); border-right: 0; border-radius: 12px 0 0 12px; background: var(--hueco); }
+.casilla-cuenta input { width: 18px; height: 18px; margin: 0; cursor: pointer; }
+.tarjeta-cuenta-sel.marcada .casilla-cuenta { border-color: var(--acento); background: var(--marcado); }
+.cifras-cuenta { border-top: 1px solid var(--linea-suave); margin-top: 10px; padding-top: 8px; display: grid; gap: 6px; }
+.cab-rangos { gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.rangos-cuenta { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 130px), 1fr)); }
+.rango-cuenta { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border: 1px solid var(--linea);
+  border-radius: 10px; background: var(--hueco); min-width: 0; }
+.faltan-duraciones { gap: 8px; flex-wrap: wrap; align-items: center; }
+.video-cuenta.dudoso { opacity: .78; }
+.relativas-video { font-variant-numeric: tabular-nums; }
+.pastilla-dudoso { display: inline-block; margin-top: 4px; white-space: normal; overflow-wrap: anywhere; text-transform: none; letter-spacing: 0; }
+.varias-cuentas { display: grid; gap: 8px; }
+.varias-cuentas > .fila { gap: 8px; flex-wrap: wrap; align-items: center; }
+.varias-cuentas h3 { margin: 0; }
+.resultado-conjunto { display: grid; gap: 8px; border-top: 1px solid var(--linea-suave); padding-top: 10px; min-width: 0; }
+.resultado-conjunto h4 { margin: 8px 0 0; }
+.resumen-conjunto { margin: 0; line-height: 1.5; }
+.item-conjunto { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--linea); border-radius: 10px;
+  background: var(--panel); min-width: 0; overflow-wrap: anywhere; }
+.pruebas-conjunto { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.pastilla.prueba { text-decoration: none; text-transform: none; letter-spacing: 0; }
+.cab-tema .pastilla { text-transform: none; letter-spacing: 0; white-space: normal; overflow-wrap: anywhere; }
+.proponer-temas { border-top: 1px solid var(--linea-suave); padding-top: 10px; display: grid; gap: 6px; }
+.proponer-temas h4 { margin: 0; }
+.proponer-temas .fila { gap: 8px; flex-wrap: wrap; align-items: center; }
+.temas-propuestos { display: grid; gap: 10px; border-top: 2px solid var(--linea); padding-top: 12px; margin-top: 6px; min-width: 0; }
+.temas-propuestos > .fila { gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.temas-propuestos h3 { margin: 0; }
+.tarjeta-tema { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--linea); border-radius: 12px;
+  background: var(--panel); min-width: 0; }
+.tarjeta-tema.estado-aprobado { border-color: var(--acento); }
+.tarjeta-tema.estado-descartado { opacity: .6; }
+.tarjeta-tema.escrito { border-style: dashed; }
+.cab-tema { gap: 6px; flex-wrap: wrap; align-items: center; }
+.campos-tema { display: grid; gap: 6px 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.campo-tema { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.campo-tema.ancho { grid-column: 1 / -1; }
+.campo-tema input { width: 100%; box-sizing: border-box; min-width: 0; }
+.por-que-tema { overflow-wrap: anywhere; }
+.aviso-copia ul { margin: 4px 0 0; padding-left: 18px; }
+.temas-fuera summary { cursor: pointer; }
+.tema-fuera { gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--linea-suave); min-width: 0; }
+.tema-fuera > .crece { min-width: 0; overflow-wrap: anywhere; }
+.escribir-temas { gap: 8px; flex-wrap: wrap; align-items: center; border-top: 1px solid var(--linea-suave); padding-top: 10px; }
+@media (max-width: 600px) {
+  .campos-tema { grid-template-columns: minmax(0, 1fr); }
+}

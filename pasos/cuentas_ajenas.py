@@ -43,19 +43,24 @@ En `<secretos>/lectura_redes.json` (la carpeta de `pasos/claves.py`, la que
 vetan el asistente y el chat), y no en `claves.json`: así esta rama no toca el
 almacén central. Nunca bajan a la pantalla: solo los cuatro últimos caracteres.
 """
+import concurrent.futures
 import datetime as dt
 import json
 import os
 import re
+import shutil
+import subprocess
 import threading
 import time
 import uuid
 
 try:
     from . import claves as CLAVES
+    from . import cuentas_metricas as M
     from . import parrilla as P
 except ImportError:                                   # corriendo desde pasos/
     import claves as CLAVES
+    import cuentas_metricas as M
     import parrilla as P
 
 RAIZ_ESTUDIO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -495,6 +500,11 @@ def leer(raiz, red, usuario, cuantos=30, forzar=False, avance=None, pagar=False)
         break
     if resultado is None:
         raise ErrorCuentas("no se ha podido traer la cuenta:\n- " + "\n- ".join(intentos), 409)
+    medidas = duraciones_con_ffprobe(resultado["videos"], avance)
+    if medidas:
+        resultado["duraciones_ffprobe"] = medidas
+    for v in resultado["videos"]:
+        v.pop("media_url", None)          # caduca en horas: no se guarda
     resultado["videos"].sort(key=lambda v: v.get("vistas") if v.get("vistas") is not None else -1, reverse=True)
     resultado.update({"traida": ahora(), "pedidos": cuantos, "intentos": intentos,
                       "fuente_nombre": FUENTES.get(resultado["fuente"], resultado["fuente"])})
@@ -514,33 +524,185 @@ def leer(raiz, red, usuario, cuantos=30, forzar=False, avance=None, pagar=False)
 
 # ------------------------------------------------------------------ Claude
 
-def resumen_para_claude(datos, maximo=25):
-    """Los vídeos de la cuenta en texto: los que más vistas tienen y los que
-    menos, para que se vea la diferencia."""
-    videos = list(datos.get("videos") or [])
-    con = [v for v in videos if v.get("vistas") is not None]
-    sin = [v for v in videos if v.get("vistas") is None]
+def resumen_para_claude(datos, maximo=MAX_VIDEOS):
+    """Los vídeos de la cuenta en texto para Claude: TODOS los leídos (hasta 50,
+    rama cuentas-gustan-2; antes iban 25), de más a menos vistas, cada uno con
+    sus cifras relativas a la cuenta (`cuentas_metricas`) y los dudosos
+    marcados para que no los tome de referencia."""
+    m = M.metricas(datos)
+    videos = m["videos"]
     lineas = [f"CUENTA: @{datos.get('usuario')} en {NOMBRE_RED.get(datos.get('red'), datos.get('red'))}"
               + (f" ({datos.get('nombre')})" if datos.get("nombre") and datos.get("nombre") != datos.get("usuario") else "")
               + (f", {datos['seguidores']} seguidores" if datos.get("seguidores") else "")
               + f". {len(videos)} vídeos leídos el {str(datos.get('traida') or '')[:10]}."]
-    elegidos = con[:maximo] if len(con) <= maximo else con[:maximo - 5] + con[-5:]
-    for i, v in enumerate(elegidos + sin[:max(0, maximo - len(elegidos))], 1):
-        cifras = []
-        for clave, nombre in (("vistas", "vistas"), ("me_gusta", "me gusta"), ("comentarios", "comentarios"),
-                              ("compartidos", "compartidos")):
-            if v.get(clave) is not None:
-                cifras.append(f"{v[clave]} {nombre}")
-        if v.get("duracion_s"):
-            cifras.append(f"{int(v['duracion_s'])} s")
-        fecha = str(v.get("fecha") or "")[:16].replace("T", " ")
-        texto = " ".join(str(v.get("texto") or "").split())[:300]
-        lineas.append(f"{i}. {fecha} · {', '.join(cifras) or 'sin cifras'}\n   Texto: {texto or '(sin texto)'}")
-        if v.get("transcripcion"):
-            lineas.append(f"   Lo que dice: {' '.join(v['transcripcion'].split())[:500]}")
-    if len(con) > maximo:
-        lineas.append(f"(Van los {maximo - 5} con más vistas y los 5 con menos.)")
+    if m["mediana_vistas"] is not None:
+        lineas.append(f"Su mediana: {M.cifra(m['mediana_vistas'], 0)} vistas"
+                      + (f", {M.cifra(m['mediana_mg100'], 1)} «me gusta» por 100 vistas" if m["mediana_mg100"] is not None else "")
+                      + ". «×2,0 su mediana» = el doble de vistas de lo normal en ESTA cuenta.")
+    lineas.append(M.texto_rangos(m))
+    if m["dudosos"]:
+        lineas.append(f"{m['dudosos']} vídeo(s) marcados DUDOSO (colaboración o posible promoción): "
+                      "están para que se vean, pero no los uses como prueba de nada.")
+    for v in videos[:maximo]:
+        lineas.append(M.linea_video(v, datos.get("usuario")))
+    if len(videos) > maximo:
+        lineas.append(f"(Van los {maximo} con más vistas de {len(videos)}.)")
     return "\n".join(lineas)
+
+
+def cuenta_con_metricas(raiz, red, usuario):
+    """Lo guardado de la cuenta, con sus cifras relativas (`metricas`) y si se
+    puede completar la duración que falta (`duraciones`)."""
+    datos = cuenta(raiz, red, usuario)
+    m = M.metricas(datos)
+    salida = dict(datos)
+    salida["videos"] = m.pop("videos")
+    salida["metricas"] = m
+    salida["duraciones"] = plan_duraciones(raiz, red, usuario, datos=datos)
+    return salida
+
+
+# ------------------------------------------------- la duración que falta
+#
+# Instagram por la vía oficial no da la duración. Al leer, se mide con ffprobe
+# sobre el enlace del vídeo (`media_url`), leyendo solo su cabecera: el vídeo
+# no se baja ni se guarda. Lo que siga faltando (Meta no da el enlace de los
+# vídeos con música con derechos, o ya caducó) se puede completar con Apify,
+# con el precio delante y dentro del tope del mes.
+
+PLAZO_FFPROBE_S = 20
+FFPROBE_A_LA_VEZ = 4
+
+
+def _ffprobe():
+    return os.environ.get("ESTUDIO_FFPROBE") or shutil.which("ffprobe") or ""
+
+
+def duracion_ffprobe(url, plazo=PLAZO_FFPROBE_S):
+    """Los segundos de un vídeo por su enlace, o None. Solo lee la cabecera."""
+    binario = _ffprobe()
+    if not binario or not str(url or "").startswith(("http://", "https://", "/")):
+        return None
+    try:
+        r = subprocess.run([binario, "-v", "error", "-show_entries", "format=duration",
+                            "-of", "default=nw=1:nk=1", str(url)],
+                           capture_output=True, text=True, timeout=plazo, check=False)
+        valor = float((r.stdout or "").strip().splitlines()[0])
+        return round(valor, 1) if 0 < valor < 6 * 3600 else None
+    except (subprocess.SubprocessError, OSError, ValueError, IndexError):
+        return None
+
+
+def duraciones_con_ffprobe(videos, avance=None):
+    """Mide los vídeos con `media_url` y sin duración. -> cuántos se midieron."""
+    pendientes = [v for v in videos if v.get("media_url") and not v.get("duracion_s")]
+    if not pendientes or not _ffprobe():
+        return 0
+    if avance:
+        avance(f"midiendo la duración de {len(pendientes)} vídeos (sin bajarlos)")
+    hechos = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=FFPROBE_A_LA_VEZ) as pool:
+        for v, segundos in zip(pendientes, pool.map(lambda x: duracion_ffprobe(x["media_url"]), pendientes)):
+            if segundos:
+                v["duracion_s"] = segundos
+                v["duracion_fuente"] = "ffprobe"
+                hechos += 1
+    return hechos
+
+
+def _codigo_corto(url):
+    """El código de un post de Instagram en su enlace (…/reel/ABC123/ -> ABC123)."""
+    m = re.search(r"instagram\.com/(?:[\w.]+/)?(?:p|reel|reels|tv)/([\w-]+)", str(url or ""))
+    return m.group(1) if m else ""
+
+
+def plan_duraciones(raiz, red, usuario, datos=None):
+    """{faltan, total, se_puede, coste_usd, motivo, gasto_mes, tope_usd, queda_usd}."""
+    datos = datos or cuenta(raiz, red, usuario)
+    videos = datos.get("videos") or []
+    faltan = sum(1 for v in videos if not v.get("duracion_s"))
+    pub = claves_publicas()
+    gastado = gasto_del_mes(raiz)
+    coste = F.coste_apify(red, len(videos)) if videos else 0.0
+    motivo = ""
+    if not faltan:
+        motivo = "todos los vídeos tienen su duración"
+    elif red != "instagram":
+        motivo = "en esta red la duración llega con la lectura: vuelve a traer la cuenta"
+    elif not _claves().get("apify_token"):
+        motivo = "falta el token de Apify (en Configuración)"
+    elif not pub["pago"]:
+        motivo = "el servicio de pago está apagado (en Configuración)"
+    elif gastado + coste > pub["tope_usd"]:
+        motivo = (f"pasaría del tope del mes ({gastado:.2f} $ gastados de {pub['tope_usd']:.2f} $): "
+                  "súbelo en Configuración si quieres seguir")
+    return {"faltan": faltan, "total": len(videos), "se_puede": bool(faltan) and not motivo,
+            "coste_usd": coste if faltan else 0.0, "motivo": motivo, "gasto_mes": gastado,
+            "tope_usd": pub["tope_usd"], "queda_usd": round(max(0.0, pub["tope_usd"] - gastado), 4)}
+
+
+def completar_duraciones(raiz, red, usuario, pagar=False, avance=None):
+    """Pide a Apify los mismos vídeos y copia SOLO su duración en los que no la
+    tienen (las demás cifras se quedan como se leyeron). Pide `pagar`."""
+    datos = cuenta(raiz, red, usuario)
+    plan_d = plan_duraciones(raiz, red, usuario, datos=datos)
+    if not plan_d["se_puede"]:
+        raise ErrorCuentas(f"no se puede completar la duración: {plan_d['motivo']}", 409)
+    if not pagar:
+        raise ErrorCuentas(f"completar la duración con Apify costará unos {plan_d['coste_usd']:.2f} $", 402,
+                           pide_pago={"coste_usd": plan_d["coste_usd"], "via": FUENTES["apify"], "intentos": []})
+    pub = claves_publicas()
+    cuantos = len(datos.get("videos") or [])
+    coste = F.coste_apify(red, cuantos)
+    rid, gastado = _reservar(raiz, red, usuario, coste, pub["tope_usd"])
+    if rid is None:
+        raise ErrorCuentas(f"llegaría al tope del mes ({gastado:.2f} $ de {pub['tope_usd']:.2f} $)", 409)
+    if avance:
+        avance(f"pidiendo la duración a {FUENTES['apify']}")
+    try:
+        if _simular():
+            leido = SIM.leer("apify", red, usuario, cuantos)
+            for v, w in zip(datos.get("videos") or [], leido["videos"]):
+                w["url"] = v.get("url")
+        else:
+            leido = F.apify(_claves().get("apify_token"), red, usuario, cuantos, bases=_bases(),
+                            max_usd=pub["tope_usd"] - gastado)
+    except Exception as fallo:                         # noqa: BLE001 - se apunta y se dice
+        if not isinstance(fallo, F.ErrorLectura):
+            fallo = F.ErrorLectura(f"fallo inesperado: {str(fallo)[:200]}", "red", cobrado=True)
+        real = (F.coste_apify(red, fallo.resultados) if fallo.resultados else coste if fallo.cobrado else 0)
+        _ajustar(raiz, red, usuario, rid, coste, real, fallo.resultados)
+        raise ErrorCuentas(f"no se ha podido completar la duración: {fallo}", 409) from None
+    _ajustar(raiz, red, usuario, rid, coste, leido.get("coste_usd") or 0, len(leido["videos"]))
+    por_codigo = {}
+    for w in leido["videos"]:
+        clave = _codigo_corto(w.get("url")) or str(w.get("id") or "")
+        if clave and w.get("duracion_s"):
+            por_codigo[clave] = w["duracion_s"]
+    datos = cuenta(raiz, red, usuario)
+    puestas = 0
+    for v in datos.get("videos") or []:
+        if v.get("duracion_s"):
+            continue
+        segundos = por_codigo.get(_codigo_corto(v.get("url")) or str(v.get("id") or ""))
+        if segundos:
+            v["duracion_s"], v["duracion_fuente"] = segundos, "apify"
+            puestas += 1
+    datos["duraciones_apify"] = {"al": ahora(), "puestas": puestas, "coste_usd": leido.get("coste_usd") or 0}
+    escribir_json(_ruta_cuenta(raiz, red, datos["usuario"]), datos)
+    datos["coste_usd"] = leido.get("coste_usd") or 0
+    return datos
+
+
+def lanzar_duraciones(raiz, red, usuario, pagar=False, en_hilo=True):
+    cuenta(raiz, red, usuario)                 # 404 antes de lanzar nada
+    tid = _nuevo_trabajo("duraciones", red, usuario)
+    fn = lambda avance: completar_duraciones(raiz, red, usuario, pagar, avance)  # noqa: E731
+    if en_hilo:
+        threading.Thread(target=_correr, args=(tid, fn), daemon=True, name=f"cuenta-{tid}").start()
+    else:
+        _correr(tid, fn)
+    return trabajo(tid)
 
 
 def instruccion_analisis(datos):

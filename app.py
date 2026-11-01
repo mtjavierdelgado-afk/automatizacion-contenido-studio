@@ -21721,8 +21721,10 @@ def parrilla_cuentas_trabajo(tid: str):
 
 @app.get("/api/parrilla/cuentas/{red}/{usuario}")
 def parrilla_cuenta(red: str, usuario: str):
+    """Lo guardado de la cuenta, con sus cifras relativas (`metricas`, rama
+    cuentas-gustan-2) y si se puede completar la duración que falta."""
     red, usuario = _cuenta_pedida(red, usuario)
-    return _por_cuentas(_cuentas().cuenta, raiz_proyectos(), red, usuario)
+    return _por_cuentas(_cuentas().cuenta_con_metricas, raiz_proyectos(), red, usuario)
 
 
 @app.delete("/api/parrilla/cuentas/{red}/{usuario}")
@@ -21761,6 +21763,185 @@ def parrilla_desde_cuenta(cid: str, peticion: Request, cuerpo: dict = Body(defau
         "analisis": datos.get("analisis") or "", "contexto": _contexto_parrilla(cid, d)})
     anotar_global("parrilla_desde_cuenta", {"proyecto": cid, "red": red, "usuario": usuario})
     return trabajo_
+
+
+# ------------------------------- CUENTAS QUE TE GUSTAN 2 (rama cuentas-gustan-2)
+# Pedido del dueño del 01-11-2026: completar la duración de una cuenta,
+# analizar varias juntas (`pasos/cuentas_conjunto.py`), proponer temas para un
+# proyecto y escribir solo los aprobados (`pasos/temas_cuentas.py`). Todo va
+# en `_sistema/parrilla/`, fuera de las firmas de cualquier vídeo (regla 1).
+# Lo de Claude, en un hilo: la pantalla pregunta por el trabajo.
+
+try:
+    import cuentas_conjunto as CONJUNTO  # noqa: E402
+    import temas_cuentas as TEMAS  # noqa: E402
+    ERROR_TEMAS = ""
+except Exception as _fallo_temas:  # noqa: BLE001
+    CONJUNTO = TEMAS = None
+    ERROR_TEMAS = f"{type(_fallo_temas).__name__}: {_fallo_temas}"
+
+
+def _temas_mods():
+    if CONJUNTO is None or TEMAS is None:
+        raise ErrorApi(503, f"«Analizar varias cuentas» no se ha podido cargar: {ERROR_TEMAS}")
+    return CONJUNTO, TEMAS
+
+
+def _por_temas(fn, *args, **kwargs):
+    CJ, T = _temas_mods()
+    try:
+        return fn(*args, **kwargs)
+    except (CJ.ErrorConjunto, T.ErrorTemas) as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+    except CUENTAS.ErrorCuentas as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+    except _parrilla().ErrorParrilla as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+def _videos_creados_de(cid, peticion, maximo=60):
+    """[{id, nombre, texto}] de los vídeos ya creados en ese proyecto (para que
+    una idea repetida se note). El texto es el material del Encargo."""
+    cerrados = _cerrados(peticion)
+    if cid in cerrados:
+        return []
+    asignaciones = CLIENTES._leer(raiz_proyectos())
+    fichas = []
+    for ficha in _listar_proyectos():
+        if ficha.get(CONFIG_TALLER):
+            continue
+        if CLIENTES.cliente_de(raiz_proyectos(), ficha.get(CONFIG_ESTILO_LIGHT) or "", ficha.get("id"),
+                               datos=asignaciones) == cid:
+            fichas.append(ficha)
+    fichas.sort(key=lambda f: str(f.get("creado") or ""), reverse=True)
+    salida = []
+    for ficha in fichas[:maximo]:
+        try:
+            texto = (contexto(ficha["id"]).estado.params("ingesta") or {}).get("texto") or ""
+        except Exception:                                   # noqa: BLE001
+            texto = ""
+        salida.append({"id": ficha["id"], "nombre": ficha.get("nombre") or ficha["id"],
+                       "texto": " ".join(str(texto).split())[:400]})
+    return salida
+
+
+@app.post("/api/parrilla/cuentas/{red}/{usuario}/duraciones", status_code=202)
+def parrilla_cuenta_duraciones(red: str, usuario: str, cuerpo: dict = Body(default=None)):
+    """{pagar} -> el trabajo. Completa con Apify la duración que falta (solo
+    Instagram; se paga: sin `pagar`, acaba pidiendo permiso con el precio)."""
+    red, usuario = _cuenta_pedida(red, usuario)
+    pagar = _cuerpo(cuerpo).get("pagar") is True
+    t = _por_cuentas(_cuentas().lanzar_duraciones, raiz_proyectos(), red, usuario, pagar)
+    anotar_global("cuenta_duraciones", {"red": red, "usuario": usuario, "pagar": pagar})
+    return t
+
+
+@app.post("/api/parrilla/conjuntos/plan")
+def parrilla_conjunto_plan(cuerpo: dict = Body(default=None)):
+    """{cuentas: ["red:usuario"]} -> cuántas cuentas y vídeos, tokens, cupo y si se puede."""
+    CJ, _T = _temas_mods()
+    return _por_temas(CJ.plan, raiz_proyectos(), _cuerpo(cuerpo).get("cuentas"))
+
+
+@app.post("/api/parrilla/conjuntos", status_code=202)
+def parrilla_conjunto_lanzar(cuerpo: dict = Body(default=None)):
+    """{cuentas} -> el trabajo: Claude compara las cuentas (con la membresía)."""
+    CJ, _T = _temas_mods()
+    cuentas = _cuerpo(cuerpo).get("cuentas")
+    t = _por_temas(CJ.lanzar, raiz_proyectos(), cuentas)
+    anotar_global("cuentas_conjunto", {"cuentas": len(CJ.entender_lista(cuentas))})
+    return t
+
+
+@app.get("/api/parrilla/conjuntos/trabajos/{tid}")
+def parrilla_conjunto_trabajo(tid: str):
+    CJ, _T = _temas_mods()
+    t = CJ.trabajo(tid)
+    if not t:
+        raise ErrorApi(404, "ese trabajo ya no existe (¿se reinició el servicio?)")
+    return t
+
+
+@app.post("/api/parrilla/conjuntos/ultimo")
+def parrilla_conjunto_ultimo(cuerpo: dict = Body(default=None)):
+    """{cuentas} -> {analisis: el último de EXACTAMENTE esa selección, o null}."""
+    CJ, _T = _temas_mods()
+    return {"analisis": _por_temas(CJ.ultimo, raiz_proyectos(), _cuerpo(cuerpo).get("cuentas"))}
+
+
+@app.get("/api/parrilla/conjuntos/{aid}")
+def parrilla_conjunto(aid: str):
+    CJ, _T = _temas_mods()
+    return _por_temas(CJ.analisis, raiz_proyectos(), aid)
+
+
+@app.get("/api/parrilla/proyectos/{cid}/temas")
+def parrilla_temas(cid: str, peticion: Request):
+    """La propuesta de temas del proyecto (o {propuesta: null})."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    return {"propuesta": _por_temas(T.leer, raiz_proyectos(), cid), "limites": T.LIMITES,
+            "max_cuantos": T.MAX_CUANTOS, "por_defecto": T.CUANTOS_DEFECTO}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/temas/plan")
+def parrilla_temas_plan(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{analisis, cuantos} -> lo que se mandará a Claude y si el cupo alcanza."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    d = _cuerpo(cuerpo)
+    return _por_temas(T.plan, raiz_proyectos(), cid, d.get("analisis"), d.get("cuantos"),
+                      _videos_creados_de(cid, peticion))
+
+
+@app.post("/api/parrilla/proyectos/{cid}/temas", status_code=202)
+def parrilla_temas_proponer(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{analisis, cuantos} -> el trabajo: Claude propone temas (no escribe guiones)."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    d = _cuerpo(cuerpo)
+    t = _por_temas(T.lanzar_propuesta, raiz_proyectos(), cid, d.get("analisis"), d.get("cuantos"),
+                   _videos_creados_de(cid, peticion))
+    anotar_global("parrilla_proponer_temas", {"proyecto": cid, "cuantos": d.get("cuantos")})
+    return t
+
+
+@app.get("/api/parrilla/temas/trabajos/{tid}")
+def parrilla_temas_trabajo(tid: str):
+    _CJ, T = _temas_mods()
+    t = T.trabajo(tid)
+    if not t:
+        raise ErrorApi(404, "ese trabajo ya no existe (¿se reinició el servicio?)")
+    return t
+
+
+@app.put("/api/parrilla/proyectos/{cid}/temas/{tid}")
+def parrilla_tema_cambiar(cid: str, tid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{tema?, gancho?, tipo_video?, espacio?, problema?, estado?, incluir?} -> la propuesta."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    return {"propuesta": _por_temas(T.editar, raiz_proyectos(), cid, tid, _cuerpo(cuerpo))}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/temas/escribir", status_code=202)
+def parrilla_temas_escribir(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{confirmado: true, modo?, nombre?} -> el trabajo de la Parrilla: un guion
+    por tema aprobado. Sin proyecto elegido, o sin confirmar, no se escribe nada."""
+    cid = _proyecto_parrilla(cid, peticion)
+    P = _parrilla()
+    if cid == P.SIN_PROYECTO:
+        raise ErrorApi(409, "elige un proyecto: los guiones van a su Parrilla")
+    d = _cuerpo(cuerpo)
+    if d.get("confirmado") is not True:
+        raise ErrorApi(409, f"confirma que van a la Parrilla de «{_nombres_de_clientes().get(cid, cid)}»")
+    _CJ, T = _temas_mods()
+    datos, temas = _por_temas(T.para_escribir, raiz_proyectos(), cid)
+    nombre = str(d.get("nombre") or "").strip() or f"Ideas de cuentas · {ahora()[:10]}"
+    modo = d.get("modo") if d.get("modo") in P.USOS else "adaptar"
+    t = _por_parrilla(P.lanzar, raiz_proyectos(), cid, "temas", {
+        "temas": temas, "modo": modo, "nombre": nombre, "contexto": _contexto_parrilla(cid, d)})
+    anotar_global("parrilla_escribir_temas", {"proyecto": cid, "temas": len(temas), "propuesta": datos.get("id")})
+    return t
 
 
 # ------------------------------------------------------------------------ main

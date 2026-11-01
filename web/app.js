@@ -32679,6 +32679,12 @@ function tarjetaTema(t) {
 
 function bloqueTemasPropuestos() {
   if (!hayProyectoParrilla()) return null;
+  // los guiones de los temas aprobados acaban de escribirse: se vuelven a leer marcados
+  const t = PAR.trabajo;
+  if (t && t.tipo === 'temas' && t.estado !== 'trabajando' && PAR.temasVisto !== t.id) {
+    PAR.temasVisto = t.id;
+    PAR.temasDe = '';
+  }
   if (PAR.temasDe !== PAR.cid) { if (!PAR.temasCargando) setTimeout(cargarTemasPropuestos, 0); return null; }
   const p = PAR.temas;
   if (!p || !(p.temas || []).length) return null;
@@ -32723,7 +32729,6 @@ async function escribirTemasAprobados(n) {
   try {
     const t = await pedir(rutaTemas('/escribir'), { method: 'POST', cuerpo: { confirmado: true, modo: PAR.temasModo || 'adaptar' } });
     PAR.trabajo = t;
-    PAR.temasDe = '';                 // al volver, los temas se leen ya marcados como escritos
     toast(`Claude está escribiendo ${n} guion${n === 1 ? '' : 'es'}: aparecerán en la Parrilla`);
     pintarModulo();
     vigilarTrabajoParrilla();

@@ -32421,10 +32421,6 @@ async function completarDuracionesCuenta(d) {
 
 function rutaConjuntos(resto) { return `${BASE}/api/parrilla/conjuntos${resto || ''}`; }
 
-function nombreProyectoParrilla() {
-  return ((PAR.proyectos || []).find(p => p.id === PAR.cid) || {}).nombre || '';
-}
-
 function hayProyectoParrilla() { return !!PAR.cid && PAR.cid !== '_sin'; }
 
 function textoCupo(cupo) {

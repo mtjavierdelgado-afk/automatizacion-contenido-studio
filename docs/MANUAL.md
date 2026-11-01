@@ -896,6 +896,36 @@ YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
   **Configuración → Analizar cuentas** (son de todo el Studio). Aquí sale su
   estado («⚠ Falta la clave de YouTube», «✓ Apify conectado», lo gastado) y
   **Configurar ›**, que te lleva allí.
+- **Las cifras de cada cuenta, relativas a ella**: su mediana de vistas, «me
+  gusta» y comentarios **por cada 100 vistas**, y **vistas por duración**
+  (menos de 15 s, 15–30 s…) con cuántos vídeos tienen ese dato. «×1,6» quiere
+  decir 1,6 veces las vistas normales de ESA cuenta. Los vídeos **dudosos**
+  (colaboración, o muchas vistas con muy pocos «me gusta»: posible promoción)
+  se ven, pero no cuentan como referencia. Si a Instagram le falta la duración,
+  **«Completar con Apify»** la rellena (pregunta antes, con el precio).
+
+#### Varias cuentas juntas y temas para tu proyecto
+
+1. Marca las cuentas en **Ya leídas** (o **Seleccionar todas**; de 2 a 10).
+2. **Analizar seleccionadas**: antes te dice cuántas cuentas, vídeos y cupo de
+   Claude se van a usar (con el cupo al 90 % no arranca). Sale qué fórmula se
+   repite en varias cuentas, cuál funciona solo en una, los temas saturados y
+   los libres, cada cosa con sus vídeos de prueba enlazados.
+3. **Proponer temas** (eliges cuántos): solo ideas, sin guiones. Cada tema trae
+   gancho, tipo de vídeo, espacio, problema, sus vídeos de referencia, por qué
+   y la duración sugerida (solo con 8 vídeos o más con duración). Las ideas
+   repetidas se unen; lo que ya está en tu Parrilla o en tus vídeos sale como
+   **parecido** o **repetido** (los repetidos no entran salvo **Incluir
+   igualmente**); como mucho 3 por cuenta y 2 por fórmula, y cada uno en un
+   espacio distinto.
+4. **Aprueba, edita o descarta** cada tema.
+5. **Escribir guiones aprobados**: confirma el proyecto y solo esos se
+   escriben, en su Parrilla, con su origen (cuentas, vídeos, fórmula y fecha).
+   Si un guion repite una frase de un vídeo original, el tema lo avisa para que
+   la cambies.
+
+«Escribir guiones con lo que le funciona», dentro de una sola cuenta, sigue
+igual para cuando tengas prisa.
 
 ### Marca del cliente
 

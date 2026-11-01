@@ -392,7 +392,7 @@ def instruccion_temas(temas, modo, contexto=None, desde=1):
     modo = modo if modo in USOS else "adaptar"
     bloques = []
     for n, t in enumerate(temas, 1):
-        lineas = [f"TEMA {n}: {t.get('tema')}",
+        lineas = [f"TEMA {codigo_tema(t, n)}: {t.get('tema')}",
                   f"- Gancho (la idea; dilo con tus palabras): {t.get('gancho') or '—'}",
                   f"- Tipo de vídeo: {t.get('tipo_video') or '—'}",
                   f"- Espacio (dónde ocurre; distinto en cada guion): {t.get('espacio') or '—'}",
@@ -406,7 +406,8 @@ def instruccion_temas(temas, modo, contexto=None, desde=1):
             lineas += [f"    · {x}" for x in t["inspiracion"][:4]]
         bloques.append("\n".join(lineas))
     return ("[[TAREA:temas]]\n"
-            f"Escribe {len(temas)} guion(es), UNO POR CADA TEMA de abajo y en el MISMO orden. Los temas ya "
+            f"Escribe {len(temas)} guion(es), UNO POR CADA TEMA de abajo y en el MISMO orden. El ID de cada "
+            "guion es EXACTAMENTE el código de su tema (T01, T02…). Los temas ya "
             "los aprobó quien los encarga: respeta su tema, su gancho, su espacio y su fórmula.\n"
             "Inspírate sin copiar: no reutilices frases de los vídeos de referencia (ni 8 palabras seguidas "
             "iguales), ni su marca, ni sus datos. Respeta MI marca, su vocabulario y sus reglas.\n"
@@ -414,8 +415,13 @@ def instruccion_temas(temas, modo, contexto=None, desde=1):
             "en el gancho, como @x#3»). Si el espacio es un solo sitio, ponlo en ESPACIO FIJO.\n\n"
             f"Uso: {modo} (como lo tratará el Studio). Escribe la locución final, completa.\n\n"
             + _REGLAS + "\n\n" + _AJUSTE_RED + "\n\n" + _FORMATO_SALIDA + "\n\n" + _SALIDA_STUDIO + "\n"
-            f"- Los ID, correlativos desde G{int(desde):02d}.\n\n"
+            "- El ID de cada guion, el código de su tema (por ejemplo «T03 — Título»).\n\n"
             + _contexto_texto(contexto) + "LOS TEMAS\n" + "\n\n".join(bloques))
+
+
+def codigo_tema(t, n=1):
+    """«T03» (el id del tema en mayúsculas), o «T{n}» si no trae id."""
+    return re.sub(r"[^A-Za-z0-9]", "", str(t.get("id") or "")).upper() or f"T{int(n):02d}"
 
 
 #: Cuántas palabras seguidas iguales a un vídeo de referencia hacen «copiada».
@@ -1803,15 +1809,17 @@ def _claude_simulado(instruccion, para, cwd=None):
         # (para que se vea el aviso de frases copiadas)
         desde = int((re.search(r"desde G(\d+)", instruccion) or [0, 1])[1])
         modo = "exacto" if "Uso: exacto" in instruccion else "adaptar"
-        bloques = re.split(r"^TEMA \d+: ", instruccion.split("LOS TEMAS\n", 1)[-1], flags=re.M)[1:]
+        bloques = re.findall(r"^TEMA (\w+): (.*?)(?=^TEMA \w+: |\Z)",
+                             instruccion.split("LOS TEMAS\n", 1)[-1], flags=re.M | re.S)
         salida = []
-        for i, bloque in enumerate(bloques):
+        for i, (codigo, bloque) in enumerate(bloques):
             tema = bloque.split("\n", 1)[0].strip()
             inspira = re.search(r"·\s*@[\w.\-]+#\d+:\s*(.+)", bloque)
             voz = f"Hoy te cuento {tema}."
             if i == 0 and inspira:
                 voz += " " + inspira.group(1)
-            salida.append(f"{SEPARADOR}\n" + _guion_simulado(desde + i, tema, voz, modo))
+            salida.append(f"{SEPARADOR}\n" + _guion_simulado(desde + i, tema, voz, modo).replace(
+                f"S{desde + i:02d} — ", f"{codigo} — ", 1))
         return "\n".join(salida)
     if tarea in ("pedir", "resultados"):
         cuantos = int((re.search(r"Escribe (\d+) guion", instruccion, re.I) or [0, 1])[1])
@@ -2033,7 +2041,21 @@ def _trabajar(raiz, cid, tid, tipo, d):
                     aviso = (aviso + " " if aviso else "") + (
                         f"Claude devolvió {len(nuevos)} de {len(lote)} guiones en una tanda: "
                         "los temas que faltan siguen aprobados para volver a pedirlos.")
-                for texto, tema in zip(nuevos, lote):
+                # cada guion, a SU tema por el código (T03); por posición solo si
+                # vino uno por tema y alguno no trae código (revisión del 01-11)
+                por_codigo = {codigo_tema(x, i + k + 1): x for k, x in enumerate(lote)}
+                codigos = [str(leer_guion(x).get("codigo") or "").upper() for x in nuevos]
+                if all(c in por_codigo for c in codigos) and len(set(codigos)) == len(codigos):
+                    parejas = [(x, por_codigo[c]) for x, c in zip(nuevos, codigos)]
+                elif len(nuevos) == len(lote):
+                    parejas = list(zip(nuevos, lote))
+                else:
+                    parejas = [(x, por_codigo.get(c)) for x, c in zip(nuevos, codigos)]
+                for texto, tema in parejas:
+                    if tema is None:          # no se sabe de qué tema es: se guarda sin atarlo a ninguno
+                        textos.append(texto)
+                        origenes.append({"tipo": "temas", "sin_tema": True})
+                        continue
                     o = dict(tema.get("origen") or {})
                     copiadas = frases_copiadas(texto, tema.get("fuentes") or [])
                     if copiadas:

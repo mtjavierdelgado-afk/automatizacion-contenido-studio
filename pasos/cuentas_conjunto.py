@@ -60,7 +60,8 @@ GUARDADOS = 30
 
 _LOCK = threading.Lock()
 _TRABAJOS = {}
-_RE_REF = re.compile(r"@([\w.\-]+)#(\d+)")
+#: «@usuario#N», o «@usuario/red#N» cuando el mismo @ está en dos redes.
+_RE_REF = re.compile(r"@([\w.\-]+?)(?:/(tiktok|instagram|youtube))?#(\d+)")
 
 
 class ErrorConjunto(ValueError):
@@ -119,13 +120,29 @@ def _cargar(raiz, lista):
     return salida
 
 
+def _repetidos(cargadas):
+    """Los @ que salen en más de una red de la selección."""
+    vistos, dobles = set(), set()
+    for datos, _m in cargadas:
+        u = str(datos.get("usuario") or "").lower()
+        (dobles if u in vistos else vistos).add(u)
+    return dobles
+
+
+def etiqueta(datos, cargadas):
+    """Cómo se nombra la cuenta en las referencias: «ana», o «ana/tiktok» si
+    el mismo @ está también en otra red de la selección (revisión 01-11)."""
+    u = str(datos.get("usuario") or "")
+    return f"{u}/{datos.get('red')}" if u.lower() in _repetidos(cargadas) else u
+
+
 def texto_cuentas(cargadas, maximo=C.MAX_VIDEOS):
     """Todas las cuentas en texto, cada vídeo con su referencia @usuario#n."""
     bloques = []
     for datos, m in cargadas:
         lineas = [M.cabecera_cuenta(datos, m), M.texto_rangos(m)]
         for v in m["videos"][:maximo]:
-            lineas.append(M.linea_video(v, datos.get("usuario"), largo_texto=180))
+            lineas.append(M.linea_video(v, etiqueta(datos, cargadas), largo_texto=180))
         bloques.append("\n".join(lineas))
     return "\n\n".join(bloques)
 
@@ -171,19 +188,24 @@ def estado_cupo():
         cupos = CC.leer_cupo()
     except Exception:                                      # noqa: BLE001 - sin medidor, no se frena
         return {"uso": None, "malo": False, "medido": False}
-    usos = []
-    for ficha in (cupos or {}).values():
+    # por cuenta, su ventana más llena; y de las cuentas, la MENOS llena: con
+    # una cuenta de respaldo con cupo, el CLI sigue por ella (revisión 01-11)
+    por_cuenta = []
+    for clave, ficha in (cupos or {}).items():
+        usos = []
         for nombre, v in ((ficha or {}).get("ventanas") or {}).items():
             reinicia = v.get("reinicia")
             if reinicia and float(reinicia) <= time.time():
                 continue
             usos.append((float(v.get("uso") or 0), nombre, reinicia))
-    agotado = any(a.get("nombre") == "Cupo agotado" for a in avisos)
-    if not usos and not agotado:
+        cuenta_ficha = (ficha or {}).get("cuenta") or "principal"
+        if any(a.get("nombre") == "Cupo agotado" and a.get("cuenta") == cuenta_ficha for a in avisos):
+            usos.append((1.0, "agotado", None))
+        if usos:
+            por_cuenta.append(max(usos))
+    if not por_cuenta:
         return {"uso": None, "malo": False, "medido": bool(cupos)}
-    uso, nombre, reinicia = max(usos) if usos else (1.0, "", None)
-    if agotado:
-        uso = max(uso, 1.0)
+    uso, nombre, reinicia = min(por_cuenta)
     return {"uso": round(uso, 4), "ventana": nombre, "reinicia": reinicia,
             "malo": uso >= UMBRAL_CUPO, "medido": True}
 
@@ -228,26 +250,37 @@ def leer_json_de(texto):
 
 
 def indice_de_videos(cargadas):
-    """{"usuario#n": {cuenta, red, n, url, texto, rel, dudoso}} para comprobar referencias."""
+    """{"red:usuario#n": {cuenta, red, clave_cuenta, n, url, texto, rel, dudoso, ref}}
+    para comprobar referencias. «cuenta» es su etiqueta («ana» o «ana/tiktok»)."""
     indice = {}
     for datos, m in cargadas:
         usuario = str(datos.get("usuario") or "").lower()
+        nombre = etiqueta(datos, cargadas)
         for v in m["videos"]:
-            indice[f"{usuario}#{v['n']}"] = {
-                "cuenta": datos.get("usuario"), "red": datos.get("red"), "n": v["n"],
+            indice[f"{datos.get('red')}:{usuario}#{v['n']}"] = {
+                "cuenta": nombre, "red": datos.get("red"), "clave_cuenta": f"{datos.get('red')}:{usuario}",
+                "n": v["n"], "ref": f"@{nombre}#{v['n']}", "id": v.get("id") or "",
                 "url": v.get("url") or "", "texto": " ".join(str(v.get("texto") or "").split())[:160],
                 "rel": v.get("rel"), "dudoso": v.get("dudoso"), "duracion_s": v.get("duracion_s")}
     return indice
 
 
+def _buscar(indice, usuario, red, n):
+    usuario = usuario.lower()
+    if red:
+        return f"{red}:{usuario}#{n}" if f"{red}:{usuario}#{n}" in indice else None
+    candidatas = [k for k in indice if k.split(":", 1)[1] == f"{usuario}#{n}"]
+    return candidatas[0] if len(candidatas) == 1 else None   # ambiguo: no se adivina
+
+
 def pruebas_validas(crudas, indice):
     salida, vistas = [], set()
     for ref in crudas if isinstance(crudas, list) else [crudas]:
-        for usuario, n in _RE_REF.findall(str(ref or "")):
-            clave = f"{usuario.lower()}#{int(n)}"
-            if clave in indice and clave not in vistas and not indice[clave]["dudoso"]:
+        for usuario, red, n in _RE_REF.findall(str(ref or "")):
+            clave = _buscar(indice, usuario, red, int(n))
+            if clave and clave not in vistas and not indice[clave]["dudoso"]:
                 vistas.add(clave)
-                salida.append(dict(indice[clave], ref=f"@{indice[clave]['cuenta']}#{indice[clave]['n']}"))
+                salida.append(dict(indice[clave]))
     return salida
 
 
@@ -265,7 +298,7 @@ def limpiar(crudo, cargadas):
         if not isinstance(f, dict):
             continue
         pruebas = pruebas_validas(f.get("pruebas"), indice)
-        cuentas = sorted({p["cuenta"] for p in pruebas})
+        cuentas = sorted({p["cuenta"] for p in pruebas})       # «ana» y «ana/tiktok» son dos
         item = {"nombre": _texto(f.get("nombre"), 80), "descripcion": _texto(f.get("descripcion")),
                 "pruebas": pruebas, "cuentas": cuentas}
         if not item["nombre"] or not pruebas:
@@ -305,7 +338,7 @@ def respuesta_simulada(cargadas):
     refs = []
     for datos, m in cargadas:
         buenos = [v for v in m["videos"] if not v["dudoso"]][:3]
-        refs.append([f"@{datos.get('usuario')}#{v['n']}" for v in buenos])
+        refs.append([f"@{etiqueta(datos, cargadas)}#{v['n']}" for v in buenos])
     todas = [r for rs in refs for r in rs[:1]]
     return json.dumps({
         "resumen": "(simulado) Las preguntas en el primer segundo funcionan en todas las cuentas.",

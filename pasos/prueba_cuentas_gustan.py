@@ -437,6 +437,72 @@ def prueba_studio():
         proceso.wait(timeout=15)
 
 
+# ------------------------------------------- 7. lo que encontró la revisión
+
+def prueba_revision():
+    seccion("7] lo que encontró la revisión independiente (01-11)")
+    m = M.metricas({"videos": [_video(i, 1000, 50, 20, texto=t) for i, t in
+                               enumerate(["Nuestros colaboradores te cuentan", "Colabora con nosotros", "colab con @x",
+                                          "feat. Juan", "normal"])]})
+    igual([v["dudoso"] for v in m["videos"]], [False, False, True, True, False],
+          "«colaboradores» y «colabora» no son colaboración; «colab» y «feat.» sí")
+    igual((M.nombre_tipo("REELS"), M.nombre_tipo("CAROUSEL_ALBUM")), ("Reel", "Carrusel"),
+          "el tipo en bruto de las cuentas leídas antes, con su nombre")
+    datos = {"videos": [_video(0, 1000, 50, None, tipo="publicacion"), _video(1, 1000, 50, None, tipo="carrusel"),
+                        _video(2, 1000, 50, None, tipo="reel")]}
+    raiz = os.path.join(CARPETA, "rev")
+    os.makedirs(raiz)
+    C.guardar_claves({"apify_token": "apify_api_x", "pago": True, "tope_usd": 5})
+    igual(C.plan_duraciones(raiz, "instagram", "x", datos=datos)["faltan"], 1, "las fotos y los carruseles no cuentan como «falta la duración»")
+    datos["duraciones_apify"] = {"sin": ["COD2"]}
+    p = C.plan_duraciones(raiz, "instagram", "x", datos=datos)
+    ok(p["faltan"] == 0 and not p["se_puede"], "lo que Apify ya no supo rellenar no se vuelve a ofrecer (ni a pagar)")
+
+    # el mismo @ en dos redes son dos cuentas
+    C.guardar_claves({"apify_token": "apify_api_x"})
+    for red in ("tiktok", "instagram"):
+        C.leer(raiz, red, "marca", 12, pagar=True)
+    C.leer(raiz, "tiktok", "otra", 12, pagar=True)
+    cargadas = CJ._cargar(raiz, CJ.entender_lista(["tiktok:marca", "instagram:marca", "tiktok:otra"]))
+    indice = CJ.indice_de_videos(cargadas)
+    ok("@marca/tiktok#2" in CJ.texto_cuentas(cargadas) and "@otra#2" in CJ.texto_cuentas(cargadas),
+       "con el mismo @ en dos redes, las referencias llevan la red")
+    pr = CJ.pruebas_validas(["@marca/tiktok#2", "@marca/instagram#2", "@marca#2"], indice)
+    igual([(x["red"], x["n"]) for x in pr], [("tiktok", 2), ("instagram", 2)], "y cada una va a su vídeo (la ambigua no se adivina)")
+    limpio = CJ.limpiar({"formulas_comunes": [{"nombre": "X", "pruebas": ["@marca/tiktok#2", "@marca/instagram#3"]}]}, cargadas)
+    ok(limpio["formulas_comunes"], "una fórmula que está en las dos redes del mismo @ sigue siendo común")
+
+    # el cupo: con una cuenta de respaldo con cupo, no se bloquea
+    with open(CC.fichero_cupo(), "w", encoding="utf-8") as fh:
+        json.dump({"a": {"cuenta": "principal", "ventanas": {"five_hour": {"uso": 0.95, "reinicia": time.time() + 3600}}},
+                   "b": {"cuenta": "respaldo", "ventanas": {"five_hour": {"uso": 0.20, "reinicia": time.time() + 3600}}}}, fh)
+    try:
+        cupo = CJ.estado_cupo()
+        ok(not cupo["malo"] and cupo["uso"] == 0.2, f"con la de respaldo al 20 %, se puede ({cupo})")
+    finally:
+        os.remove(CC.fichero_cupo())
+
+    # una cuenta vuelta a traer después del análisis
+    a = CJ.analizar(raiz, ["tiktok:marca", "tiktok:otra"])
+    time.sleep(1.1)                     # «traida» va al segundo
+    C.leer(raiz, "tiktok", "otra", 12, forzar=True, pagar=True)
+    f = lanza(T.plan, raiz, "cl_rev", a["id"], 3)
+    ok(isinstance(f, T.ErrorTemas) and "volvió a traer" in str(f), "si una cuenta se volvió a traer, pide analizar otra vez")
+
+    # Claude se salta un guion: cada uno va a SU tema por el código
+    temas = [{"id": "t01", "tema": "Uno", "origen": {"tema_id": "t01"}}, {"id": "t02", "tema": "Dos", "origen": {"tema_id": "t02"}},
+             {"id": "t03", "tema": "Tres", "origen": {"tema_id": "t03"}}]
+    P.LLAMAR_CLAUDE = lambda i, para: "\n".join(f"{P.SEPARADOR}\n" + P._guion_simulado(1, t, "voz", "adaptar").replace("S01 — ", f"{c} — ", 1)
+                                                for c, t in (("T01", "Uno"), ("T03", "Tres")))
+    try:
+        t = P.lanzar(raiz, "cl_rev", "temas", {"temas": temas, "modo": "adaptar"}, en_hilo=False)
+    finally:
+        P.LLAMAR_CLAUDE = None
+    ids = [P.leer(raiz, "cl_rev", g)["origen"].get("tema_id") for g in t["guiones"]]
+    igual(ids, ["t01", "t03"], "si Claude se salta el 2.º, el 3.º va al tema 3 (no al 2)")
+    ok("devolvió 2 de 3" in (t.get("aviso") or ""), "y avisa de que falta uno")
+
+
 def main():
     print("PRUEBA DE CUENTAS QUE TE GUSTAN 2")
     prueba_metricas()
@@ -444,6 +510,7 @@ def main():
     raiz, a = prueba_conjunto()
     cid = prueba_temas(raiz, a)
     prueba_escribir(raiz, cid)
+    prueba_revision()
     try:
         import fastapi  # noqa: F401
         import requests  # noqa: F401

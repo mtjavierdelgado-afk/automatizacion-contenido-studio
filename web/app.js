@@ -32061,7 +32061,8 @@ function bloqueTraerCuenta() {
   /* cuentas-gustan-2 (01-11-2026): cada tarjeta lleva su casilla para
      analizar varias juntas, con «Seleccionar todas» y «Quitar selección». */
   const sel = seleccionCuentas();
-  const visibles = lista.slice(0, 20);
+  // las 20 primeras y, además, las marcadas: lo que entra en el análisis se ve
+  const visibles = lista.filter((c, i) => i < 20 || sel.has(claveCuenta(c)));
   return h('div', { clase: 'cuentas-y-leidas' }, bloque,
     h('div', { clase: 'leidas-cuentas' }, h('div', { clase: 'fila cab-leidas' }, h('h3', {}, 'Ya leídas'),
       h('span', { clase: 'crece' }),
@@ -32168,6 +32169,7 @@ async function trabajoCuentaAcabado(nuevo) {
   PAR.cuentaTrabajo = Object.assign({}, nuevo, { visto: true });
   if (nuevo.estado === 'listo') {
     if (nuevo.de_cache) toast('ya estaba leída hoy: no se ha vuelto a pagar');
+    else if (nuevo.tipo === 'duraciones') toast(`duraciones completadas${nuevo.coste_usd ? ` (≈${Number(nuevo.coste_usd).toFixed(2)} $)` : ''}`);
     else if (nuevo.coste_usd) toast(`leída con Apify (≈${Number(nuevo.coste_usd).toFixed(2)} $)`);
     else toast(nuevo.tipo === 'analizar' ? 'análisis listo' : 'cuenta leída');
     PAR.cuentas = null;
@@ -32448,6 +32450,8 @@ function bloqueVariasCuentas() {
   }
   const caja = h('div', { clase: 'bloque varias-cuentas' });
   const ocupado = PAR.conjuntoTrabajo && PAR.conjuntoTrabajo.estado === 'trabajando';
+  // al volver a Automatizar con un trabajo en marcha, se vuelve a preguntar por él
+  if (ocupado && !PAR.conjuntoReloj) setTimeout(vigilarConjunto, 0);
   const demasiadas = sel.size > MAX_CUENTAS_JUNTAS;
   caja.appendChild(h('div', { clase: 'fila' }, h('h3', {}, 'Analizar varias cuentas juntas'), h('span', { clase: 'crece' }),
     h('button', { clase: 'primario', disabled: (ocupado || sel.size < 2 || demasiadas) ? true : null,
@@ -32489,10 +32493,12 @@ async function analizarSeleccionadas() {
 
 function vigilarConjunto() {
   clearTimeout(PAR.conjuntoReloj);
+  PAR.conjuntoReloj = null;
   const t = PAR.conjuntoTrabajo;
   if (!t || MODULOS.actual !== 'automatizar') return;
   if (t.estado !== 'trabajando') { if (!t.visto) conjuntoAcabado(t); return; }
   PAR.conjuntoReloj = setTimeout(async () => {
+    PAR.conjuntoReloj = null;
     try {
       PAR.conjuntoTrabajo = await pedirTrabajoParrilla(rutaConjuntos(`/trabajos/${encodeURIComponent(t.id)}`));
     } catch (e) {
@@ -32557,14 +32563,16 @@ function bloqueProponerTemas(a) {
     caja.appendChild(h('div', { clase: 'caja-aviso' }, 'Elige arriba un proyecto: los temas se comparan con su Parrilla y los guiones van allí.'));
     return caja;
   }
-  const ocupado = PAR.temasTrabajo && PAR.temasTrabajo.estado === 'trabajando';
+  // el trabajo de proponer es de UN proyecto: en otro no se enseña ni apaga nada
+  const t = PAR.temasTrabajo && PAR.temasTrabajo.cid === PAR.cid ? PAR.temasTrabajo : null;
+  const ocupado = t && t.estado === 'trabajando';
+  if (ocupado && !PAR.temasReloj) setTimeout(vigilarTemas, 0);
   const cuantos = h('input', { type: 'number', min: 1, max: 30, value: PAR.temasCuantos, clase: 'numero-corto',
     'aria-label': 'Cuántos temas', oninput: ev => { PAR.temasCuantos = ev.target.value; } });
   cuantos.dataset.foco = 'temas-cuantos';
   caja.appendChild(h('div', { clase: 'fila' }, h('label', {}, 'Temas'), cuantos,
     h('button', { clase: 'primario', disabled: ocupado ? true : null, onclick: () => proponerTemas(a) }, 'Proponer temas'),
     h('span', { clase: 'pista crece' }, `Para ${nombreProyectoParrilla() || 'este proyecto'}. Solo ideas, sin guiones: luego tú apruebas cuáles se escriben.`)));
-  const t = PAR.temasTrabajo;
   if (t && t.estado === 'trabajando') {
     caja.appendChild(h('div', { clase: 'caja-aviso fila' }, h('span', { clase: 'girando', 'aria-hidden': 'true' }),
       h('span', { clase: 'crece' }, `${t.avance || 'trabajando'}…`)));
@@ -32590,17 +32598,20 @@ async function proponerTemas(a) {
 
 function vigilarTemas() {
   clearTimeout(PAR.temasReloj);
+  PAR.temasReloj = null;
   const t = PAR.temasTrabajo;
   if (!t || MODULOS.actual !== 'automatizar') return;
   if (t.estado !== 'trabajando') {
     if (!t.visto) {
       PAR.temasTrabajo = Object.assign({}, t, { visto: true });
-      if (t.estado === 'listo') { toast('temas propuestos: revísalos abajo'); cargarTemasPropuestos(true); }
+      if (t.estado === 'listo' && t.cid === PAR.cid) { toast('temas propuestos: revísalos abajo'); cargarTemasPropuestos(true); }
+      else if (t.estado === 'listo') PAR.temasDe = '';      // de otro proyecto: se leerán al volver a él
       repintarParrillaSinPisar();
     }
     return;
   }
   PAR.temasReloj = setTimeout(async () => {
+    PAR.temasReloj = null;
     try {
       PAR.temasTrabajo = await pedirTrabajoParrilla(`${BASE}/api/parrilla/temas/trabajos/${encodeURIComponent(t.id)}`);
     } catch (e) {
@@ -32617,7 +32628,7 @@ async function cargarTemasPropuestos(forzar) {
   PAR.temasCargando = true;
   try {
     const r = await pedir(rutaTemas());
-    if (cid === PAR.cid) { PAR.temas = r.propuesta; PAR.temasDe = cid; }
+    if (cid === PAR.cid) { PAR.temas = r.propuesta; PAR.temasDe = cid; PAR.temasCupo = r.cupo || null; }
   } catch (e) {
     if (cid === PAR.cid) { PAR.temas = null; PAR.temasDe = cid; }
   } finally {
@@ -32629,12 +32640,20 @@ async function cargarTemasPropuestos(forzar) {
 const NIVEL_CRUCE = { nuevo: ['nuevo', 'ok'], parecido: ['parecido', 'aviso'], repetido: ['repetido', 'error'] };
 const ESTADO_TEMA = { pendiente: 'por revisar', aprobado: '✓ aprobado', descartado: 'descartado' };
 
-async function cambiarTema(tid, cambios) {
-  try {
-    const r = await pedir(rutaTemas(`/${encodeURIComponent(tid)}`), { method: 'PUT', cuerpo: cambios });
-    PAR.temas = r.propuesta;
-  } catch (e) { toast(e.message, true); }
-  repintarParrillaSinPisar();
+/* Los cambios de los temas van DE UNO EN UNO (escribir en un campo y pulsar
+   «Aprobar» manda dos): así ninguno pisa al otro y la pantalla se queda con
+   la respuesta del último (revisión del 01-11-2026). */
+function cambiarTema(tid, cambios) {
+  const ruta = rutaTemas(`/${encodeURIComponent(tid)}`);
+  const cid = PAR.cid;
+  PAR.temasCola = (PAR.temasCola || Promise.resolve()).then(async () => {
+    try {
+      const r = await pedir(ruta, { method: 'PUT', cuerpo: cambios });
+      if (cid === PAR.cid) PAR.temas = r.propuesta;
+    } catch (e) { toast(e.message, true); }
+    repintarParrillaSinPisar();
+  });
+  return PAR.temasCola;
 }
 
 function campoTema(t, campo, etiqueta, largo) {
@@ -32719,9 +32738,16 @@ function bloqueTemasPropuestos() {
 
 async function escribirTemasAprobados(n) {
   if (!hayProyectoParrilla()) { toast('elige un proyecto: los guiones van a su Parrilla', true); return; }
+  // un campo a medio editar se guarda antes (sale del campo y espera la cola)
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  await (PAR.temasCola || Promise.resolve());
   const nombre = nombreProyectoParrilla();
+  if (PAR.temasCupo && PAR.temasCupo.malo) {
+    alert(`${textoCupo(PAR.temasCupo)} Espera a que se renueve: los temas aprobados siguen ahí.`);
+    return;
+  }
   if (!confirm(`Se escribirán ${n} guion${n === 1 ? '' : 'es'} y se añadirán a la Parrilla de «${nombre}».\n`
-    + 'Claude los escribe con tu membresía (no se paga aparte). ¿Seguir?')) return;
+    + `Claude los escribe con tu membresía (no se paga aparte). ${textoCupo(PAR.temasCupo)}\n\n¿Seguir?`)) return;
   try {
     const t = await pedir(rutaTemas('/escribir'), { method: 'POST', cuerpo: { confirmado: true, modo: PAR.temasModo || 'adaptar' } });
     PAR.trabajo = t;

@@ -620,7 +620,11 @@ def plan_duraciones(raiz, red, usuario, datos=None):
     """{faltan, total, se_puede, coste_usd, motivo, gasto_mes, tope_usd, queda_usd}."""
     datos = datos or cuenta(raiz, red, usuario)
     videos = datos.get("videos") or []
-    faltan = sum(1 for v in videos if not v.get("duracion_s"))
+    # solo los VÍDEOS (una foto o un carrusel nunca tienen duración), y no los
+    # que Apify ya no supo rellenar: no se vuelve a pagar por lo mismo
+    sin_dato = set((datos.get("duraciones_apify") or {}).get("sin") or [])
+    faltan = sum(1 for v in videos if not v.get("duracion_s") and M.es_video(v)
+                 and (_codigo_corto(v.get("url")) or str(v.get("id") or "")) not in sin_dato)
     pub = claves_publicas()
     gastado = gasto_del_mes(raiz)
     coste = F.coste_apify(red, len(videos)) if videos else 0.0
@@ -688,7 +692,10 @@ def completar_duraciones(raiz, red, usuario, pagar=False, avance=None):
         if segundos:
             v["duracion_s"], v["duracion_fuente"] = segundos, "apify"
             puestas += 1
-    datos["duraciones_apify"] = {"al": ahora(), "puestas": puestas, "coste_usd": leido.get("coste_usd") or 0}
+    sin = [_codigo_corto(v.get("url")) or str(v.get("id") or "") for v in datos.get("videos") or []
+           if not v.get("duracion_s") and M.es_video(v)]
+    datos["duraciones_apify"] = {"al": ahora(), "puestas": puestas, "coste_usd": leido.get("coste_usd") or 0,
+                                 "sin": sin}
     escribir_json(_ruta_cuenta(raiz, red, datos["usuario"]), datos)
     datos["coste_usd"] = leido.get("coste_usd") or 0
     return datos

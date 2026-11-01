@@ -182,7 +182,7 @@ def instruccion(conjunto, cargadas, existentes, cuantos, marca=""):
     for datos, m in cargadas:
         mejores = sorted((v for v in m["videos"] if not v["dudoso"] and v.get("rel") is not None),
                          key=lambda v: -v["rel"])[:VIDEOS_POR_CUENTA]
-        videos += [M.linea_video(v, datos.get("usuario"), largo_texto=160) for v in mejores]
+        videos += [M.linea_video(v, CJ.etiqueta(datos, cargadas), largo_texto=160) for v in mejores]
     ya = "\n".join(f"- [{e['tipo']}] {e['nombre']}: {e['texto'][:160]}" for e in existentes[:VIDEOS_EXISTENTES])
     pedidas = min(MAX_CUANTOS + 10, math.ceil(cuantos * DE_MAS))
     return ("[[TAREA:proponer_temas]]\n"
@@ -238,7 +238,7 @@ def respuesta_simulada(cargadas, cuantos):
         temas.append({"tema": tema, "gancho": f"¿Y si probamos {clave}?", "tipo_video": "lista",
                       "espacio": espacio, "problema": problema,
                       "formula": "Pregunta en el gancho" if i % 2 else "Lista rápida",
-                      "referencias": [f"@{datos.get('usuario')}#{v['n']}"],
+                      "referencias": [f"@{CJ.etiqueta(datos, cargadas)}#{v['n']}"],
                       "por_que": f"×{M.cifra(v.get('rel'), 1)} su mediana", "parecido_a": ""})
     if temas:
         temas.insert(1, dict(temas[0], tema=temas[0]["tema"] + ", versión para empresas"))
@@ -249,21 +249,14 @@ def _texto(valor, largo=400):
     return " ".join(str(valor or "").split())[:largo]
 
 
-def _duracion_de(conjunto, cuentas):
-    """La duración sugerida con los rangos de esas cuentas, o "" si hay menos
-    de `MIN_CON_DURACION` vídeos con ese dato."""
-    rangos = {}
-    for c in conjunto.get("cuentas") or []:
-        if c.get("usuario") not in cuentas:
-            continue
-        for r in c.get("rangos") or []:
-            caja = rangos.setdefault(r["rango"], {"rango": r["rango"], "videos": 0, "suma": 0.0})
-            if r.get("videos") and r.get("mediana_rel") is not None:
-                caja["videos"] += r["videos"]
-                caja["suma"] += r["mediana_rel"] * r["videos"]
-    lista = [{"rango": k, "videos": v["videos"], "mediana_rel": (v["suma"] / v["videos"]) if v["videos"] else None}
-             for k, v in rangos.items()]
-    mejor = M.mejor_rango(lista)
+def _duracion_de(cargadas, claves):
+    """La duración sugerida con las cifras ACTUALES de esas cuentas (`claves`:
+    «red:usuario»), o "" si hay menos de `MIN_CON_DURACION` vídeos con ese dato."""
+    videos = []
+    for datos, m in cargadas:
+        if f"{datos.get('red')}:{str(datos.get('usuario') or '').lower()}" in claves:
+            videos += m["videos"]
+    mejor = M.mejor_rango(M.rangos_de(videos))
     if not mejor:
         return ""
     return f"{mejor['rango']} (×{M.cifra(mejor['mediana_rel'], 1)} su mediana; {mejor['total']} vídeos con duración)"
@@ -284,6 +277,7 @@ def ordenar(crudos, conjunto, cargadas, existentes, cuantos, limites=None):
                                                     "formula", "por_que", "parecido_a")}
         idea["referencias"] = refs
         idea["cuentas"] = sorted({r["cuenta"] for r in refs})
+        idea["claves_cuentas"] = sorted({r["clave_cuenta"] for r in refs})
         idea["_pal"] = palabras(" ".join(idea[k] for k in ("tema", "gancho", "problema", "espacio", "formula")))
         idea["_corto"] = palabras(" ".join(idea[k] for k in ("tema", "gancho", "problema")))
         ideas.append(idea)
@@ -296,6 +290,7 @@ def ordenar(crudos, conjunto, cargadas, existentes, cuantos, limites=None):
             vistas = {r["ref"] for r in gemela["referencias"]}
             gemela["referencias"] += [r for r in idea["referencias"] if r["ref"] not in vistas]
             gemela["cuentas"] = sorted({r["cuenta"] for r in gemela["referencias"]})
+            gemela["claves_cuentas"] = sorted({r["clave_cuenta"] for r in gemela["referencias"]})
             gemela.setdefault("unido_con", []).append(idea["tema"])
             continue
         unicas.append(idea)
@@ -326,14 +321,14 @@ def ordenar(crudos, conjunto, cargadas, existentes, cuantos, limites=None):
         if idea["cruce"]["nivel"] == "repetido":
             idea["grupo"], idea["motivo"] = "repetido", f"ya está: {idea['cruce']['con']}"
             continue
-        cuenta = idea["referencias"][0]["cuenta"]
+        cuenta = idea["referencias"][0]["clave_cuenta"]      # «red:usuario»: el mismo @ en dos redes son dos
         formula = _clave_corta(idea["formula"]) or "-"
         espacio = _clave_corta(idea["espacio"])
         if elegidas >= cuantos:
             idea["grupo"], idea["motivo"] = "variedad", f"ya hay {cuantos} temas (los que pediste)"
             continue
         if por_cuenta.get(cuenta, 0) >= limites["por_cuenta"]:
-            idea["grupo"], idea["motivo"] = "variedad", f"ya hay {limites['por_cuenta']} de @{cuenta}"
+            idea["grupo"], idea["motivo"] = "variedad", f"ya hay {limites['por_cuenta']} de @{idea['referencias'][0]['cuenta']}"
             continue
         if formula != "-" and por_formula.get(formula, 0) >= limites["por_formula"]:
             idea["grupo"], idea["motivo"] = "variedad", f"ya hay {limites['por_formula']} con la fórmula «{idea['formula']}»"
@@ -351,7 +346,7 @@ def ordenar(crudos, conjunto, cargadas, existentes, cuantos, limites=None):
         idea.pop("_pal", None)
         idea.pop("_corto", None)
         idea.update(id=f"t{n:02d}", estado="pendiente", editado=False,
-                    duracion=_duracion_de(conjunto, idea["cuentas"]), guion="", avisos_copia=[])
+                    duracion=_duracion_de(cargadas, idea["claves_cuentas"]), guion="", avisos_copia=[])
         salida.append(idea)
     return salida
 
@@ -376,6 +371,14 @@ def preparar(raiz, cid, aid, videos_creados=None):
         cargadas = CJ._cargar(raiz, lista)
     except CJ.ErrorConjunto as fallo:
         raise ErrorTemas(str(fallo), fallo.codigo) from None
+    # una cuenta vuelta a traer después del análisis tiene otra numeración:
+    # las pruebas del análisis ya no señalarían los mismos vídeos
+    traidas = {f"{c.get('red')}:{str(c.get('usuario') or '').lower()}": c.get("traida") for c in conjunto.get("cuentas") or []}
+    for datos, _m in cargadas:
+        clave = f"{datos.get('red')}:{str(datos.get('usuario') or '').lower()}"
+        if traidas.get(clave) and traidas[clave] != datos.get("traida"):
+            raise ErrorTemas(f"@{datos.get('usuario')} se volvió a traer después del análisis: vuelve a pulsar "
+                             "«Analizar seleccionadas» para que las pruebas cuadren", 409)
     existentes = existentes_de_parrilla(raiz, cid) + [
         {"tipo": "video", "id": v.get("id"), "nombre": _texto(v.get("nombre"), 120), "texto": _texto(v.get("texto"), 400)}
         for v in (videos_creados or []) if isinstance(v, dict)]
@@ -430,11 +433,23 @@ def proponer(raiz, cid, aid, cuantos=CUANTOS_DEFECTO, videos_creados=None, limit
              "analisis": conjunto["id"], "analisis_al": conjunto.get("al"),
              "cuentas": [{"red": c["red"], "usuario": c["usuario"]} for c in conjunto.get("cuentas") or []],
              "cuantos": cuantos, "limites": dict(LIMITES, **(limites or {})), "temas": temas}
-    _guardar(raiz, cid, datos)
+    with _cerrojo(cid):
+        _guardar(raiz, cid, datos)
     return datos
 
 
+def _cerrojo(cid):
+    """Un cerrojo por proyecto: dos clics seguidos (escribir y «Aprobar») no
+    se pisan al leer-cambiar-guardar la propuesta (revisión del 01-11)."""
+    return P._lock(f"temas:{P._cid(cid)}")
+
+
 def editar(raiz, cid, tid, cambios):
+    with _cerrojo(cid):
+        return _editar(raiz, cid, tid, cambios)
+
+
+def _editar(raiz, cid, tid, cambios):
     datos = leer(raiz, cid)
     if not datos:
         raise ErrorTemas("no hay ninguna propuesta de temas en este proyecto", 404)
@@ -470,7 +485,8 @@ def aprobados_sin_escribir(datos):
 def para_escribir(raiz, cid):
     """Lo que `parrilla.lanzar(tipo='temas')` necesita: cada tema aprobado con
     sus referencias, los textos de los vídeos (para no copiarlos) y su origen."""
-    datos = leer(raiz, cid)
+    with _cerrojo(cid):
+        datos = leer(raiz, cid)
     if not datos:
         raise ErrorTemas("no hay ninguna propuesta de temas en este proyecto", 404)
     temas = aprobados_sin_escribir(datos)
@@ -485,7 +501,8 @@ def para_escribir(raiz, cid):
         except C.ErrorCuentas:
             continue
         for v in d.get("videos") or []:
-            textos[v.get("url") or ""] = " ".join(str(x or "") for x in (v.get("texto"), v.get("transcripcion")))
+            clave = f"{c['red']}:{str(c['usuario']).lower()}#{v.get('id') or v.get('url') or ''}"
+            textos[clave] = " ".join(str(x or "") for x in (v.get("texto"), v.get("transcripcion")))
     salida = []
     for t in temas:
         salida.append({
@@ -493,7 +510,8 @@ def para_escribir(raiz, cid):
             "espacio": t["espacio"], "problema": t["problema"], "formula": t["formula"],
             "por_que": t["por_que"], "duracion": t.get("duracion") or "",
             "inspiracion": [f"{r['ref']}: {r['texto']}" for r in t["referencias"][:4]],
-            "fuentes": [textos.get(r["url"]) or r["texto"] for r in t["referencias"]],
+            "fuentes": [textos.get(f"{r.get('clave_cuenta')}#{r.get('id') or r.get('url') or ''}") or r["texto"]
+                        for r in t["referencias"]],
             "origen": {"tipo": "temas", "propuesta": datos["id"], "tema_id": t["id"], "tema": t["tema"][:160],
                        "cuentas": [f"@{c}" for c in t["cuentas"]],
                        "videos": [r["url"] for r in t["referencias"] if r.get("url")][:8],

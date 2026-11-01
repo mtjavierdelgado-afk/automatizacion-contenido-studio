@@ -21880,8 +21880,9 @@ def parrilla_temas(cid: str, peticion: Request):
     """La propuesta de temas del proyecto (o {propuesta: null})."""
     cid = _proyecto_parrilla(cid, peticion)
     _CJ, T = _temas_mods()
+    CJ, _T = _temas_mods()
     return {"propuesta": _por_temas(T.leer, raiz_proyectos(), cid), "limites": T.LIMITES,
-            "max_cuantos": T.MAX_CUANTOS, "por_defecto": T.CUANTOS_DEFECTO}
+            "max_cuantos": T.MAX_CUANTOS, "por_defecto": T.CUANTOS_DEFECTO, "cupo": CJ.estado_cupo()}
 
 
 @app.post("/api/parrilla/proyectos/{cid}/temas/plan")
@@ -21934,7 +21935,11 @@ def parrilla_temas_escribir(cid: str, peticion: Request, cuerpo: dict = Body(def
     d = _cuerpo(cuerpo)
     if d.get("confirmado") is not True:
         raise ErrorApi(409, f"confirma que van a la Parrilla de «{_nombres_de_clientes().get(cid, cid)}»")
-    _CJ, T = _temas_mods()
+    CJ, T = _temas_mods()
+    cupo = CJ.estado_cupo()
+    if cupo["malo"]:
+        raise ErrorApi(409, f"te queda poco de Claude: la ventana más llena va por el {round(cupo['uso'] * 100)} %. "
+                            "Espera a que se renueve: los temas aprobados siguen ahí.")
     datos, temas = _por_temas(T.para_escribir, raiz_proyectos(), cid)
     nombre = str(d.get("nombre") or "").strip() or f"Ideas de cuentas · {ahora()[:10]}"
     modo = d.get("modo") if d.get("modo") in P.USOS else "adaptar"

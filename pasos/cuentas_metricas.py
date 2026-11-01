@@ -42,12 +42,31 @@ MIN_CON_DURACION = 8
 VECES_PROMOCION = 3.0
 FRACCION_PROMOCION = 1 / 3
 
-_RE_COLAB = re.compile(r"\b(colab|collab|colaboraci[oó]n|ft\.|feat\.)", re.I)
+#: «colab» o «collab» como palabra suelta, «en colaboración», «ft.»/«feat.»; no
+#: «colaboradores» ni «colabora» (revisión del 01-11-2026).
+_RE_COLAB = re.compile(r"(?<!\w)(colab|collab)(?!\w)|en colaboraci[oó]n|(?<!\w)(ft|feat)\.", re.I)
 _RE_CON_ARROBA = re.compile(r"^\s*(con|with|junto a)\s+@[\w.]+", re.I)
 
 
+#: Lo que guardaban las cuentas leídas antes de esta rama (el tipo en bruto).
+_TIPOS_EN_BRUTO = {"reels": "reel", "clips": "reel", "carousel_album": "carrusel", "sidecar": "carrusel",
+                   "image": "publicacion", "feed": "video", "shorts": "short"}
+#: Lo que nunca tiene duración (no es un vídeo).
+SIN_DURACION = ("publicacion", "carrusel", "fotos")
+
+
+def tipo_normal(tipo):
+    t = str(tipo or "").strip().lower()
+    return t if t in TIPOS else _TIPOS_EN_BRUTO.get(t, "")
+
+
 def nombre_tipo(tipo):
-    return TIPOS.get(str(tipo or ""), "")
+    return TIPOS.get(tipo_normal(tipo), "")
+
+
+def es_video(v):
+    """Si el post es un vídeo (los de tipo desconocido cuentan como vídeo)."""
+    return tipo_normal((v or {}).get("tipo")) not in SIN_DURACION
 
 
 def _num(valor):
@@ -130,6 +149,7 @@ def metricas(datos):
                        "rel": round(vistas / med_vistas, 2) if vistas is not None and med_vistas else None,
                        "mg100": _por_100(v.get("me_gusta"), vistas),
                        "com100": _por_100(v.get("comentarios"), vistas),
+                       "tipo": tipo_normal(v.get("tipo")) or v.get("tipo") or "",
                        "tipo_nombre": nombre_tipo(v.get("tipo")),
                        "dudoso": False, "motivo": ""})
     # la vara de «me gusta» se mide sin los que ya son de colaboración
@@ -146,11 +166,19 @@ def metricas(datos):
             v["motivo"] = (f"posible promoción: ×{cifra(v['rel'], 1)} las vistas normales con pocos «me gusta» "
                            f"({cifra(v['mg100'], 1)} por 100 vistas; lo normal aquí es {cifra(med_mg, 1)})")
     validos = [v for v in videos if not v["dudoso"]]
+    # «×N su mediana» se mide contra lo NORMAL de la cuenta: sin los dudosos
+    med_validos = mediana([v.get("vistas") for v in validos])
+    if med_validos:
+        med_vistas = med_validos
+        for v in videos:
+            vistas = _num(v.get("vistas"))
+            v["rel"] = round(vistas / med_vistas, 2) if vistas is not None else None
     rangos = rangos_de(videos)
     return {"mediana_vistas": med_vistas,
             "mediana_mg100": mediana([v["mg100"] for v in validos]),
             "mediana_com100": mediana([v["com100"] for v in validos]),
             "con_duracion": sum(1 for v in videos if _rango(v.get("duracion_s")) is not None),
+            "videos_reales": sum(1 for v in videos if es_video(v)),
             "total": len(videos), "dudosos": sum(1 for v in videos if v["dudoso"]),
             "rangos": rangos, "mejor_rango": mejor_rango(rangos), "videos": videos}
 

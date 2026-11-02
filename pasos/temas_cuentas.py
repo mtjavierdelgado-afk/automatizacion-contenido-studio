@@ -560,7 +560,7 @@ def lanzar_propuesta(raiz, cid, aid, cuantos=CUANTOS_DEFECTO, videos_creados=Non
             with _LOCK:
                 _TRABAJOS[tid]["avance"] = texto
         try:
-            r = proponer(raiz, cid, aid, cuantos, videos_creados, limites, avance, aunque_cupo=aunque_cupo)
+            r = proponer(raiz, cid, aid, cuantos, videos_creados, limites, avance, aunque_cupo=True)  # lanzar ya avisó
             with _LOCK:
                 _TRABAJOS[tid].update(estado="listo", propuesta=r["id"], reloj=time.time())
         except Exception as fallo:                          # noqa: BLE001 - va a la pantalla

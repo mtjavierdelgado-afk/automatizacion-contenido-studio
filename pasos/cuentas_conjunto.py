@@ -239,7 +239,7 @@ def comprobar_cupo(aunque_cupo, cupo=None):
     igualmente» (`aunque_cupo`). -> el cupo."""
     cupo = cupo or estado_cupo()
     if cupo["malo"] and aunque_cupo is not True:
-        raise ErrorConjunto(aviso_de_cupo(cupo) + " Pulsa «Seguir igualmente» para lanzarlo.", 409, cupo=cupo)
+        raise ErrorConjunto(aviso_de_cupo(cupo) + " Confirma que quieres «Seguir igualmente» para lanzarlo.", 409, cupo=cupo)
     return cupo
 
 
@@ -473,7 +473,7 @@ def lanzar(raiz, cuentas, en_hilo=True, aunque_cupo=False):
             with _LOCK:
                 _TRABAJOS[tid]["avance"] = texto
         try:
-            r = analizar(raiz, cuentas, avance, aunque_cupo=aunque_cupo)
+            r = analizar(raiz, cuentas, avance, aunque_cupo=True)  # lanzar ya avisó
             with _LOCK:
                 _TRABAJOS[tid].update(estado="listo", analisis=r["id"], reloj=time.time())
         except Exception as fallo:                          # noqa: BLE001 - va a la pantalla

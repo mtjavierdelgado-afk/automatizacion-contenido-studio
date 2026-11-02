@@ -21838,14 +21838,14 @@ def parrilla_cuenta_duraciones(red: str, usuario: str, cuerpo: dict = Body(defau
 
 @app.post("/api/parrilla/conjuntos/plan")
 def parrilla_conjunto_plan(cuerpo: dict = Body(default=None)):
-    """{cuentas: ["red:usuario"]} -> cuántas cuentas y vídeos, tokens, cupo y si se puede."""
+    """{cuentas: ["red:usuario"]} -> cuántas cuentas y vídeos, tokens, cupo y aviso_cupo (al 90 % avisa, no frena)."""
     CJ, _T = _temas_mods()
     return _por_temas(CJ.plan, raiz_proyectos(), _cuerpo(cuerpo).get("cuentas"))
 
 
 @app.post("/api/parrilla/conjuntos", status_code=202)
 def parrilla_conjunto_lanzar(cuerpo: dict = Body(default=None)):
-    """{cuentas} -> el trabajo: Claude compara las cuentas (con la membresía)."""
+    """{cuentas, aunque_cupo?} -> el trabajo: Claude compara las cuentas (con la membresía). Con el cupo al 90 % da 409 hasta que llega aunque_cupo: true."""
     CJ, _T = _temas_mods()
     d = _cuerpo(cuerpo)
     cuentas = d.get("cuentas")
@@ -21888,7 +21888,7 @@ def parrilla_temas(cid: str, peticion: Request):
 
 @app.post("/api/parrilla/proyectos/{cid}/temas/plan")
 def parrilla_temas_plan(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """{analisis, cuantos} -> lo que se mandará a Claude y si el cupo alcanza."""
+    """{analisis, cuantos} -> lo que se mandará a Claude y aviso_cupo (al 90 % avisa, no frena)."""
     cid = _proyecto_parrilla(cid, peticion)
     _CJ, T = _temas_mods()
     d = _cuerpo(cuerpo)
@@ -21898,7 +21898,7 @@ def parrilla_temas_plan(cid: str, peticion: Request, cuerpo: dict = Body(default
 
 @app.post("/api/parrilla/proyectos/{cid}/temas", status_code=202)
 def parrilla_temas_proponer(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """{analisis, cuantos} -> el trabajo: Claude propone temas (no escribe guiones)."""
+    """{analisis, cuantos, aunque_cupo?} -> el trabajo: Claude propone temas (no escribe guiones). Con el cupo al 90 % da 409 hasta que llega aunque_cupo: true."""
     cid = _proyecto_parrilla(cid, peticion)
     _CJ, T = _temas_mods()
     d = _cuerpo(cuerpo)
@@ -21927,7 +21927,7 @@ def parrilla_tema_cambiar(cid: str, tid: str, peticion: Request, cuerpo: dict = 
 
 @app.post("/api/parrilla/proyectos/{cid}/temas/escribir", status_code=202)
 def parrilla_temas_escribir(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """{confirmado: true, modo?, nombre?} -> el trabajo de la Parrilla: un guion
+    """{confirmado: true, modo?, nombre?, aunque_cupo?} -> el trabajo de la Parrilla: un guion
     por tema aprobado. Sin proyecto elegido, o sin confirmar, no se escribe nada."""
     cid = _proyecto_parrilla(cid, peticion)
     P = _parrilla()

@@ -32330,8 +32330,8 @@ function selectorCuentaChat() {
  * «Proponer temas» para el proyecto, aprobar/editar/descartar cada uno y
  * «Escribir guiones aprobados». Lo de Claude va en un hilo del servidor y
  * aquí se pregunta cada 2 s. Antes de llamar a Claude se enseña cuántas
- * cuentas, vídeos y cuánto cupo; con el cupo al 90 % no arranca. La
- * selección vive en la pantalla (y en localStorage): no se pierde.
+ * cuentas, vídeos y cuánto cupo; con el cupo al 90 % avisa y deja
+ * «Seguir igualmente». La selección vive en la pantalla (y en localStorage): no se pierde.
  */
 const MAX_CUENTAS_JUNTAS = 10;
 const CLAVE_SELECCION_CUENTAS = 'cuentasSeleccion';
@@ -32451,7 +32451,7 @@ async function conAvisoDeCupo(lanzar, extra) {
     return await lanzar(extra || {});
   } catch (e) {
     if (!/Seguir igualmente/.test(e.message || '') || (extra || {}).aunque_cupo) throw e;
-    if (!confirm(`⚠ ${e.message.replace(/ Pulsa «Seguir igualmente».*$/, '')}\n\nPulsa «Aceptar» para seguir igualmente.`)) return null;
+    if (!confirm(`⚠ ${e.message.replace(/ Confirma que quieres «Seguir igualmente».*$/, '')}\n\nPulsa «Aceptar» para seguir igualmente.`)) return null;
     return lanzar(Object.assign({}, extra || {}, { aunque_cupo: true }));
   }
 }

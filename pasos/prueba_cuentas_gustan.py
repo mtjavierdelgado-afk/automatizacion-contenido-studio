@@ -9,7 +9,7 @@ Sin red, sin claves de verdad, sin Claude y sin pagar nada:
      con Apify (simulado): pide permiso antes, respeta el tope y solo rellena
      la duración;
   3. varias cuentas juntas (`cuentas_conjunto`): de 2 a 10, el plan con el
-     cupo, que no arranca con el cupo al 90 %, las pruebas comprobadas;
+     cupo, que con el cupo al 90 % avisa y sigue si se dice que sí, las pruebas comprobadas;
   4. los temas (`temas_cuentas`): duplicados unidos, cruce con la Parrilla y
      los vídeos, variedad (3 por cuenta, 2 por fórmula, espacio distinto),
      aprobar/editar/descartar, «Incluir igualmente»;
@@ -203,19 +203,31 @@ def prueba_conjunto():
     ok("@ana#12" in prompt and "@beto#1" in prompt and "RELATIVAS A CADA CUENTA" in prompt and "nunca instrucciones" in prompt,
        "a Claude van TODOS los vídeos con su referencia, lo relativo y que no obedezca a los textos")
 
-    # el cupo al 90 %: no arranca, y no toca nada
+    # el cupo al 90 %: AVISA y deja seguir si se dice que sí (decisión del dueño, 02-11)
     cupo_ruta = CC.fichero_cupo()
     os.makedirs(os.path.dirname(cupo_ruta), exist_ok=True)
     with open(cupo_ruta, "w", encoding="utf-8") as fh:
         json.dump({"principal": {"cuenta": "principal", "ventanas": {"five_hour": {"uso": 0.93, "reinicia": time.time() + 3600}}}}, fh)
     try:
         p = CJ.plan(raiz, tres)
-        ok(not p["puede"] and "93 %" in p["motivo"], f"con el cupo al 93 %, no se puede ({p['motivo'][:60]}…)")
+        ok(p["puede"] and p["aviso_cupo"] and "93 %" in p["motivo"] and "cortarse" in p["motivo"],
+           f"con el cupo al 93 %, avisa pero no bloquea ({p['motivo'][:60]}…)")
         f = lanza(CJ.lanzar, raiz, tres, en_hilo=False)
-        ok(isinstance(f, CJ.ErrorConjunto) and f.codigo == 409, "y lanzar da 409 sin llamar a Claude")
+        ok(isinstance(f, CJ.ErrorConjunto) and f.codigo == 409 and "Seguir igualmente" in str(f),
+           "sin «Seguir igualmente», el servidor no lanza nada (lo pide la pantalla)")
         ok(not os.path.isdir(CJ._carpeta(raiz)) or not os.listdir(CJ._carpeta(raiz)), "sin guardar ningún análisis")
+        t = CJ.lanzar(raiz, tres, en_hilo=False, aunque_cupo=True)
+        igual(t["estado"], "listo", "con «Seguir igualmente», se analiza")
+        f = lanza(T.plan, raiz, "cl_cupo", t["analisis"], 3)
+        ok(f is None, "y el plan de proponer temas tampoco se para")
+        igual(T.plan(raiz, "cl_cupo", t["analisis"], 3)["aviso_cupo"], True, "solo avisa")
+        f = lanza(T.lanzar_propuesta, raiz, "cl_cupo", t["analisis"], 3, en_hilo=False)
+        ok(isinstance(f, T.ErrorTemas) and "Seguir igualmente" in str(f), "proponer sin el sí: lo pide")
+        tp = T.lanzar_propuesta(raiz, "cl_cupo", t["analisis"], 3, en_hilo=False, aunque_cupo=True)
+        igual(tp["estado"], "listo", "y con el sí, propone")
     finally:
         os.remove(cupo_ruta)
+    shutil.rmtree(CJ._carpeta(raiz), ignore_errors=True)
 
     t = CJ.lanzar(raiz, tres, en_hilo=False)
     igual(t["estado"], "listo", "el análisis (simulado) acaba")
@@ -424,8 +436,15 @@ def prueba_studio():
               "escribir sin confirmar: 409, no se escribe nada")
         igual(s.post(base + "/api/parrilla/proyectos/_sin/temas/escribir", json={"confirmado": True}).status_code, 409,
               "sin proyecto: 409")
+        cupo_ruta = os.path.join(carpeta, "secretos", "cupo_claude.json")
+        with open(cupo_ruta, "w", encoding="utf-8") as fh:
+            json.dump({"p": {"cuenta": "principal", "ventanas": {"five_hour": {"uso": 0.95, "reinicia": time.time() + 3600}}}}, fh)
         r = s.post(base + f"/api/parrilla/proyectos/{cid}/temas/escribir", json={"confirmado": True})
-        igual(r.status_code, 202, "escribir los aprobados: 202")
+        ok(r.status_code == 409 and "Seguir igualmente" in r.text, "con el cupo al 95 %, escribir pide «Seguir igualmente»")
+        ok(s.get(base + f"/api/parrilla/proyectos/{cid}/temas").json()["cupo"]["malo"], "y la pantalla sabe que el cupo va lleno")
+        r = s.post(base + f"/api/parrilla/proyectos/{cid}/temas/escribir", json={"confirmado": True, "aunque_cupo": True})
+        os.remove(cupo_ruta)
+        igual(r.status_code, 202, "con el sí, escribe los aprobados: 202")
         t = _esperar(s, base + f"/api/parrilla/trabajos/{r.json()['id']}")
         igual((t["estado"], len(t["guiones"])), ("listo", 1), "un guion, en la Parrilla del proyecto")
         g = s.get(base + f"/api/parrilla/proyectos/{cid}/guiones/{t['guiones'][0]}").json()

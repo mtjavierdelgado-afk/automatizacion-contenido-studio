@@ -26,9 +26,10 @@ EL CUPO DE CLAUDE (punto D)
 ---------------------------
 Antes de lanzar se enseña cuántas cuentas y vídeos van, los tokens estimados
 (≈ caracteres / 3,5 de lo que se manda, más la respuesta) y el uso del cupo
-que dice el medidor (`consumo_claude`). Con alguna ventana al 90 % o más
-(`UMBRAL_CUPO`, el mismo del piloto) NO se lanza: la selección y lo leído no
-se tocan.
+que dice el medidor (`consumo_claude`). Con el cupo al 90 % o más
+(`UMBRAL_CUPO`) AVISA y deja seguir (decisión del dueño, 02-11-2026): el
+servidor solo lanza si llega `aunque_cupo: true` («Seguir igualmente»). Al
+100 % es Claude quien rechaza el trabajo; no se pierde nada.
 """
 import hashlib
 import json
@@ -220,9 +221,26 @@ def _plan_de(cargadas, prompt):
     return {"cuentas": [{"red": d["red"], "usuario": d.get("usuario"), "videos": m["total"],
                          "dudosos": m["dudosos"]} for d, m in cargadas],
             "n_cuentas": len(cargadas), "videos": videos, "tokens": tokens_de(prompt),
-            "cupo": cupo, "puede": not cupo["malo"],
-            "motivo": (f"te queda poco de Claude: la ventana más llena va por el {round(cupo['uso'] * 100)} %. "
-                       "Espera a que se renueve: la selección y lo leído no se pierden.") if cupo["malo"] else ""}
+            "cupo": cupo, "puede": True, "aviso_cupo": bool(cupo["malo"]),
+            "motivo": aviso_de_cupo(cupo)}
+
+
+def aviso_de_cupo(cupo):
+    """La advertencia del cupo al 90 % o más (decisión del dueño, 02-11-2026:
+    avisa y deja seguir; no bloquea). "" si no hace falta."""
+    if not cupo.get("malo"):
+        return ""
+    return (f"Te queda poco de Claude: la ventana más llena va por el {round(cupo['uso'] * 100)} %. "
+            "Si sigues, puede cortarse a medias; si pasa, no se pierde nada y lo repites cuando se renueve.")
+
+
+def comprobar_cupo(aunque_cupo, cupo=None):
+    """Con el cupo al 90 % o más, solo se sigue si quien pulsa dijo «Seguir
+    igualmente» (`aunque_cupo`). -> el cupo."""
+    cupo = cupo or estado_cupo()
+    if cupo["malo"] and aunque_cupo is not True:
+        raise ErrorConjunto(aviso_de_cupo(cupo) + " Pulsa «Seguir igualmente» para lanzarlo.", 409, cupo=cupo)
+    return cupo
 
 
 def plan(raiz, cuentas):
@@ -358,14 +376,13 @@ def _id_de_seleccion(lista):
     return hashlib.sha1("|".join(sorted(_clave(r, u) for r, u in lista)).encode("utf-8")).hexdigest()[:12]
 
 
-def analizar(raiz, cuentas, avance=None):
+def analizar(raiz, cuentas, avance=None, aunque_cupo=False):
     lista = entender_lista(cuentas)
     _comprobar_cantidad(lista)
     cargadas = _cargar(raiz, lista)
     prompt = instruccion(cargadas)
     p = _plan_de(cargadas, prompt)
-    if not p["puede"]:
-        raise ErrorConjunto(p["motivo"], 409, cupo=p["cupo"])
+    comprobar_cupo(aunque_cupo, p["cupo"])
     if avance:
         avance(f"Claude está comparando {len(cargadas)} cuentas ({p['videos']} vídeos)")
     if C._simular() and P.LLAMAR_CLAUDE is None:
@@ -437,12 +454,11 @@ def trabajo(tid):
         return dict(t) if t else None
 
 
-def lanzar(raiz, cuentas, en_hilo=True):
+def lanzar(raiz, cuentas, en_hilo=True, aunque_cupo=False):
     lista = entender_lista(cuentas)
     _comprobar_cantidad(lista)
-    p = plan(raiz, cuentas)                   # 404/409 antes de lanzar nada
-    if not p["puede"]:
-        raise ErrorConjunto(p["motivo"], 409, cupo=p["cupo"])
+    p = plan(raiz, cuentas)                   # 404 antes de lanzar nada
+    comprobar_cupo(aunque_cupo, p["cupo"])
     with _LOCK:
         if any(t["estado"] == "trabajando" for t in _TRABAJOS.values()):
             raise ErrorConjunto("ya hay un análisis de varias cuentas en marcha: espera a que acabe", 409)
@@ -457,7 +473,7 @@ def lanzar(raiz, cuentas, en_hilo=True):
             with _LOCK:
                 _TRABAJOS[tid]["avance"] = texto
         try:
-            r = analizar(raiz, cuentas, avance)
+            r = analizar(raiz, cuentas, avance, aunque_cupo=aunque_cupo)
             with _LOCK:
                 _TRABAJOS[tid].update(estado="listo", analisis=r["id"], reloj=time.time())
         except Exception as fallo:                          # noqa: BLE001 - va a la pantalla

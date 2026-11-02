@@ -1395,8 +1395,13 @@ GUIAS = {
             "vistas, «×1,6 su mediana» y las vistas por duración. Los vídeos de colaboración o con "
             "pinta de promoción salen como dudosos y no cuentan.",
             "Marca varias en «Ya leídas» (de 2 a 10) y pulsa «Analizar seleccionadas»: fórmulas que "
-            "se repiten, las de una sola cuenta y los temas saturados y libres, con sus pruebas. "
-            "Luego «Proponer temas» → apruebas, editas o descartas → «Escribir guiones aprobados».",
+            "se repiten, las de una sola cuenta, los temas saturados y libres, todos los temas agrupados "
+            "(con qué cuentas los hacen y la suma de vistas) y los ganchos que mejor funcionan, con sus "
+            "pruebas. Luego «Proponer temas» → apruebas, editas o descartas → «Escribir guiones aprobados».",
+            "«Comparar con el anterior» (gratis, sin Claude) dice qué fórmulas, temas y ganchos aparecen, "
+            "siguen o desaparecen frente a otro análisis guardado: el de este mes contra el del pasado.",
+            "En «Tus cuentas» marcas las cuentas leídas que son tuyas: lo que ya publicaste en ellas "
+            "sale como «ya lo tienes» al proponer temas.",
         ],
         "si": [
             "Pega el enlace del PERFIL (no el de un vídeo) o escribe el @usuario y elige la red.",

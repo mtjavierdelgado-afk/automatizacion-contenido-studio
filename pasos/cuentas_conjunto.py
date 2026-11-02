@@ -555,7 +555,7 @@ def _ficha(d):
     r = d.get("resultado") or {}
     return {"id": d["id"], "al": d.get("al"), "seleccion": d.get("seleccion"),
             "cuentas": [{"red": c.get("red"), "usuario": c.get("usuario")} for c in d.get("cuentas") or []],
-            "videos": d.get("videos"),
+            "videos": d.get("videos"), "agrupados": tiene_agrupados(d),
             "formulas": len(r.get("formulas_comunes") or []) + len(r.get("formulas_unicas") or []),
             "temas": len(r.get("temas") or []) or len(r.get("temas_saturados") or []) + len(r.get("temas_libres") or []),
             "ganchos": len(r.get("ganchos") or [])}
@@ -583,15 +583,21 @@ def anterior_de(raiz, d):
     return mejor
 
 
-def _piezas(d, que):
-    """[(nombre, texto para comparar, cifras)] de una sección de un análisis.
-    Un análisis anterior a los temas agrupados usa los saturados y libres."""
+def tiene_agrupados(d):
+    """¿El análisis es de después de los temas agrupados y los ganchos (02-11)?"""
+    return "temas" in (d.get("resultado") or {})
+
+
+def _piezas(d, que, agrupados=True):
+    """[(nombre, texto para comparar, cifra)] de una sección de un análisis.
+    Con `agrupados` False (uno de los dos es de antes de los temas agrupados)
+    los temas son los saturados y libres de LOS DOS: así se compara lo mismo."""
     r = d.get("resultado") or {}
     if que == "formulas":
         return [(f["nombre"], f["nombre"] + " " + f.get("descripcion", ""), len(f.get("cuentas") or []))
                 for f in (r.get("formulas_comunes") or []) + (r.get("formulas_unicas") or [])]
     if que == "temas":
-        temas = r.get("temas") or (r.get("temas_saturados") or []) + (r.get("temas_libres") or [])
+        temas = (r.get("temas") or []) if agrupados else (r.get("temas_saturados") or []) + (r.get("temas_libres") or [])
         return [(t["tema"], t["tema"], t.get("vistas_total")) for t in temas]
     return [(g["gancho"], g["gancho"] + " " + g.get("descripcion", ""), g.get("rel_media"))
             for g in r.get("ganchos") or []]
@@ -609,15 +615,19 @@ def comparar(raiz, aid, con=None):
         from . import temas_cuentas as T
     except ImportError:
         import temas_cuentas as T
-    d = analisis(raiz, aid)
-    otro = analisis(raiz, con) if con else anterior_de(raiz, d)
+    visto = analisis(raiz, aid)
+    otro = analisis(raiz, con) if con else anterior_de(raiz, visto)
     if otro is None:
-        return {"analisis": _ficha(d), "con": None, "secciones": {}}
-    if otro["id"] == d["id"]:
+        return {"analisis": _ficha(visto), "vista_desde": visto["id"], "con": None, "secciones": {}}
+    if otro["id"] == visto["id"]:
         raise ErrorConjunto("elige otro análisis para comparar")
+    # siempre del más viejo al más nuevo: «aparecen» es lo que hay ahora y antes no
+    invertido = str(otro.get("al") or "") > str(visto.get("al") or "")
+    d, otro = (otro, visto) if invertido else (visto, otro)
+    agrupados = tiene_agrupados(d) and tiene_agrupados(otro)
     secciones = {}
     for que in ("formulas", "temas", "ganchos"):
-        nuevos, viejos = _piezas(d, que), _piezas(otro, que)
+        nuevos, viejos = _piezas(d, que, agrupados), _piezas(otro, que, agrupados)
         pal_viejos = [T.palabras(v[1]) | T.palabras(v[0]) for v in viejos]
         usados, aparecen, siguen = set(), [], []
         for nombre, texto, cifra in nuevos:
@@ -637,9 +647,11 @@ def comparar(raiz, aid, con=None):
                 aparecen.append({"nombre": nombre, "cifra": cifra})
         desaparecen = [{"nombre": v[0], "cifra": v[2]} for i, v in enumerate(viejos) if i not in usados]
         secciones[que] = {"aparecen": aparecen, "siguen": siguen, "desaparecen": desaparecen,
-                          "antes_sin_datos": que == "ganchos" and not viejos and bool(nuevos)}
-    return {"analisis": _ficha(d), "con": _ficha(otro), "misma_seleccion": otro.get("seleccion") == d.get("seleccion"),
-            "secciones": secciones}
+                          "cifra": {"formulas": "cuentas", "temas": "vistas", "ganchos": "rel"}[que],
+                          "antes_sin_datos": que == "ganchos" and not tiene_agrupados(otro) and bool(nuevos)}
+    return {"analisis": _ficha(d), "con": _ficha(otro), "vista_desde": visto["id"], "invertido": invertido,
+            "temas_agrupados": agrupados,
+            "misma_seleccion": otro.get("seleccion") == d.get("seleccion"), "secciones": secciones}
 
 
 # ------------------------------------------------------------ trabajos

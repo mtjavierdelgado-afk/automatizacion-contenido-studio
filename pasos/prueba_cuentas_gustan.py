@@ -582,7 +582,25 @@ def prueba_tercera(raiz, a):
     ok([x["nombre"] for x in sec["aparecen"]] == ["Torneos en la oficina"]
        and [x["nombre"] for x in sec["desaparecen"]] == ["Karaoke en hoteles"]
        and [x["nombre"] for x in sec["siguen"]] == ["Cumpleaños con consola"], "aparece uno, desaparece otro y sigue uno")
-    ok(c["secciones"]["ganchos"]["antes_sin_datos"], "un análisis viejo sin ganchos: lo dice, no los da por nuevos sin más")
+    s0 = c["secciones"]["temas"]["siguen"][0]
+    ok(s0["cifra"] == cumple["vistas_total"] and "cifra_antes" in s0, "«Siguen» lleva la cifra de antes y la de ahora")
+    c = CJ.comparar(raiz, a["id"], b["id"])
+    ok(c["invertido"] and c["vista_desde"] == a["id"] and c["con"]["id"] == a["id"] and c["analisis"]["id"] == b["id"],
+       "comparar con uno MÁS NUEVO: se ordena del viejo al nuevo y lo dice (invertido)")
+    igual([x["nombre"] for x in c["secciones"]["temas"]["aparecen"]], ["Torneos en la oficina"],
+          "y «aparecen» sigue siendo lo que hay ahora y antes no")
+    # un análisis guardado ANTES de esta rama: sin temas agrupados ni ganchos
+    d = json.load(open(ruta, encoding="utf-8"))
+    d["resultado"].pop("temas")
+    json.dump(d, open(ruta, "w", encoding="utf-8"))
+    c = CJ.comparar(raiz, b["id"], a["id"])
+    ok(not c["temas_agrupados"] and c["secciones"]["ganchos"]["antes_sin_datos"],
+       "contra un análisis viejo: lo dice (temas y ganchos)")
+    sec = c["secciones"]["temas"]
+    ok(not sec["aparecen"] and not sec["desaparecen"] and len(sec["siguen"]) == 2,
+       f"y en Temas compara saturados y libres de los dos, no todo como «aparece» ({sec})")
+    ok(not [x for x in CJ.historial(raiz) if x["id"] == a["id"]][0]["agrupados"], "el historial sabe cuál es viejo")
+    igual(CJ.cifras_de([{"cuenta": "ana", "ref": "@ana#1"}])["vistas_total"], None, "sin vistas en las pruebas: null, sin error")
     ok(isinstance(lanza(CJ.comparar, raiz, b["id"], b["id"]), CJ.ErrorConjunto), "consigo mismo, no")
     ok(isinstance(lanza(CJ.comparar, raiz, b["id"], "a0000000000"), CJ.ErrorConjunto), "con uno que no existe, 404")
     time.sleep(1.1)
@@ -605,13 +623,36 @@ def prueba_tercera(raiz, a):
     carla = C.cuenta(raiz, "tiktok", "carla")
     texto = carla["videos"][0]["texto"]
     _c, cargadas, existentes, _m = T.preparar(raiz, cid, b["id"])
-    ok(any(e["tipo"] == "publicado" and e["texto"] == " ".join(texto.split())[:400] for e in existentes),
+    ok(any(e["tipo"] == "publicado" and e["texto"] == T.primera_linea(texto) for e in existentes),
        "con su texto, como «publicado»")
-    ideas = [{"tema": texto[:120], "gancho": "", "problema": "", "referencias": ["@ana#2"]}]
+    ideas = [{"tema": T.primera_linea(texto)[:120], "gancho": "", "problema": "", "referencias": ["@ana#2"]}]
     orden = T.ordenar(ideas, _c, cargadas, existentes, 5)
     ok(orden and orden[0]["cruce"]["nivel"] == "repetido" and orden[0]["cruce"]["tipo"] == "publicado",
        "una idea igual a algo que ya publicaste sale como «ya lo tienes» (repetido, publicado)")
     ok("lo publicado en mis cuentas" in T.instruccion(_c, cargadas, existentes, 5), "y Claude sabe que eso ya está")
+    # la primera línea, sin hashtags: un pie de foto largo no «contiene» cualquier idea
+    igual(T.primera_linea("Fiesta en casa con consola #gamer #fiesta @amigo\nmás texto #otra"),
+          "Fiesta en casa con consola", "de lo publicado cuenta la primera línea, sin hashtags ni menciones")
+    largo = [{"tipo": "publicado", "id": "x", "nombre": "tu @yo: Montamos la consola en el cumpleaños de Lucas",
+              "texto": "Montamos la consola en el cumpleaños de Lucas"}]
+    idea = [{"tema": "Cumpleaños temáticos con karaoke en terrazas", "gancho": "", "problema": "",
+             "referencias": ["@ana#2"]}]
+    o = T.ordenar(idea, _c, cargadas, largo, 5)
+    ok(o and o[0]["cruce"]["nivel"] != "repetido", f"una idea que solo comparte una palabra con lo publicado no sale repetida ({o[0]['cruce']})")
+    ok(isinstance(lanza(T.guardar_cuentas_propias, raiz, cid, ["facebook:mia"]), T.ErrorTemas),
+       "una entrada que no se entiende: error, no se borra lo que había")
+    igual([c["usuario"] for c in T.cuentas_propias(raiz, cid)["cuentas"]], ["carla"], "y lo guardado sigue")
+    # una propia que deja de estar leída no bloquea los cambios
+    C.leer(raiz, "tiktok", "dani", 12, pagar=True)
+    T.guardar_cuentas_propias(raiz, cid, ["tiktok:carla", "tiktok:dani"])
+    C.borrar(raiz, "tiktok", "dani")
+    d = T.cuentas_propias(raiz, cid)
+    ok([x["leida"] for x in d["cuentas"]] == [True, False], "una propia que se dejó de leer: se ve como no leída")
+    ok(lanza(T.guardar_cuentas_propias, raiz, cid, ["tiktok:dani", "tiktok:ana"]) is None,
+       "y aun así se puede añadir otra (la guardada no bloquea)")
+    ok(lanza(T.guardar_cuentas_propias, raiz, cid, ["tiktok:ana"]) is None, "o quitarla")
+    ok(isinstance(lanza(T.guardar_cuentas_propias, raiz, cid, ["tiktok:ana", "tiktok:dani"]), T.ErrorTemas),
+       "pero una NUEVA tiene que estar leída")
     igual(T.guardar_cuentas_propias(raiz, cid, [])["cuentas"], [], "[] las quita")
 
 

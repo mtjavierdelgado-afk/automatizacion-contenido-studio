@@ -32573,6 +32573,7 @@ function resultadoConjunto(a) {
     r.ganchos, g => h('div', { clase: 'item-conjunto' },
       h('div', {}, h('b', {}, g.gancho), h('span', { clase: 'meta' }, ` · ${cifrasGanchoConjunto(g)}`)),
       g.descripcion ? h('div', {}, g.descripcion) : null, ejemplosGancho(g.ejemplos)));
+  if (!('temas' in r)) caja.appendChild(h('div', { clase: 'pista' }, 'Este análisis es de antes de los temas agrupados y los ganchos: haz uno nuevo para verlos.'));
   if (r.quitadas) caja.appendChild(h('div', { clase: 'pista' }, `${r.quitadas} conclusión(es) de Claude se quitaron porque no citaban ningún vídeo que exista.`));
   caja.appendChild(bloqueCompararConjuntos(a));
   caja.appendChild(bloqueProponerTemas(a));
@@ -32606,8 +32607,8 @@ function ejemplosGancho(ejemplos) {
 async function cargarHistorialConjuntos() {
   if (PAR.conjHistorialCargando) return;
   PAR.conjHistorialCargando = true;
-  try { PAR.conjHistorial = (await pedir(rutaConjuntos('/historial'))).analisis || []; }
-  catch (e) { PAR.conjHistorial = []; }
+  try { PAR.conjHistorial = (await pedir(rutaConjuntos('/historial'))).analisis || []; PAR.conjHistorialError = ''; }
+  catch (e) { PAR.conjHistorial = []; PAR.conjHistorialError = e.message || 'no se pudo leer'; }
   finally { PAR.conjHistorialCargando = false; }
   if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
 }
@@ -32617,6 +32618,11 @@ function bloqueCompararConjuntos(a) {
   if (!PAR.conjHistorial) {
     setTimeout(cargarHistorialConjuntos, 0);
     caja.appendChild(h('div', { clase: 'pista' }, 'Cargando los análisis guardados…'));
+    return caja;
+  }
+  if (PAR.conjHistorialError) {
+    caja.appendChild(h('div', { clase: 'caja-error fila' }, h('span', { clase: 'crece' }, `No se pudieron leer los análisis guardados: ${PAR.conjHistorialError}`),
+      h('button', { clase: 'mini', onclick: () => { PAR.conjHistorial = null; PAR.conjHistorialError = ''; pintarModulo(); } }, 'Reintentar')));
     return caja;
   }
   const otros = PAR.conjHistorial.filter(x => x.id !== a.id);
@@ -32635,7 +32641,7 @@ function bloqueCompararConjuntos(a) {
     h('button', { clase: 'primario', onclick: () => compararConjunto(a, '') }, 'Comparar con el anterior')));
   caja.appendChild(h('div', { clase: 'pista' }, 'Comparar es gratis: no llama a Claude, mira qué nombres coinciden.'));
   const c = PAR.comparacion;
-  if (c && c.analisis && c.analisis.id === a.id) caja.appendChild(resultadoComparacion(c));
+  if (c && c.vista_desde === a.id) caja.appendChild(resultadoComparacion(c));
   return caja;
 }
 
@@ -32656,8 +32662,12 @@ async function compararConjunto(a, con) {
 function resultadoComparacion(c) {
   const caja = h('div', { clase: 'resultado-comparacion' });
   if (!c.con) return caja;
-  caja.appendChild(h('div', { clase: 'meta' }, `Frente al análisis del ${fechaConjunto(c.con.al)} (${cuentasCortas(c.con.cuentas)})`
-    + (c.misma_seleccion ? ', con las mismas cuentas.' : '. Ojo: no son exactamente las mismas cuentas.')));
+  caja.appendChild(h('div', { clase: 'meta' }, `Del análisis del ${fechaConjunto(c.con.al)} (${cuentasCortas(c.con.cuentas)}) `
+    + `al del ${fechaConjunto(c.analisis.al)}` + (c.misma_seleccion ? ', con las mismas cuentas.' : '. Ojo: no son exactamente las mismas cuentas.')
+    + (c.invertido ? ' (El que elegiste es el más nuevo: «Aparecen» es lo que tiene él y no este.)' : '')));
+  if (!c.temas_agrupados) caja.appendChild(h('div', { clase: 'pista' }, 'Uno de los dos es de antes de los temas agrupados: en Temas se comparan los saturados y libres de los dos.'));
+  const cifra = (tipo, n) => n == null ? '' : tipo === 'vistas' ? `${cifraCorta(n)} vistas`
+    : tipo === 'rel' ? `×${decimalCuenta(n, 1)}` : `${n} cuenta${n === 1 ? '' : 's'}`;
   const nombres = { formulas: 'Fórmulas', temas: 'Temas', ganchos: 'Ganchos' };
   Object.keys(nombres).forEach(que => {
     const s = (c.secciones || {})[que];
@@ -32668,9 +32678,10 @@ function resultadoComparacion(c) {
     caja.appendChild(h('div', { clase: 'seccion-comparacion' }, h('h5', {}, nombres[que]),
       vacio ? h('div', { clase: 'pista' }, 'Ninguno en los dos análisis.') : null,
       s.antes_sin_datos ? h('div', { clase: 'pista' }, 'El análisis anterior es de antes de que se midieran los ganchos: todos salen como nuevos.') : null,
-      lista('Aparecen', 'aparece', s.aparecen, x => x.nombre),
-      lista('Siguen', 'sigue', s.siguen, x => x.nombre + (x.antes && x.antes !== x.nombre ? ` (antes: «${x.antes}»)` : '')),
-      lista('Desaparecen', 'desaparece', s.desaparecen, x => x.nombre)));
+      lista('Aparecen', 'aparece', s.aparecen, x => x.nombre + (x.cifra != null ? ` · ${cifra(s.cifra, x.cifra)}` : '')),
+      lista('Siguen', 'sigue', s.siguen, x => x.nombre + (x.antes && x.antes !== x.nombre ? ` (antes: «${x.antes}»)` : '')
+        + (x.cifra != null || x.cifra_antes != null ? ` · ${cifra(s.cifra, x.cifra_antes) || '—'} → ${cifra(s.cifra, x.cifra) || '—'}` : '')),
+      lista('Desaparecen', 'desaparece', s.desaparecen, x => x.nombre + (x.cifra != null ? ` · ${cifra(s.cifra, x.cifra)}` : ''))));
   });
   return caja;
 }
@@ -32685,16 +32696,18 @@ async function cargarCuentasPropias() {
     const r = await pedir(rutaProyectoParrilla('/cuentas-propias'));
     if (cid === PAR.cid) PAR.propias = { cid, cuentas: r.cuentas || [], maximo: r.maximo || 5 };
   } catch (e) {
-    if (cid === PAR.cid) PAR.propias = { cid, cuentas: [], maximo: 5 };
+    // sin la lista no se ofrece cambiarla: guardar pisaría lo que hay (revisión 02-11)
+    if (cid === PAR.cid) PAR.propias = { cid, cuentas: [], maximo: 5, error: e.message || 'no se pudo leer' };
   } finally { PAR.propiasCargando = false; }
   if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
 }
 
 async function guardarCuentasPropias(claves) {
+  const cid = PAR.cid;
   try {
     const r = await pedir(rutaProyectoParrilla('/cuentas-propias'), { method: 'PUT', cuerpo: { cuentas: claves } });
-    PAR.propias = { cid: PAR.cid, cuentas: r.cuentas || [], maximo: r.maximo || 5 };
-    pintarModulo();
+    // si mientras tanto se cambió de proyecto, la respuesta no es de este
+    if (cid === PAR.cid) { PAR.propias = { cid, cuentas: r.cuentas || [], maximo: r.maximo || 5 }; pintarModulo(); }
   } catch (e) { toast(e.message, true); }
 }
 
@@ -32702,6 +32715,11 @@ function bloqueCuentasPropias() {
   const caja = h('div', { clase: 'cuentas-propias' });
   if (!PAR.propias || PAR.propias.cid !== PAR.cid) {
     setTimeout(cargarCuentasPropias, 0);
+    return caja;
+  }
+  if (PAR.propias.error) {
+    caja.appendChild(h('div', { clase: 'caja-error fila' }, h('span', { clase: 'crece' }, `No se pudieron leer tus cuentas: ${PAR.propias.error}`),
+      h('button', { clase: 'mini', onclick: () => { PAR.propias = null; pintarModulo(); } }, 'Reintentar')));
     return caja;
   }
   const propias = PAR.propias.cuentas;

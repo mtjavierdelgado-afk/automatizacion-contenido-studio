@@ -5,8 +5,10 @@
        Claude propone ideas (tema, gancho, tipo de vídeo, espacio, problema,
        fórmula, referencias y por qué) y el Studio las ordena:
          - une los DUPLICADOS aunque estén redactados distinto,
-         - las cruza con los guiones de la Parrilla del proyecto y con sus
-           vídeos ya creados: «nuevo», «parecido» o «repetido» (los repetidos
+         - las cruza con los guiones de la Parrilla del proyecto, con sus
+           vídeos ya creados y con lo publicado en SUS CUENTAS (las que el
+           dueño marca como «Tus cuentas» del proyecto, leídas como las ajenas;
+           rama cuentas-gustan-3): «nuevo», «parecido» o «repetido» (los repetidos
            no entran salvo que el dueño pulse «Incluir igualmente»),
          - mantiene la VARIEDAD: como mucho 3 por cuenta y 2 por fórmula, y un
            espacio distinto en cada una (decisión del dueño, 01-11),
@@ -52,7 +54,9 @@ UMBRAL_PARECIDO = 0.35
 CAMPOS_EDITABLES = ("tema", "gancho", "tipo_video", "espacio", "problema")
 ESTADOS = ("pendiente", "aprobado", "descartado")
 VIDEOS_POR_CUENTA = 15
-VIDEOS_EXISTENTES = 80
+VIDEOS_EXISTENTES = 120
+#: Cuántas cuentas propias puede tener un proyecto.
+MAX_PROPIAS = 5
 
 _VACIAS = set("""a al algo algun alguna algunas alguno algunos ante antes aqui asi aun cada como con
 contra cual cuando de del desde donde dos el ella ellas ellos en entre era es esa esas ese eso esos esta
@@ -163,6 +167,68 @@ def existentes_de_parrilla(raiz, cid):
     return salida
 
 
+# ------------------------------------------- las cuentas propias (punto D)
+
+def _ruta_propias(raiz, cid):
+    return os.path.join(P.carpeta(raiz), "propias", f"{P._cid(cid)}.json")
+
+
+def _lista_propias(raiz, cid):
+    datos = leer_json(_ruta_propias(raiz, cid), None)
+    return CJ.entender_lista((datos or {}).get("cuentas") if isinstance(datos, dict) else [])
+
+
+def cuentas_propias(raiz, cid):
+    """{cuentas: [{red, usuario, leida, videos, traida}]} de las cuentas del
+    proyecto cuyo contenido publicado entra en el cruce «ya lo tienes»."""
+    salida = []
+    for red, usuario in _lista_propias(raiz, cid):
+        try:
+            datos = C.cuenta(raiz, red, usuario)
+            salida.append({"red": red, "usuario": usuario, "leida": True,
+                           "videos": len(datos.get("videos") or []), "traida": datos.get("traida")})
+        except C.ErrorCuentas:
+            salida.append({"red": red, "usuario": usuario, "leida": False, "videos": 0, "traida": None})
+    return {"cuentas": salida, "maximo": MAX_PROPIAS}
+
+
+def guardar_cuentas_propias(raiz, cid, cuentas):
+    """Las cuentas propias del proyecto (solo de las ya leídas; [] las quita)."""
+    if not cid or P._cid(cid) == P.SIN_PROYECTO:
+        raise ErrorTemas("elige primero un proyecto", 409)
+    if not isinstance(cuentas, list):
+        raise ErrorTemas("cuentas: una lista de «red:usuario»")
+    lista = CJ.entender_lista(cuentas)
+    if len(lista) > MAX_PROPIAS:
+        raise ErrorTemas(f"como mucho {MAX_PROPIAS} cuentas propias por proyecto")
+    for red, usuario in lista:
+        try:
+            C.cuenta(raiz, red, usuario)
+        except C.ErrorCuentas:
+            raise ErrorTemas(f"@{usuario} ({red}) no está leída: tráela primero en «Cuentas que te gustan»", 404) from None
+    with P._lock(f"propias:{P._cid(cid)}"):
+        os.makedirs(os.path.dirname(_ruta_propias(raiz, cid)), exist_ok=True)
+        escribir_json(_ruta_propias(raiz, cid), {"cuentas": [f"{r}:{u}" for r, u in lista], "al": ahora()})
+    return cuentas_propias(raiz, cid)
+
+
+def existentes_propios(raiz, cid):
+    """[{tipo: publicado, nombre, texto}] de lo publicado en las cuentas propias
+    leídas (una cuenta que ya no está leída no suma nada, sin error)."""
+    salida = []
+    for red, usuario in _lista_propias(raiz, cid):
+        try:
+            datos = C.cuenta(raiz, red, usuario)
+        except C.ErrorCuentas:
+            continue
+        for v in datos.get("videos") or []:
+            texto = _texto(v.get("texto") or v.get("titulo"), 400)
+            if texto:
+                salida.append({"tipo": "publicado", "id": f"{red}:{usuario}#{v.get('id') or ''}",
+                               "nombre": _texto(f"tu @{usuario}: {texto}", 120), "texto": texto})
+    return salida
+
+
 # -------------------------------------------------------- la propuesta
 
 def instruccion(conjunto, cargadas, existentes, cuantos, marca=""):
@@ -206,7 +272,8 @@ def instruccion(conjunto, cargadas, existentes, cuantos, marca=""):
             + (f"MI MARCA\n{marca.strip()}\n\n" if str(marca or "").strip() else "")
             + "LO QUE DIJO EL ANÁLISIS\n" + ("\n".join(lineas) or "(sin conclusiones)") + "\n\n"
             "LOS VÍDEOS QUE MEJOR LES FUNCIONAN (cifras relativas a cada cuenta)\n" + "\n".join(videos)
-            + "\n\nYA HECHOS EN ESTE PROYECTO (guiones de la Parrilla y vídeos creados)\n" + (ya or "(nada todavía)"))
+            + "\n\nYA HECHOS EN ESTE PROYECTO (guiones de la Parrilla, vídeos creados y lo publicado "
+            "en mis cuentas)\n" + (ya or "(nada todavía)"))
 
 
 #: Ideas del doble, distintas de verdad entre sí (para las suites).
@@ -381,7 +448,7 @@ def preparar(raiz, cid, aid, videos_creados=None):
                              "«Analizar seleccionadas» para que las pruebas cuadren", 409)
     existentes = existentes_de_parrilla(raiz, cid) + [
         {"tipo": "video", "id": v.get("id"), "nombre": _texto(v.get("nombre"), 120), "texto": _texto(v.get("texto"), 400)}
-        for v in (videos_creados or []) if isinstance(v, dict)]
+        for v in (videos_creados or []) if isinstance(v, dict)] + existentes_propios(raiz, cid)
     return conjunto, cargadas, existentes, _contexto(raiz, cid)
 
 
@@ -401,7 +468,8 @@ def plan(raiz, cid, aid, cuantos, videos_creados=None):
     prompt = instruccion(conjunto, cargadas, existentes, cuantos, marca)
     cupo = CJ.estado_cupo()
     return {"cuantos": cuantos, "n_cuentas": len(cargadas), "videos": sum(m["total"] for _d, m in cargadas),
-            "existentes": len(existentes), "tokens": CJ.tokens_de(prompt), "cupo": cupo,
+            "existentes": len(existentes),
+            "publicados": sum(1 for e in existentes if e["tipo"] == "publicado"), "tokens": CJ.tokens_de(prompt), "cupo": cupo,
             "puede": True, "aviso_cupo": bool(cupo["malo"]), "motivo": CJ.aviso_de_cupo(cupo),
             "hay_propuesta": bool(leer(raiz, cid))}
 

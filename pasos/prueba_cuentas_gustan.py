@@ -416,11 +416,23 @@ def prueba_studio():
         igual(s.get(base + "/api/parrilla/conjuntos/a0000000000").status_code, 404, "uno que no existe: 404")
         igual(s.post(base + "/api/parrilla/conjuntos/ultimo", json={"cuentas": sel}).json()["analisis"]["id"], a["id"],
               "y ahora sí hay uno de esa selección")
+        h = s.get(base + "/api/parrilla/conjuntos/historial").json()
+        igual([x["id"] for x in h["analisis"]], [a["id"]], "GET /api/parrilla/conjuntos/historial")
+        c = s.get(base + f"/api/parrilla/conjuntos/{a['id']}/comparar").json()
+        igual(c["con"], None, "comparar sin anterior: con null")
+        igual(s.get(base + f"/api/parrilla/conjuntos/{a['id']}/comparar?con={a['id']}").status_code, 400,
+              "comparar consigo mismo: 400")
 
         cid = s.post(base + "/api/clientes", json={"nombre": "Proyecto de temas"}).json()["cliente"]["id"]
+        igual(s.get(base + f"/api/parrilla/proyectos/{cid}/cuentas-propias").json()["cuentas"], [], "sin cuentas propias")
+        r = s.put(base + f"/api/parrilla/proyectos/{cid}/cuentas-propias", json={"cuentas": ["tiktok:nadie"]})
+        igual(r.status_code, 404, "una cuenta propia sin leer: 404")
+        r = s.put(base + f"/api/parrilla/proyectos/{cid}/cuentas-propias", json={"cuentas": ["instagram:estudio_c"]})
+        ok(r.status_code == 200 and r.json()["cuentas"][0]["leida"], "PUT de las cuentas propias")
+        igual(s.get(base + "/api/parrilla/proyectos/no_existe/cuentas-propias").status_code, 404, "de un proyecto que no existe: 404")
         igual(s.get(base + f"/api/parrilla/proyectos/{cid}/temas").json()["propuesta"], None, "sin propuesta todavía")
         p = s.post(base + f"/api/parrilla/proyectos/{cid}/temas/plan", json={"analisis": a["id"], "cuantos": 5}).json()
-        ok(p["puede"] and p["tokens"] > 0, "el plan de los temas")
+        ok(p["puede"] and p["tokens"] > 0 and p["publicados"] == 12, "el plan de los temas (con lo publicado en la cuenta propia)")
         igual(s.post(base + "/api/parrilla/proyectos/_sin/temas/plan", json={"analisis": a["id"], "cuantos": 5}).status_code, 409,
               "sin proyecto, no")
         r = s.post(base + f"/api/parrilla/proyectos/{cid}/temas", json={"analisis": a["id"], "cuantos": 5})
@@ -522,6 +534,87 @@ def prueba_revision():
     ok("devolvió 2 de 3" in (t.get("aviso") or ""), "y avisa de que falta uno")
 
 
+# ------------------------------------ 8. tercera vuelta (cuentas-gustan-3)
+
+def prueba_tercera(raiz, a):
+    seccion("8] temas agrupados, ganchos, historial y comparar, cuentas propias")
+    r = a["resultado"]
+    temas = r["temas"]
+    igual([t["tema"] for t in temas], ["Cumpleaños con consola", "Torneos en la oficina"],
+          "los temas agrupados: el mismo nombre se une y el que no tiene pruebas se quita")
+    cumple = temas[0]
+    ok(cumple["n_cuentas"] == 3 and cumple["cuentas"] == sorted(cumple["cuentas"]),
+       f"con las cuentas que lo hacen ({cumple['cuentas']})")
+    suma = sum(p["vistas"] for p in cumple["pruebas"])
+    igual(cumple["vistas_total"], suma, "la suma de vistas la calcula el Studio con sus vídeos de prueba")
+    igual(cumple["n_videos"], 7, "incluidos los del tema repetido con otra mayúscula")
+    ok(temas[0]["n_cuentas"] >= temas[1]["n_cuentas"], "primero el que hacen más cuentas")
+    ganchos = r["ganchos"]
+    ok(len(ganchos) == 2 and all(g["ejemplos"] and g["ejemplos"][0]["url"] for g in ganchos),
+       "los ganchos, con ejemplos enlazados")
+    ok(ganchos[0]["rel_media"] >= ganchos[1]["rel_media"], "del que mejor funciona al que menos")
+    prompt = CJ.instruccion(CJ._cargar(raiz, CJ.entender_lista([c["red"] + ":" + c["usuario"] for c in a["cuentas"]])))
+    ok('"temas"' in prompt and '"ganchos"' in prompt and "AGRUPADOS" in prompt, "a Claude se le piden temas agrupados y ganchos")
+    viejo = CJ.limpiar({"temas_libres": [{"tema": "Z", "pruebas": ["@ana#3"]}]},
+                       CJ._cargar(raiz, CJ.entender_lista(["tiktok:ana", "youtube:beto"])))
+    igual((viejo["temas"], viejo["ganchos"]), ([], []), "sin temas ni ganchos en la respuesta: listas vacías, sin error")
+
+    # C: historial y comparar
+    sel = [c["red"] + ":" + c["usuario"] for c in a["cuentas"]]
+    igual(CJ.comparar(raiz, a["id"])["con"], None, "el primero no tiene con qué compararse")
+    time.sleep(1.1)
+    b = CJ.analisis(raiz, CJ.lanzar(raiz, sel, en_hilo=False)["analisis"])
+    h = CJ.historial(raiz)
+    ok(h[0]["id"] == b["id"] and a["id"] in [x["id"] for x in h], "el historial: el más nuevo primero")
+    ok(h[0]["temas"] == 2 and h[0]["ganchos"] == 2 and h[0]["cuentas"], "cada uno con cuántos temas, ganchos y cuentas")
+    c = CJ.comparar(raiz, b["id"])
+    igual((c["con"]["id"], c["misma_seleccion"]), (a["id"], True), "por defecto, contra el anterior de la misma selección")
+    sec = c["secciones"]["temas"]
+    igual((len(sec["siguen"]), sec["aparecen"], sec["desaparecen"]), (2, [], []), "mismos temas: siguen los dos")
+    # uno con otro tema y sin ganchos (como los de antes de esta rama)
+    ruta = os.path.join(CJ._carpeta(raiz), f"{a['id']}.json")
+    d = json.load(open(ruta, encoding="utf-8"))
+    d["resultado"]["temas"] = [dict(d["resultado"]["temas"][0]), {"tema": "Karaoke en hoteles", "vistas_total": 10}]
+    d["resultado"].pop("ganchos")
+    json.dump(d, open(ruta, "w", encoding="utf-8"))
+    c = CJ.comparar(raiz, b["id"], a["id"])
+    sec = c["secciones"]["temas"]
+    ok([x["nombre"] for x in sec["aparecen"]] == ["Torneos en la oficina"]
+       and [x["nombre"] for x in sec["desaparecen"]] == ["Karaoke en hoteles"]
+       and [x["nombre"] for x in sec["siguen"]] == ["Cumpleaños con consola"], "aparece uno, desaparece otro y sigue uno")
+    ok(c["secciones"]["ganchos"]["antes_sin_datos"], "un análisis viejo sin ganchos: lo dice, no los da por nuevos sin más")
+    ok(isinstance(lanza(CJ.comparar, raiz, b["id"], b["id"]), CJ.ErrorConjunto), "consigo mismo, no")
+    ok(isinstance(lanza(CJ.comparar, raiz, b["id"], "a0000000000"), CJ.ErrorConjunto), "con uno que no existe, 404")
+    time.sleep(1.1)
+    otra = CJ.analisis(raiz, CJ.lanzar(raiz, sel[:2], en_hilo=False)["analisis"])
+    igual(CJ.anterior_de(raiz, otra)["id"], b["id"], "sin anterior de la misma selección, el que comparte más cuentas")
+
+    # D: las cuentas propias
+    cid = "cl_propias"
+    igual(T.cuentas_propias(raiz, cid)["cuentas"], [], "sin cuentas propias al principio")
+    ok(isinstance(lanza(T.guardar_cuentas_propias, raiz, cid, ["tiktok:nadie"]), T.ErrorTemas), "una sin leer: no")
+    ok(isinstance(lanza(T.guardar_cuentas_propias, raiz, "_sin", ["tiktok:ana"]), T.ErrorTemas), "sin proyecto: no")
+    ok(isinstance(lanza(T.guardar_cuentas_propias, raiz, cid, [f"tiktok:u{i}" for i in range(6)]), T.ErrorTemas),
+       "como mucho 5")
+    p0 = T.plan(raiz, cid, b["id"], 5)
+    igual(p0["publicados"], 0, "sin cuentas propias no hay publicados en el cruce")
+    d = T.guardar_cuentas_propias(raiz, cid, ["tiktok:carla"])
+    ok(d["cuentas"][0]["leida"] and d["cuentas"][0]["videos"] == 12, "guardar una cuenta propia (leída)")
+    p1 = T.plan(raiz, cid, b["id"], 5)
+    igual((p1["publicados"], p1["existentes"]), (12, p0["existentes"] + 12), "lo publicado en ella entra en el cruce")
+    carla = C.cuenta(raiz, "tiktok", "carla")
+    texto = carla["videos"][0]["texto"]
+    _c, cargadas, existentes, _m = T.preparar(raiz, cid, b["id"])
+    ok(any(e["tipo"] == "publicado" and e["texto"] == " ".join(texto.split())[:400] for e in existentes),
+       "con su texto, como «publicado»")
+    ideas = [{"tema": texto[:120], "gancho": "", "problema": "", "referencias": ["@ana#2"]}]
+    orden = T.ordenar(ideas, _c, cargadas, existentes, 5)
+    ok(orden and orden[0]["cruce"]["nivel"] == "repetido" and orden[0]["cruce"]["tipo"] == "publicado",
+       "una idea igual a algo que ya publicaste sale como «ya lo tienes» (repetido, publicado)")
+    ok("lo publicado en mis cuentas" in T.instruccion(_c, cargadas, existentes, 5), "y Claude sabe que eso ya está")
+    igual(T.guardar_cuentas_propias(raiz, cid, [])["cuentas"], [], "[] las quita")
+
+
 def main():
     print("PRUEBA DE CUENTAS QUE TE GUSTAN 2")
     prueba_metricas()
@@ -529,6 +622,7 @@ def main():
     raiz, a = prueba_conjunto()
     cid = prueba_temas(raiz, a)
     prueba_escribir(raiz, cid)
+    prueba_tercera(raiz, a)
     prueba_revision()
     try:
         import fastapi  # noqa: F401

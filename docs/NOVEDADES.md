@@ -10,6 +10,23 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Cuentas que te gustan: varias juntas, temas para aprobar y cifras justas (1 de noviembre)**
+- **Cada cuenta, con cifras relativas a ella misma**: «me gusta» y comentarios
+  por cada 100 vistas, «×1,6 su mediana» y las vistas por duración, con
+  cuántos vídeos tienen ese dato. Los vídeos de **colaboración** o con pinta de
+  **promoción** (muchas vistas y casi ningún «me gusta») salen marcados como
+  dudosos y no cuentan. A Claude le llegan los 50 vídeos, no 25.
+- **La duración de Instagram** se mide sin bajar el vídeo; si aun así falta,
+  «Completar con Apify» la rellena (pregunta antes, con el precio y el tope).
+- **Varias cuentas juntas**: marca de 2 a 10 en «Ya leídas» y pulsa «Analizar
+  seleccionadas». Antes te dice cuántas cuentas, vídeos y cupo de Claude se van
+  a usar; con el cupo al 90 % no arranca y no se pierde nada.
+- **Proponer temas → aprobar → escribir**: Claude propone ideas (sin guiones),
+  tú apruebas, editas o descartas, y solo los aprobados se escriben en la
+  Parrilla del proyecto que confirmes. Sin duplicados, sin repetir lo que ya
+  tienes, como mucho 3 por cuenta y 2 por fórmula, y cada guion recuerda de qué
+  cuentas y vídeos salió.
+
 **Arreglo: «Deshacer» una imagen insertada le dejaba su dibujo a la de antes (28 de octubre)**
 - Si la imagen de antes (S004) se había dibujado para una frase algo distinta
   (porque la voz se regrabó después), al deshacer la insertada (S004B) el Studio

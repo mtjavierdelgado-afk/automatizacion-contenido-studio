@@ -393,6 +393,12 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/parrilla/cuentas/{red}/{usuario}` | — |
 | `GET` | `/api/parrilla/cuentas/{red}/{usuario}` | — |
 | `POST` | `/api/parrilla/cuentas/{red}/{usuario}/analizar` | Claude dice qué le funciona a esa cuenta -> el trabajo. |
+| `POST` | `/api/parrilla/cuentas/{red}/{usuario}/duraciones` | {pagar} -> el trabajo. Completa con Apify la duración que falta (solo Instagram; se paga: sin `pagar`, acaba pidiendo permiso con el precio). |
+| `POST` | `/api/parrilla/conjuntos` | {cuentas} -> el trabajo: Claude compara las cuentas (con la membresía). |
+| `POST` | `/api/parrilla/conjuntos/plan` | {cuentas: ["red:usuario"]} -> cuántas cuentas y vídeos, tokens, cupo y si se puede. |
+| `GET` | `/api/parrilla/conjuntos/trabajos/{tid}` | — |
+| `POST` | `/api/parrilla/conjuntos/ultimo` | {cuentas} -> {analisis: el último de EXACTAMENTE esa selección, o null}. |
+| `GET` | `/api/parrilla/conjuntos/{aid}` | — |
 | `GET` | `/api/parrilla/plantilla` | Un guion en blanco en el formato del Studio, para «Escribir uno». |
 | `GET` | `/api/parrilla/proyectos` | Los proyectos que se pueden ver, con cuántos guiones tiene cada uno, y |
 | `GET` | `/api/parrilla/proyectos/{cid}` | Las matrices del proyecto y sus guiones, con el estado al día. |
@@ -405,6 +411,12 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/mensajes` | Un mensaje (multipart): «texto», «web» (1/0), «resultados» (1/0), «modelo» |
 | `POST` | `/api/parrilla/proyectos/{cid}/convertir` | Claude convierte lo pegado al formato: {texto, modo, matriz?, nombre?, |
 | `POST` | `/api/parrilla/proyectos/{cid}/desde-cuenta` | Guiones para ESTE proyecto con lo que le funciona a una cuenta ajena: |
+| `GET` | `/api/parrilla/proyectos/{cid}/temas` | La propuesta de temas del proyecto (o {propuesta: null}). |
+| `POST` | `/api/parrilla/proyectos/{cid}/temas` | {analisis, cuantos} -> el trabajo: Claude propone temas (no escribe guiones). |
+| `POST` | `/api/parrilla/proyectos/{cid}/temas/escribir` | {confirmado: true, modo?, nombre?} -> el trabajo de la Parrilla: un guion por tema aprobado. Sin proyecto elegido, o sin confirmar, no se escribe nada. |
+| `POST` | `/api/parrilla/proyectos/{cid}/temas/plan` | {analisis, cuantos} -> lo que se mandará a Claude y si el cupo alcanza. |
+| `PUT` | `/api/parrilla/proyectos/{cid}/temas/{tid}` | {tema?, gancho?, tipo_video?, espacio?, problema?, estado?, incluir?} -> la propuesta. |
+| `GET` | `/api/parrilla/temas/trabajos/{tid}` | — |
 | `POST` | `/api/parrilla/proyectos/{cid}/desde-resultados` | Claude escribe guiones a partir de lo que mejor funcionó: {claves?, dias?, |
 | `POST` | `/api/parrilla/proyectos/{cid}/guiones` | Sin Claude: {texto (ya en el formato), matriz?, nombre?} -> {matriz, guiones} |
 | `DELETE` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | — |

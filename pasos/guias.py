@@ -1391,9 +1391,16 @@ GUIAS = {
             "«Escribir guiones con lo que le funciona» los escribe para TU proyecto, con tu marca, "
             "inspirados y sin copiar sus frases ni sus datos. Van a la Parrilla, pendientes.",
             "«Hablar de ella en el chat» la pasa a «Conversar con Claude».",
+            "Cada cuenta enseña sus cifras RELATIVAS a ella: «me gusta» y comentarios por cada 100 "
+            "vistas, «×1,6 su mediana» y las vistas por duración. Los vídeos de colaboración o con "
+            "pinta de promoción salen como dudosos y no cuentan.",
+            "Marca varias en «Ya leídas» (de 2 a 10) y pulsa «Analizar seleccionadas»: fórmulas que "
+            "se repiten, las de una sola cuenta y los temas saturados y libres, con sus pruebas. "
+            "Luego «Proponer temas» → apruebas, editas o descartas → «Escribir guiones aprobados».",
         ],
         "si": [
             "Pega el enlace del PERFIL (no el de un vídeo) o escribe el @usuario y elige la red.",
+            "Para comparar cuentas, mejor de tu mismo tema: la propuesta sale más útil.",
             "Empieza con 30 vídeos: da para ver qué funciona y cuesta poco.",
             "Analiza antes de pedir guiones: los guiones usan el análisis.",
             "Pide en «algo más» lo que necesites: «para Navidad», «sin precios».",

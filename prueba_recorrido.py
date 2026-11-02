@@ -9392,5 +9392,108 @@ def insertar_una_imagen(navegador, datos):
     pg.sin_errores("insertar una imagen")
     pg.cerrar()
 
+
+@escenario
+def cuentas_que_te_gustan_2(navegador, datos):
+    """cuentas-gustan-2 (01-11-2026), con las fuentes simuladas: las cifras de
+    una cuenta (relativas, por duración, dudosos) y completar su duración;
+    marcar varias, «Analizar seleccionadas» (avisa de cuentas, vídeos y cupo),
+    «Proponer temas», editar y aprobar, «Escribir guiones aprobados» con el
+    nombre del proyecto, y que los temas queden escritos. Y en el móvil."""
+    api = datos["api"]
+    api.put("/api/parrilla/cuentas/conexiones", {"apify_token": "apify_api_recorrido_1234",
+                                                 "meta_token": "EAABrecorrido5678", "ig_id": "17841400000000000"})
+    for red, usuario in (("tiktok", "gusta_ana"), ("tiktok", "gusta_beto"), ("instagram", "gusta_estudio")):
+        r, t = api.post("/api/parrilla/cuentas/leer", {"texto": "@" + usuario, "red": red, "cuantos": 12, "pagar": True})
+        fin = time.time() + 30
+        while t.get("estado") == "trabajando" and time.time() < fin:
+            time.sleep(0.4)
+            _r, t = api.get(f"/api/parrilla/cuentas/trabajos/{t['id']}")
+        ok(t.get("estado") == "listo", f"@{usuario} leída ({t.get('estado')}: {t.get('error', '')[:80]})")
+    r, d = api.post("/api/clientes", {"nombre": "Ideas de cuentas"})
+    cid = ((d or {}).get("cliente") or {}).get("id")
+    ok(cid, "un proyecto para los temas")
+
+    pg = Pagina(navegador, datos, nombre="cuentas que te gustan 2")
+    pg.js("try { localStorage.removeItem('cuentasSeleccion'); } catch (e) {} PAR.cuentasSel = null;")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    pg.pulsar(".pestanas-automatizar button", "Cuentas que te gustan")
+    ok(pg.esperar(".tarjeta-cuenta-sel", "gusta_estudio", 10), "cada cuenta leída, con su casilla")
+    pg.pulsar(".cuentas-guardadas .tarjeta-cuenta", "gusta_estudio")
+    ok(pg.esperar(".cifras-cuenta", "Vistas por duración", 10), "la cuenta enseña sus cifras y las vistas por duración")
+    ok(pg.visible(".cifras-cuenta", "Mediana"), "con su mediana")
+    ok(pg.visible(".relativas-video", "su mediana"), "cada vídeo, relativo a la cuenta y por cada 100 vistas")
+    ok(pg.visible(".pastilla-dudoso", "Dudoso"), "los dudosos se ven, con su motivo")
+    ok(pg.visible(".faltan-duraciones", "falta la duración"), "Instagram sin duración: lo dice")
+    pg.dialogos.clear()
+    pg.pulsar(".faltan-duraciones button", "Completar con Apify")
+    ok(any("$" in x and "duración" in x for x in pg.dialogos), f"pregunta antes de pagar, con el precio: {pg.dialogos[-1:]}")
+    ok(pg.esperar(".cab-rangos .meta", "12 de 12", 20), "y completa la duración de los 12")
+    pg.captura("cuenta_con_cifras")
+
+    pg.pulsar(".cab-leidas button", "Seleccionar todas")
+    marcadas = pg.p.locator(".tarjeta-cuenta-sel.marcada").count()
+    ok(marcadas >= 3, f"«Seleccionar todas» marca las leídas ({marcadas})")
+    ok(pg.esperar(".varias-cuentas button.primario", "Analizar seleccionadas", 5), "aparece «Analizar seleccionadas»")
+    pg.dialogos.clear()
+    pg.pulsar(".varias-cuentas button.primario", "Analizar seleccionadas")
+    ok(any("cuentas" in x and "vídeos" in x and "cupo" in x for x in pg.dialogos),
+       f"antes de llamar a Claude dice cuántas cuentas, vídeos y el cupo: {pg.dialogos[-1:]}")
+    ok(pg.esperar(".resultado-conjunto h4", "Fórmulas que se repiten", 30), "el análisis de varias cuentas")
+    ok(pg.visible(".pruebas-conjunto a.prueba"), "cada conclusión con sus vídeos de prueba, enlazados")
+    pg.captura("varias_cuentas")
+
+    pg.p.locator("[data-foco=temas-cuantos]").fill("4")
+    pg.dialogos.clear()
+    pg.pulsar(".proponer-temas button.primario", "Proponer temas")
+    ok(any("Ideas de cuentas" in x for x in pg.dialogos), "proponer temas dice para qué proyecto")
+    ok(pg.esperar(".tarjeta-tema", segundos=30), "la lista de temas para aprobar")
+    ok(pg.visible(".tarjeta-tema .pastilla", "nuevo"), "cada tema dice si es nuevo, parecido o repetido")
+    ok(pg.visible(".tarjeta-tema .pruebas-conjunto"), "con sus cuentas y vídeos de referencia")
+    pg.p.locator(".temas-propuestos").first.scroll_into_view_if_needed()
+    pg.captura("temas_propuestos")
+    pg.p.locator("[data-foco=tema-t01-gancho]").fill("Un gancho escrito por mí")
+    pg.p.locator("[data-foco=tema-t01-gancho]").press("Tab")
+    pg.p.wait_for_timeout(1500)
+    _r, temas = api.get(f"/api/parrilla/proyectos/{cid}/temas")
+    t01 = next((t for t in ((temas or {}).get("propuesta") or {}).get("temas", []) if t["id"] == "t01"), {})
+    ok(t01.get("gancho") == "Un gancho escrito por mí", f"editar el gancho se guarda ({t01.get('gancho')!r})")
+    ok(pg.p.locator(".escribir-temas button.primario").is_disabled(), "sin aprobar nada, «Escribir» no se puede pulsar")
+    for _ in range(2):
+        pg.pulsar(".tarjeta-tema.estado-pendiente .cab-tema button.primario", "Aprobar")
+        pg.p.wait_for_timeout(800)
+    ok(pg.esperar(".escribir-temas button.primario", "Escribir guiones aprobados (2)", 10), "dos aprobados")
+    pg.dialogos.clear()
+    pg.pulsar(".escribir-temas button.primario", "Escribir guiones aprobados")
+    ok(any("Parrilla de «Ideas de cuentas»" in x for x in pg.dialogos), f"confirma con el nombre del proyecto: {pg.dialogos[-1:]}")
+    fin = time.time() + 30
+    guiones = []
+    while time.time() < fin and len(guiones) < 2:
+        pg.p.wait_for_timeout(800)
+        _r, todo = api.get(f"/api/parrilla/proyectos/{cid}")
+        guiones = [g for m in (todo or {}).get("matrices", []) for g in m.get("guiones", [])]
+    ok(len(guiones) == 2, f"dos guiones en la Parrilla del proyecto ({len(guiones)})")
+    pg.p.wait_for_function("() => PAR.trabajo && PAR.trabajo.estado === 'listo' && PAR.seccion === 'parrilla'",
+                           timeout=30000)
+    ok(pg.esperar(".tarjeta-guion", segundos=10), "al acabar, la pantalla enseña la Parrilla con los guiones")
+    pg.pulsar(".pestanas-automatizar button", "Cuentas que te gustan")
+    ok(pg.esperar(".tarjeta-tema .pastilla", "guion escrito", 15), "y los temas quedan como escritos")
+    pg.pulsar(".cab-leidas button", "Quitar selección")
+    ok(pg.p.locator(".tarjeta-cuenta-sel.marcada").count() == 0, "«Quitar selección» las desmarca")
+    pg.sin_errores("cuentas que te gustan 2")
+    pg.cerrar()
+
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="movil")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}'); irASeccionParrilla('cuentas');")
+    ok(pg.esperar(".tarjeta-tema", segundos=15), "en el móvil, los temas")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
+    ok(ancho <= 391, f"y caben a lo ancho ({ancho} px)")
+    pg.captura("temas_movil")
+    pg.sin_errores("cuentas que te gustan 2 en el móvil")
+    pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

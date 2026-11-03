@@ -112,9 +112,11 @@ def comun_tokens(sobre):
             "salida": int(uso.get("output_tokens") or 0)}
 
 #: La version que ve quien usa el Studio (Novedades, el pie, /api/salud). La
-#: 3.1 empieza con el diseño CrearIA (19-10-2026). Los nombres de fase «V2.0
-#: fase N» de CLAUDE.md son otra cosa y no cambian.
-VERSION = "3.1"
+#: 3.1 empezo con el diseño CrearIA (19-10-2026); la 5.1, el 28-10-2026
+#: (decision del dueño). Los nombres de fase «V2.0 fase N» de CLAUDE.md son
+#: otra cosa y no cambian. Si cambia, cambia tambien el pie de `web/app.js`
+#: (PIE_DERECHOS) y el de `despliegue/login/public/login.html`.
+VERSION = "5.1"
 #: Como se llama el producto en pantalla, en los avisos y en la documentacion
 #: (CrearIA Studio desde el 19-10-2026, rama `diseno-crearia`). Es SOLO lo que
 #: se ve: los nombres internos --/opt/as-video-studio, el comando `asvs`, los
@@ -601,7 +603,8 @@ def _correr_paso_marcado(avisar, ctx, paso_id, modulo, unidades, opciones):
                                        unidades=unidades, **extra)
             return modulo.ejecutar(ctx.proyecto, params, avisar, **extra)
 
-    if paso_id == "assets":
+    # la pasada que solo vuelve a cortar (unir-planos) no dibuja: no espera turno
+    if paso_id == "assets" and not extra.get("solo_cortar"):
         resultado = _con_turno_de_imagenes(avisar, ctx, correr)
     elif paso_id == "render" and not extra.get("solo_montar"):
         resultado = _con_turno_de_montaje(avisar, ctx, correr)
@@ -1248,6 +1251,12 @@ def cambiar_cliente(cid: str, cuerpo: dict = Body(default=None)):
 def borrar_cliente(cid: str):
     """Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto."""
     sueltos = _cliente_o_400(lambda: CLIENTES.borrar(raiz_proyectos(), cid))
+    # SU FICHA DEL NEGOCIO se va con él, y sus estilos (ahora sin proyecto)
+    # vuelven a automático (Etapa Foto C)
+    if PASOS_MODULOS is not None:
+        PASOS_MODULOS.dominios.borrar_de_cliente(cid)
+        for pid in sueltos if isinstance(sueltos, list) else []:
+            _negocio_al_estilo(pid)
     anotar_global("cliente_borrado", {"id": cid, "estilos": len(sueltos)})
     return {"borrado": cid, "estilos_sin_proyecto": sueltos}
 
@@ -1284,6 +1293,9 @@ def asignar_estilo_a_cliente(preset_id: str, cuerpo: dict = Body(default=None)):
     """Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca)."""
     cid = str(_cuerpo(cuerpo).get("cliente") or "").strip()
     _cliente_o_400(lambda: CLIENTES.asignar(raiz_proyectos(), preset_id, cid))
+    # la ficha del negocio de su nuevo proyecto, o ninguna (Etapa Foto C)
+    if PASOS_MODULOS is not None:
+        _negocio_al_estilo(preset_id)
     return {"estilo": preset_id, "cliente": cid}
 
 
@@ -2393,7 +2405,10 @@ def _es_taller(ctx):
 
 @app.get("/api/cola_studio")
 def cola_del_studio(peticion: Request):
-    """La cola de todo el Studio: imágenes, montaje y lo demás que trabaja."""
+    """La cola de todo el Studio (solo lee; sin nombres de proyectos con clave).
+
+    Imágenes y montaje con `ahora` (quién tiene el turno) y `fila` (quién
+    espera, por orden de llegada), y `trabajando`: lo demás en marcha."""
     try:
         cerrados = CLIENTES.cerrados_para(raiz_proyectos(), peticion.headers.get("x-estudio-abiertos"))
     except Exception:                                       # noqa: BLE001
@@ -2493,6 +2508,15 @@ def _nombre_de_pid(pid, cerrados):
     return {"nombre": config.get("nombre") or pid, "video": True}
 
 
+def _claude_del_video(pid):
+    """Lo de Claude de un vídeo para «Coste del vídeo» (medidor-claude-2). None
+    si no hay registro (vídeos de antes del medidor): la tabla usa el coste."""
+    try:
+        return CONSUMO_CLAUDE.del_video(pid) if CONSUMO_CLAUDE is not None else None
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
 def _consumo_de_claude(peticion):
     cc = CONSUMO_CLAUDE
     if cc is None:
@@ -2520,9 +2544,11 @@ def _consumo_de_claude(peticion):
 
 @app.get("/api/claude/consumo")
 def consumo_de_claude(peticion: Request):
-    """El medidor de Claude (solo lee): el cupo de cada cuenta, los avisos al
-    70 % y al 90 % y el consumo de los últimos días. Si toca (más de 15 min y
-    ha habido llamadas), lanza una medida en segundo plano: no espera a ella."""
+    """El medidor de Claude: cupo de cada cuenta, avisos y consumo (solo lee).
+
+    El cupo (ventanas de 5 h y semana), los avisos al 70 % y al 90 % y el
+    consumo de los últimos días. Si toca (más de 15 min y ha habido llamadas),
+    lanza una medida en segundo plano: no espera a ella."""
     if CONSUMO_CLAUDE is not None and not CONSUMO_CLAUDE.midiendo():
         for cuenta in _cuentas_para_medir():
             try:
@@ -2535,8 +2561,10 @@ def consumo_de_claude(peticion: Request):
 
 @app.post("/api/claude/consumo/medir")
 def medir_consumo_de_claude(peticion: Request):
-    """«Medir ahora»: una llamada mínima por cuenta (haiku, una palabra) para
-    leer su cupo. Espera a la medida (unos segundos)."""
+    """«Medir ahora»: lee el cupo de cada cuenta con una llamada mínima.
+
+    Una llamada a haiku de una palabra por cuenta; espera a la medida (unos
+    segundos) y devuelve lo mismo que el GET."""
     if CONSUMO_CLAUDE is None:
         raise ErrorApi(503, "el medidor de Claude no se ha podido cargar")
     # a la vez y con tope: detrás del proxy una petición de un minuto se corta
@@ -3683,9 +3711,20 @@ def _desglose_de_eventos(eventos):
         elif prov == "claude_cli":
             op = str(e.get("operacion") or "claude")
             t = e.get("tokens") or {}
-            ficha = claude.setdefault(op, {"llamadas": 0, "tokens": 0})
+            ficha = claude.setdefault(op, {"llamadas": 0, "tokens": 0, "cache": 0})
             ficha["llamadas"] += 1
-            ficha["tokens"] += int(t.get("entrada") or 0) + int(t.get("salida") or 0) + int(t.get("cache") or 0)
+            # TOKENS NUEVOS Y DE CACHÉ, aparte (medidor-claude-2): la caché
+            # leída cuesta ~10 % y sumada inflaba la cifra. Los eventos viejos
+            # no traen el desglose: su caché entera cuenta como «de caché».
+            detalle_e = e.get("detalle") if isinstance(e.get("detalle"), dict) else {}
+            leida = detalle_e.get("cache_leida")
+            cache = int(t.get("cache") or 0)
+            try:
+                leida = cache if leida is None else max(0, min(cache, int(leida or 0)))
+            except (TypeError, ValueError):
+                leida = cache
+            ficha["tokens"] += int(t.get("entrada") or 0) + int(t.get("salida") or 0) + (cache - leida)
+            ficha["cache"] += leida
     return {
         "imagenes": {k: {"cuantas": v[0], "usd": round(v[1], 4)} for k, v in imagenes.items()},
         "imagenes_confirmadas": confirmadas, "imagenes_estimadas": estimadas,
@@ -3693,6 +3732,7 @@ def _desglose_de_eventos(eventos):
         "claude": sorted(({"para": k, **v} for k, v in claude.items()),
                          key=lambda x: -x["tokens"]),
         "claude_tokens": sum(v["tokens"] for v in claude.values()),
+        "claude_cache": sum(v["cache"] for v in claude.values()),
         "usd": round(sum(v[1] for v in imagenes.values()) + sum(v[1] for v in voz.values()), 4),
     }
 
@@ -3778,6 +3818,7 @@ def coste_en_detalle(pid: str):
     calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "low")
     return {
         "proyecto": ctx.id, "total_usd": detalle["usd"], **detalle,
+        "claude_consumo": _claude_del_video(ctx.id),
         "musica": {"usd": 0.0, "titulo": musica.get("titulo") or musica.get("nombre") or "",
                    "fuente": musica.get("fuente") or musica.get("origen") or (
                        "subida por ti" if musica.get("propia") else "Jamendo"),
@@ -7375,6 +7416,529 @@ def aceptar_imagen_obsoleta(pid: str, sid: str):
     return {"ok": True, "id": sid}
 
 
+# ------------------------------------------------ QUITAR UNA IMAGEN (unir-planos)
+#
+# Rama unir-planos (25-10-2026, pedido del dueño). «Quitar esta imagen»: lo que
+# se oye en ella pasa a la de antes o a la de después, que conserva su dibujo.
+# Se apunta en `<proyecto>/planos_quitados.json` (`pasos/quitar_planos.py`,
+# FUERA de params: ahí explica por qué) y se lanza una pasada de imágenes SIN
+# NINGUNA UNIDAD PEDIDA, que no dibuja nada: solo vuelve a cortar y deja una
+# versión nueva. Detrás quedan los rótulos y el montaje, gratis, con «Montar».
+# Deshacer es lo mismo al revés, y tampoco paga: si la imagen quitada ya no
+# estuviera, el plano vuelve sin imagen y se dibuja solo si se pide.
+
+def _quitar_planos():
+    return getattr(PASOS_MODULOS, "quitar_planos", None) or __import__("quitar_planos")
+
+
+def _vecinos_para_quitar(plan, sid):
+    """{"anterior": id|None, "siguiente": id|None} a los que puede ir la voz de
+    `sid`; None en los dos si `sid` no se puede quitar."""
+    qp = _quitar_planos()
+    sin_imagen = PASOS_MODULOS.p6_assets._sin_imagen
+    escenas = [e for e in (plan.get("escenas") or []) if e.get("id")]
+    ids = [str(e["id"]) for e in escenas]
+    if sid not in ids:
+        return None
+    i = ids.index(sid)
+    salida = {"anterior": None, "siguiente": None}
+    if not qp.se_puede_quitar(escenas[i], sin_imagen) or qp.tiene_continuacion(escenas, i):
+        return salida
+    if i > 0 and qp.puede_recibir(escenas[i - 1], sin_imagen):
+        salida["anterior"] = ids[i - 1]
+    if i + 1 < len(escenas) and qp.puede_recibir(escenas[i + 1], sin_imagen):
+        salida["siguiente"] = ids[i + 1]
+    return salida
+
+
+def _quitar_en_la_previa(plan, escena):
+    """Lo que la diapositiva necesita para «Quitar esta imagen» y «Deshacer»."""
+    try:
+        vecinos = _vecinos_para_quitar(plan, str(escena.get("id") or "")) or {}
+    except Exception:                                       # noqa: BLE001
+        vecinos = {}
+    salida = {}
+    if vecinos.get("anterior") or vecinos.get("siguiente"):
+        salida["quitar"] = vecinos
+    if escena.get("absorbe"):
+        salida["absorbe"] = [{"id": a.get("id"), "lado": a.get("lado"),
+                              "narracion": a.get("narracion") or "",
+                              "n": int(a.get("n") or 0)}
+                             for a in escena["absorbe"] if isinstance(a, dict)]
+    # e «Insertar una imagen aquí…» y su deshacer (rama insertar-imagen)
+    salida.update(_insertar_en_la_previa(plan, escena))
+    return salida
+
+
+def _sin_nada_en_marcha(ctx, que):
+    if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+        raise ErrorApi(409, f"hay algo en marcha en este vídeo: {que} cuando termine")
+    with _COLA_LOCK:
+        if _cola_dibujando(ctx):
+            raise ErrorApi(409, f"se están rehaciendo imágenes con tus notas: {que} "
+                                "cuando terminen")
+
+
+def _pasada_sin_dibujar(ctx, nombre, restaurar=None):
+    """La pasada de imágenes que solo vuelve a cortar (`solo_cortar`): ninguna
+    unidad pedida, sin hojas ni planos nuevos, sin esperar turno de imágenes.
+    No se dibuja ni se paga nada. `restaurar`: [{uid, texto}] del plano devuelto,
+    que se sella con su imagen de siempre si sigue diciendo eso y su imagen no
+    está obsoleta. -> {trabajo, trabajo_id}"""
+    opciones = {"solo_cortar": True}
+    if restaurar:
+        opciones["restaurar"] = list(restaurar)
+    tid = lanzar_paso(ctx, "assets", [], nombre=nombre, opciones=opciones)
+    return {"trabajo": tid, "trabajo_id": tid}
+
+
+def _quitados_sin_aplicar(ctx, plan):
+    """Lo apuntado como quitado que el plan de ahora NO refleja (la pasada
+    fallo o se cancelo, o se volvio a una version anterior): se enseña con su
+    «Deshacer» para que nunca quede algo quitado sin forma de devolverlo."""
+    p6 = PASOS_MODULOS.p6_assets
+    aplicados = set()
+    for escena in plan.get("escenas") or []:
+        for a in escena.get("absorbe") or []:
+            if isinstance(a, dict):
+                aplicados.add((p6._texto_clave({"narracion": a.get("narracion")}),
+                               int(a.get("n") or 0)))
+    return [{"id": e.get("id"), "narracion": e["texto"], "n": e["n"], "hacia": e["hacia"]}
+            for e in _quitar_planos().leer(ctx.proyecto.raiz)
+            if (e["texto"], e["n"]) not in aplicados]
+
+
+@app.post("/api/proyectos/{pid}/planos/{sid}/quitar", status_code=202)
+def quitar_imagen(pid: str, sid: str, cuerpo: dict = Body(default=None)):
+    """Quita la imagen `sid`: su voz pasa a la de antes o a la de después.
+    {hacia: "anterior"|"siguiente"} -> el trabajo (gratis) que vuelve a cortar."""
+    ctx = contexto(pid)
+    p6 = PASOS_MODULOS.p6_assets
+    hacia = str(_cuerpo(cuerpo).get("hacia") or "")
+    if hacia not in _quitar_planos().HACIA:
+        raise ErrorApi(400, "di a qué imagen pasa la voz: «anterior» o «siguiente»")
+    with _cerrojo_de_cadena(ctx.id):
+        _sin_nada_en_marcha(ctx, "quítala")
+        plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+        vecinos = _vecinos_para_quitar(plan, sid)
+        if vecinos is None:
+            raise ErrorApi(404, f"este vídeo no tiene la imagen {sid}")
+        if not vecinos.get(hacia):
+            raise ErrorApi(409, f"la voz de {sid} no puede pasar a la imagen {hacia}: "
+                                "no la hay, o es una cartela o la continuación de otra")
+        escenas = [e for e in plan["escenas"] if e.get("id")]
+        i = next(n for n, e in enumerate(escenas) if str(e.get("id")) == sid)
+        qp = _quitar_planos()
+        unidad = ((ctx.estado.params("assets") or {}).get("unidades") or {}).get(f"escena:{sid}")
+        antes = qp.leer(ctx.proyecto.raiz)
+        texto = p6._texto_clave(escenas[i])
+        # LA OCURRENCIA EN EL CORTE ORIGINAL, como la cuenta `aplicar`: los
+        # planos de antes que dicen lo mismo, tambien los ya quitados (viven
+        # en el `absorbe` de su vecino; los de `sid` mismo, solo los de antes)
+        def quitados_iguales(escena, solo_antes=False):
+            return sum(1 for a in escena.get("absorbe") or []
+                       if isinstance(a, dict) and (not solo_antes or a.get("lado") == "antes")
+                       and p6._texto_clave({"narracion": a.get("narracion")}) == texto)
+        n = (qp.ocurrencia(escenas, i, p6._texto_clave)
+             + sum(quitados_iguales(e) for e in escenas[:i])
+             + quitados_iguales(escenas[i], solo_antes=True))
+        # si estaba al dia al quitarla: solo entonces se sella al deshacer
+        fresca = f"escena:{sid}" not in set(ctx.estado.unidades_obsoletas("assets") or [])
+        qp.quitar(ctx.proyecto.raiz, texto, hacia, sid, n=n,
+                  unidad=unidad if isinstance(unidad, dict) else None, fresca=fresca)
+        try:
+            ficha = _pasada_sin_dibujar(ctx, "quitar_imagen")
+        except Exception:
+            # sin pasada no se aplica: lo apuntado se deshace, o quedaria
+            # quitado a medias (y sin «Deshacer» en la pantalla)
+            qp.reponer(ctx.proyecto.raiz, antes)
+            raise
+    ctx.bitacora.anotar("imagen_quitada", "assets",
+                        {"plano": sid, "hacia": hacia, "a": vecinos[hacia]})
+    return dict(ficha, quitada=sid, hacia=vecinos[hacia])
+
+
+@app.post("/api/proyectos/{pid}/planos/devolver", status_code=202)
+def devolver_imagen(pid: str, cuerpo: dict = Body(default=None)):
+    """Deshace «Quitar esta imagen». {narracion: lo que decía la imagen quitada}
+    -> el trabajo (gratis) que vuelve a cortar."""
+    ctx = contexto(pid)
+    p6 = PASOS_MODULOS.p6_assets
+    datos = _cuerpo(cuerpo)
+    narracion = str(datos.get("narracion") or "")
+    texto = p6._texto_clave({"narracion": narracion})
+    try:
+        n = max(0, int(datos.get("n") or 0))
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "'n' tiene que ser un número")
+    if not texto:
+        raise ErrorApi(400, "manda {narracion}: lo que decía la imagen quitada")
+    qp = _quitar_planos()
+    with _cerrojo_de_cadena(ctx.id):
+        _sin_nada_en_marcha(ctx, "deshazlo")
+        entrada = qp.devolver(ctx.proyecto.raiz, texto, n)
+        if entrada is None:
+            raise ErrorApi(404, "esa imagen no está quitada")
+        # SUS PARAMS POR UNIDAD (la dirección, la nota...), que el núcleo borró
+        # al retirarla. Solo si el corte de ahora la tiene en el mismo número
+        # (el que se lleva su voz la nombra con él): si no, se dejan fuera
+        # antes que escribirlos en otro plano.
+        uid = f"escena:{entrada['id']}"
+        plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+        en_su_sitio = any(a.get("id") == entrada["id"] and int(a.get("n") or 0) == n
+                          for e in plan.get("escenas") or []
+                          for a in e.get("absorbe") or [] if isinstance(a, dict))
+        repuso = False
+        if entrada.get("unidad") and entrada["id"] and en_su_sitio:
+            unidades = (ctx.estado.params("assets") or {}).get("unidades") or {}
+            if uid not in unidades:
+                ctx.estado.actualizar_params("assets", {"unidades": {uid: entrada["unidad"]}})
+                repuso = True
+        restaurar = ([{"uid": uid, "texto": texto}]
+                     if en_su_sitio and entrada["id"] and entrada.get("fresca") else None)
+        try:
+            ficha = _pasada_sin_dibujar(ctx, "devolver_imagen", restaurar=restaurar)
+        except Exception:
+            qp.restaurar(ctx.proyecto.raiz, entrada)
+            if repuso:
+                with ctx.estado._lock:
+                    params = copy.deepcopy(ctx.estado.params("assets") or {})
+                    (params.get("unidades") or {}).pop(uid, None)
+                    ctx.estado.set_params("assets", params)
+            raise
+    ctx.bitacora.anotar("imagen_devuelta", "assets", {"narracion": narracion[:120]})
+    return dict(ficha, devuelta=True)
+
+
+# --------------------------------------- INSERTAR UNA IMAGEN (insertar-imagen)
+#
+# Rama insertar-imagen (26-10-2026, pedido del dueño). Lo contrario de quitar:
+# se elige la palabra de un plano donde empieza una imagen nueva y se escribe en
+# español qué se ve. Claude lo pasa al inglés (en un hilo: tarda segundos y el
+# proxy corta a los sesenta), se apunta en `<proyecto>/planos_insertados.json`
+# (`pasos/insertar_planos.py`, FUERA de params) y se lanza la pasada de
+# imágenes con la nueva como ÚNICA unidad pedida: se paga UNA imagen, con el
+# precio confirmado antes. El plano partido conserva su dibujo. Deshacer es la
+# pasada que solo corta (`_pasada_sin_dibujar`), gratis.
+
+_INSERTANDO = {}
+_LOCK_INSERTANDO = threading.Lock()
+
+
+def _insertar_planos():
+    return getattr(PASOS_MODULOS, "insertar_planos", None) or __import__("insertar_planos")
+
+
+def _precio_de_una_imagen(ctx):
+    params = ctx.estado.params("assets") or {}
+    calidad = str(params.get("calidad") or "low")
+    precio = AJUSTES.precio_por_imagen(calidad, modo=PASOS_MODULOS.p6_assets.modo_de(
+        params.get("estilo")))
+    return calidad, round(float((precio or {}).get("usd") or 0.0), 4)
+
+
+def _donde_insertar(plan, sid):
+    """-> (escenas, i) del plano `sid` si admite una imagen insertada; si no,
+    ErrorApi con el motivo."""
+    ip = _insertar_planos()
+    escenas = [e for e in (plan.get("escenas") or []) if e.get("id")]
+    i = next((n for n, e in enumerate(escenas) if str(e["id"]) == sid), None)
+    if i is None:
+        raise ErrorApi(404, f"este vídeo no tiene la imagen {sid}")
+    if not ip.se_puede_partir(escenas, i, PASOS_MODULOS.p6_assets._sin_imagen):
+        raise ErrorApi(409, f"en {sid} no se puede insertar una imagen: es una cartela, "
+                            "la continuación de otra, ya es una insertada o lleva la voz "
+                            "de una quitada")
+    return escenas, i
+
+
+def _insertar_en_la_previa(plan, escena):
+    """Lo que la diapositiva necesita para «Insertar una imagen aquí…» y para
+    deshacer una insertada."""
+    salida = {}
+    try:
+        ip = _insertar_planos()
+        escenas = [e for e in (plan.get("escenas") or []) if e.get("id")]
+        i = next((n for n, e in enumerate(escenas) if e.get("id") == escena.get("id")), None)
+        if i is not None and ip.se_puede_partir(escenas, i, PASOS_MODULOS.p6_assets._sin_imagen):
+            validas = ip.palabras_validas(escena)
+            if validas:
+                salida["insertar"] = {"palabras": ip.palabras_de(escena), "validas": validas}
+    except Exception:                                       # noqa: BLE001
+        pass
+    if isinstance(escena.get("insertada"), dict):
+        ins = escena["insertada"]
+        salida["insertada"] = {"en": ins.get("en"), "texto": ins.get("texto"),
+                               "n": int(ins.get("n") or 0), "palabra": int(ins.get("palabra") or 0),
+                               "que": ins.get("que") or ""}
+    return salida
+
+
+def _insertados_sin_aplicar(ctx, plan):
+    """Lo apuntado como insertado que el corte de ahora NO tiene (la tanda
+    falló o se canceló, o se volvió a una versión anterior): se enseña con su
+    «Deshacer», como lo quitado (`_quitados_sin_aplicar`)."""
+    puestos = {(i.get("texto"), int(i.get("n") or 0), int(i.get("palabra") or 0))
+               for e in plan.get("escenas") or [] if isinstance(e.get("insertada"), dict)
+               for i in [e["insertada"]]}
+    return [{"id": e["id"], "texto": e["texto"], "n": e["n"], "palabra": e["palabra"],
+             "que": e.get("que") or ""}
+            for e in _insertar_planos().leer(ctx.proyecto.raiz)
+            if (e["texto"], e["n"], e["palabra"]) not in puestos]
+
+
+def _ficha_insertando(ctx):
+    calidad, usd = _precio_de_una_imagen(ctx)
+    with _LOCK_INSERTANDO:
+        marcha = dict(_INSERTANDO.get(ctx.id) or {})
+    return dict({"estado": "quieto"}, **marcha, precio={"usd": usd, "calidad": calidad})
+
+
+@app.get("/api/proyectos/{pid}/planos/insertar")
+def leer_insercion(pid: str):
+    """Cómo va la última imagen insertada y lo que cuesta una. -> {estado,
+    precio: {usd, calidad}, trabajo_id?, nuevo?, error?}"""
+    return _ficha_insertando(contexto(pid))
+
+
+@app.post("/api/proyectos/{pid}/planos/{sid}/insertar", status_code=202)
+def insertar_imagen(pid: str, sid: str, cuerpo: dict = Body(default=None)):
+    """Inserta una imagen nueva en `sid`. {palabra, que, usd}
+
+    `palabra`: desde qué palabra (0 = la primera; tiene que ser >= 1) va la
+    nueva. `que`: lo que se ve, en español. `usd`: el precio de una imagen que
+    se confirmó; si ya no es ese, no se lanza nada (409). Claude pasa `que` al
+    inglés en un hilo y después se apunta y se lanza la tanda de UNA imagen.
+    -> la ficha, con `estado` «pensando»."""
+    ctx = contexto(pid)
+    p6 = PASOS_MODULOS.p6_assets
+    ip = _insertar_planos()
+    datos = _cuerpo(cuerpo)
+    que = " ".join(str(datos.get("que") or "").split())
+    try:
+        palabra = int(datos.get("palabra"))
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "di desde qué palabra va la imagen nueva")
+    if not que:
+        raise ErrorApi(400, "escribe qué quieres que se vea en la imagen nueva")
+    if len(que) > ip.MAX_QUE:
+        raise ErrorApi(400, f"escríbelo en menos de {ip.MAX_QUE} letras")
+    _calidad, usd = _precio_de_una_imagen(ctx)
+    try:
+        visto = round(float(datos.get("usd")), 4)
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "hace falta 'usd': el precio que se confirmó")
+    if abs(visto - usd) > 0.0005:
+        raise ErrorApi(409, f"una imagen cuesta ahora {usd:.3f} $, no {visto:.3f} $: vuelve a "
+                            "mirarlo antes de confirmar", {"usd": usd})
+    with _cerrojo_de_cadena(ctx.id):
+        _sin_nada_en_marcha(ctx, "insértala")
+        plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+        escenas, i = _donde_insertar(plan, sid)
+        palabras = ip.palabras_de(escenas[i])
+        if not 1 <= palabra < len(palabras):
+            raise ErrorApi(400, f"la imagen nueva tiene que empezar entre la palabra 2 y la "
+                                f"{len(palabras)} de {sid}")
+        if palabra not in ip.palabras_validas(escenas[i]):
+            raise ErrorApi(400, f"ahí uno de los dos trozos duraría menos de "
+                                f"{ip.MIN_TROZO_S:g} s: elige otra palabra")
+        # SOLO SE PARTE UNA IMAGEN DIBUJADA, y sin nada pendiente de insertar:
+        # la tanda pide UNA imagen y lo demás no se toca (revisión del 26-10)
+        if not _ruta_de_version(ctx, "assets", "escenas", f"{sid}.png"):
+            raise ErrorApi(409, f"{sid} todavía no tiene imagen: dibújala antes de insertar otra")
+        if _insertados_sin_aplicar(ctx, plan):
+            raise ErrorApi(409, "hay una imagen insertada que no llegó a dibujarse: deshazla o "
+                                "vuelve a intentarla antes de insertar otra")
+        texto = p6._texto_clave(escenas[i])
+        # LA OCURRENCIA EN EL CORTE ANTES DE QUITAR, como la cuenta `aplicar`:
+        # los planos de antes que dicen lo mismo y los quitados que viven en
+        # el `absorbe` de su vecino (los de `sid` mismo no: no se parte uno así)
+        n = (sum(1 for e in escenas[:i] if p6._texto_clave(e) == texto and not e.get("insertada"))
+             + sum(1 for e in escenas[:i] for a in e.get("absorbe") or []
+                   if isinstance(a, dict) and p6._texto_clave({"narracion": a.get("narracion")}) == texto))
+        with _LOCK_INSERTANDO:
+            if (_INSERTANDO.get(ctx.id) or {}).get("estado") == "pensando":
+                raise ErrorApi(409, "ya se está preparando otra imagen nueva en este vídeo")
+            _INSERTANDO[ctx.id] = {"estado": "pensando", "plano": sid}
+    prompt, narracion = escenas[i].get("prompt") or "", " ".join(palabras[palabra:])
+
+    def hilo():
+        ficha = {"plano": sid}
+        try:
+            pedido = ip.al_ingles(que, prompt=prompt, narracion=narracion, cwd=RAIZ_ESTUDIO)
+            with _cerrojo_de_cadena(ctx.id):
+                # y el precio que se confirmó sigue siendo el de ahora
+                if abs(_precio_de_una_imagen(ctx)[1] - usd) > 0.0005:
+                    raise ErrorApi(409, "el precio de una imagen ha cambiado mientras se "
+                                        "preparaba: vuelve a mirarlo y confírmalo otra vez")
+                # lo de antes de pensar puede haber cambiado: se mira otra vez
+                _sin_nada_en_marcha(ctx, "insértala")
+                plan_ahora = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+                escenas_ahora, j = _donde_insertar(plan_ahora, sid)
+                if p6._texto_clave(escenas_ahora[j]) != texto:
+                    raise ErrorApi(409, f"{sid} ha cambiado mientras se preparaba: vuelve a pedirla")
+                antes = ip.leer(ctx.proyecto.raiz)
+                # NI UNA LETRA CON PARAMS DE OTRA INSERTADA (revisión del 28-10):
+                # S004B dirigida, deshecha a medias y vuelta a insertar heredaría
+                # la dirección vieja en vez de lo que se acaba de escribir
+                declaradas = (ctx.estado.params("assets") or {}).get("unidades") or {}
+                ocupadas = {u[len(f"escena:{sid}"):] for u in declaradas
+                            if u.startswith(f"escena:{sid}") and len(u) == len(f"escena:{sid}") + 1}
+                letra = ip.letra_libre(antes, texto, n, ocupadas)
+                if not letra:
+                    raise ErrorApi(409, f"{sid} ya tiene todas las imágenes insertadas que admite")
+                entradas = ip.insertar(ctx.proyecto.raiz, texto, n, palabra, sid, que=que,
+                                       direccion=pedido["direccion"],
+                                       personas=pedido["personas"], letra=letra)
+                nueva = next(e for e in entradas if (e["texto"], e["n"], e["palabra"]) == (texto, n, palabra))
+                nuevo = f"{sid}{nueva['letra']}"
+                try:
+                    trabajo_id = lanzar_paso(ctx, "assets", [f"escena:{nuevo}"],
+                                             nombre="insertar_imagen", evento="imagen_insertada",
+                                             datos={"plano": sid, "nuevo": nuevo, "usd": usd},
+                                             opciones={"solo_pedidas": True})
+                except Exception:
+                    # sin tanda no se apunta: quedaría un plano sin imagen
+                    ip.reponer(ctx.proyecto.raiz, antes)
+                    raise
+            ctx.bitacora.anotar("imagen_insertada", "assets",
+                                {"plano": sid, "nuevo": nuevo, "palabra": palabra})
+            ficha.update(estado="lanzado", nuevo=nuevo, trabajo_id=trabajo_id)
+        except Exception as fallo:                          # noqa: BLE001
+            mensaje = fallo.mensaje if isinstance(fallo, ErrorApi) else _error_para_persona(fallo)
+            ficha.update(estado="error", error=mensaje)
+        with _LOCK_INSERTANDO:
+            _INSERTANDO[ctx.id] = ficha
+
+    threading.Thread(target=hilo, daemon=True, name=f"insertar-{ctx.id}").start()
+    return _ficha_insertando(ctx)
+
+
+@app.post("/api/proyectos/{pid}/planos/insertadas/deshacer", status_code=202)
+def deshacer_imagen_insertada(pid: str, cuerpo: dict = Body(default=None)):
+    """Quita una imagen insertada: el plano del que salió recupera toda su voz,
+    con su dibujo de siempre. {texto, n, palabra} (lo que trae `insertada` en la
+    previa) -> el trabajo (gratis) que vuelve a cortar."""
+    ctx = contexto(pid)
+    ip = _insertar_planos()
+    datos = _cuerpo(cuerpo)
+    texto = str(datos.get("texto") or "").strip()
+    try:
+        n, palabra = int(datos.get("n") or 0), int(datos.get("palabra"))
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "manda {texto, n, palabra}: lo que trae la imagen insertada")
+    if not texto:
+        raise ErrorApi(400, "manda {texto, n, palabra}: lo que trae la imagen insertada")
+    with _cerrojo_de_cadena(ctx.id):
+        _sin_nada_en_marcha(ctx, "deshazlo")
+        antes = ip.leer(ctx.proyecto.raiz)
+        entrada = ip.deshacer(ctx.proyecto.raiz, texto, n, palabra)
+        if entrada is None:
+            raise ErrorApi(404, "esa imagen no está insertada")
+        try:
+            ficha = _pasada_sin_dibujar(ctx, "deshacer_insertada")
+        except Exception:
+            ip.reponer(ctx.proyecto.raiz, antes)
+            raise
+    ctx.bitacora.anotar("imagen_insertada_deshecha", "assets",
+                        {"plano": entrada.get("id"), "palabra": palabra})
+    return dict(ficha, deshecha=True)
+
+
+# --------------------------------- DESCRIPCIÓN DE CADA PLANO (descripcion-planos)
+#
+# Rama descripcion-planos (26-10-2026, pedido del dueño). Debajo de cada imagen,
+# en Imágenes, una o dos frases en español con lo que su prompt pide dibujar.
+# El prompt sigue en inglés y no se toca: la descripción la escribe Claude
+# (membresía) y va a `<proyecto>/descripciones.json` por la huella del prompt,
+# FUERA de params y firmas (regla 1). Si el prompt cambia, su descripción vieja
+# deja de casar sola y se pide otra; nunca se enseña la de otro prompt.
+
+_DESCRIBIENDO = {}
+_LOCK_DESCRIBIENDO = threading.Lock()
+
+
+def _prompts_de_planos(plan):
+    """[(sid, prompt en inglés)] de los planos con imagen, en orden."""
+    salida = []
+    for escena in plan.get("escenas") or []:
+        sid, prompt = str(escena.get("id") or ""), " ".join(str(escena.get("prompt") or "").split())
+        if sid and prompt:
+            salida.append((sid, prompt))
+    return salida
+
+
+def _ficha_descripciones(ctx, plan=None):
+    """{descripciones: {sid: español}, faltan, total, estado, error?}."""
+    if plan is None:
+        plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    mod = _traducciones()
+    pares = _prompts_de_planos(plan)
+    hechas = mod.de(ctx.proyecto.raiz, [p for _s, p in pares], mod.FICHERO_DESCRIPCIONES)
+    descripciones = {sid: hechas.get(p) or "" for sid, p in pares}
+    with _LOCK_DESCRIBIENDO:
+        marcha = dict(_DESCRIBIENDO.get(ctx.id) or {})
+    ficha = {"descripciones": {s: d for s, d in descripciones.items() if d},
+             # el prompt de cada plano: la pantalla pone la descripción junto
+             # al prompt para el que se escribió, nunca junto a otro
+             "prompts": dict(pares),
+             "faltan": len({p for s, p in pares if not descripciones.get(s)}),
+             "total": len({p for _s, p in pares}),
+             "estado": marcha.get("estado") or "quieto"}
+    if marcha.get("error"):
+        ficha["error"] = marcha["error"]
+    return ficha
+
+
+@app.get("/api/proyectos/{pid}/planos/descripciones")
+def leer_descripciones_planos(pid: str):
+    """Lo que se pidió dibujar en cada plano, en español. -> la ficha"""
+    return _ficha_descripciones(contexto(pid))
+
+
+@app.post("/api/proyectos/{pid}/planos/describir", status_code=202)
+def describir_planos(pid: str, cuerpo: dict = Body(default=None)):
+    """Pide a Claude, en un hilo, la descripción en español de los planos que
+    no la tienen. {auto?: bool}: lo pide la pantalla sola al abrir Imágenes, y
+    entonces no se relanza tras un error (una sesión de Claude caída no se
+    reintenta en cada repintado); el botón «Reintentar» sí. No dibuja ni
+    cambia nada del vídeo. -> la ficha, con `estado` «pensando» si arrancó."""
+    ctx = contexto(pid)
+    auto = bool(_cuerpo(cuerpo).get("auto"))
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    mod = _traducciones()
+    raiz = ctx.proyecto.raiz
+    faltan = mod.faltan(raiz, [p for _s, p in _prompts_de_planos(plan)],
+                        mod.FICHERO_DESCRIPCIONES)
+    with _LOCK_DESCRIBIENDO:
+        previo = dict(_DESCRIBIENDO.get(ctx.id) or {})
+        lanzar = (bool(faltan) and previo.get("estado") != "pensando"
+                  and not (auto and previo.get("estado") == "error"))
+        if lanzar:
+            _DESCRIBIENDO[ctx.id] = {"estado": "pensando"}
+
+    def hilo():
+        try:
+            hechas = mod.describir(faltan, cwd=RAIZ_ESTUDIO)
+            mod.guardar(raiz, hechas, mod.FICHERO_DESCRIPCIONES)
+            if not hechas:
+                raise mod.ErrorTraduccion("Claude no ha devuelto ninguna descripción; "
+                                          "vuelve a pedirla.")
+            ctx.bitacora.anotar("planos_descritos", "assets", {"planos": len(hechas)})
+            ficha = {"estado": "listo"}
+            if len(hechas) < len(faltan):
+                ficha = {"estado": "error", "error": f"Faltan {len(faltan) - len(hechas)} "
+                         "descripciones que Claude no devolvió; vuelve a pedirlas."}
+        except Exception as fallo:                          # noqa: BLE001
+            ficha = {"estado": "error", "error": _error_para_persona(fallo)}
+        with _LOCK_DESCRIBIENDO:
+            _DESCRIBIENDO[ctx.id] = ficha
+
+    if lanzar:
+        threading.Thread(target=hilo, daemon=True, name=f"describir-{ctx.id}").start()
+    return _ficha_descripciones(ctx, plan)
+
+
 @app.get("/api/proyectos/{pid}/previsualizacion")
 def leer_previsualizacion(pid: str):
     """Las piezas para ver el video sin montarlo. -> {escenas, audio, ...}"""
@@ -7392,6 +7956,8 @@ def leer_previsualizacion(pid: str):
     # lo mismo, y uno de los dos viejo.
     params_callouts = ctx.estado.params("callouts") or {}
     medir, banda = _medidor_de_subtitulo(ctx, plan)
+    # lo que se pidió dibujar, en español (rama descripcion-planos)
+    descritos = _ficha_descripciones(ctx, plan)["descripciones"]
     escenas = []
     for escena in escenas_plan:
         sid = str(escena.get("id") or "")
@@ -7418,7 +7984,7 @@ def leer_previsualizacion(pid: str):
                 texto=PASOS_MODULOS.p7_callouts.texto_subtitulo_de(
                     params_callouts, f"escena:{sid}"),
                 ancla=PASOS_MODULOS.p7_callouts.ancla_subtitulo_de(
-                    params_callouts, f"escena:{sid}")) or []
+                    params_callouts, f"escena:{sid}", escena)) or []
         except Exception:                                     # noqa: BLE001
             trozos = []
         escenas.append({
@@ -7433,6 +7999,13 @@ def leer_previsualizacion(pid: str):
             # y si el dibujo que hay ya no es de lo que aqui se dice. Va vacio
             # cuando esta al dia: es una excepcion, no un campo de todos.
             **_obsolescencia(ctx, escena),
+            # «Quitar esta imagen» (a qué vecinos puede ir su voz) y la voz de
+            # los quitados que lleva (rama unir-planos)
+            **_quitar_en_la_previa(plan, escena),
+            # lo que su prompt pide dibujar, en español, y el prompt en inglés
+            # (rama descripcion-planos; vacíos en una cartela)
+            "descripcion": descritos.get(sid) or "",
+            "prompt": " ".join(str(escena.get("prompt") or "").split()),
             # EL CUADRO YA COMPUESTO, cuando existe, y manda sobre todo lo
             # demas. `p7_callouts.previsualizar` compone lo MISMO que renderiza
             # `p8_render` --la imagen dentro del transform de camara, la capa
@@ -7462,6 +8035,10 @@ def leer_previsualizacion(pid: str):
     render = ctx.estado.params("render") or {}
     return {
         "escenas": escenas,
+        # lo apuntado como quitado que este corte aún no refleja (unir-planos)
+        "quitados_sin_aplicar": _quitados_sin_aplicar(ctx, plan),
+        # y lo insertado que no llegó a dibujarse (insertar-imagen)
+        "insertados_sin_aplicar": _insertados_sin_aplicar(ctx, plan),
         "audio": _audio_de_la_toma(ctx),
         # LA MUSICA Y LOS EFECTOS SOLO PARA EL PLAY SEGUIDO. Escena a escena se
         # oye la VOZ y nada mas: lo que se esta juzgando ahi es si la imagen
@@ -8593,7 +9170,10 @@ def _reglas_para_revisor(estilo, plan):
         if p6.modo_de(estilo) == "foto":
             contexto = " ".join([p6.contexto_de_reglas(estilo)] + [
                 str(e.get("prompt") or "") for e in plan.get("escenas") or []])
-            lineas = reglas.para("prompt_imagen", modo="foto", contexto=contexto)
+            # con las de la ficha del negocio en su hueco (Etapa Foto C), las mismas
+            # que recibió el generador (`p6_assets._prompt_completo`)
+            lineas = reglas.para("prompt_imagen", modo="foto", contexto=contexto,
+                                 extra=p6.dominios.reglas_de_foto(estilo))
         else:
             lineas = reglas.para("prompt_imagen")
         return "\n".join(f"  - {l}" for l in lineas)
@@ -9313,6 +9893,16 @@ def _aplicar_cambios_del_repaso(ctx, reparto, avisos):
         # que escribir sólo el subtítulo borraría sus zonas a evitar y su
         # `sin_callout`.
         previas = (ctx.estado.params("callouts") or {}).get("unidades") or {}
+        # LA NARRACION DE AHORA DE CADA PLANO, que es su ancla (28-10): si
+        # después cambia lo que dice ese plano --se quita la imagen de al lado
+        # y se lleva su voz, o se inserta una dentro--, lo escrito a mano se
+        # deja de usar en vez de repetir o perder palabras (ver de_escena)
+        try:
+            dichas = {f"escena:{e.get('id')}": " ".join(str(e.get("narracion") or "").split())
+                      for e in (PASOS_MODULOS.p6_assets.plan_actual(
+                          ctx.proyecto, "assets", estado=ctx.estado) or {}).get("escenas") or []}
+        except Exception:                                   # noqa: BLE001
+            dichas = {}
         bloque = {}
         for uid, texto in unidades_callouts.items():
             actual = previas.get(uid)
@@ -9320,7 +9910,10 @@ def _aplicar_cambios_del_repaso(ctx, reparto, avisos):
             actual["subtitulo_texto"] = texto
             # escrito a mano contra la narracion de AHORA: el ancla de una
             # corrección de ortografía anterior ya no vale (ver de_escena)
-            actual.pop("subtitulo_ancla", None)
+            if dichas.get(uid):
+                actual["subtitulo_ancla"] = dichas[uid]
+            else:
+                actual.pop("subtitulo_ancla", None)
             bloque[uid] = actual
         params_callouts["unidades"] = bloque
     if params_callouts:
@@ -13584,6 +14177,18 @@ def guardar_preset_canal(cuerpo: dict = Body(default=None)):
         datos.get("tipo"), datos.get("nombre"), datos.get("datos"),
         nota=datos.get("nota") or "", miniatura=datos.get("miniatura") or "",
         pid=datos.get("id") or None))
+    # LA FICHA DEL NEGOCIO, AL MOMENTO (Etapa Foto C, decisión del dueño 28-10):
+    # guardar aquí un estilo de canal (p. ej. «Guardar como estilo» desde un
+    # vídeo, o sustituir su contenido) puede dejarlo en foto y con láminas sin
+    # el negocio de su proyecto. Se le pone ya; sin ficha en el proyecto, o en
+    # un estilo de dibujo, no se escribe nada (lo general, como hasta ahora).
+    if ficha.get("tipo") == "canal":
+        try:
+            antes = ((ficha.get("datos") or {}).get("estilo") or {}).get("dominio") or ""
+            if _negocio_al_estilo(ficha["id"]) != antes:
+                ficha = _presets().leer(ficha["id"])
+        except Exception as fallo:                           # noqa: BLE001
+            anotar_global("aviso", {"negocio": str(fallo), "preset": ficha.get("id")})
     anotar_global("preset_guardado", {"id": ficha["id"], "tipo": ficha["tipo"],
                                       "nombre": ficha["nombre"]})
     return {"preset": ficha, **_presets().listar()}
@@ -13656,6 +14261,9 @@ def restaurar_preset_canal(pid: str):
     él: se apartaron juntos (`borrar_preset_light`) y sin el taller el estilo
     vuelve sin sus láminas ni su escucha."""
     ficha = _preset_o_400(lambda p: p.restaurar(pid))
+    # mientras estuvo en la papelera pudo cambiar la ficha de su proyecto
+    if PASOS_MODULOS is not None:
+        _negocio_al_estilo(pid)
     taller = ((ficha.get("datos") or {}).get("origen") or {}).get("taller") if isinstance(ficha, dict) else ""
     devuelto = ""
     if taller and not os.path.isdir(os.path.join(raiz_proyectos(), taller)):
@@ -14857,6 +15465,13 @@ def _correr_preset_light_dentro(avisar, ctx, encargo, solo, preset_id, retomar,
             CLIENTES.asignar(raiz_proyectos(), ficha["id"], encargo["cliente"])
         except CLIENTES.ErrorCliente as fallo:
             ctx.bitacora.anotar("aviso", None, {"cliente": str(fallo)})
+    # LA FICHA DEL NEGOCIO DE SU PROYECTO (Etapa Foto C), al crearlo y al rehacerlo:
+    # rehacer puede ser el momento en que el estilo tiene láminas por primera vez,
+    # o en que pasa a foto
+    try:
+        _negocio_al_estilo(ficha["id"])
+    except Exception as fallo:                                # noqa: BLE001
+        ctx.bitacora.anotar("aviso", None, {"negocio": str(fallo)})
     salida["resumen"] = ficha.get("resumen") or ""
     salida["coste_usd"] = round(salida["coste_usd"], 4)
     avisar(1.0, f"preset «{ficha['nombre']}» listo", PUBLICO_LISTO)
@@ -15315,6 +15930,10 @@ def duplicar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
                                                   os.path.basename(una)))
             except OSError:
                 pass
+    # LA COPIA NO SE LLEVA LA FICHA DEL NEGOCIO del original: la recibe la de su
+    # proyecto (ninguna hasta que se meta en uno), Etapa Foto C
+    if PASOS_MODULOS is not None:
+        _negocio_al_estilo(nueva["id"])
     return {"preset": nueva, "de": preset_id}
 
 
@@ -16311,17 +16930,140 @@ def guardar_relato_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
 # La pantalla para elegirlo llega con la Etapa Foto C: aqui, leerlo y fijarlo.
 
 @app.get("/api/dominios")
-def listar_dominios():
-    """Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico}"""
+def listar_dominios(peticion: Request = None):
+    """El negocio general y las fichas de los clientes (Etapa Foto C).
+    -> {dominios, automatico}"""
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
-    return {"dominios": PASOS_MODULOS.dominios.listar(),
-            "automatico": "sin fijar: se detecta por el texto del vídeo, como siempre"}
+    cerrados = _cerrados(peticion) if peticion is not None else set()
+    return {"dominios": [d for d in PASOS_MODULOS.dominios.listar()
+                         if (d.get("cliente") or "") not in cerrados],
+            "automatico": "sin ficha: el general, sin reglas de ningún negocio"}
+
+
+# ------------------------------------------------- LA FICHA DEL NEGOCIO
+#
+# Etapa Foto C (21-10-2026): el negocio de cada cliente es una FICHA de su
+# proyecto (qué hace, sus reglas de foto, lo que vigila el revisor), en
+# `<proyectos>/_sistema/dominios.json` (`dominios.ruta_usuario`), fuera del
+# código. Los estilos del proyecto la llevan en `estilo.dominio` (la pone
+# `_negocio_al_estilo` al guardar la ficha, al borrarla, al mover un estilo de
+# proyecto y al crear uno dentro) y llega a los vídeos nuevos al crearlos y a
+# los hechos con «Traer el estilo», como el resto del estilo. Cambiar las reglas
+# de una ficha que ya usa un vídeo de foto cambia el prompt de sus imágenes:
+# quedan para rehacer, y rehacerlas se paga.
+
+def _negocio_al_estilo(preset_id):
+    """Pone en el estilo `preset_id` la ficha del negocio de su proyecto (o se
+    la quita si su proyecto no tiene). -> el id puesto ("" si ninguno)"""
+    dominios = PASOS_MODULOS.dominios
+    presets = _presets()
+    with presets.lock_de(presets.FICHERO):
+        # el proyecto y su ficha se leen DENTRO del cerrojo: quitar la ficha y
+        # mover el estilo a la vez dejaba el id de una ficha ya borrada
+        cid = CLIENTES.cliente_de(raiz_proyectos(), estilo_id=preset_id) or ""
+        negocio = dominios.de_cliente(cid) if cid else None
+        tid = negocio["id"] if negocio else ""
+        try:
+            ficha = presets.leer(preset_id)
+        except presets.ErrorPreset:
+            return ""
+        if ficha.get("tipo") != "canal":
+            return ""
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        estilo = dict(contenido.get("estilo") or {})
+        if not estilo.get("referencias"):
+            return ""              # sin estilo gráfico todavía: no hay donde
+        if estilo.get("modo") != "foto":
+            # la ficha solo cambia las imágenes de FOTO: en un estilo de dibujo
+            # no se escribe, y así no mueve la firma de sus vídeos al traerlo
+            tid = ""
+        if (estilo.get("dominio") or "") == tid:
+            return tid
+        if tid:
+            estilo["dominio"] = tid
+        else:
+            estilo.pop("dominio", None)
+        contenido["estilo"] = estilo
+        try:
+            presets.guardar("canal", ficha.get("nombre") or "", contenido,
+                            nota=ficha.get("nota") or "",
+                            miniatura=ficha.get("miniatura") or "", pid=preset_id)
+        except presets.ErrorPreset:
+            return ""
+    return tid
+
+
+def _estilos_del_cliente(cid):
+    """Los ids de los estilos de un proyecto."""
+    asignados = (CLIENTES.listar(raiz_proyectos()) or {}).get("estilos") or {}
+    return [pid for pid, dueno in asignados.items() if dueno == cid]
+
+
+def _cliente_que_existe(cid):
+    cid = str(cid or "").strip()
+    clientes = (CLIENTES.listar(raiz_proyectos()) or {}).get("clientes") or []
+    if not any(c.get("id") == cid for c in clientes):
+        raise ErrorApi(404, "ese proyecto no existe")
+    return cid
+
+
+def _negocio_abierto(peticion, cid):
+    """El proyecto existe y quien pide puede verlo (los de clave, con su pase)."""
+    cid = _cliente_que_existe(cid)
+    if peticion is not None and cid in _cerrados(peticion):
+        raise ErrorApi(403, "este proyecto tiene clave: ábrelo primero")
+    return cid
+
+
+@app.get("/api/clientes/{cid}/negocio")
+def leer_negocio_cliente(cid: str, peticion: Request = None):
+    """La ficha del negocio de un proyecto. -> {negocio: ficha|null, estilos}"""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    cid = _negocio_abierto(peticion, cid)
+    crudo = PASOS_MODULOS.dominios.de_cliente(cid)
+    return {"negocio": PASOS_MODULOS.dominios.publicar(crudo) if crudo else None,
+            "estilos": len(_estilos_del_cliente(cid))}
+
+
+@app.put("/api/clientes/{cid}/negocio")
+def guardar_negocio_cliente(cid: str, cuerpo: dict = Body(default=None),
+                            peticion: Request = None):
+    """Crea o cambia la ficha del negocio de un proyecto: {nombre, reglas?,
+    revisor?: {equipo?, orientacion?}}. Se la pone a todos sus estilos.
+    -> {negocio, estilos: cuántos la llevan}"""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    cid = _negocio_abierto(peticion, cid)
+    try:
+        crudo = PASOS_MODULOS.dominios.guardar_de_cliente(cid, _cuerpo(cuerpo))
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    puestos = sum(1 for pid in _estilos_del_cliente(cid) if _negocio_al_estilo(pid))
+    anotar_global("negocio_guardado", {"cliente": cid, "estilos": puestos})
+    return {"negocio": PASOS_MODULOS.dominios.publicar(crudo), "estilos": puestos}
+
+
+@app.delete("/api/clientes/{cid}/negocio")
+def borrar_negocio_cliente(cid: str, peticion: Request = None):
+    """Quita la ficha del negocio de un proyecto: sus estilos vuelven a
+    automático (general). Los vídeos ya creados no cambian."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    cid = _negocio_abierto(peticion, cid)
+    if not PASOS_MODULOS.dominios.borrar_de_cliente(cid):
+        raise ErrorApi(404, "este proyecto no tiene ficha del negocio")
+    for pid in _estilos_del_cliente(cid):
+        _negocio_al_estilo(pid)
+    anotar_global("negocio_borrado", {"cliente": cid})
+    return {"borrado": cid}
 
 
 @app.put("/api/presets-light/{preset_id}/dominio")
 def guardar_dominio_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
-    """Fija el negocio de un estilo: {dominio: "estadoplay" | "general" | null}.
+    """Fija el negocio de un estilo: {dominio: id de un tipo (de fábrica o del
+    dueño) | null}.
     null (o "") vuelve a la deteccion automatica. No toca ningun video: llega a
     los nuevos al crearlos y a los hechos con «Traer el estilo»."""
     if PASOS_MODULOS is None:
@@ -16334,6 +17076,13 @@ def guardar_dominio_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
         dominio = PASOS_MODULOS.dominios.normalizar(datos.get("dominio"))
     except ValueError as fallo:
         raise ErrorApi(400, str(fallo))
+    # una ficha de cliente, solo la del PROYECTO de este estilo y si sigue viva
+    # (Etapa Foto C): la de otro cliente o una borrada no se eligen
+    if dominio and dominio not in PASOS_MODULOS.dominios.DE_FABRICA:
+        cid = CLIENTES.cliente_de(raiz_proyectos(), estilo_id=preset_id) or ""
+        propia = PASOS_MODULOS.dominios.de_cliente(cid) if cid else None
+        if not propia or propia["id"] != dominio:
+            raise ErrorApi(400, "esa ficha del negocio no es la del proyecto de este estilo")
     with presets.lock_de(presets.FICHERO):
         ficha = _preset_o_400(lambda p: p.leer(preset_id))
         if ficha.get("tipo") != "canal":
@@ -17169,11 +17918,30 @@ def _imagenes_ya_generadas(ctx, planos, rehara=frozenset()):
     imagenes, 7,13 $». El precio era el del VIDEO ENTERO y no el de lo que
     faltaba, asi que retomar parecia costar lo mismo que empezar de cero -- y
     con esa cifra delante lo razonable es no pulsar.
+
+    CON EL GUION VISUAL MANDANDO TAMBIEN SE CUENTA (26-10-2026). Desde
+    guion-visual-2 `_planos_previstos` cuenta las lineas del guion visual
+    (origen «el guion visual aprobado», tambien las de la Parrilla) y aqui solo
+    se miraba el origen del plan cortado: lo hecho salia CERO, y «Montar el
+    video» pedia dibujar las 6 imagenes de un video con las 6 al dia («6
+    imagenes que han quedado viejas»). Redibujar no lo arreglaba --la cuenta
+    volvia a dar cero--, asi que el aviso volvia en cada version. Lo que hay en
+    disco es el mismo hecho venga de donde venga el numero de planos; el
+    `min(hechas, imagenes)` de quien llama cubre un guion visual con menos
+    lineas que el plan cortado.
     """
-    if rehara is None or planos.get("origen") != "el plan de este video":
+    if rehara is None or planos.get("origen") not in ("el plan de este video",
+                                                      "el guion visual aprobado"):
         return 0
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
     escenas = _escenas_que_pagan(plan)
+    if planos.get("origen") == "el guion visual aprobado":
+        # SOLO LOS PLANOS QUE VA A TENER EL GUION VISUAL (S001..SNNN, los ids
+        # son por posicion): un plan cortado antes, mas largo y con un hueco
+        # dentro, no puede tapar con sus PNG de sobra una imagen que p6 si
+        # dibujara (revision independiente del 26-10)
+        validos = {f"S{n:03d}" for n in range(1, int(planos.get("con_imagen") or 0) + 1)}
+        escenas = [e for e in escenas if str(e.get("id") or "") in validos]
     # EN LA CARPETA DE TRABAJO MIENTRAS SE GENERA, Y EN LA VERSION UNA VEZ
     # SELLADA. Mirar solo la de trabajo daba CERO en cuanto el paso terminaba
     # --que es justo cuando hay 216 imagenes hechas-- y el boton volvia a pedir
@@ -20970,8 +21738,10 @@ def parrilla_cuentas_trabajo(tid: str):
 
 @app.get("/api/parrilla/cuentas/{red}/{usuario}")
 def parrilla_cuenta(red: str, usuario: str):
+    """Lo guardado de la cuenta, con sus cifras relativas (`metricas`, rama
+    cuentas-gustan-2) y si se puede completar la duración que falta."""
     red, usuario = _cuenta_pedida(red, usuario)
-    return _por_cuentas(_cuentas().cuenta, raiz_proyectos(), red, usuario)
+    return _por_cuentas(_cuentas().cuenta_con_metricas, raiz_proyectos(), red, usuario)
 
 
 @app.delete("/api/parrilla/cuentas/{red}/{usuario}")
@@ -21010,6 +21780,222 @@ def parrilla_desde_cuenta(cid: str, peticion: Request, cuerpo: dict = Body(defau
         "analisis": datos.get("analisis") or "", "contexto": _contexto_parrilla(cid, d)})
     anotar_global("parrilla_desde_cuenta", {"proyecto": cid, "red": red, "usuario": usuario})
     return trabajo_
+
+
+# ------------------------------- CUENTAS QUE TE GUSTAN 2 (rama cuentas-gustan-2)
+# Pedido del dueño del 01-11-2026: completar la duración de una cuenta,
+# analizar varias juntas (`pasos/cuentas_conjunto.py`), proponer temas para un
+# proyecto y escribir solo los aprobados (`pasos/temas_cuentas.py`). Todo va
+# en `_sistema/parrilla/`, fuera de las firmas de cualquier vídeo (regla 1).
+# Lo de Claude, en un hilo: la pantalla pregunta por el trabajo.
+
+try:
+    import cuentas_conjunto as CONJUNTO  # noqa: E402
+    import temas_cuentas as TEMAS  # noqa: E402
+    ERROR_TEMAS = ""
+except Exception as _fallo_temas:  # noqa: BLE001
+    CONJUNTO = TEMAS = None
+    ERROR_TEMAS = f"{type(_fallo_temas).__name__}: {_fallo_temas}"
+
+
+def _temas_mods():
+    if CONJUNTO is None or TEMAS is None:
+        raise ErrorApi(503, f"«Analizar varias cuentas» no se ha podido cargar: {ERROR_TEMAS}")
+    return CONJUNTO, TEMAS
+
+
+def _por_temas(fn, *args, **kwargs):
+    CJ, T = _temas_mods()
+    try:
+        return fn(*args, **kwargs)
+    except (CJ.ErrorConjunto, T.ErrorTemas) as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+    except CUENTAS.ErrorCuentas as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+    except _parrilla().ErrorParrilla as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+def _videos_creados_de(cid, peticion, maximo=60):
+    """[{id, nombre, texto}] de los vídeos ya creados en ese proyecto (para que
+    una idea repetida se note). El texto es el material del Encargo."""
+    cerrados = _cerrados(peticion)
+    if cid in cerrados:
+        return []
+    asignaciones = CLIENTES._leer(raiz_proyectos())
+    fichas = []
+    for ficha in _listar_proyectos():
+        if ficha.get(CONFIG_TALLER):
+            continue
+        if CLIENTES.cliente_de(raiz_proyectos(), ficha.get(CONFIG_ESTILO_LIGHT) or "", ficha.get("id"),
+                               datos=asignaciones) == cid:
+            fichas.append(ficha)
+    fichas.sort(key=lambda f: str(f.get("creado") or ""), reverse=True)
+    salida = []
+    for ficha in fichas[:maximo]:
+        try:
+            texto = (contexto(ficha["id"]).estado.params("ingesta") or {}).get("texto") or ""
+        except Exception:                                   # noqa: BLE001
+            texto = ""
+        salida.append({"id": ficha["id"], "nombre": ficha.get("nombre") or ficha["id"],
+                       "texto": " ".join(str(texto).split())[:400]})
+    return salida
+
+
+@app.post("/api/parrilla/cuentas/{red}/{usuario}/duraciones", status_code=202)
+def parrilla_cuenta_duraciones(red: str, usuario: str, cuerpo: dict = Body(default=None)):
+    """{pagar} -> el trabajo. Completa con Apify la duración que falta (solo
+    Instagram; se paga: sin `pagar`, acaba pidiendo permiso con el precio)."""
+    red, usuario = _cuenta_pedida(red, usuario)
+    pagar = _cuerpo(cuerpo).get("pagar") is True
+    t = _por_cuentas(_cuentas().lanzar_duraciones, raiz_proyectos(), red, usuario, pagar)
+    anotar_global("cuenta_duraciones", {"red": red, "usuario": usuario, "pagar": pagar})
+    return t
+
+
+@app.post("/api/parrilla/conjuntos/plan")
+def parrilla_conjunto_plan(cuerpo: dict = Body(default=None)):
+    """{cuentas: ["red:usuario"]} -> cuántas cuentas y vídeos, tokens, cupo y aviso_cupo (al 90 % avisa, no frena)."""
+    CJ, _T = _temas_mods()
+    return _por_temas(CJ.plan, raiz_proyectos(), _cuerpo(cuerpo).get("cuentas"))
+
+
+@app.post("/api/parrilla/conjuntos", status_code=202)
+def parrilla_conjunto_lanzar(cuerpo: dict = Body(default=None)):
+    """{cuentas, aunque_cupo?} -> el trabajo: Claude compara las cuentas (con la membresía). Con el cupo al 90 % da 409 hasta que llega aunque_cupo: true."""
+    CJ, _T = _temas_mods()
+    d = _cuerpo(cuerpo)
+    cuentas = d.get("cuentas")
+    t = _por_temas(CJ.lanzar, raiz_proyectos(), cuentas, aunque_cupo=d.get("aunque_cupo") is True)
+    anotar_global("cuentas_conjunto", {"cuentas": len(CJ.entender_lista(cuentas))})
+    return t
+
+
+@app.get("/api/parrilla/conjuntos/trabajos/{tid}")
+def parrilla_conjunto_trabajo(tid: str):
+    CJ, _T = _temas_mods()
+    t = CJ.trabajo(tid)
+    if not t:
+        raise ErrorApi(404, "ese trabajo ya no existe (¿se reinició el servicio?)")
+    return t
+
+
+@app.post("/api/parrilla/conjuntos/ultimo")
+def parrilla_conjunto_ultimo(cuerpo: dict = Body(default=None)):
+    """{cuentas} -> {analisis: el último de EXACTAMENTE esa selección, o null}."""
+    CJ, _T = _temas_mods()
+    return {"analisis": _por_temas(CJ.ultimo, raiz_proyectos(), _cuerpo(cuerpo).get("cuentas"))}
+
+
+@app.get("/api/parrilla/conjuntos/historial")
+def parrilla_conjuntos_historial():
+    """Los análisis de varias cuentas guardados, el más nuevo primero (ficha corta)."""
+    CJ, _T = _temas_mods()
+    return {"analisis": _por_temas(CJ.historial, raiz_proyectos()), "guardados": CJ.GUARDADOS}
+
+
+@app.get("/api/parrilla/conjuntos/{aid}")
+def parrilla_conjunto(aid: str):
+    CJ, _T = _temas_mods()
+    return _por_temas(CJ.analisis, raiz_proyectos(), aid)
+
+
+@app.get("/api/parrilla/conjuntos/{aid}/comparar")
+def parrilla_conjunto_comparar(aid: str, con: str = ""):
+    """?con=<otro análisis> -> qué fórmulas, temas y ganchos aparecen, siguen y
+    desaparecen. Sin `con`, contra el anterior de la misma selección (o el que
+    comparte más cuentas). Gratis: no llama a Claude."""
+    CJ, _T = _temas_mods()
+    return _por_temas(CJ.comparar, raiz_proyectos(), aid, con or None)
+
+
+@app.get("/api/parrilla/proyectos/{cid}/cuentas-propias")
+def parrilla_cuentas_propias(cid: str, peticion: Request):
+    """Las cuentas del proyecto cuyo contenido publicado entra en el cruce «ya lo tienes»."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    return _por_temas(T.cuentas_propias, raiz_proyectos(), cid)
+
+
+@app.put("/api/parrilla/proyectos/{cid}/cuentas-propias")
+def parrilla_guardar_cuentas_propias(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{cuentas: ["red:usuario"]} -> las cuentas propias (solo ya leídas; [] las quita)."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    r = _por_temas(T.guardar_cuentas_propias, raiz_proyectos(), cid, _cuerpo(cuerpo).get("cuentas"))
+    anotar_global("cuentas_propias", {"cid": cid, "cuentas": len(r["cuentas"])})
+    return r
+
+
+@app.get("/api/parrilla/proyectos/{cid}/temas")
+def parrilla_temas(cid: str, peticion: Request):
+    """La propuesta de temas del proyecto (o {propuesta: null})."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    CJ, _T = _temas_mods()
+    return {"propuesta": _por_temas(T.leer, raiz_proyectos(), cid), "limites": T.LIMITES,
+            "max_cuantos": T.MAX_CUANTOS, "por_defecto": T.CUANTOS_DEFECTO, "cupo": CJ.estado_cupo()}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/temas/plan")
+def parrilla_temas_plan(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{analisis, cuantos} -> lo que se mandará a Claude y aviso_cupo (al 90 % avisa, no frena)."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    d = _cuerpo(cuerpo)
+    return _por_temas(T.plan, raiz_proyectos(), cid, d.get("analisis"), d.get("cuantos"),
+                      _videos_creados_de(cid, peticion))
+
+
+@app.post("/api/parrilla/proyectos/{cid}/temas", status_code=202)
+def parrilla_temas_proponer(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{analisis, cuantos, aunque_cupo?} -> el trabajo: Claude propone temas (no escribe guiones). Con el cupo al 90 % da 409 hasta que llega aunque_cupo: true."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    d = _cuerpo(cuerpo)
+    t = _por_temas(T.lanzar_propuesta, raiz_proyectos(), cid, d.get("analisis"), d.get("cuantos"),
+                   _videos_creados_de(cid, peticion), aunque_cupo=d.get("aunque_cupo") is True)
+    anotar_global("parrilla_proponer_temas", {"proyecto": cid, "cuantos": d.get("cuantos")})
+    return t
+
+
+@app.get("/api/parrilla/temas/trabajos/{tid}")
+def parrilla_temas_trabajo(tid: str):
+    _CJ, T = _temas_mods()
+    t = T.trabajo(tid)
+    if not t:
+        raise ErrorApi(404, "ese trabajo ya no existe (¿se reinició el servicio?)")
+    return t
+
+
+@app.put("/api/parrilla/proyectos/{cid}/temas/{tid}")
+def parrilla_tema_cambiar(cid: str, tid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{tema?, gancho?, tipo_video?, espacio?, problema?, estado?, incluir?} -> la propuesta."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    return {"propuesta": _por_temas(T.editar, raiz_proyectos(), cid, tid, _cuerpo(cuerpo))}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/temas/escribir", status_code=202)
+def parrilla_temas_escribir(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{confirmado: true, modo?, nombre?, aunque_cupo?} -> el trabajo de la Parrilla: un guion
+    por tema aprobado. Sin proyecto elegido, o sin confirmar, no se escribe nada."""
+    cid = _proyecto_parrilla(cid, peticion)
+    P = _parrilla()
+    if cid == P.SIN_PROYECTO:
+        raise ErrorApi(409, "elige un proyecto: los guiones van a su Parrilla")
+    d = _cuerpo(cuerpo)
+    if d.get("confirmado") is not True:
+        raise ErrorApi(409, f"confirma que van a la Parrilla de «{_nombres_de_clientes().get(cid, cid)}»")
+    CJ, T = _temas_mods()
+    _por_temas(CJ.comprobar_cupo, d.get("aunque_cupo") is True)   # al 90 %: avisa; sigue si se dijo que sí
+    datos, temas = _por_temas(T.para_escribir, raiz_proyectos(), cid)
+    nombre = str(d.get("nombre") or "").strip() or f"Ideas de cuentas · {ahora()[:10]}"
+    modo = d.get("modo") if d.get("modo") in P.USOS else "adaptar"
+    t = _por_parrilla(P.lanzar, raiz_proyectos(), cid, "temas", {
+        "temas": temas, "modo": modo, "nombre": nombre, "contexto": _contexto_parrilla(cid, d)})
+    anotar_global("parrilla_escribir_temas", {"proyecto": cid, "temas": len(temas), "propuesta": datos.get("id")})
+    return t
 
 
 # ------------------------------------------------------------------------ main

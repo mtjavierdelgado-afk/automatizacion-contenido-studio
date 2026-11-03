@@ -1,4 +1,4 @@
-# Automatización Contenido Studio
+# CrearIA Studio · Automatización de contenido
 
 Convierte **lo que escribas** —unas notas, un artículo pegado, una cronología, o
 tu propio guion— en un vídeo de animación narrada, pasando por ocho fases con

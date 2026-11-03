@@ -32,7 +32,7 @@ un informe que grita no lo lee nadie -- que es exactamente la leccion que dejo
 escrita el de JavaScript. Lo que este caza es lo otro: el nombre que NO existe
 en ninguna parte, que falla siempre.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\herramientas\\indefinidos_py.py
+    python herramientas/indefinidos_py.py
 """
 import ast
 import builtins

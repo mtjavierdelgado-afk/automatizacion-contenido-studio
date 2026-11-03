@@ -5,7 +5,7 @@ Crea un proyecto temporal, simula la ejecucion de todos los pasos, cambia el
 texto de una sola escena y comprueba que la obsolescencia cae solo donde debe,
 revierte versiones y comprueba que la propagacion sigue siendo correcta.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\nucleo\\prueba_nucleo.py
+    python nucleo/prueba_nucleo.py
 """
 import io
 import os

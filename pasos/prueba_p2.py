@@ -5,7 +5,7 @@ El paso no llama a ningun modelo, asi que la prueba es completa y rapida:
 normalizacion de idiomas, presupuesto de palabras, validaciones, avisos contra
 el material de la ingesta e integracion con el nucleo.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_p2.py
+    python pasos/prueba_p2.py
 """
 import json
 import os

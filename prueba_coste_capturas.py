@@ -1,7 +1,7 @@
 """
 Prueba del medidor de coste y de las capturas anotables.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\prueba_coste_capturas.py
+    python prueba_coste_capturas.py
 
 Que se prueba de verdad, sin gastar un centimo:
 

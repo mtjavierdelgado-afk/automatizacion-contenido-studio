@@ -11,7 +11,7 @@ y rapida. Lo que se comprueba es justo lo que se puede romper en silencio:
   - que los fallos se anoten (si no, el recomendador nunca sabe que algo vence)
   - que una integracion no pueda prometer un clip que la pool no tiene
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_ajustes.py
+    python pasos/prueba_ajustes.py
 """
 import json
 import io

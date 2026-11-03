@@ -230,7 +230,7 @@ def sistema():
     raras. Lo que va por stdin (el mensaje) si lleva acentos.
     """
     return (
-        "Eres el asistente de Automatizacion Contenido Studio, un producto que convierte texto en "
+        "Eres el asistente de CrearIA Studio (Automatizacion de contenido), un producto que convierte texto en "
         "un video narrado en ocho pasos (ingesta, brief, guion, voz, revision de "
         "audio, assets, callouts, render). Hablas con la persona que lo esta usando "
         "desde la propia pantalla del Estudio, y tu trabajo es resolver dudas y "

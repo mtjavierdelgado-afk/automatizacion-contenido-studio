@@ -387,9 +387,12 @@ def _reglas_de(reglas, estilo):
             from . import p6_assets                         # noqa: PLC0415
         except ImportError:
             import p6_assets                                # noqa: PLC0415
+        # y las del tipo de negocio, en su hueco (Etapa Foto C; ver
+        # `dominios.reglas_de_foto`)
         return reglas.bloque_prompt(
             "prompt_imagen", modo="foto",
-            contexto=p6_assets.contexto_de_reglas(estilo))
+            contexto=p6_assets.contexto_de_reglas(estilo),
+            extra=p6_assets.dominios.reglas_de_foto(estilo))
     return reglas.bloque_prompt("prompt_imagen")
 
 

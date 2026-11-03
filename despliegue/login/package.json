@@ -2,7 +2,7 @@
   "name": "studio-videos-ia",
   "version": "0.1.0",
   "private": true,
-  "description": "Studio Videos IA - autenticacion y panel inicial",
+  "description": "CrearIA Studio - el acceso (login)",
   "main": "server.js",
   "engines": { "node": ">=20" },
   "scripts": {

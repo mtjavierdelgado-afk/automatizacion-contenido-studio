@@ -71,24 +71,24 @@ def huella(texto):
     return hashlib.sha1(_limpio(texto).encode("utf-8")).hexdigest()[:16]
 
 
-def ruta(raiz):
-    return os.path.join(raiz, FICHERO)
+def ruta(raiz, fichero=FICHERO):
+    return os.path.join(raiz, fichero)
 
 
-def _leer(raiz):
+def _leer(raiz, fichero=FICHERO):
     try:
-        with open(ruta(raiz), encoding="utf-8") as fh:
+        with open(ruta(raiz, fichero), encoding="utf-8") as fh:
             datos = json.load(fh)
     except (OSError, ValueError):
         return {}
     return datos if isinstance(datos, dict) else {}
 
 
-def de(raiz, textos):
+def de(raiz, textos, fichero=FICHERO):
     """{texto en inglés: español guardado, o "" si no hay}. Solo casa si la
     traducción se hizo para ESE texto (se comprueba también el inglés guardado,
     no solo la huella)."""
-    guardadas = _leer(raiz)
+    guardadas = _leer(raiz, fichero)
     salida = {}
     for texto in textos or []:
         limpio = _limpio(texto)
@@ -100,12 +100,12 @@ def de(raiz, textos):
     return salida
 
 
-def faltan(raiz, textos):
+def faltan(raiz, textos, fichero=FICHERO):
     """Los textos en inglés que todavía no tienen traducción guardada."""
-    return [t for t, es in de(raiz, textos).items() if not es]
+    return [t for t, es in de(raiz, textos, fichero).items() if not es]
 
 
-def guardar(raiz, pares):
+def guardar(raiz, pares, fichero=FICHERO):
     """Apunta {inglés: español}. Escribe en un temporal y lo mueve: un corte a
     medias no deja un fichero roto (y si lo dejara, `_leer` lo da por vacío y
     se vuelve a traducir; no se pierde nada que cueste dinero)."""
@@ -114,7 +114,7 @@ def guardar(raiz, pares):
     if not pares:
         return 0
     with _LOCK:
-        datos = _leer(raiz)
+        datos = _leer(raiz, fichero)
         for en, es in pares.items():
             datos[huella(en)] = {"en": en, "es": es}
         os.makedirs(raiz, exist_ok=True)
@@ -122,7 +122,7 @@ def guardar(raiz, pares):
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(datos, fh, ensure_ascii=False, indent=2)
-            os.replace(temporal, ruta(raiz))
+            os.replace(temporal, ruta(raiz, fichero))
         except BaseException:
             try:
                 os.remove(temporal)
@@ -197,6 +197,71 @@ def al_espanol(textos, cwd=None):
             continue
         for i, texto in trozo:
             es = _limpio(traducciones.get(str(i)))
+            if es:
+                salida[texto] = es
+    return salida
+
+
+# ------------------------------------------------- lo que se pidió dibujar
+
+#: Las descripciones de cada plano van aparte de las traducciones: no son una
+#: traducción literal sino un resumen, y el mismo inglés en los dos ficheros
+#: daría dos textos distintos para la misma huella.
+FICHERO_DESCRIPCIONES = "descripciones.json"
+#: Un prompt de plano trae el sitio, la acción, el reparto, la frase de la voz
+#: y el encuadre: más largo que un cambio de estado. Lo que pase de aquí no
+#: cambia lo que se ve.
+MAX_PROMPT = 2500
+#: Lo que se pide de una vez: un vídeo de cuatro minutos son ~86 planos, o
+#: sea tres llamadas.
+POR_LLAMADA_PLANOS = 30
+
+SISTEMA_DESCRIBIR = ("Resumes en español lo que un prompt en inglés le pide dibujar a "
+                     "un generador de imágenes. Contestas únicamente con el JSON pedido.")
+
+INSTRUCCION_DESCRIBIR = """Cada texto de abajo es el prompt en INGLÉS con el que se dibuja UNA imagen
+de un vídeo. Lo va a leer una persona que no lee inglés y que quiere saber,
+de un vistazo, QUÉ se pidió dibujar en esa imagen, para ver si cuadra con sus
+vecinas.
+
+Para cada uno, escribe en ESPAÑOL neutro una o dos frases cortas (máximo
+40 palabras) que digan:
+- dónde pasa (el sitio y cómo es, si lo dice),
+- quién sale y qué hace, y los objetos o cambios importantes,
+- el encuadre, si lo dice (plano general, primer plano, detalle…).
+
+No cuentes el estilo de dibujo, las reglas técnicas ni frases del tipo
+«muestra el momento que describe la narración». Si el prompt cita la frase
+de la voz y no dice nada más concreto, escribe «Una escena que muestre: »
+seguido de esa frase en español. No inventes nada que el prompt no diga.
+
+<describir_en_espanol>
+{textos}
+</describir_en_espanol>
+
+Devuelve SOLO este JSON, con una entrada por cada id:
+{{"descripciones": {{"<id>": "<la descripcion>"}}}}"""
+
+
+def describir(prompts, cwd=None):
+    """[prompts en inglés] -> {prompt: descripción corta en español}. Como
+    `al_espanol`, solo vuelven los que el modelo describió."""
+    unicos = []
+    for texto in prompts or []:
+        limpio = _limpio(texto)
+        if limpio and limpio not in unicos:
+            unicos.append(limpio)
+    salida = {}
+    for desde in range(0, len(unicos), POR_LLAMADA_PLANOS):
+        trozo = list(enumerate(unicos[desde:desde + POR_LLAMADA_PLANOS]))
+        lote = "\n".join(f'<t id="{i}">{t[:MAX_PROMPT]}</t>' for i, t in trozo)
+        datos = _pedir_json(INSTRUCCION_DESCRIBIR.format(textos=lote), SISTEMA_DESCRIBIR,
+                            "la descripcion de los planos", cwd)
+        descripciones = datos.get("descripciones")
+        if not isinstance(descripciones, dict):
+            continue
+        for i, texto in trozo:
+            es = _limpio(descripciones.get(str(i)))
             if es:
                 salida[texto] = es
     return salida

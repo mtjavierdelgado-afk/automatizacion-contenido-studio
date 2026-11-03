@@ -165,12 +165,52 @@ def prueba_al_ingles():
        "un inglés más largo que el tope de un cambio (400) se rechaza, no se recorta")
 
 
+def prueba_describir():
+    seccion("5. LO QUE SE PIDIÓ DIBUJAR (rama descripcion-planos): OTRO FICHERO, POR LOTES")
+    raiz = tempfile.mkdtemp(dir=_TEMPORAL)
+    prompt = ("A small bathroom with grey tiles, wide shot from the doorway. This shot "
+              "accompanies the narration line: \"Este baño era el más feo\".")
+    T.guardar(raiz, {prompt: "una traducción literal"})
+    igual(T.de(raiz, [prompt], T.FICHERO_DESCRIPCIONES), {prompt: ""},
+          "las descripciones no leen el fichero de las traducciones")
+    igual(T.guardar(raiz, {prompt: "Un baño pequeño de baldosas grises, visto desde la puerta."},
+                    T.FICHERO_DESCRIPCIONES), 1, "se guardan en su propio fichero")
+    ok(os.path.exists(os.path.join(raiz, "descripciones.json")), "que es descripciones.json")
+    igual(T.de(raiz, [prompt])[prompt], "una traducción literal",
+          "y la traducción de antes sigue en el suyo, sin pisarse")
+    igual(T.faltan(raiz, [prompt, prompt + " Close-up."], T.FICHERO_DESCRIPCIONES),
+          [prompt + " Close-up."], "un prompt que cambia vuelve a faltar")
+    salida, doble = _con_doble(
+        ['{"descripciones": {"0": "Un baño pequeño visto desde la puerta.", "1": ""}}'],
+        lambda: T.describir([prompt, "otro prompt", prompt, ""]))
+    igual(salida, {prompt: "Un baño pequeño visto desde la puerta."},
+          "vuelve lo descrito; lo vacío se queda fuera")
+    instruccion, kwargs = doble.vistas[0]
+    ok("<describir_en_espanol>" in instruccion and instruccion.count("grey tiles") == 1,
+       "una sola llamada con cada prompt una vez")
+    igual((kwargs.get("modelo"), kwargs.get("esfuerzo")), (T.MODELO, T.ESFUERZO),
+          "con el modelo ligero")
+    muchos = [f"prompt numero {i}" for i in range(T.POR_LLAMADA_PLANOS + 5)]
+    respuestas = [json.dumps({"descripciones": {str(i): f"d{i}" for i in range(T.POR_LLAMADA_PLANOS)}}),
+                  json.dumps({"descripciones": {str(i): f"e{i}" for i in range(5)}})]
+    salida, doble = _con_doble(respuestas, lambda: T.describir(muchos))
+    igual((len(doble.vistas), len(salida)), (2, T.POR_LLAMADA_PLANOS + 5),
+          f"{T.POR_LLAMADA_PLANOS + 5} planos van en dos llamadas y vuelven todos")
+    salida, doble = _con_doble(["roto", "roto"], lambda: T.describir([prompt]))
+    ok(isinstance(salida, T.ErrorTraduccion), "roto dos veces: ErrorTraduccion")
+    largo = "x" * (T.MAX_PROMPT + 500)
+    _s, doble = _con_doble(['{"descripciones": {}}'], lambda: T.describir([largo]))
+    ok(("x" * T.MAX_PROMPT) in doble.vistas[0][0] and ("x" * (T.MAX_PROMPT + 1)) not in doble.vistas[0][0],
+       "un prompt larguísimo se manda recortado")
+
+
 def main():
     print("PRUEBA DE LAS TRADUCCIONES")
     prueba_guardar_y_leer()
     prueba_fichero_roto()
     prueba_al_espanol()
     prueba_al_ingles()
+    prueba_describir()
     shutil.rmtree(_TEMPORAL, ignore_errors=True)
     print("\n" + "=" * 70)
     if _fallos:

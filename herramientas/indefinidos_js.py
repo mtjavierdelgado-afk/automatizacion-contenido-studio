@@ -33,7 +33,7 @@ sitio donde se esconde el fallo de verdad.
 Lo usa `prueba_api.py`, asi que un nombre nuevo sin declarar pone una suite en
 rojo en vez de esperar a que alguien abra esa pantalla.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\herramientas\\indefinidos_js.py
+    python herramientas/indefinidos_js.py
 """
 import io
 import os

@@ -8,7 +8,179 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
+## V5.1 · octubre de 2026
+
+**Cuentas que te gustan: temas con sus vistas, ganchos, comparar y tus cuentas (2 de noviembre)**
+- **Todos los temas, agrupados**: el mismo tema en varias cuentas sale una sola
+  vez, con **qué cuentas lo hacen** y la **suma de vistas** de sus vídeos (la
+  suma la hace el Studio, no Claude).
+- **Ganchos que mejor funcionan**: cómo empiezan los vídeos que más funcionan
+  (pregunta, ❌/✅, antes y después…), del mejor al peor, con 2 o 3 ejemplos
+  enlazados y la primera frase de cada uno.
+- **Análisis guardados y comparación**: debajo de cada análisis, la lista de
+  los guardados para **abrir** uno o **compararlo**. «Comparar con el anterior»
+  dice qué fórmulas, temas y ganchos **aparecen**, **siguen** y
+  **desaparecen**. Es gratis: no llama a Claude.
+- **Tus cuentas**: en «Proponer temas» marcas qué cuentas leídas son tuyas, y
+  lo que ya publicaste en ellas también sale como «ya lo tienes» (parecido o
+  repetido).
+
+**El cupo de Claude al 90 % avisa, no frena (2 de noviembre)**
+- En Cuentas que te gustan, «Analizar seleccionadas», «Proponer temas» y
+  «Escribir guiones aprobados» ya no se paran con el cupo al 90 %: sale una
+  advertencia y puedes **seguir igualmente**. Si Claude se queda sin cupo a
+  medias, el aviso lo dice y no se pierde nada: lo repites cuando se renueve.
+
+**Cuentas que te gustan: varias juntas, temas para aprobar y cifras justas (1 de noviembre)**
+- **Cada cuenta, con cifras relativas a ella misma**: «me gusta» y comentarios
+  por cada 100 vistas, «×1,6 su mediana» y las vistas por duración, con
+  cuántos vídeos tienen ese dato. Los vídeos de **colaboración** o con pinta de
+  **promoción** (muchas vistas y casi ningún «me gusta») salen marcados como
+  dudosos y no cuentan. A Claude le llegan los 50 vídeos, no 25.
+- **La duración de Instagram** se mide sin bajar el vídeo; si aun así falta,
+  «Completar con Apify» la rellena (pregunta antes, con el precio y el tope).
+- **Varias cuentas juntas**: marca de 2 a 10 en «Ya leídas» y pulsa «Analizar
+  seleccionadas». Antes te dice cuántas cuentas, vídeos y cupo de Claude se van
+  a usar; con el cupo al 90 % o más te avisa y puedes seguir igualmente.
+- **Proponer temas → aprobar → escribir**: Claude propone ideas (sin guiones),
+  tú apruebas, editas o descartas, y solo los aprobados se escriben en la
+  Parrilla del proyecto que confirmes. Sin duplicados, sin repetir lo que ya
+  tienes, como mucho 3 por cuenta y 2 por fórmula, y cada guion recuerda de qué
+  cuentas y vídeos salió.
+
+**Arreglo: «Deshacer» una imagen insertada le dejaba su dibujo a la de antes (28 de octubre)**
+- Si la imagen de antes (S004) se había dibujado para una frase algo distinta
+  (porque la voz se regrabó después), al deshacer la insertada (S004B) el Studio
+  le ponía a S004 el dibujo de S004B. Ya no: el dibujo de una imagen insertada
+  solo puede ser de una imagen insertada, y S004 recupera el suyo.
+
+**Quitar e insertar imágenes: los dos detalles que quedaban (28 de octubre)**
+- **Un subtítulo corregido a mano ya no repite ni pierde palabras** cuando partes
+  esa imagen (insertar) o le pasas la voz de otra (quitar): si lo escribiste
+  para la frase de antes, se deja de usar y sale el subtítulo de la voz; si lo
+  escribiste para la frase de ahora, se sigue usando.
+  Desde ahora, cada subtítulo que corriges recuerda la frase para la que lo
+  escribiste: si esa frase cambia más adelante, vuelve el de la voz en vez de
+  enseñar un texto que ya no es el que se oye.
+- **«Dirigir» funciona en una imagen insertada** (S004B): lo que escribas ahí
+  cambia su dibujo al rehacerla, como en cualquier otra imagen.
+
+**El Studio pasa a la versión 5.1 (28 de octubre)**
+- La versión se ve en el pie del Studio, en la página de acceso y en
+  Configuración → Novedades. Lo de debajo de este apartado es lo que trajo la 3.1.
+- Se han quitado del código los restos del proyecto en el que se basó al
+  principio: nombres, dominio, servidor y carpetas de su autor en ejemplos,
+  pruebas, comentarios y documentos. No cambia nada de lo que hace el Studio.
+
+**La ficha del negocio de cada cliente (28 de octubre, Etapa Foto C)**
+- **El Studio ya no trae ningún negocio de fábrica**, ni EstadoPlay ni ningún
+  otro: sirve igual para cualquier cliente. Sin ficha, todo es «general»: las
+  fotos no llevan reglas de ningún negocio y se reparten los encuadres
+  generales de foto. Lo que antes se metía solo en los vídeos de consolas (los
+  encuadres de estaciones y trípodes, las reglas de mandos y equipo) ya no está.
+- **Crear → tu proyecto → «⚙ Ajustes del proyecto» → «Ficha del negocio».** Cada proyecto (cliente) tiene
+  la suya: qué hace el negocio, sus **reglas de foto** (con «Solo si el plano
+  habla de…» y «Afinar con Claude», como las del estilo) y lo que vigila el
+  **revisor** del equipo o producto y de las miradas. Se guarda fuera del
+  código: `asvs actualizar` no la toca. «Copiar la de otro proyecto» la trae de
+  otro cliente parecido.
+- **Todos los estilos del proyecto la usan solos**, y en la pestaña «Reglas» de
+  cada estilo se ve, sin editarla, encima de las reglas del estilo, con un botón
+  para ir a cambiarla. Llega a los vídeos nuevos al crearlos y a los ya hechos
+  con «Traer el estilo».
+- **La recoge al momento**: al crear el estilo, al rehacerlo (también al
+  pasarlo a foto o al dibujar sus láminas), al moverlo de proyecto y al
+  guardarlo como estilo desde un vídeo. Si el proyecto no tiene ficha, no pasa
+  nada: el estilo usa lo general (fotos sin reglas de ningún negocio), igual
+  que antes; en cuanto la llenes, sus estilos la reciben solos. Los estilos de
+  dibujo no la llevan nunca.
+- Ojo: cambiar las reglas de la ficha de un proyecto con vídeos de foto cambia
+  el prompt de sus imágenes; quedan para rehacer, y rehacerlas se paga.
+
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
+
+**Dos ajustes finos del gasto (26 de octubre)**
+- **Imágenes sin detalle de OpenAI**: cuando OpenAI no dice lo que cobró por una
+  imagen, el Studio la calcula con la tabla oficial de gpt-image-2. En calidad
+  baja, apaisada o vertical, son 0,005 $ (antes apuntaba 0,006 $, el precio de
+  la cuadrada). Lo normal es que OpenAI sí lo diga, y entonces manda su cifra.
+- **La voz, sin contar las pausas como texto**: cada pausa (`<break …/>`)
+  cuenta como UN carácter, como cobra Cartesia. Antes contaba como 23. El gasto
+  de voz baja unos céntimos por vídeo. Las demás marcas se siguen contando
+  enteras, porque Cartesia no dice cómo las cobra y es mejor pasarse que quedarse corto.
+- La tabla nueva llega al servidor sola con `asvs actualizar` (si no editaste
+  las tarifas a mano).
+
+**El nombre nuevo, también en la página de acceso (26 de octubre)**
+- La página donde se pone la contraseña dice **CrearIA Studio · Automatización
+  de contenido**, con el logo de la C y su icono en la pestaña, y el pie con
+  «© 2026 Agencia Redes Botánica · v3.1». Antes seguía con el nombre antiguo y
+  «V2.0».
+- El asistente se presenta con el nombre nuevo, y también el letrero de
+  `asvs estado` y del instalador.
+
+**Lo que se pidió dibujar en cada imagen, en español (26 de octubre)**
+- En **Imágenes**, debajo de cada imagen sale **«Lo que se pidió dibujar»**: una
+  o dos frases en español con lo que se le pidió al dibujante (el sitio, quién
+  sale y qué hace, el encuadre). Sirve para ver de un vistazo por qué una imagen
+  no cuadra con la de al lado.
+- Lo escribe Claude solo al abrir la pantalla, la primera vez y solo para las
+  imágenes que no lo tienen (unas tres llamadas para un vídeo de cuatro
+  minutos, con tu membresía). **No dibuja nada ni cuesta dinero**, y no deja
+  ninguna imagen por rehacer.
+- **«Ver el original en inglés»** despliega el texto que de verdad se manda a
+  dibujar, que sigue en inglés porque el dibujante lo entiende mejor.
+- Si una imagen está marcada como vieja, la frase es lo que se pide ahora, no
+  con lo que se dibujó.
+
+**Claude en el coste de cada vídeo, tokens sin inflar y tarifas al día (26 de octubre)**
+- **«Coste del vídeo» enseña lo de Claude de ese vídeo**: cuántas llamadas, los
+  tokens y lo que costaría por API, y en «Claude en este vídeo, por tarea» en qué
+  se gastaron (guion, ortografía, revisor…). Con la membresía no se cobra aparte.
+- **Los tokens de Claude ya no salen inflados**: se separan los **nuevos**
+  (lo que de verdad pesa) de los **leídos de caché**, que cuestan ~10 %. Antes una
+  llamada pequeña aparecía con 30 000–40 000 tokens. Igual en el medidor de
+  Configuración.
+- **Las tarifas se ponen al día solas** con `asvs actualizar`: si OpenAI o
+  Cartesia cambian sus precios, el servidor se entera. Si las cambiaste a mano,
+  no se tocan y te lo dice.
+
+**Arreglo: «Montar el vídeo» pedía dibujar imágenes que ya estaban (26 de octubre)**
+- En los vídeos con **guion visual** (aprobado, o con las líneas que trae la
+  Parrilla), «Montar el vídeo» avisaba «hay que dibujar antes N imágenes que han
+  quedado viejas» y ponía su precio, aunque todas estuvieran dibujadas y al día.
+  Era un fallo de la cuenta: no contaba lo ya dibujado. Rehacer las imágenes no
+  lo quitaba, y por eso el aviso volvía en cada versión.
+- Ahora cuenta lo que ya está dibujado: con las imágenes al día, montar dice
+  «gratis», y si falta alguna pide solo esa.
+**Insertar una imagen nueva dentro de otra (26 de octubre)**
+- En **Imágenes**, «Ajustar esta imagen» → **«Insertar una imagen aquí…»**:
+  pulsas la palabra de la frase donde empieza la imagen nueva y escribes en
+  español qué quieres que se vea. Claude lo pasa al inglés para el dibujante.
+- La imagen de antes **conserva su dibujo** y se queda con lo que se dice
+  antes de esa palabra; la nueva, con el mismo sitio y estilo, se queda con el
+  resto. Se llama como la de antes con una letra (**S004B**): los números de
+  las demás y tus notas no se mueven.
+- **Se paga una imagen** (unos 0,05 $ en calidad baja, 0,08 $ en media): te
+  pregunta antes con el precio. Después hay que volver a montar el vídeo
+  (gratis).
+- **«Deshacer · quitar esta imagen nueva»** es gratis: la de antes recupera
+  toda su voz con su imagen de siempre.
+- No se puede insertar en una cartela, en la continuación de otra imagen, en
+  una imagen insertada ni en una que ya lleva la voz de una quitada.
+
+**Quitar una imagen o igualarla con la de al lado (26 de octubre)**
+- **«Quitar esta imagen»** (en cada diapositiva de Imágenes, «Ajustar esta
+  imagen»): lo que se oye en ella pasa a la imagen de antes o a la de después,
+  la que tú elijas. Esa imagen se alarga y conserva su dibujo: no se paga nada.
+  Los números no cambian (si quitas S002, el vídeo va de S001 a S003). Después
+  hay que volver a montar el vídeo, que también es gratis.
+- **«Deshacer»**: la imagen que se lleva la voz lo dice («Lleva también la voz
+  de S002») y la devuelve con su misma imagen, sin pagar otra.
+- **«Igualar con la anterior / la siguiente»**: te deja escrita la nota para
+  rehacer esa imagen con la de al lado como referencia (mismo sitio, acabados y
+  luz). Se paga solo cuando la rehagas, como cualquier nota.
+- No se pueden quitar las cartelas ni pasar la voz a una cartela.
 
 **Tus notas de mejoras (24 de octubre)**
 - **El asistente habla en español de Latinoamérica**: tutea, nada de
@@ -26,6 +198,10 @@ vídeos, estilos, claves y contraseña no se tocan.
   Antes la imagen base y los estados se sumaban a «Personajes».
 - **El corrector ya no se rompe con comillas en el guion** («comenta "BAÑO"»):
   esa era la «respuesta rota» que no se arreglaba ni con «Revisar otra vez».
+- **Y tampoco cuando Claude se corrige a sí mismo** (26 de octubre): a veces
+  contestaba, escribía «espera, ese texto ya estaba bien» y mandaba otra
+  respuesta detrás. Ahora vale la última. Era la «respuesta rota» de un guion
+  sin comillas.
 - El botón «Cerrar» de un error ya no tapa el final del mensaje.
 
 **El medidor de Claude: cuánto te queda de la membresía (25 de octubre)**
@@ -131,7 +307,6 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   tu línea. Tampoco sale una composición «abstracta»: la línea dice lo que se ve.
 - **El precio cuenta una imagen por línea** del guion visual (antes podía
   prometer otra cifra: «8 imágenes» y salían 6).
-
 **El negocio de cada estilo (21 de octubre)**
 - **Lo de EstadoPlay ya no está escrito a mano en el Studio.** Los servicios
   (consolas, simuladores, realidad virtual, karaoke) y cómo se reconocen, las
@@ -145,8 +320,9 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 - **Lo único que cambia sin pedirlo**: en un vídeo que no es de consolas (un
   baño, unas plantas), el revisor de imágenes ya no busca televisores, mandos
   ni trípodes; mira los objetos y el equipo de ESE vídeo.
-- Un estilo puede fijar su dominio (`PUT /api/presets-light/{id}/dominio`); la
-  pantalla para elegirlo llegará con la Etapa Foto C.
+- (Esto se quedó atrás con la Etapa Foto C, arriba: EstadoPlay ya no viene de
+  fábrica y cada cliente lleva su ficha del negocio en su proyecto.)
+
 **Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.

@@ -459,9 +459,12 @@ def _dia(t):
 
 
 def _sumar(caja, r):
+    """`tokens` son los NUEVOS (entrada + salida + caché creada) y `cache` la
+    leída, que cuesta ~10 %: sumadas, una llamada pequeña parecía de 40 mil."""
     caja["llamadas"] += 1
     caja["tokens"] += (_numero(r.get("entrada")) + _numero(r.get("salida"))
-                       + _numero(r.get("cache_creada")) + _numero(r.get("cache_leida")))
+                       + _numero(r.get("cache_creada")))
+    caja["cache"] += _numero(r.get("cache_leida"))
     caja["salida"] += _numero(r.get("salida"))
     if isinstance(r.get("usd"), (int, float)):
         caja["usd"] = round(caja["usd"] + float(r["usd"]), 4)
@@ -477,7 +480,7 @@ def tarea_de(para):
 
 
 def _caja(**extra):
-    return dict({"llamadas": 0, "tokens": 0, "salida": 0, "usd": 0.0}, **extra)
+    return dict({"llamadas": 0, "tokens": 0, "cache": 0, "salida": 0, "usd": 0.0}, **extra)
 
 
 def resumen(ahora=None, dias=DIAS_RESUMEN):
@@ -515,6 +518,28 @@ def resumen(ahora=None, dias=DIAS_RESUMEN):
             "por_dia": sorted(por_dia.values(), key=lambda c: c["fecha"], reverse=True),
             "por_tarea": orden(por_tarea)[:12], "por_video": orden(por_video)[:12],
             "por_cuenta": orden(por_cuenta), "agotados": agotados[-5:], "dias": dias}
+
+
+def del_video(pid):
+    """Lo de Claude de UN vídeo, de todo el registro (35 días como mucho):
+    {llamadas, tokens, cache, usd, por_tarea, desde}. None si no hay nada."""
+    pid = str(pid or "")
+    if not pid:
+        return None
+    total, por_tarea, desde = _caja(), {}, None
+    for r in leer_registro():
+        if r.get("tipo") != "llamada" or r.get("proyecto") != pid:
+            continue
+        _sumar(total, r)
+        tarea = tarea_de(r.get("para"))
+        _sumar(por_tarea.setdefault(tarea, _caja(tarea=tarea)), r)
+        t = float(r.get("t") or 0)
+        desde = t if desde is None else min(desde, t)
+    if not total["llamadas"]:
+        return None
+    total["por_tarea"] = sorted(por_tarea.values(), key=lambda c: (-c["usd"], -c["tokens"]))[:10]
+    total["desde"] = desde
+    return total
 
 
 def avisos(cupos, ahora=None):

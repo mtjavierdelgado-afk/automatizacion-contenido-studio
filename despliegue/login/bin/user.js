@@ -196,7 +196,7 @@ async function main() {
 
     default:
       console.log(`
-Gestion de cuentas de Studio Videos IA
+Gestion de cuentas de CrearIA Studio
 
   node bin/user.js poner <cuenta> [--password <pw> | --password-stdin]
   node bin/user.js create <cuenta> [--password <pw> | --password-stdin] [--name "Nombre"] [--email <mail>] [--role admin|user]

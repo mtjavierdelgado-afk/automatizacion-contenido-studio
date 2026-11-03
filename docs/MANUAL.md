@@ -427,6 +427,27 @@ cuánto tardarán. Se dibujan **una detrás de otra** en el servidor: puedes
 cerrar o recargar la página y sigue. Si escribes **varias notas para la misma
 imagen**, se juntan y se paga **una**.
 
+**Lo que se pidió dibujar**: debajo de la imagen, una o dos frases en español
+con lo que se le pidió al dibujante (el sitio, quién sale, qué hace, el
+encuadre). Las escribe Claude solo al abrir Imágenes, sin coste ni redibujar
+nada; **Ver el original en inglés** enseña el texto que de verdad se manda. En
+una imagen marcada como vieja, la frase es lo que se pide ahora.
+
+**Ajustar esta imagen** (cuando dos imágenes seguidas no casan):
+**Igualar con la anterior / la siguiente** te escribe la nota para rehacerla
+con la de al lado como referencia (se paga al rehacerla). **Quitar esta
+imagen…** pasa lo que se oye en ella a la de antes o a la de después, que se
+alarga y conserva su dibujo: gratis, sin cambiar los números de las demás.
+Después hay que **volver a montar** el vídeo (gratis). La imagen que se lleva la
+voz lo dice («Lleva también la voz de S002») con su botón **Deshacer**, que la
+devuelve con su misma imagen. Las cartelas no se quitan ni reciben voz.
+**Insertar una imagen aquí…** hace lo contrario: pulsas la palabra donde
+empieza la imagen nueva y escribes qué quieres que se vea. La de antes conserva
+su dibujo y se queda con lo de antes; la nueva (**S004B**, sin cambiar los
+números de las demás) se dibuja sola: **se paga una imagen**, y te pregunta con
+el precio. Su diapositiva dice «Imagen insertada en S004» con **Deshacer**, que
+es gratis.
+
 **Retocar o dibujar desde cero.** «Rehacer esta imagen» **retoca** la de ahora:
 es lo mejor para cambios pequeños («que lleve gafas», «más luz»). Para un
 cambio grande usa **Desde cero**. Si una ya hecha salió casi igual, pulsa
@@ -881,6 +902,46 @@ YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
   **Configuración → Analizar cuentas** (son de todo el Studio). Aquí sale su
   estado («⚠ Falta la clave de YouTube», «✓ Apify conectado», lo gastado) y
   **Configurar ›**, que te lleva allí.
+- **Las cifras de cada cuenta, relativas a ella**: su mediana de vistas, «me
+  gusta» y comentarios **por cada 100 vistas**, y **vistas por duración**
+  (menos de 15 s, 15–30 s…) con cuántos vídeos tienen ese dato. «×1,6» quiere
+  decir 1,6 veces las vistas normales de ESA cuenta. Los vídeos **dudosos**
+  (colaboración, o muchas vistas con muy pocos «me gusta»: posible promoción)
+  se ven, pero no cuentan como referencia. Si a Instagram le falta la duración,
+  **«Completar con Apify»** la rellena (pregunta antes, con el precio).
+
+#### Varias cuentas juntas y temas para tu proyecto
+
+1. Marca las cuentas en **Ya leídas** (o **Seleccionar todas**; de 2 a 10).
+2. **Analizar seleccionadas**: antes te dice cuántas cuentas, vídeos y cupo de
+   Claude se van a usar (con el cupo al 90 % o más te avisa y puedes **seguir
+   igualmente**; si Claude se queda sin cupo a medias, no se pierde nada). Sale qué fórmula se
+   repite en varias cuentas, cuál funciona solo en una, los temas saturados y
+   los libres, cada cosa con sus vídeos de prueba enlazados. Además, **todos
+   los temas agrupados** (el mismo tema en varias cuentas es uno solo, con
+   qué cuentas lo hacen y la suma de vistas de sus vídeos) y los **ganchos que
+   mejor funcionan**, con ejemplos.
+   Debajo, **Análisis guardados y comparación**: abre uno anterior o pulsa
+   **Comparar con el anterior** (gratis, sin Claude) para ver qué aparece, qué
+   sigue y qué desaparece; sirve para comparar el análisis de este mes con el
+   del mes siguiente.
+3. **Proponer temas** (eliges cuántos): solo ideas, sin guiones. Cada tema trae
+   gancho, tipo de vídeo, espacio, problema, sus vídeos de referencia, por qué
+   y la duración sugerida (solo con 8 vídeos o más con duración). Las ideas
+   repetidas se unen; lo que ya está en tu Parrilla, en tus vídeos o en lo que
+   publicaste en **Tus cuentas** (las marcas ahí; antes léelas como cualquier
+   otra cuenta) sale como
+   **parecido** o **repetido** (los repetidos no entran salvo **Incluir
+   igualmente**); como mucho 3 por cuenta y 2 por fórmula, y cada uno en un
+   espacio distinto.
+4. **Aprueba, edita o descarta** cada tema.
+5. **Escribir guiones aprobados**: confirma el proyecto y solo esos se
+   escriben, en su Parrilla, con su origen (cuentas, vídeos, fórmula y fecha).
+   Si un guion repite una frase de un vídeo original, el tema lo avisa para que
+   la cambies.
+
+«Escribir guiones con lo que le funciona», dentro de una sola cuenta, sigue
+igual para cuando tengas prisa.
 
 ### Marca del cliente
 

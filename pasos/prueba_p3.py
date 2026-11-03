@@ -6,7 +6,7 @@ horquilla de palabras, manejo de fallos del CLI) se prueba sin red, y
 despues se llama de verdad al CLI de Claude para redactar un guion corto sobre
 un material de referencia en ingles con un brief en espanol.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_p3.py
+    python pasos/prueba_p3.py
 """
 import json
 import os

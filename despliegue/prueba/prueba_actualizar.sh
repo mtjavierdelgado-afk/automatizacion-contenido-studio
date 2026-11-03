@@ -105,6 +105,7 @@ echo "print('v2')" > "$T/fuente/repo-main/app.py"
 echo "fastapi" > "$T/fuente/repo-main/requirements.txt"
 echo '{"de_fabrica": true}' > "$T/fuente/repo-main/motores/reglas/reglas.json"
 echo "login v2" > "$T/fuente/repo-main/despliegue/login/server.js"
+echo '{"tarifas": "v2"}' > "$T/fuente/repo-main/tarifas.json"
 printf '#!/bin/sh\necho asvs v2\n' > "$T/fuente/repo-main/despliegue/asvs"
 printf '#!/bin/sh\necho clave v2\n' > "$T/fuente/repo-main/despliegue/estudio-clave"
 # LAS PLANTILLAS DE VERDAD: las del arbol que se esta probando
@@ -272,6 +273,25 @@ echo "[G] no hay lanzador del navegador: se avisa y se sigue"
 montar; rm -f "$T/binarios/estudio-edge"; correr; codigo=$?
 ok '[ $codigo -eq 0 ]' "sale bien ($(tail -n 2 "$T/salida" | tr '\n' ' '))"
 ok 'grep -q "v2" "$T/raiz/app/app.py"' "con el codigo nuevo"
+
+echo "[H] las tarifas (medidor-claude-2): al dia si no se tocaron a mano"
+montar; echo '{"tarifas": "v1"}' > "$T/raiz/datos/tarifas.json"; cp "$T/raiz/datos/tarifas.json" "$T/raiz/datos/tarifas.de_fabrica.json"
+correr; codigo=$?
+ok '[ $codigo -eq 0 ] && grep -q v2 "$T/raiz/datos/tarifas.json"' "las de fabrica de antes se cambian por las nuevas"
+ok 'grep -q v1 "$T/raiz/datos/tarifas.json.anterior" && grep -q v2 "$T/raiz/datos/tarifas.de_fabrica.json"' \
+   "dejando las de antes en tarifas.json.anterior y apuntando las de fabrica nuevas"
+montar; echo '{"tarifas": "v1"}' > "$T/raiz/datos/tarifas.de_fabrica.json"; echo '{"tarifas": "mias"}' > "$T/raiz/datos/tarifas.json"
+correr; codigo=$?
+ok '[ $codigo -eq 0 ] && grep -q mias "$T/raiz/datos/tarifas.json" && [ ! -f "$T/raiz/datos/tarifas.json.anterior" ]' \
+   "las cambiadas a mano no se tocan"
+ok 'grep -q "cambiado a mano" "$T/salida"' "y se dice"
+montar; echo '{"tarifas": "v2"}' > "$T/raiz/datos/tarifas.json"
+correr; codigo=$?
+ok '[ $codigo -eq 0 ] && grep -q v2 "$T/raiz/datos/tarifas.de_fabrica.json" && [ ! -f "$T/raiz/datos/tarifas.json.anterior" ]' \
+   "ya al dia (la primera vez, sin de_fabrica): no se cambian y se apunta la de fabrica"
+montar; rm -f "$T/raiz/datos/tarifas.json"
+correr; codigo=$?
+ok '[ $codigo -eq 0 ] && grep -q v2 "$T/raiz/datos/tarifas.json"' "si no habia tarifas, se ponen"
 
 echo
 if [ "$FALLOS" -gt 0 ]; then

@@ -4757,7 +4757,7 @@ function seccionPaleta() {
    módulo. Los enlaces son enlaces y no botones, para que el barrido de botones
    del recorrido no se vaya a otra parte a mitad. */
 const PIE_DERECHOS = '© 2026 Agencia Redes Botánica · CrearIA Studio — '
-  + 'Automatización de contenido · v3.1 · Todos los derechos reservados.';
+  + 'Automatización de contenido · v5.1 · Todos los derechos reservados.';
 
 /* EL CONTACTO (mailto) y LOS TÉRMINOS DE USO, que viven en docs/TERMINOS.md y
    se sirven en /api/sistema/terminos, como el manual. */
@@ -7449,7 +7449,7 @@ function dentroDeProyecto(caja, cid) {
           h('span', { clase: 'pastilla' }, `${plural(estilos.length, 'estilo', 'estilos')} · ${plural(videos.length, 'vídeo', 'vídeos')}`),
           ficha && ficha.logo ? h('span', { clase: 'pastilla ok' }, 'logo ✓') : null))),
     h('div', { clase: 'acc' },
-      ficha ? h('button', { clase: 'mini abrir-ajustes-proyecto', title: 'Nombre, logo, ocultar, clave y borrar',
+      ficha ? h('button', { clase: 'mini abrir-ajustes-proyecto', title: 'Nombre, logo, ficha del negocio, ocultar, clave y borrar',
         onclick: () => abrirAjustesProyecto(cid) }, '⚙ Ajustes del proyecto') : null,
       botonPapeleraLight(),
       botonNuevoVideo(cid))));
@@ -7470,9 +7470,8 @@ function dentroDeProyecto(caja, cid) {
 const SECCIONES_AJUSTES_PROYECTO = [
   { id: 'nombre', titulo: 'Nombre', pinta: c => seccionNombreDelProyecto(c) },
   { id: 'logo', titulo: 'Logo', pinta: c => panelLogoProyecto(c.cliente) },
-  // la Ficha del negocio de etapa-foto-c entra aquí como una sección más (id
-  // reservado `ficha-negocio`), con su botón y su panel tal cual:
-  // { id: 'ficha-negocio', titulo: 'Ficha del negocio', pinta: c => … },
+  // Etapa Foto C: la ficha del negocio de este cliente (sus estilos de foto la usan)
+  { id: 'ficha-negocio', titulo: 'Ficha del negocio', pinta: c => panelNegocioProyecto(c.cliente) },
   { id: 'visibilidad', titulo: 'Visibilidad', pinta: c => seccionVisibilidadDelProyecto(c) },
   { id: 'clave', titulo: 'Clave', pinta: c => seccionClaveDelProyecto(c) },
   { id: 'publicar', titulo: 'Publicar', pinta: () => seccionPublicarDelProyecto() },
@@ -11373,7 +11372,19 @@ function tablaDeGasto(d, incluirEstilo) {
       voz.regrabaciones.usd || 0, 'tramos regrabados'));
   }
   if (incluirEstilo !== false) {
-    filas.push(filaCoste('Claude', `${miles(d.claude_tokens || 0)} tokens`, 0,
+    /* CLAUDE DE ESTE VÍDEO (medidor-claude-2): del registro del medidor, que
+       lleva todas sus llamadas; sin él (vídeos de antes), del coste. Los
+       tokens nuevos y los de caché, aparte. */
+    /* EL REGISTRO SOLO SI ESTÁ ENTERO: empezó con el medidor (26-10) y se poda
+       a 35 días, así que un vídeo con el guion de antes tendría ahí solo lo de
+       hoy. Si cuenta menos llamadas que el coste del vídeo, manda el coste. */
+    const enCoste = (d.claude || []).reduce((n, x) => n + (Number(x.llamadas) || 0), 0);
+    const c = d.claude_consumo && d.claude_consumo.llamadas >= enCoste ? d.claude_consumo : null;
+    filas.push(c
+      ? filaCoste('Claude', `${c.llamadas} llamadas · ${tokensCorto(c.tokens)} tokens nuevos + ${tokensCorto(c.cache)} de caché`, 0,
+        `va por tu suscripción: no se cobra aparte (≈ ${dolares(c.usd)} si fuera por API)`)
+      : filaCoste('Claude', `${tokensCorto(d.claude_tokens || 0)} tokens nuevos`
+        + (d.claude_cache ? ` + ${tokensCorto(d.claude_cache)} de caché` : ''), 0,
       'va por tu suscripción: no se cobra aparte'));
   }
   return h('table', { clase: 'tabla tabla-coste' }, h('tbody', {}, ...filas));
@@ -11415,6 +11426,14 @@ async function abrirCosteDelVideo(pid) {
     + '. La voz, por los caracteres que se enviaron a Cartesia.'));
   cuerpo.appendChild(h('h2', {}, 'Este vídeo'));
   cuerpo.appendChild(tablaDeGasto(d));
+  /* Claude de este vídeo, por tarea (medidor-claude-2) */
+  const cv = d.claude_consumo;
+  const claudeVideo = cv && tablaConsumoClaude('Claude, por tarea', cv.por_tarea, 'Tarea', f => f.tarea);
+  if (claudeVideo) {
+    const desde = cv.desde ? new Date(Number(cv.desde) * 1000).toLocaleDateString('es') : '';
+    cuerpo.appendChild(h('details', { clase: 'detalle-consumo-claude claude-del-video' },
+      h('summary', {}, `Claude en este vídeo, por tarea${desde ? ` (desde el ${desde})` : ''}`), claudeVideo));
+  }
   const m = d.musica || {};
   const ef = d.efectos || {};
   cuerpo.appendChild(h('table', { clase: 'tabla tabla-coste' }, h('tbody', {},
@@ -11444,10 +11463,10 @@ async function abrirCosteDelVideo(pid) {
   cuerpo.appendChild(h('div', { clase: 'meta' },
     `Lo que se promete antes de pulsar usa ${usdCorto(precio.usd)} por imagen: ${precio.fuente || ''}.`));
   if ((d.claude || []).length) {
-    const det = h('details', {}, h('summary', {}, 'Claude, por para qué se usó (tokens)'));
+    const det = h('details', {}, h('summary', {}, 'Claude, por para qué se usó (del coste del vídeo)'));
     det.appendChild(h('table', { clase: 'tabla tabla-coste' }, h('tbody', {},
       ...d.claude.slice(0, 15).map(c => filaCoste(c.para, `${c.llamadas} llamada(s)`, 0,
-        `${miles(c.tokens)} tokens`)))));
+        `${tokensCorto(c.tokens)} tokens nuevos${c.cache ? ` + ${tokensCorto(c.cache)} de caché` : ''}`)))));
     cuerpo.appendChild(det);
   }
 }
@@ -13601,6 +13620,120 @@ function textoDelPlano(e) {
   return caja;
 }
 
+/* LO QUE SE PIDIÓ DIBUJAR, EN ESPAÑOL (rama descripcion-planos, 26-10-2026).
+ *
+ * Debajo de la imagen, una o dos frases en español con lo que su prompt pide
+ * dibujar, y el prompt en inglés plegado debajo. Las escribe Claude (membresía)
+ * al abrir Imágenes, solo las que faltan, y viven en `descripciones.json` del
+ * proyecto: FUERA de params y firmas, así que pedirlas no redibuja nada.
+ * `DESCRIBIR.autoDe` es la ficha de la previa para la que ya se pidieron solas:
+ * una ficha nueva (otro corte, otra versión) las vuelve a pedir, y el servidor
+ * no relanza un «auto» tras un error. */
+const DESCRIBIR = { pid: '', estado: '', error: '', siguiendo: false, autoDe: null, vuelta: 0 };
+
+function aplicarDescripciones(pid, ficha) {
+  if (!PREVIA.ficha || PREVIA.pid !== pid) return;
+  DESCRIBIR.pid = pid;
+  DESCRIBIR.estado = ficha.estado || '';
+  DESCRIBIR.error = ficha.error || '';
+  /* CON SU PROMPT: la descripción va junto al prompt para el que se escribió.
+     Si el del plano cambió sin recargar la previa, se ponen los dos nuevos. */
+  const dadas = ficha.descripciones || {};
+  const prompts = ficha.prompts || {};
+  (PREVIA.ficha.escenas || []).forEach(x => {
+    if (!(x.id in prompts)) return;
+    x.prompt = prompts[x.id];
+    x.descripcion = dadas[x.id] || '';
+  });
+}
+
+async function describirPlanos(auto) {
+  const pid = PREVIA.pid;
+  if (!pid) return;
+  if (!auto) { DESCRIBIR.pid = pid; DESCRIBIR.estado = 'pensando'; DESCRIBIR.error = ''; repintarVideo(); }
+  try {
+    const ficha = await pedir(`${API.proyecto(pid)}/planos/describir`,
+      { method: 'POST', cuerpo: { auto: !!auto } });
+    aplicarDescripciones(pid, ficha);
+    if (ficha.estado === 'pensando') seguirDescripciones(pid);
+  } catch (err) {
+    if (PREVIA.pid === pid) { DESCRIBIR.pid = pid; DESCRIBIR.estado = 'error'; DESCRIBIR.error = err.message; }
+  }
+  repintarVideo();
+}
+
+/* Se pregunta cada dos segundos y medio hasta que Claude termina. Un corte de
+   red no deja la pantalla «escribiendo» para siempre: se reintenta con más
+   espera y, pasados unos intentos, se suelta con su aviso. */
+function seguirDescripciones(pid) {
+  if (DESCRIBIR.siguiendo) return;
+  DESCRIBIR.siguiendo = true;
+  /* UNA SOLA VUELTA VIVA: cambiar de vídeo sube el turno y la de antes se
+     para sola, aunque se vuelva al mismo vídeo antes de su siguiente pregunta */
+  DESCRIBIR.vuelta += 1;
+  const turno = DESCRIBIR.vuelta;
+  let fallos = 0;
+  const vuelta = async () => {
+    if (turno !== DESCRIBIR.vuelta) return;
+    if (PREVIA.pid !== pid || videoAbierto().pid !== pid) { DESCRIBIR.siguiendo = false; return; }
+    try {
+      const ficha = await pedir(`${API.proyecto(pid)}/planos/descripciones`);
+      if (turno !== DESCRIBIR.vuelta) return;
+      fallos = 0;
+      aplicarDescripciones(pid, ficha);
+      if (ficha.estado === 'pensando') { setTimeout(vuelta, 2500); return; }
+      DESCRIBIR.siguiendo = false;
+    } catch (_err) {
+      if (turno !== DESCRIBIR.vuelta) return;
+      fallos += 1;
+      if (fallos < 6 && PREVIA.pid === pid) { setTimeout(vuelta, 2500 * fallos); return; }
+      DESCRIBIR.siguiendo = false;
+      DESCRIBIR.estado = 'error';
+      DESCRIBIR.error = 'Se ha perdido la conexión con el Studio mientras se escribían: '
+        + 'recarga la página para ver cómo quedó.';
+    }
+    repintarVideo();
+  };
+  setTimeout(vuelta, 2500);
+}
+
+function descripcionDelPlano(e) {
+  const escenas = (PREVIA.ficha || {}).escenas || [];
+  if (DESCRIBIR.pid !== PREVIA.pid) {
+    DESCRIBIR.pid = PREVIA.pid; DESCRIBIR.estado = ''; DESCRIBIR.error = ''; DESCRIBIR.siguiendo = false;
+    DESCRIBIR.vuelta += 1; // la vuelta del otro vídeo se para
+  }
+  // SOLAS, UNA VEZ POR FICHA, aunque se esté mirando una cartela: se piden
+  // después de pintar, no en mitad
+  if (PREVIA.ficha && DESCRIBIR.autoDe !== PREVIA.ficha && escenas.some(x => x.prompt && !x.descripcion)) {
+    DESCRIBIR.autoDe = PREVIA.ficha;
+    setTimeout(() => describirPlanos(true), 0);
+  }
+  if (!e || !e.prompt) return null;
+  const caja = h('div', { clase: 'plano-descripcion', datos: { plano: e.id } },
+    h('span', { clase: 'meta' }, 'Lo que se pidió dibujar'));
+  if (e.descripcion) {
+    caja.appendChild(h('p', { clase: 'plano-descripcion-texto' }, e.descripcion));
+    if (e.obsoleta) {
+      caja.appendChild(h('div', { clase: 'meta' },
+        'Es lo que se pide ahora: esta imagen se dibujó con un texto anterior.'));
+    }
+  } else if (DESCRIBIR.estado === 'pensando') {
+    caja.appendChild(h('div', { clase: 'meta plano-descripcion-espera' },
+      'Claude lo está escribiendo en español…'));
+  } else {
+    caja.appendChild(h('div', { clase: 'fila' },
+      DESCRIBIR.estado === 'error' && DESCRIBIR.error
+        ? h('span', { clase: 'meta plano-descripcion-error' }, DESCRIBIR.error) : null,
+      h('button', { clase: 'mini', type: 'button', onclick: () => describirPlanos(false) },
+        DESCRIBIR.estado === 'error' ? 'Reintentar' : 'Verlo en español')));
+  }
+  caja.appendChild(h('details', { clase: 'plano-descripcion-ingles' },
+    h('summary', {}, 'Ver el original en inglés'),
+    h('div', { clase: 'plano-descripcion-prompt' }, e.prompt)));
+  return caja;
+}
+
 /* Lo que se cuelga debajo de la imagen: la cabecera con las descargas y el
    botón de ocultar, y el cuadro con el texto si se quiere ver. */
 function descargasYTextoDelPlano(e) {
@@ -13699,6 +13832,7 @@ function vistaPreviaLight() {
   engancharSwipePrevia(marco);
   caja.appendChild(marco);
   caja.appendChild(descargasYTextoDelPlano(e)); // descargar y leer lo que dice (imagenes-texto)
+  const pedido = descripcionDelPlano(e); if (pedido) caja.appendChild(pedido); // en español (descripcion-planos)
 
   /* LOS MANDOS. La flecha derecha es el gesto principal —pasar de escena y
      oírla— así que va grande y también en el teclado. */
@@ -13752,6 +13886,9 @@ function vistaPreviaLight() {
   if (e.obsoleta) caja.appendChild(avisoImagenObsoleta(e));
   const delPlano = montajeDelPlano(e); if (delPlano) caja.appendChild(delPlano);
   const elementos = elementosDelPlano(e); if (elementos) caja.appendChild(elementos);
+  const sinAplicar = quitadosSinAplicar(); if (sinAplicar) caja.appendChild(sinAplicar);
+  const sinDibujar = insertadosSinAplicar(); if (sinDibujar) caja.appendChild(sinDibujar); // insertar-imagen
+  const ajustar = ajustarImagenDelPlano(e, escenas); if (ajustar) caja.appendChild(ajustar);
   caja.appendChild(cuadroFeedbackEscena(e));
   /* EL REVISOR: pedir que mire las imágenes y ver lo que dejó (ver
      `panelRevisor`). Sus notas salen abajo, en la lista de siempre. */
@@ -14341,6 +14478,333 @@ function esTactil() {
  * dibujando otra vez. Un segundo camino se habría quedado viejo el día que
  * alguien tocara esa elección.
  */
+/* AJUSTAR ESTA IMAGEN (rama unir-planos, 25-10): cuando dos imágenes seguidas
+   no casan. «Igualar con la anterior/siguiente» deja escrita la nota para
+   rehacerla con la de al lado como referencia (se paga al rehacerla, como
+   cualquier nota). «Quitar esta imagen» pasa lo que se oye en ella a la de al
+   lado, que conserva su dibujo: no se paga nada, y se deshace igual. */
+const NOTA_IGUALAR = (lado, id) => `Que sea el mismo sitio que la imagen ${lado} (${id}): `
+  + 'mismos acabados, misma luz, mismos muebles y objetos, mismo estilo. Solo cambia el '
+  + 'ángulo de la cámara o lo que pasa en ella.';
+
+function ajustarImagenDelPlano(e, escenas) {
+  insertarAlDia();
+  const q = e.quitar || {};
+  const absorbe = e.absorbe || [];
+  const i = escenas.findIndex(x => x.id === e.id);
+  const ant = i > 0 ? escenas[i - 1] : null;
+  const sig = i >= 0 && i + 1 < escenas.length ? escenas[i + 1] : null;
+  const conImagen = x => x && x.imagen && !x.cartela;
+  if (!absorbe.length && !q.anterior && !q.siguiente && !conImagen(ant) && !conImagen(sig)
+      && !e.insertar && !e.insertada) return null;
+  const caja = h('div', { clase: 'ajustar-imagen' },
+    h('span', { clase: 'ajustar-imagen-titulo' }, 'Ajustar esta imagen'));
+  absorbe.forEach(a => caja.appendChild(h('div', { clase: 'fila ajustar-absorbe' },
+    h('span', { clase: 'meta crece' }, `Lleva también la voz de ${a.id}, que quitaste: `
+      + `«${recortar(legible(a.narracion), 90)}»`),
+    h('button', { clase: 'mini', disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => devolverImagenQuitada(a) }, `Deshacer · volver a poner ${a.id}`))));
+  const insertada = imagenInsertadaDelPlano(e); if (insertada) caja.appendChild(insertada); // insertar-imagen
+  const fila = h('div', { clase: 'fila' });
+  [['anterior', ant], ['siguiente', sig]].forEach(([lado, vecino]) => {
+    if (!conImagen(vecino) || !e.imagen) return;
+    fila.appendChild(h('button', { clase: 'mini',
+      title: `Escribe la nota para rehacer ${e.id} con ${vecino.id} como referencia. `
+        + 'Se paga una imagen cuando la rehagas.',
+      onclick: () => {
+        PREVIA.borrador[e.id] = NOTA_IGUALAR(lado, vecino.id);
+        repintarVideo();
+        toast(`nota escrita abajo: revísala y guárdala para rehacer ${e.id}`);
+      } }, `Igualar con la ${lado} (${vecino.id})`));
+  });
+  if (q.anterior || q.siguiente) {
+    fila.appendChild(h('button', { clase: 'mini fantasma',
+      disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => { PREVIA.quitando = PREVIA.quitando === e.id ? null : e.id; repintarVideo(); } },
+    'Quitar esta imagen…'));
+  }
+  if (e.insertar) {
+    fila.appendChild(h('button', { clase: 'mini fantasma',
+      disabled: PREVIA.guardando || !!trabajoVideoLight() || INSERTAR.estado === 'pensando',
+      onclick: () => abrirInsertarImagen(e) }, 'Insertar una imagen aquí…'));
+  }
+  if (fila.childNodes.length) caja.appendChild(fila);
+  const panelInsertar = panelInsertarImagen(e); if (panelInsertar) caja.appendChild(panelInsertar);
+  if (PREVIA.quitando === e.id) {
+    const elegir = h('div', { clase: 'ajustar-quitar' },
+      h('div', { clase: 'meta' }, `Lo que se oye en ${e.id} pasa a la imagen de al lado, que se alarga `
+        + 'y conserva su dibujo. Gratis: no se dibuja nada. Después hay que volver a montar el vídeo '
+        + '(también gratis). Se puede deshacer.'));
+    const botones = h('div', { clase: 'fila' });
+    if (q.anterior) {
+      botones.appendChild(h('button', { clase: 'mini primario', disabled: PREVIA.guardando,
+        onclick: () => quitarImagen(e, 'anterior', q.anterior) },
+        `Su voz pasa a ${q.anterior} (la anterior)`));
+    }
+    if (q.siguiente) {
+      botones.appendChild(h('button', { clase: 'mini primario', disabled: PREVIA.guardando,
+        onclick: () => quitarImagen(e, 'siguiente', q.siguiente) },
+        `Su voz pasa a ${q.siguiente} (la siguiente)`));
+    }
+    botones.appendChild(h('button', { clase: 'mini fantasma', disabled: PREVIA.guardando,
+      onclick: () => { PREVIA.quitando = null; repintarVideo(); } }, 'Cancelar'));
+    elegir.appendChild(botones);
+    caja.appendChild(elegir);
+  }
+  return caja;
+}
+
+/* LO QUITADO QUE ESTE CORTE NO REFLEJA (la pasada falló o se canceló, o se
+   volvió a una versión anterior de las imágenes): nunca se queda algo quitado
+   sin su «Deshacer». */
+function quitadosSinAplicar() {
+  const lista = (PREVIA.ficha || {}).quitados_sin_aplicar || [];
+  if (!lista.length) return null;
+  const caja = h('div', { clase: 'ajustar-imagen caja-aviso' },
+    h('span', { clase: 'ajustar-imagen-titulo' }, 'Imágenes quitadas que este corte aún no refleja'),
+    h('div', { clase: 'meta' }, 'Se aplicarán la próxima vez que se pongan al día las imágenes. '
+      + 'Si no querías quitarlas, deshazlo aquí.'));
+  lista.forEach(a => caja.appendChild(h('div', { clase: 'fila ajustar-absorbe' },
+    h('span', { clase: 'meta crece' }, `${a.id || 'Una imagen'}: «${recortar(legible(a.narracion), 90)}»`),
+    h('button', { clase: 'mini', disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => devolverImagenQuitada(a) }, 'Deshacer'))));
+  return caja;
+}
+
+/* La pasada que vuelve a cortar no dibuja nada: al acabar se vuelve a pedir la
+   previa, y se queda mirando la imagen que se lleva la voz. */
+function seguirPasadaDeCorte(pid, tid, irA, mensaje) {
+  seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
+    if (trabajo.estado === 'listo') toast(mensaje);
+    else if (trabajo.estado === 'error') toast(`no se ha podido: ${trabajo.error || 'falló'}`, true);
+    if (videoAbierto().pid === pid) {
+      // el carril y la barra: el vídeo queda por volver a montar
+      try { await refrescarFichasLight(); } catch (_e) { /* se ve al volver */ }
+      reiniciarPrevia();
+      if (irA) PREVIA.recordada = { pid, id: irA };
+      await cargarPreviaLight();
+    }
+    pintarLight();
+  }, () => refrescarVivosLight(), pid);
+}
+
+async function quitarImagen(e, hacia, a) {
+  const v = videoAbierto();
+  PREVIA.guardando = true;
+  repintarVideo();
+  try {
+    const d = await pedir(`${API.proyecto(v.pid)}/planos/${encodeURIComponent(e.id)}/quitar`,
+      { method: 'POST', cuerpo: { hacia } });
+    PREVIA.quitando = null;
+    seguirPasadaDeCorte(v.pid, d.trabajo, a,
+      `${e.id} quitada: su voz va con ${a}. Monta el vídeo para verlo (gratis)`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+  PREVIA.guardando = false;
+  repintarVideo();
+}
+
+async function devolverImagenQuitada(a) {
+  const v = videoAbierto();
+  PREVIA.guardando = true;
+  repintarVideo();
+  try {
+    const d = await pedir(`${API.proyecto(v.pid)}/planos/devolver`,
+      { method: 'POST', cuerpo: { narracion: a.narracion, n: a.n || 0 } });
+    seguirPasadaDeCorte(v.pid, d.trabajo, a.id,
+      `${a.id} vuelve a estar. Monta el vídeo para verlo (gratis)`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+  PREVIA.guardando = false;
+  repintarVideo();
+}
+
+/* INSERTAR UNA IMAGEN (rama insertar-imagen, 26-10). Lo contrario de quitar:
+   se pulsa la palabra de la frase donde empieza la imagen nueva y se escribe
+   qué se ve. La de antes conserva su dibujo; la nueva (S004B) se dibuja sola:
+   UNA imagen, con su precio confirmado antes. Deshacer es gratis.
+   `INSERTAR.abierto` es el plano con el panel abierto, y lo escrito vive aquí
+   (nunca como param) hasta que se pulsa insertar. */
+const INSERTAR = { pid: '', abierto: '', palabra: 0, que: '', precio: null, estado: '', siguiendo: false };
+
+/* OTRO VÍDEO, OTRO PANEL: lo escrito y el precio eran del de antes. Y si al
+   volver (o al recargar) el servidor sigue preparando una, se sigue. */
+function insertarAlDia() {
+  const pid = videoAbierto().pid;
+  if (!pid || INSERTAR.pid === pid) return;
+  Object.assign(INSERTAR, { pid, abierto: '', palabra: 0, que: '', precio: null, estado: '', siguiendo: false });
+  pedir(`${API.proyecto(pid)}/planos/insertar`).then(d => {
+    if (INSERTAR.pid !== pid || d.estado !== 'pensando') return;
+    INSERTAR.estado = 'pensando';
+    seguirInsercion(pid, d.plano);
+    repintarVideo();
+  }).catch(() => { /* sin estado: no hay nada que seguir */ });
+}
+
+async function abrirInsertarImagen(e) {
+  if (INSERTAR.abierto === e.id) { INSERTAR.abierto = ''; repintarVideo(); return; }
+  Object.assign(INSERTAR, { abierto: e.id, palabra: 0, que: '', precio: null });
+  PREVIA.quitando = null;
+  repintarVideo();
+  try {
+    const d = await pedir(`${API.proyecto(videoAbierto().pid)}/planos/insertar`);
+    INSERTAR.precio = d.precio || null;
+  } catch (err) {
+    toast(`no se ha podido saber el precio: ${err.message}`, true);
+  }
+  repintarVideo();
+}
+
+function panelInsertarImagen(e) {
+  if (INSERTAR.abierto !== e.id || !e.insertar) return null;
+  const palabras = (e.insertar.palabras || []).map(legible);
+  const caja = h('div', { clase: 'insertar-imagen' },
+    h('div', { clase: 'meta' }, `Pulsa la palabra donde empieza la imagen nueva (cada imagen dura `
+      + `al menos un segundo). ${e.id} conserva su `
+      + 'dibujo y se queda con lo de antes; la nueva, con el mismo sitio y estilo, se queda con el resto.'));
+  const chips = h('div', { clase: 'insertar-palabras' });
+  const validas = new Set(e.insertar.validas || []);
+  palabras.forEach((p, k) => {
+    chips.appendChild(h('button', {
+      clase: `mini insertar-palabra${k === INSERTAR.palabra ? ' sel' : ''}${k && k >= INSERTAR.palabra && INSERTAR.palabra ? ' nueva' : ''}`,
+      type: 'button', disabled: !validas.has(k), 'aria-pressed': k === INSERTAR.palabra ? 'true' : 'false',
+      title: validas.has(k) ? `La nueva empieza en «${p}»`
+        : 'Ahí una de las dos imágenes duraría menos de un segundo',
+      onclick: () => { INSERTAR.palabra = k; repintarVideo(); } }, p));
+  });
+  caja.appendChild(chips);
+  if (INSERTAR.palabra) {
+    caja.appendChild(h('div', { clase: 'meta insertar-reparto' },
+      `${e.id}: «${recortar(palabras.slice(0, INSERTAR.palabra).join(' '), 80)}» · `
+      + `nueva: «${recortar(palabras.slice(INSERTAR.palabra).join(' '), 80)}»`));
+  }
+  caja.appendChild(h('label', { clase: 'meta' }, 'Qué quieres que se vea en la imagen nueva'));
+  caja.appendChild(h('textarea', { clase: 'insertar-que', rows: 2, maxlength: 400,
+    placeholder: 'Por ejemplo: las baldosas grises de cerca, con la junta sucia',
+    oninput: ev => {
+      INSERTAR.que = ev.target.value;
+      const b = caja.querySelector('button[data-accion=insertar-imagen]');
+      if (b) b.disabled = !puedeInsertar();
+    } }, INSERTAR.que));
+  const precio = INSERTAR.precio;
+  caja.appendChild(h('div', { clase: 'meta' }, precio
+    ? `Se dibuja UNA imagen: ≈ ${usdCorto(precio.usd)} (calidad ${precio.calidad}). Deshacerla es gratis.`
+    : 'Mirando lo que cuesta una imagen…'));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini primario', type: 'button', datos: { accion: 'insertar-imagen' },
+      disabled: !puedeInsertar(), onclick: () => insertarImagen(e) },
+    INSERTAR.estado === 'pensando' ? 'Preparándola…'
+      : `Insertar y dibujarla${precio ? ` (≈ ${usdCorto(precio.usd)})` : ''}`),
+    h('button', { clase: 'mini fantasma', type: 'button',
+      onclick: () => { INSERTAR.abierto = ''; repintarVideo(); } }, 'Cancelar')));
+  return caja;
+}
+
+function puedeInsertar() {
+  return !!(INSERTAR.palabra && INSERTAR.que.trim() && INSERTAR.precio
+    && INSERTAR.estado !== 'pensando' && !PREVIA.guardando && !trabajoVideoLight());
+}
+
+async function insertarImagen(e) {
+  const pid = videoAbierto().pid;
+  const precio = INSERTAR.precio;
+  if (!puedeInsertar()) return;
+  if (!confirm(`Se va a dibujar UNA imagen nueva en ${e.id} (≈ ${usdCorto(precio.usd)}). ¿Seguimos?`)) return;
+  INSERTAR.estado = 'pensando';
+  repintarVideo();
+  try {
+    await pedir(`${API.proyecto(pid)}/planos/${encodeURIComponent(e.id)}/insertar`,
+      { method: 'POST', cuerpo: { palabra: INSERTAR.palabra, que: INSERTAR.que.trim(), usd: precio.usd } });
+    seguirInsercion(pid, e.id);
+  } catch (err) {
+    INSERTAR.estado = '';
+    toast(err.message, true);
+    repintarVideo();
+  }
+}
+
+/* Claude pasa lo escrito al inglés en el servidor (segundos): se pregunta
+   hasta que se lanza la tanda, y entonces se sigue como la de quitar. */
+function seguirInsercion(pid, sid) {
+  if (INSERTAR.siguiendo) return;
+  INSERTAR.siguiendo = true;
+  let fallos = 0;
+  const vuelta = async () => {
+    try {
+      const d = await pedir(`${API.proyecto(pid)}/planos/insertar`);
+      fallos = 0;
+      if (d.estado === 'pensando') { setTimeout(vuelta, 1500); return; }
+      INSERTAR.siguiendo = false;
+      INSERTAR.estado = '';
+      if (d.estado === 'error') {
+        toast(d.error || 'no se ha podido insertar la imagen', true);
+      } else if (d.estado === 'lanzado' && d.trabajo_id) {
+        INSERTAR.abierto = '';
+        INSERTAR.que = '';
+        toast(`dibujando ${d.nuevo}…`);
+        seguirPasadaDeCorte(pid, d.trabajo_id, d.nuevo,
+          `${d.nuevo} dibujada. Monta el vídeo para verla (el montaje es gratis)`);
+      }
+    } catch (_err) {
+      fallos += 1;
+      if (fallos < 6) { setTimeout(vuelta, 1500 * fallos); return; }
+      INSERTAR.siguiendo = false;
+      INSERTAR.estado = '';
+      toast('Se ha perdido la conexión con el Studio: recarga la página para ver cómo quedó.', true);
+    }
+    if (videoAbierto().pid === pid) repintarVideo();
+  };
+  setTimeout(vuelta, 1000);
+}
+
+/* LO INSERTADO QUE NO LLEGÓ A DIBUJARSE (la tanda falló o se canceló): nunca
+   se queda apuntado sin su «Deshacer». */
+function insertadosSinAplicar() {
+  const lista = (PREVIA.ficha || {}).insertados_sin_aplicar || [];
+  if (!lista.length) return null;
+  const caja = h('div', { clase: 'ajustar-imagen caja-aviso' },
+    h('span', { clase: 'ajustar-imagen-titulo' }, 'Imágenes insertadas que no llegaron a dibujarse'),
+    h('div', { clase: 'meta' }, 'Deshazlas aquí (gratis); después puedes volver a insertarlas.'));
+  lista.forEach(a => caja.appendChild(h('div', { clase: 'fila ajustar-absorbe' },
+    h('span', { clase: 'meta crece' }, `En ${a.id || 'una imagen'}`
+      + (a.que ? `: «${recortar(a.que, 90)}»` : '')),
+    h('button', { clase: 'mini', disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => deshacerImagenInsertada({ id: a.id, insertada: { en: a.id, texto: a.texto, n: a.n,
+        palabra: a.palabra } }, true) }, 'Deshacer'))));
+  return caja;
+}
+
+function imagenInsertadaDelPlano(e) {
+  const ins = e.insertada;
+  if (!ins) return null;
+  return h('div', { clase: 'fila ajustar-absorbe' },
+    h('span', { clase: 'meta crece' }, `Imagen insertada en ${ins.en}`
+      + (ins.que ? `: «${recortar(ins.que, 90)}»` : '')),
+    h('button', { clase: 'mini', disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => deshacerImagenInsertada(e) }, 'Deshacer · quitar esta imagen nueva'));
+}
+
+async function deshacerImagenInsertada(e, sinDibujar) {
+  const v = videoAbierto();
+  const ins = e.insertada || {};
+  if (!sinDibujar
+      && !confirm(`¿Quitar ${e.id}? ${ins.en} recupera toda su voz con su dibujo de siempre. Gratis.`)) return;
+  PREVIA.guardando = true;
+  repintarVideo();
+  try {
+    const d = await pedir(`${API.proyecto(v.pid)}/planos/insertadas/deshacer`,
+      { method: 'POST', cuerpo: { texto: ins.texto, n: ins.n || 0, palabra: ins.palabra } });
+    seguirPasadaDeCorte(v.pid, d.trabajo, ins.en,
+      `${e.id} quitada: ${ins.en} vuelve a tener toda su voz. Monta el vídeo para verlo (gratis)`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+  PREVIA.guardando = false;
+  repintarVideo();
+}
+
 function cuadroFeedbackEscena(escena) {
   /* LAS APLICADAS NO SE ENSEÑAN. Una nota es algo que PIDES; en cuanto está
      hecha deja de ser una petición y pasa a ser historia, y dejarla ahí hace
@@ -17635,6 +18099,7 @@ function bloqueImagenesEstiloLight(ficha) {
 
 function bloqueReglasLight(ficha) {
   const caja = h('div', {});
+  caja.appendChild(bloqueNegocioDelEstilo(ficha));  // Etapa Foto C
   if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
     caja.appendChild(h('div', { clase: 'pista' },
       'Primero genera el estilo gráfico (las láminas); después podrás ponerle reglas.'));
@@ -24787,18 +25252,31 @@ function avisarCupoClaude() {
   try { localStorage.setItem('estudio.claude.avisados', JSON.stringify([...vistos].slice(-40))); } catch (e) { /* sin almacén */ }
 }
 
+/* «12 k», «1,3 M»: los tokens en corto */
+function tokensCorto(n) {
+  const v = Number(n) || 0;
+  if (v >= 999500) return `${(v / 1e6).toFixed(1).replace('.', ',')} M`;
+  if (v >= 1000) return `${Math.round(v / 1000)} k`;
+  return String(v);
+}
+
+/* TOKENS NUEVOS Y DE CACHÉ, aparte (medidor-claude-2): la caché leída cuesta
+   ~10 % del precio, y sumada inflaba la cifra de cualquier llamada. */
 function tablaConsumoClaude(titulo, filas, columna, nombreDe) {
   if (!filas || !filas.length) return null;
   const cuerpo = h('tbody');
   filas.forEach(f => cuerpo.appendChild(h('tr', {},
     h('td', { clase: 'que' }, nombreDe(f)),
     h('td', {}, String(f.llamadas)),
-    h('td', {}, f.tokens >= 1e6 ? `${(f.tokens / 1e6).toFixed(1).replace('.', ',')} M` : `${Math.round(f.tokens / 1000)} k`),
+    h('td', {}, tokensCorto(f.tokens)),
+    h('td', { clase: 'meta' }, tokensCorto(f.cache)),
     h('td', {}, dolares(f.usd)))));
   return h('div', { clase: 'tabla-consumo-claude' },
     h('b', {}, titulo),
     h('table', {},
-      h('thead', {}, h('tr', {}, h('th', {}, columna), h('th', {}, 'Llamadas'), h('th', {}, 'Tokens'),
+      h('thead', {}, h('tr', {}, h('th', {}, columna), h('th', {}, 'Llamadas'),
+        h('th', { title: 'Entrada, salida y caché creada: lo que de verdad pesa' }, 'Tokens nuevos'),
+        h('th', { title: 'Leídos de la caché: cuestan ~10 % de un token nuevo' }, 'De caché'),
         h('th', { title: 'Lo que costaría por API. Con la membresía no se cobra: sirve para comparar.' }, '≈ $ API'))),
       cuerpo));
 }
@@ -31557,6 +32035,8 @@ function seccionCuentasParrilla() {
   }
   caja.appendChild(estadoConexionesCuentas());  // las claves, en Configuración: lo encaja aquí rediseno-publicar
   caja.appendChild(bloqueTraerCuenta());
+  const varias = bloqueVariasCuentas();   // cuentas-gustan-2: analizar varias y proponer temas
+  if (varias) caja.appendChild(varias);
   if (PAR.cuentaAbierta) caja.appendChild(bloqueCuentaAbierta(PAR.cuentaAbierta));
   return caja;
 }
@@ -31626,18 +32106,32 @@ function bloqueTraerCuenta() {
   if (!lista.length) return bloque;
   /* LAS YA LEÍDAS, COMO TARJETAS (rediseno-automatizar): red, cuántos vídeos,
      cuándo se leyó y si Claude ya la analizó. Abrir una no paga nada. */
+  /* cuentas-gustan-2 (01-11-2026): cada tarjeta lleva su casilla para
+     analizar varias juntas, con «Seleccionar todas» y «Quitar selección». */
+  const sel = seleccionCuentas();
+  // las 20 primeras y, además, las marcadas: lo que entra en el análisis se ve
+  const visibles = lista.filter((c, i) => i < 20 || sel.has(claveCuenta(c)));
   return h('div', { clase: 'cuentas-y-leidas' }, bloque,
-    h('div', { clase: 'leidas-cuentas' }, h('h3', {}, 'Ya leídas'),
-      h('div', { clase: 'cuentas-guardadas' }, lista.slice(0, 20).map(c => {
+    h('div', { clase: 'leidas-cuentas' }, h('div', { clase: 'fila cab-leidas' }, h('h3', {}, 'Ya leídas'),
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini fantasma', onclick: () => marcarTodasCuentas(visibles, true) }, 'Seleccionar todas'),
+      h('button', { clase: 'mini fantasma', disabled: sel.size ? null : true, onclick: () => marcarTodasCuentas(visibles, false) }, 'Quitar selección')),
+      h('div', { clase: 'cuentas-guardadas' }, visibles.map(c => {
         const abierta = PAR.cuentaAbierta && PAR.cuentaAbierta.usuario === c.usuario && PAR.cuentaAbierta.red === c.red;
-        return h('button', { type: 'button', clase: `tarjeta-cuenta${abierta ? ' activa' : ''}`,
-          'aria-pressed': abierta ? 'true' : 'false',
-          title: `${c.videos} vídeos · ${String(c.traida || '').replace('T', ' ').slice(0, 16)}`,
-          onclick: () => abrirCuentaParrilla(c.red, c.usuario) },
-        h('b', {}, `@${c.usuario}`),
-        h('span', { clase: 'meta' }, `${NOMBRE_RED_CUENTA[c.red] || c.red} · ${c.videos} vídeos · leída el `
-          + `${String(c.traida || '').replace('T', ' ').slice(0, 10)}`),
-        h('span', { clase: `pastilla${c.analizada ? ' ok' : ''}` }, c.analizada ? '✓ analizada' : 'sin analizar'));
+        const clave = claveCuenta(c);
+        const marcada = sel.has(clave);
+        return h('div', { clase: `tarjeta-cuenta-sel${marcada ? ' marcada' : ''}` },
+          h('label', { clase: 'casilla-cuenta', title: marcada ? 'Quitar de la selección' : 'Marcar para analizar varias juntas' },
+            h('input', { type: 'checkbox', checked: marcada ? true : null, 'aria-label': `Seleccionar @${c.usuario}`,
+              onchange: ev => marcarCuenta(clave, ev.target.checked) })),
+          h('button', { type: 'button', clase: `tarjeta-cuenta${abierta ? ' activa' : ''}`,
+            'aria-pressed': abierta ? 'true' : 'false',
+            title: `${c.videos} vídeos · ${String(c.traida || '').replace('T', ' ').slice(0, 16)}`,
+            onclick: () => abrirCuentaParrilla(c.red, c.usuario) },
+          h('b', {}, `@${c.usuario}`),
+          h('span', { clase: 'meta' }, `${NOMBRE_RED_CUENTA[c.red] || c.red} · ${c.videos} vídeos · leída el `
+            + `${String(c.traida || '').replace('T', ' ').slice(0, 10)}`),
+          h('span', { clase: `pastilla${c.analizada ? ' ok' : ''}` }, c.analizada ? '✓ analizada' : 'sin analizar')));
       }))));
 }
 
@@ -31723,6 +32217,7 @@ async function trabajoCuentaAcabado(nuevo) {
   PAR.cuentaTrabajo = Object.assign({}, nuevo, { visto: true });
   if (nuevo.estado === 'listo') {
     if (nuevo.de_cache) toast('ya estaba leída hoy: no se ha vuelto a pagar');
+    else if (nuevo.tipo === 'duraciones') toast(`duraciones completadas${nuevo.coste_usd ? ` (≈${Number(nuevo.coste_usd).toFixed(2)} $)` : ''}`);
     else if (nuevo.coste_usd) toast(`leída con Apify (≈${Number(nuevo.coste_usd).toFixed(2)} $)`);
     else toast(nuevo.tipo === 'analizar' ? 'análisis listo' : 'cuenta leída');
     PAR.cuentas = null;
@@ -31771,6 +32266,7 @@ function bloqueCuentaAbierta(d) {
     bloque.appendChild(h('details', { clase: 'intentos-cuenta' }, h('summary', { clase: 'meta' }, 'Por qué esta vía'),
       h('ul', {}, d.intentos.map(x => h('li', { clase: 'meta' }, x)))));
   }
+  if (d.metricas) bloque.appendChild(cifrasDeCuenta(d));   // cuentas-gustan-2
 
   const analisis = h('div', { clase: 'analisis-cuenta' }, h('div', { clase: 'fila' }, h('h4', {}, 'Qué le funciona'),
     h('span', { clase: 'crece' }),
@@ -31804,10 +32300,16 @@ function bloqueCuentaAbierta(d) {
   (d.videos || []).forEach((v, i) => {
     const cifras = [v.vistas != null ? `${cifraCorta(v.vistas)} vistas` : 'sin vistas',
       v.me_gusta != null ? `${cifraCorta(v.me_gusta)} ♥` : '', v.comentarios != null ? `${cifraCorta(v.comentarios)} 💬` : '',
-      v.duracion_s ? `${Math.round(v.duracion_s)} s` : '', String(v.fecha || '').slice(0, 10)].filter(Boolean).join(' · ');
-    tabla.appendChild(h('div', { clase: 'fila video-cuenta' },
-      h('span', { clase: 'numero-video' }, String(i + 1)),
-      h('div', { clase: 'crece texto-video' }, h('div', {}, recortar(v.texto || '(sin texto)', 160)), h('div', { clase: 'meta' }, cifras)),
+      v.duracion_s ? `${Math.round(v.duracion_s)} s` : 'sin duración', v.tipo_nombre || '', String(v.fecha || '').slice(0, 10)].filter(Boolean).join(' · ');
+    // cuentas-gustan-2: lo relativo a la cuenta y por cada 100 vistas
+    const relativas = [v.rel != null ? `×${decimalCuenta(v.rel, 1)} su mediana` : '',
+      v.mg100 != null ? `${decimalCuenta(v.mg100, 1)} ♥ por 100 vistas` : '',
+      v.com100 != null ? `${decimalCuenta(v.com100, 2)} 💬 por 100 vistas` : ''].filter(Boolean).join(' · ');
+    tabla.appendChild(h('div', { clase: `fila video-cuenta${v.dudoso ? ' dudoso' : ''}` },
+      h('span', { clase: 'numero-video' }, String(v.n || i + 1)),
+      h('div', { clase: 'crece texto-video' }, h('div', {}, recortar(v.texto || '(sin texto)', 160)), h('div', { clase: 'meta' }, cifras),
+        relativas ? h('div', { clase: 'meta relativas-video' }, relativas) : null,
+        v.dudoso ? h('div', { clase: 'pastilla aviso pastilla-dudoso', title: v.motivo || '' }, `Dudoso: ${v.motivo || 'no cuenta como referencia'}`) : null),
       v.url ? h('a', { clase: 'mini fantasma', href: v.url, target: '_blank', rel: 'noopener noreferrer' }, 'Ver') : null));
   });
   bloque.appendChild(h('details', { clase: 'lista-videos-cuenta', open: true },
@@ -31867,6 +32369,634 @@ function selectorCuentaChat() {
   [h('option', { value: '' }, '📈 sin cuenta de referencia')].concat(lista.map(c => h('option', {
     value: `${c.red}:${c.usuario}`, selected: PAR.chatCuenta === `${c.red}:${c.usuario}` ? true : null },
   `📈 @${c.usuario} (${NOMBRE_RED_CUENTA[c.red] || c.red})`))));
+}
+
+/* ------------------------------------- CUENTAS QUE TE GUSTAN 2 (01-11-2026)
+ *
+ * Rama cuentas-gustan-2, pedido del dueño: las cifras de cada cuenta
+ * relativas a ella misma, analizar VARIAS juntas («Analizar seleccionadas»),
+ * «Proponer temas» para el proyecto, aprobar/editar/descartar cada uno y
+ * «Escribir guiones aprobados». Lo de Claude va en un hilo del servidor y
+ * aquí se pregunta cada 2 s. Antes de llamar a Claude se enseña cuántas
+ * cuentas, vídeos y cuánto cupo; con el cupo al 90 % avisa y deja
+ * «Seguir igualmente». La selección vive en la pantalla (y en localStorage): no se pierde.
+ */
+const MAX_CUENTAS_JUNTAS = 10;
+const CLAVE_SELECCION_CUENTAS = 'cuentasSeleccion';
+
+function claveCuenta(c) { return `${c.red}:${String(c.usuario || '').toLowerCase()}`; }
+
+function decimalCuenta(n, decimales) {
+  return Number.isFinite(n) ? n.toFixed(decimales).replace('.', ',') : '—';
+}
+
+function seleccionCuentas() {
+  if (!PAR.cuentasSel) {
+    let guardada = [];
+    try { guardada = JSON.parse(localStorage.getItem(CLAVE_SELECCION_CUENTAS) || '[]'); } catch (e) { guardada = []; }
+    PAR.cuentasSel = new Set(Array.isArray(guardada) ? guardada.filter(x => typeof x === 'string') : []);
+  }
+  // una cuenta olvidada deja de estar marcada
+  if (PAR.cuentas && Array.isArray(PAR.cuentas.cuentas)) {
+    const hay = new Set(PAR.cuentas.cuentas.map(claveCuenta));
+    [...PAR.cuentasSel].forEach(k => { if (!hay.has(k)) PAR.cuentasSel.delete(k); });
+  }
+  return PAR.cuentasSel;
+}
+
+function guardarSeleccionCuentas() {
+  try { localStorage.setItem(CLAVE_SELECCION_CUENTAS, JSON.stringify([...seleccionCuentas()])); } catch (e) { /* sin almacén */ }
+}
+
+function marcarCuenta(clave, si) {
+  const sel = seleccionCuentas();
+  if (si) sel.add(clave); else sel.delete(clave);
+  guardarSeleccionCuentas();
+  pintarModulo();
+}
+
+function marcarTodasCuentas(lista, si) {
+  const sel = seleccionCuentas();
+  if (si) lista.forEach(c => sel.add(claveCuenta(c))); else sel.clear();
+  guardarSeleccionCuentas();
+  pintarModulo();
+}
+
+/* ------------------------------------------------ las cifras de una cuenta */
+
+function cifrasDeCuenta(d) {
+  const m = d.metricas || {};
+  const caja = h('div', { clase: 'cifras-cuenta' });
+  const partes = [m.mediana_vistas != null ? `Mediana: ${cifraCorta(m.mediana_vistas)} vistas` : 'Sin vistas',
+    m.mediana_mg100 != null ? `${decimalCuenta(m.mediana_mg100, 1)} ♥ por 100 vistas` : '',
+    m.mediana_com100 != null ? `${decimalCuenta(m.mediana_com100, 2)} 💬 por 100 vistas` : '',
+    m.dudosos ? `${m.dudosos} dudoso${m.dudosos === 1 ? '' : 's'} (se ven, pero no cuentan)` : ''].filter(Boolean);
+  caja.appendChild(h('div', { clase: 'meta' }, partes.join(' · ')));
+  const filas = (m.rangos || []).filter(r => r.videos);
+  caja.appendChild(h('div', { clase: 'fila cab-rangos' }, h('b', {}, 'Vistas por duración'),
+    h('span', { clase: 'meta' }, `${m.con_duracion || 0} de ${m.total || 0} vídeos con ese dato`)));
+  if (filas.length) {
+    caja.appendChild(h('div', { clase: 'rangos-cuenta' }, filas.map(r => h('div', { clase: 'rango-cuenta' },
+      h('span', {}, r.rango), h('b', {}, r.mediana_rel != null ? `×${decimalCuenta(r.mediana_rel, 1)}` : '—'),
+      h('span', { clase: 'meta' }, `${r.videos} vídeo${r.videos === 1 ? '' : 's'}`)))));
+    caja.appendChild(h('div', { clase: 'pista' }, '«×1,6» = esos vídeos tienen 1,6 veces las vistas normales de esta cuenta.'
+      + (m.mejor_rango ? ` Lo que mejor le funciona: ${m.mejor_rango.rango}.` : ' Con menos de 8 vídeos con duración no se sugiere ninguna.')));
+  }
+  const dur = d.duraciones || {};
+  if (dur.faltan) {
+    const ocupado = PAR.cuentaTrabajo && PAR.cuentaTrabajo.estado === 'trabajando';
+    caja.appendChild(h('div', { clase: 'fila faltan-duraciones' },
+      h('span', { clase: 'meta crece' }, `A ${dur.faltan} vídeo${dur.faltan === 1 ? '' : 's'} le${dur.faltan === 1 ? '' : 's'} falta la duración.`
+        + (dur.se_puede ? '' : ` ${dur.motivo || ''}`)),
+      dur.se_puede ? h('button', { clase: 'mini', disabled: ocupado ? true : null, onclick: () => completarDuracionesCuenta(d) },
+        `Completar con Apify (≈${Number(dur.coste_usd || 0).toFixed(2)} $)`) : null));
+  }
+  return caja;
+}
+
+async function completarDuracionesCuenta(d) {
+  const dur = d.duraciones || {};
+  if (!confirm(`Completar la duración de ${dur.faltan} vídeos de @${d.usuario} con Apify costará unos `
+    + `${Number(dur.coste_usd || 0).toFixed(2)} $.\nGastado este mes: ${Number(dur.gasto_mes || 0).toFixed(2)} $ de `
+    + `${Number(dur.tope_usd || 0).toFixed(2)} $. Solo se rellena la duración: las demás cifras no cambian. ¿Seguir?`)) return;
+  try {
+    PAR.cuentaTrabajo = await pedirTrabajoParrilla(rutaCuentas(`/${encodeURIComponent(d.red)}/${encodeURIComponent(d.usuario)}/duraciones`),
+      { pagar: true });
+    pintarModulo();
+    vigilarCuentaParrilla();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------------------------------------------------- varias cuentas juntas */
+
+function rutaConjuntos(resto) { return `${BASE}/api/parrilla/conjuntos${resto || ''}`; }
+
+function hayProyectoParrilla() { return !!PAR.cid && PAR.cid !== '_sin'; }
+
+function textoCupo(cupo) {
+  if (!cupo || cupo.uso == null) return 'Tu cupo de Claude no está medido todavía (lo mide Configuración → Claude).';
+  return `Tu cupo de Claude va por el ${Math.round(cupo.uso * 100)} % en la ventana más llena.`;
+}
+
+/* El aviso antes de llamar a Claude: cuántas cuentas y vídeos y cuánto
+   cupo (punto D). Con el cupo al 90 % o más AVISA y deja seguir (decisión
+   del dueño, 02-11-2026): «Aceptar» es «Seguir igualmente». -> null si se
+   cancela, o {aunque_cupo} para mandar al servidor. */
+function confirmarEnvioClaude(plan, que) {
+  const resumen = `${que}\n\nSe mandarán a Claude ${plan.n_cuentas} cuentas y ${plan.videos} vídeos `
+    + `(≈${Number(plan.tokens || 0).toLocaleString('es')} tokens, con tu membresía; no se paga aparte).\n`;
+  if (plan.aviso_cupo) {
+    return confirm(`⚠ ${plan.motivo}\n\n${resumen}\nPulsa «Aceptar» para seguir igualmente o «Cancelar» para esperar.`)
+      ? { aunque_cupo: true } : null;
+  }
+  return confirm(`${resumen}${textoCupo(plan.cupo)}\n\n¿Seguir?`) ? {} : null;
+}
+
+/* Si el cupo se llenó entre el aviso y el clic, el servidor contesta pidiendo
+   «Seguir igualmente»: se pregunta y se repite con el sí. */
+async function conAvisoDeCupo(lanzar, extra) {
+  try {
+    return await lanzar(extra || {});
+  } catch (e) {
+    if (!/Seguir igualmente/.test(e.message || '') || (extra || {}).aunque_cupo) throw e;
+    if (!confirm(`⚠ ${e.message.replace(/ Confirma que quieres «Seguir igualmente».*$/, '')}\n\nPulsa «Aceptar» para seguir igualmente.`)) return null;
+    return lanzar(Object.assign({}, extra || {}, { aunque_cupo: true }));
+  }
+}
+
+function bloqueVariasCuentas() {
+  const sel = seleccionCuentas();
+  if (!sel.size && !PAR.conjunto && !(PAR.temasDe === PAR.cid && PAR.temas)) {
+    if (hayProyectoParrilla() && PAR.temasDe !== PAR.cid && !PAR.temasCargando) setTimeout(cargarTemasPropuestos, 0);
+    return null;
+  }
+  const caja = h('div', { clase: 'bloque varias-cuentas' });
+  const ocupado = PAR.conjuntoTrabajo && PAR.conjuntoTrabajo.estado === 'trabajando';
+  // al volver a Automatizar con un trabajo en marcha, se vuelve a preguntar por él
+  if (ocupado && !PAR.conjuntoReloj) setTimeout(vigilarConjunto, 0);
+  const demasiadas = sel.size > MAX_CUENTAS_JUNTAS;
+  caja.appendChild(h('div', { clase: 'fila' }, h('h3', {}, 'Analizar varias cuentas juntas'), h('span', { clase: 'crece' }),
+    h('button', { clase: 'primario', disabled: (ocupado || sel.size < 2 || demasiadas) ? true : null,
+      onclick: () => analizarSeleccionadas() }, `Analizar seleccionadas (${sel.size})`)));
+  caja.appendChild(h('div', { clase: 'pista' }, sel.size < 2
+    ? 'Marca al menos 2 cuentas en «Ya leídas». Se comparan con sus cifras relativas: una cuenta grande no manda solo por su tamaño.'
+    : demasiadas ? `Como mucho ${MAX_CUENTAS_JUNTAS} cuentas a la vez: quita ${sel.size - MAX_CUENTAS_JUNTAS}.`
+      : `Marcadas: ${[...sel].map(k => '@' + k.split(':')[1]).join(', ')}.`));
+  const t = PAR.conjuntoTrabajo;
+  if (t && t.estado === 'trabajando') {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' }, h('span', { clase: 'girando', 'aria-hidden': 'true' }),
+      h('span', { clase: 'crece' }, `${t.avance || 'trabajando'}… (suele tardar de 30 s a 2 min)`)));
+  } else if (t && t.estado === 'error') {
+    caja.appendChild(h('div', { clase: 'caja-error texto-error-cuenta' }, t.error));
+  }
+  if (PAR.conjunto) caja.appendChild(resultadoConjunto(PAR.conjunto));
+  const temas = bloqueTemasPropuestos();
+  if (temas) caja.appendChild(temas);
+  return caja;
+}
+
+async function analizarSeleccionadas() {
+  const cuentas = [...seleccionCuentas()];
+  try {
+    const previo = await pedir(rutaConjuntos('/ultimo'), { method: 'POST', cuerpo: { cuentas } });
+    if (previo.analisis && confirm(`Ya analizaste estas mismas cuentas el ${String(previo.analisis.al || '').replace('T', ' ').slice(0, 16)}.\n`
+      + '¿Usar ese análisis (gratis)? Pulsa «Cancelar» para hacer uno nuevo.')) {
+      PAR.conjunto = previo.analisis;
+      PAR.comparacion = null;
+      pintarModulo();
+      return;
+    }
+    const plan = await pedir(rutaConjuntos('/plan'), { method: 'POST', cuerpo: { cuentas } });
+    const si = confirmarEnvioClaude(plan, `Analizar juntas ${plan.n_cuentas} cuentas.`);
+    if (!si) return;
+    const t = await conAvisoDeCupo(extra => pedirTrabajoParrilla(rutaConjuntos(), Object.assign({ cuentas }, extra)), si);
+    if (!t) return;
+    PAR.conjuntoTrabajo = t;
+    pintarModulo();
+    vigilarConjunto();
+  } catch (e) { toast(e.message, true); }
+}
+
+function vigilarConjunto() {
+  clearTimeout(PAR.conjuntoReloj);
+  PAR.conjuntoReloj = null;
+  const t = PAR.conjuntoTrabajo;
+  if (!t || MODULOS.actual !== 'automatizar') return;
+  if (t.estado !== 'trabajando') { if (!t.visto) conjuntoAcabado(t); return; }
+  PAR.conjuntoReloj = setTimeout(async () => {
+    PAR.conjuntoReloj = null;
+    try {
+      PAR.conjuntoTrabajo = await pedirTrabajoParrilla(rutaConjuntos(`/trabajos/${encodeURIComponent(t.id)}`));
+    } catch (e) {
+      if (e.status === 404) PAR.conjuntoTrabajo = Object.assign({}, t, { estado: 'error', error: 'el servidor ya no conoce ese trabajo: vuelve a lanzarlo' });
+    }
+    repintarParrillaSinPisar();
+    vigilarConjunto();
+  }, 2000);
+}
+
+async function conjuntoAcabado(t) {
+  PAR.conjuntoTrabajo = Object.assign({}, t, { visto: true });
+  if (t.estado === 'listo' && t.analisis) {
+    try { PAR.conjunto = await pedir(rutaConjuntos(`/${encodeURIComponent(t.analisis)}`)); toast('análisis de las cuentas listo'); } catch (e) { toast(e.message, true); }
+    PAR.conjHistorial = null;          // hay uno nuevo: la lista se vuelve a pedir
+    PAR.comparacion = null;
+  }
+  repintarParrillaSinPisar();
+}
+
+function pruebasConjunto(pruebas) {
+  return h('div', { clase: 'pruebas-conjunto' }, h('span', { clase: 'meta' }, 'Pruebas:'),
+    (pruebas || []).map(p => p.url
+      ? h('a', { clase: 'pastilla prueba', href: p.url, target: '_blank', rel: 'noopener noreferrer', title: p.texto || '' },
+        `${p.ref}${p.rel != null ? ` ×${decimalCuenta(p.rel, 1)}` : ''}`)
+      : h('span', { clase: 'pastilla prueba', title: p.texto || '' }, p.ref)));
+}
+
+function resultadoConjunto(a) {
+  const r = a.resultado || {};
+  const caja = h('div', { clase: 'resultado-conjunto' });
+  caja.appendChild(h('div', { clase: 'meta' }, `${(a.cuentas || []).map(c => '@' + c.usuario).join(', ')} · ${a.videos || 0} vídeos · `
+    + `analizado el ${String(a.al || '').replace('T', ' ').slice(0, 16)}`));
+  if (r.resumen) caja.appendChild(h('p', { clase: 'resumen-conjunto' }, r.resumen));
+  const seccion = (titulo, pista, items, pinta) => {
+    if (!(items || []).length) return;
+    caja.appendChild(h('h4', {}, titulo));
+    if (pista) caja.appendChild(h('div', { clase: 'pista' }, pista));
+    items.forEach(x => caja.appendChild(pinta(x)));
+  };
+  const item = (titulo, texto, extra, pruebas) => h('div', { clase: 'item-conjunto' },
+    h('div', {}, h('b', {}, titulo), extra ? h('span', { clase: 'meta' }, ` · ${extra}`) : null),
+    texto ? h('div', {}, texto) : null, pruebasConjunto(pruebas));
+  seccion('Fórmulas que se repiten en varias cuentas', 'Las más fiables: funcionan en más de una cuenta.', r.formulas_comunes,
+    f => item(f.nombre, f.descripcion, (f.cuentas || []).map(c => '@' + c).join(', '), f.pruebas));
+  seccion('Fórmulas que funcionan solo en una', 'Pueden ser de esa cuenta y no de la fórmula: pruébalas con cuidado.', r.formulas_unicas,
+    f => item(f.nombre, f.descripcion, `solo @${f.cuenta}`, f.pruebas));
+  seccion('Temas saturados', 'Muchas cuentas los hacen: si los usas, busca otro ángulo.', r.temas_saturados,
+    t => item(t.tema, t.por_que, '', t.pruebas));
+  seccion('Temas libres', 'Funcionan y casi nadie los hace.', r.temas_libres, t => item(t.tema, t.por_que, '', t.pruebas));
+  seccion('Todos los temas, agrupados', 'El mismo tema en varias cuentas cuenta como uno. Las vistas son la suma de sus vídeos de prueba.',
+    r.temas, t => item(t.tema, '', cifrasTemaConjunto(t), t.pruebas));
+  seccion('Ganchos que mejor funcionan', 'Cómo empiezan los vídeos que más funcionan, del mejor al peor, con ejemplos.',
+    r.ganchos, g => h('div', { clase: 'item-conjunto' },
+      h('div', {}, h('b', {}, g.gancho), h('span', { clase: 'meta' }, ` · ${cifrasGanchoConjunto(g)}`)),
+      g.descripcion ? h('div', {}, g.descripcion) : null, ejemplosGancho(g.ejemplos)));
+  if (!('temas' in r)) caja.appendChild(h('div', { clase: 'pista' }, 'Este análisis es de antes de los temas agrupados y los ganchos: haz uno nuevo para verlos.'));
+  if (r.quitadas) caja.appendChild(h('div', { clase: 'pista' }, `${r.quitadas} conclusión(es) de Claude se quitaron porque no citaban ningún vídeo que exista.`));
+  caja.appendChild(bloqueCompararConjuntos(a));
+  caja.appendChild(bloqueProponerTemas(a));
+  return caja;
+}
+
+/* ------------------------- tercera vuelta (rama cuentas-gustan-3, 02-11-2026) */
+
+function fechaConjunto(al) { return String(al || '').replace('T', ' ').slice(0, 16); }
+
+function cuentasCortas(cuentas) { return (cuentas || []).map(c => '@' + (typeof c === 'string' ? c : c.usuario)).join(', '); }
+
+function cifrasTemaConjunto(t) {
+  return [`${t.n_cuentas} cuenta${t.n_cuentas === 1 ? '' : 's'}: ${cuentasCortas(t.cuentas)}`,
+    t.vistas_total != null ? `${cifraCorta(t.vistas_total)} vistas en ${t.n_videos} vídeo${t.n_videos === 1 ? '' : 's'}` : '',
+    t.rel_media != null ? `×${decimalCuenta(t.rel_media, 1)} su mediana` : ''].filter(Boolean).join(' · ');
+}
+
+function cifrasGanchoConjunto(g) {
+  return [g.rel_media != null ? `×${decimalCuenta(g.rel_media, 1)} su mediana de media` : '',
+    `${g.n_cuentas} cuenta${g.n_cuentas === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
+}
+
+function ejemplosGancho(ejemplos) {
+  return h('div', { clase: 'ejemplos-gancho' }, (ejemplos || []).map(p => h('div', { clase: 'ejemplo-gancho' },
+    p.url ? h('a', { clase: 'pastilla prueba', href: p.url, target: '_blank', rel: 'noopener noreferrer' },
+      `${p.ref}${p.rel != null ? ` ×${decimalCuenta(p.rel, 1)}` : ''}`) : h('span', { clase: 'pastilla prueba' }, p.ref),
+    h('span', { clase: 'meta crece' }, p.texto ? `«${recortar(p.texto, 110)}»` : ''))));
+}
+
+async function cargarHistorialConjuntos() {
+  if (PAR.conjHistorialCargando) return;
+  PAR.conjHistorialCargando = true;
+  try { PAR.conjHistorial = (await pedir(rutaConjuntos('/historial'))).analisis || []; PAR.conjHistorialError = ''; }
+  catch (e) { PAR.conjHistorial = []; PAR.conjHistorialError = e.message || 'no se pudo leer'; }
+  finally { PAR.conjHistorialCargando = false; }
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
+}
+
+function bloqueCompararConjuntos(a) {
+  const caja = h('div', { clase: 'comparar-conjuntos' }, h('h4', {}, 'Análisis guardados y comparación'));
+  if (!PAR.conjHistorial) {
+    setTimeout(cargarHistorialConjuntos, 0);
+    caja.appendChild(h('div', { clase: 'pista' }, 'Cargando los análisis guardados…'));
+    return caja;
+  }
+  if (PAR.conjHistorialError) {
+    caja.appendChild(h('div', { clase: 'caja-error fila' }, h('span', { clase: 'crece' }, `No se pudieron leer los análisis guardados: ${PAR.conjHistorialError}`),
+      h('button', { clase: 'mini', onclick: () => { PAR.conjHistorial = null; PAR.conjHistorialError = ''; pintarModulo(); } }, 'Reintentar')));
+    return caja;
+  }
+  const otros = PAR.conjHistorial.filter(x => x.id !== a.id);
+  if (!otros.length) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Es el único análisis guardado. Cuando hagas otro (por ejemplo, el mes que viene), aquí podrás compararlos: qué aparece, qué sigue y qué desaparece.'));
+    return caja;
+  }
+  if (!otros.some(x => x.id === PAR.conjOtro)) PAR.conjOtro = otros[0].id;
+  const elegir = h('select', { 'aria-label': 'Otro análisis', onchange: ev => { PAR.conjOtro = ev.target.value; } },
+    otros.map(x => h('option', { value: x.id, selected: x.id === PAR.conjOtro ? true : null },
+      `${fechaConjunto(x.al)} · ${cuentasCortas(x.cuentas)}`)));
+  elegir.dataset.foco = 'conjunto-otro';
+  caja.appendChild(h('div', { clase: 'fila' }, elegir,
+    h('button', { onclick: () => abrirConjunto(PAR.conjOtro) }, 'Abrir'),
+    h('button', { onclick: () => compararConjunto(a, PAR.conjOtro) }, 'Comparar con este'),
+    h('button', { clase: 'primario', onclick: () => compararConjunto(a, '') }, 'Comparar con el anterior')));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Comparar es gratis: no llama a Claude, mira qué nombres coinciden.'));
+  const c = PAR.comparacion;
+  if (c && c.vista_desde === a.id) caja.appendChild(resultadoComparacion(c));
+  return caja;
+}
+
+async function abrirConjunto(aid) {
+  if (!aid) return;
+  try { PAR.conjunto = await pedir(rutaConjuntos(`/${encodeURIComponent(aid)}`)); PAR.comparacion = null; pintarModulo(); }
+  catch (e) { toast(e.message, true); }
+}
+
+async function compararConjunto(a, con) {
+  try {
+    PAR.comparacion = await pedir(rutaConjuntos(`/${encodeURIComponent(a.id)}/comparar${con ? `?con=${encodeURIComponent(con)}` : ''}`));
+    if (!PAR.comparacion.con) toast('no hay un análisis anterior con esas cuentas: elige uno de la lista');
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+function resultadoComparacion(c) {
+  const caja = h('div', { clase: 'resultado-comparacion' });
+  if (!c.con) return caja;
+  caja.appendChild(h('div', { clase: 'meta' }, `Del análisis del ${fechaConjunto(c.con.al)} (${cuentasCortas(c.con.cuentas)}) `
+    + `al del ${fechaConjunto(c.analisis.al)}` + (c.misma_seleccion ? ', con las mismas cuentas.' : '. Ojo: no son exactamente las mismas cuentas.')
+    + (c.invertido ? ' (El que elegiste es el más nuevo: «Aparecen» es lo que tiene él y no este.)' : '')));
+  if (!c.temas_agrupados) caja.appendChild(h('div', { clase: 'pista' }, 'Uno de los dos es de antes de los temas agrupados: en Temas se comparan los saturados y libres de los dos.'));
+  const cifra = (tipo, n) => n == null ? '' : tipo === 'vistas' ? `${cifraCorta(n)} vistas`
+    : tipo === 'rel' ? `×${decimalCuenta(n, 1)}` : `${n} cuenta${n === 1 ? '' : 's'}`;
+  const nombres = { formulas: 'Fórmulas', temas: 'Temas', ganchos: 'Ganchos' };
+  Object.keys(nombres).forEach(que => {
+    const s = (c.secciones || {})[que];
+    if (!s) return;
+    const lista = (titulo, clase, items, texto) => items.length ? h('div', { clase: `cambio-conjunto ${clase}` },
+      h('b', {}, `${titulo} (${items.length})`), h('ul', {}, items.map(x => h('li', {}, texto(x))))) : null;
+    const vacio = !s.aparecen.length && !s.siguen.length && !s.desaparecen.length;
+    caja.appendChild(h('div', { clase: 'seccion-comparacion' }, h('h5', {}, nombres[que]),
+      vacio ? h('div', { clase: 'pista' }, 'Ninguno en los dos análisis.') : null,
+      s.antes_sin_datos ? h('div', { clase: 'pista' }, 'El análisis anterior es de antes de que se midieran los ganchos: todos salen como nuevos.') : null,
+      lista('Aparecen', 'aparece', s.aparecen, x => x.nombre + (x.cifra != null ? ` · ${cifra(s.cifra, x.cifra)}` : '')),
+      lista('Siguen', 'sigue', s.siguen, x => x.nombre + (x.antes && x.antes !== x.nombre ? ` (antes: «${x.antes}»)` : '')
+        + (x.cifra != null || x.cifra_antes != null ? ` · ${cifra(s.cifra, x.cifra_antes) || '—'} → ${cifra(s.cifra, x.cifra) || '—'}` : '')),
+      lista('Desaparecen', 'desaparece', s.desaparecen, x => x.nombre + (x.cifra != null ? ` · ${cifra(s.cifra, x.cifra)}` : ''))));
+  });
+  return caja;
+}
+
+/* Las cuentas propias del proyecto: lo publicado en ellas entra en el cruce
+   «ya lo tienes» al proponer temas. Se leen igual que las ajenas. */
+async function cargarCuentasPropias() {
+  if (!hayProyectoParrilla() || PAR.propiasCargando) return;
+  const cid = PAR.cid;
+  PAR.propiasCargando = true;
+  try {
+    const r = await pedir(rutaProyectoParrilla('/cuentas-propias'));
+    if (cid === PAR.cid) PAR.propias = { cid, cuentas: r.cuentas || [], maximo: r.maximo || 5 };
+  } catch (e) {
+    // sin la lista no se ofrece cambiarla: guardar pisaría lo que hay (revisión 02-11)
+    if (cid === PAR.cid) PAR.propias = { cid, cuentas: [], maximo: 5, error: e.message || 'no se pudo leer' };
+  } finally { PAR.propiasCargando = false; }
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
+}
+
+async function guardarCuentasPropias(claves) {
+  const cid = PAR.cid;
+  try {
+    const r = await pedir(rutaProyectoParrilla('/cuentas-propias'), { method: 'PUT', cuerpo: { cuentas: claves } });
+    // si mientras tanto se cambió de proyecto, la respuesta no es de este
+    if (cid === PAR.cid) { PAR.propias = { cid, cuentas: r.cuentas || [], maximo: r.maximo || 5 }; pintarModulo(); }
+  } catch (e) { toast(e.message, true); }
+}
+
+function bloqueCuentasPropias() {
+  const caja = h('div', { clase: 'cuentas-propias' });
+  if (!PAR.propias || PAR.propias.cid !== PAR.cid) {
+    setTimeout(cargarCuentasPropias, 0);
+    return caja;
+  }
+  if (PAR.propias.error) {
+    caja.appendChild(h('div', { clase: 'caja-error fila' }, h('span', { clase: 'crece' }, `No se pudieron leer tus cuentas: ${PAR.propias.error}`),
+      h('button', { clase: 'mini', onclick: () => { PAR.propias = null; pintarModulo(); } }, 'Reintentar')));
+    return caja;
+  }
+  const propias = PAR.propias.cuentas;
+  const claves = propias.map(claveCuenta);
+  const leidas = ((PAR.cuentas || {}).cuentas || []).filter(c => !claves.includes(claveCuenta(c)));
+  caja.appendChild(h('div', { clase: 'fila' }, h('b', {}, 'Tus cuentas'),
+    propias.length ? propias.map(c => h('span', { clase: `pastilla ${c.leida ? '' : 'aviso'}` },
+      `@${c.usuario} (${c.red})${c.leida ? ` · ${c.videos} publicaciones` : ' · ya no está leída'}`,
+      h('button', { clase: 'mini', 'aria-label': `Quitar @${c.usuario}`, title: 'Quitar',
+        onclick: () => guardarCuentasPropias(claves.filter(k => k !== claveCuenta(c))) }, '✕')))
+      : h('span', { clase: 'meta' }, 'ninguna'),
+    leidas.length && propias.length < PAR.propias.maximo ? h('select', { 'aria-label': 'Añadir una cuenta tuya',
+      onchange: ev => { if (ev.target.value) guardarCuentasPropias(claves.concat([ev.target.value])); } },
+      [h('option', { value: '' }, '+ Añadir una tuya…')].concat(leidas.map(c => h('option', { value: claveCuenta(c) }, `@${c.usuario} (${c.red})`))))
+      : null));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Lo que ya publicaste en tus cuentas también cuenta como «ya lo tienes». '
+    + 'Para añadir una, léela antes arriba como cualquier otra cuenta.'));
+  return caja;
+}
+
+/* -------------------------------------------------- proponer temas */
+
+function rutaTemas(resto) { return rutaProyectoParrilla(`/temas${resto || ''}`); }
+
+function bloqueProponerTemas(a) {
+  if (PAR.temasCuantos == null) PAR.temasCuantos = 10;
+  const caja = h('div', { clase: 'proponer-temas' }, h('h4', {}, 'Proponer temas'));
+  if (!hayProyectoParrilla()) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' }, 'Elige arriba un proyecto: los temas se comparan con su Parrilla y los guiones van allí.'));
+    return caja;
+  }
+  // el trabajo de proponer es de UN proyecto: en otro no se enseña ni apaga nada
+  const t = PAR.temasTrabajo && PAR.temasTrabajo.cid === PAR.cid ? PAR.temasTrabajo : null;
+  const ocupado = t && t.estado === 'trabajando';
+  if (ocupado && !PAR.temasReloj) setTimeout(vigilarTemas, 0);
+  const cuantos = h('input', { type: 'number', min: 1, max: 30, value: PAR.temasCuantos, clase: 'numero-corto',
+    'aria-label': 'Cuántos temas', oninput: ev => { PAR.temasCuantos = ev.target.value; } });
+  cuantos.dataset.foco = 'temas-cuantos';
+  caja.appendChild(h('div', { clase: 'fila' }, h('label', {}, 'Temas'), cuantos,
+    h('button', { clase: 'primario', disabled: ocupado ? true : null, onclick: () => proponerTemas(a) }, 'Proponer temas'),
+    h('span', { clase: 'pista crece' }, `Para ${nombreProyectoParrilla() || 'este proyecto'}. Solo ideas, sin guiones: luego tú apruebas cuáles se escriben.`)));
+  caja.appendChild(bloqueCuentasPropias());
+  if (t && t.estado === 'trabajando') {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' }, h('span', { clase: 'girando', 'aria-hidden': 'true' }),
+      h('span', { clase: 'crece' }, `${t.avance || 'trabajando'}…`)));
+  } else if (t && t.estado === 'error') {
+    caja.appendChild(h('div', { clase: 'caja-error texto-error-cuenta' }, t.error));
+  }
+  return caja;
+}
+
+async function proponerTemas(a) {
+  const n = Number(PAR.temasCuantos);
+  if (!Number.isInteger(n) || n < 1 || n > 30) { toast('pide de 1 a 30 temas', true); return; }
+  try {
+    const plan = await pedir(rutaTemas('/plan'), { method: 'POST', cuerpo: { analisis: a.id, cuantos: n } });
+    const extra = plan.hay_propuesta ? '\nLa propuesta de temas que ya tienes en este proyecto se sustituye (los guiones ya escritos se quedan).' : '';
+    const si = confirmarEnvioClaude(plan, `Proponer ${n} temas para ${nombreProyectoParrilla() || 'este proyecto'}.`
+      + ` Se comparan con ${plan.existentes} guiones, vídeos y publicaciones que ya tiene`
+      + `${plan.publicados ? ` (${plan.publicados} de tus cuentas)` : ''}.${extra}`);
+    if (!si) return;
+    const t = await conAvisoDeCupo(mas => pedirTrabajoParrilla(rutaTemas(), Object.assign({ analisis: a.id, cuantos: n }, mas)), si);
+    if (!t) return;
+    PAR.temasTrabajo = t;
+    pintarModulo();
+    vigilarTemas();
+  } catch (e) { toast(e.message, true); }
+}
+
+function vigilarTemas() {
+  clearTimeout(PAR.temasReloj);
+  PAR.temasReloj = null;
+  const t = PAR.temasTrabajo;
+  if (!t || MODULOS.actual !== 'automatizar') return;
+  if (t.estado !== 'trabajando') {
+    if (!t.visto) {
+      PAR.temasTrabajo = Object.assign({}, t, { visto: true });
+      if (t.estado === 'listo' && t.cid === PAR.cid) { toast('temas propuestos: revísalos abajo'); cargarTemasPropuestos(true); }
+      else if (t.estado === 'listo') PAR.temasDe = '';      // de otro proyecto: se leerán al volver a él
+      repintarParrillaSinPisar();
+    }
+    return;
+  }
+  PAR.temasReloj = setTimeout(async () => {
+    PAR.temasReloj = null;
+    try {
+      PAR.temasTrabajo = await pedirTrabajoParrilla(`${BASE}/api/parrilla/temas/trabajos/${encodeURIComponent(t.id)}`);
+    } catch (e) {
+      if (e.status === 404) PAR.temasTrabajo = Object.assign({}, t, { estado: 'error', error: 'el servidor ya no conoce ese trabajo: vuelve a lanzarlo' });
+    }
+    repintarParrillaSinPisar();
+    vigilarTemas();
+  }, 2000);
+}
+
+async function cargarTemasPropuestos(forzar) {
+  if (!hayProyectoParrilla() || (PAR.temasCargando && !forzar)) return;
+  const cid = PAR.cid;
+  PAR.temasCargando = true;
+  try {
+    const r = await pedir(rutaTemas());
+    if (cid === PAR.cid) { PAR.temas = r.propuesta; PAR.temasDe = cid; PAR.temasCupo = r.cupo || null; }
+  } catch (e) {
+    if (cid === PAR.cid) { PAR.temas = null; PAR.temasDe = cid; }
+  } finally {
+    PAR.temasCargando = false;
+  }
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
+}
+
+const NIVEL_CRUCE = { nuevo: ['nuevo', 'ok'], parecido: ['parecido', 'aviso'], repetido: ['repetido', 'error'] };
+const ESTADO_TEMA = { pendiente: 'por revisar', aprobado: '✓ aprobado', descartado: 'descartado' };
+
+/* Los cambios de los temas van DE UNO EN UNO (escribir en un campo y pulsar
+   «Aprobar» manda dos): así ninguno pisa al otro y la pantalla se queda con
+   la respuesta del último (revisión del 01-11-2026). */
+function cambiarTema(tid, cambios) {
+  const ruta = rutaTemas(`/${encodeURIComponent(tid)}`);
+  const cid = PAR.cid;
+  PAR.temasCola = (PAR.temasCola || Promise.resolve()).then(async () => {
+    try {
+      const r = await pedir(ruta, { method: 'PUT', cuerpo: cambios });
+      if (cid === PAR.cid) PAR.temas = r.propuesta;
+    } catch (e) { toast(e.message, true); }
+    repintarParrillaSinPisar();
+  });
+  return PAR.temasCola;
+}
+
+function campoTema(t, campo, etiqueta, largo) {
+  const entrada = h('input', { type: 'text', value: t[campo] || '', 'aria-label': etiqueta, maxlength: 300,
+    clase: largo ? 'largo' : '', disabled: t.guion ? true : null,
+    onchange: ev => { if (ev.target.value.trim() !== (t[campo] || '')) cambiarTema(t.id, { [campo]: ev.target.value }); } });
+  entrada.dataset.foco = `tema-${t.id}-${campo}`;
+  return h('label', { clase: `campo-tema${largo ? ' ancho' : ''}` }, h('span', { clase: 'meta' }, etiqueta), entrada);
+}
+
+function tarjetaTema(t) {
+  const [nivel, clase] = NIVEL_CRUCE[(t.cruce || {}).nivel] || NIVEL_CRUCE.nuevo;
+  const caja = h('div', { clase: `tarjeta-tema estado-${t.estado}${t.guion ? ' escrito' : ''}` });
+  caja.appendChild(h('div', { clase: 'fila cab-tema' },
+    h('span', { clase: `pastilla ${t.estado === 'aprobado' ? 'ok' : ''}` }, t.guion ? '✓ guion escrito' : ESTADO_TEMA[t.estado] || t.estado),
+    h('span', { clase: `pastilla ${clase}`, title: (t.cruce || {}).con ? `se cruza con: ${t.cruce.con}` : 'no se parece a nada del proyecto' },
+      nivel + ((t.cruce || {}).con ? ` · ${recortar(t.cruce.con, 50)}` : '')),
+    t.editado ? h('span', { clase: 'meta' }, 'editado') : null,
+    h('span', { clase: 'crece' }),
+    t.guion ? null : h('button', { clase: t.estado === 'aprobado' ? 'mini' : 'mini primario', disabled: t.grupo !== 'propuesta' ? true : null,
+      onclick: () => cambiarTema(t.id, { estado: t.estado === 'aprobado' ? 'pendiente' : 'aprobado' }) },
+    t.estado === 'aprobado' ? 'Quitar aprobación' : 'Aprobar'),
+    t.guion || t.estado === 'descartado' ? null : h('button', { clase: 'mini fantasma', onclick: () => cambiarTema(t.id, { estado: 'descartado' }) }, 'Descartar'),
+    !t.guion && t.estado === 'descartado' ? h('button', { clase: 'mini fantasma', onclick: () => cambiarTema(t.id, { estado: 'pendiente' }) }, 'Recuperar') : null));
+  caja.appendChild(h('div', { clase: 'campos-tema' }, campoTema(t, 'tema', 'Tema', true), campoTema(t, 'gancho', 'Gancho', true),
+    campoTema(t, 'tipo_video', 'Tipo de vídeo'), campoTema(t, 'espacio', 'Espacio'), campoTema(t, 'problema', 'Problema que resuelve', true)));
+  caja.appendChild(h('div', { clase: 'meta' }, [t.formula ? `Fórmula: ${t.formula}` : '',
+    t.duracion ? `Duración sugerida: ${t.duracion}` : 'Duración: sin datos suficientes para sugerirla'].filter(Boolean).join(' · ')));
+  if (t.por_que) caja.appendChild(h('div', { clase: 'por-que-tema' }, h('b', {}, 'Por qué: '), t.por_que));
+  caja.appendChild(pruebasConjunto(t.referencias));
+  if ((t.unido_con || []).length) caja.appendChild(h('div', { clase: 'pista' }, `Unido con otra idea casi igual: «${t.unido_con.join('», «')}».`));
+  if ((t.avisos_copia || []).length) {
+    caja.appendChild(h('div', { clase: 'caja-aviso aviso-copia' }, h('b', {}, '⚠ El guion repite frases de un vídeo original. Cámbialas en la Parrilla:'),
+      h('ul', {}, t.avisos_copia.map(f => h('li', {}, `«${f}»`)))));
+  }
+  return caja;
+}
+
+function bloqueTemasPropuestos() {
+  if (!hayProyectoParrilla()) return null;
+  // los guiones de los temas aprobados acaban de escribirse: se vuelven a leer marcados
+  const t = PAR.trabajo;
+  if (t && t.tipo === 'temas' && t.estado !== 'trabajando' && PAR.temasVisto !== t.id) {
+    PAR.temasVisto = t.id;
+    PAR.temasDe = '';
+  }
+  if (PAR.temasDe !== PAR.cid) { if (!PAR.temasCargando) setTimeout(cargarTemasPropuestos, 0); return null; }
+  const p = PAR.temas;
+  if (!p || !(p.temas || []).length) return null;
+  const propuesta = p.temas.filter(t => t.grupo === 'propuesta');
+  const repetidos = p.temas.filter(t => t.grupo === 'repetido');
+  const variedad = p.temas.filter(t => t.grupo === 'variedad');
+  const aprobados = propuesta.filter(t => t.estado === 'aprobado' && !t.guion);
+  const escritos = propuesta.filter(t => t.guion).length;
+  const caja = h('div', { clase: 'temas-propuestos' });
+  caja.appendChild(h('div', { clase: 'fila' }, h('h3', {}, `Temas para ${nombreProyectoParrilla() || 'este proyecto'}`),
+    h('span', { clase: 'meta crece' }, `de ${(p.cuentas || []).map(c => '@' + c.usuario).join(', ')} · propuestos el `
+      + `${String(p.creada || '').replace('T', ' ').slice(0, 16)}`)));
+  caja.appendChild(h('div', { clase: 'pista' }, `${propuesta.length} temas · ${aprobados.length} aprobados por escribir`
+    + (escritos ? ` · ${escritos} ya escritos` : '') + `. Como mucho ${(p.limites || {}).por_cuenta || 3} por cuenta y `
+    + `${(p.limites || {}).por_formula || 2} por fórmula, y cada uno en un espacio distinto.`));
+  propuesta.forEach(t => caja.appendChild(tarjetaTema(t)));
+  const plegado = (titulo, lista) => {
+    if (!lista.length) return;
+    caja.appendChild(h('details', { clase: 'temas-fuera' }, h('summary', {}, `${titulo} (${lista.length})`),
+      lista.map(t => h('div', { clase: 'fila tema-fuera' }, h('div', { clase: 'crece' }, h('b', {}, t.tema), h('div', { clase: 'meta' }, t.motivo || '')),
+        h('button', { clase: 'mini', onclick: () => cambiarTema(t.id, { incluir: true }) }, 'Incluir igualmente')))));
+  };
+  plegado('Repetidos: ya están en el proyecto y no se incluyen', repetidos);
+  plegado('No entran por variedad', variedad);
+  const ocupado = PAR.trabajo && PAR.trabajo.estado === 'trabajando';
+  const uso = h('select', { 'aria-label': 'Uso de los guiones', onchange: ev => { PAR.temasModo = ev.target.value; } },
+    [['adaptar', 'adaptar'], ['exacto', 'exacto']].map(([v, t]) => h('option', { value: v, selected: (PAR.temasModo || 'adaptar') === v ? true : null }, t)));
+  caja.appendChild(h('div', { clase: 'fila escribir-temas' },
+    h('label', {}, 'Uso'), uso,
+    h('button', { clase: 'primario', disabled: (!aprobados.length || ocupado) ? true : null, onclick: () => escribirTemasAprobados(aprobados.length) },
+      `Escribir guiones aprobados (${aprobados.length})`),
+    h('span', { clase: 'pista crece' }, aprobados.length ? `Van a la Parrilla de ${nombreProyectoParrilla()}. Nada se escribe hasta que lo pulses.`
+      : 'Aprueba los temas que quieras: solo esos se escriben.')));
+  return caja;
+}
+
+async function escribirTemasAprobados(n) {
+  if (!hayProyectoParrilla()) { toast('elige un proyecto: los guiones van a su Parrilla', true); return; }
+  // un campo a medio editar se guarda antes (sale del campo y espera la cola)
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  await (PAR.temasCola || Promise.resolve());
+  const nombre = nombreProyectoParrilla();
+  const cupoMalo = PAR.temasCupo && PAR.temasCupo.malo;
+  const aviso = cupoMalo ? `⚠ ${textoCupo(PAR.temasCupo)} Si sigues, puede cortarse a medias; si pasa, no se pierde nada.\n\n` : '';
+  if (!confirm(`${aviso}Se escribirán ${n} guion${n === 1 ? '' : 'es'} y se añadirán a la Parrilla de «${nombre}».\n`
+    + `Claude los escribe con tu membresía (no se paga aparte).${cupoMalo ? '' : ` ${textoCupo(PAR.temasCupo)}`}\n\n`
+    + (cupoMalo ? 'Pulsa «Aceptar» para seguir igualmente.' : '¿Seguir?'))) return;
+  try {
+    const t = await conAvisoDeCupo(mas => pedir(rutaTemas('/escribir'), { method: 'POST',
+      cuerpo: Object.assign({ confirmado: true, modo: PAR.temasModo || 'adaptar' }, mas) }), cupoMalo ? { aunque_cupo: true } : {});
+    if (!t) return;
+    PAR.trabajo = t;
+    toast(`Claude está escribiendo ${n} guion${n === 1 ? '' : 'es'}: aparecerán en la Parrilla`);
+    pintarModulo();
+    vigilarTrabajoParrilla();
+  } catch (e) { toast(e.message, true); }
 }
 
 montarModulos();
@@ -32150,4 +33280,324 @@ function bloqueMejoresPublicar() {
     b.appendChild(h('div', { clase: 'meta' }, `Solo publicaciones con ${r.minimo_vistas} vistas o más.`));
   }
   return b;
+}
+
+
+/* ===================================================== LA FICHA DEL NEGOCIO
+ *
+ * Etapa Foto C (21-10-2026, decisiones del dueño: «nada de un cliente metido en
+ * el código» y «el negocio es del proyecto, no de Configuración»). Cada
+ * proyecto (cliente) tiene SU ficha del negocio: qué hace, sus reglas de foto y
+ * lo que vigila el revisor (`pasos/dominios.py`, `/api/clientes/{cid}/negocio`).
+ * Todos los estilos del proyecto la usan solos; en la pestaña «Reglas» de cada
+ * estilo se ve, sin editarla, encima de las reglas propias del estilo.
+ *
+ * DOS SITIOS: la sección «Ficha del negocio» del cajón «⚙ Ajustes del proyecto»
+ * (`SECCIONES_AJUSTES_PROYECTO`, junto al logo) y `bloqueNegocioDelEstilo` en
+ * «Reglas», cuyo «✎ Editar la ficha» abre ese cajón.
+ *
+ * El editor NO se guarda solo, a diferencia de las reglas del estilo: cambiar la
+ * ficha de un proyecto con vídeos de foto deja sus imágenes para rehacer, así
+ * que guardar es un botón y se dice antes. */
+const NEGOCIOS = { porCliente: {}, cargando: {}, fallo: {}, borrador: null, deCliente: '',
+  guardando: false, afinando: {} };
+
+/* La ficha de un proyecto: undefined mientras se lee, null si no tiene. Un
+   fallo al leerla NO se guarda como «no tiene» (se enseñaría vacía y guardar
+   borraría la de verdad): se dice y se ofrece reintentar. */
+function negocioDe(cid) {
+  if (!cid || cid === '_sin') return null;
+  if (cid in NEGOCIOS.porCliente) return NEGOCIOS.porCliente[cid];
+  if (NEGOCIOS.fallo[cid]) return undefined;
+  if (!NEGOCIOS.cargando[cid]) {
+    NEGOCIOS.cargando[cid] = true;
+    pedir(`${BASE}/api/clientes/${encodeURIComponent(cid)}/negocio`)
+      .then(r => { NEGOCIOS.porCliente[cid] = r.negocio || null; delete NEGOCIOS.fallo[cid]; })
+      .catch(err => { NEGOCIOS.fallo[cid] = err.message || 'no se ha podido leer'; })
+      .finally(() => { delete NEGOCIOS.cargando[cid]; pintarLight(); });
+  }
+  return undefined;
+}
+
+function reintentarNegocio(cid) {
+  delete NEGOCIOS.fallo[cid];
+  pintarLight();
+}
+
+function borradorDeNegocio(negocio) {
+  const n = negocio || {};
+  return {
+    nombre: n.nombre || '',
+    reglas: (n.reglas || []).map((r, i) => ({
+      id: r.id || `r${i + 1}`, texto: r.texto || '', en: r.en || '', enDe: r.texto || '',
+      palabras: (r.palabras || []).join(', '), nombre: r.nombre || '',
+      gravedad: r.gravedad || 'media',
+    })),
+    equipo: (n.revisor || {}).equipo || '',
+    orientacion: (n.revisor || {}).orientacion || '',
+  };
+}
+
+function separarPalabras(texto) {
+  return String(texto || '').split(',').map(p => p.trim()).filter(Boolean);
+}
+
+async function guardarNegocio(cliente) {
+  const b = NEGOCIOS.borrador;
+  if (!b || NEGOCIOS.guardando) return;
+  if (!String(b.nombre).trim()) { toast('escribe qué hace este negocio', true); return; }
+  const cuerpo = {
+    nombre: b.nombre,
+    reglas: b.reglas.filter(r => String(r.texto || '').trim()).map(r => ({
+      id: r.id, texto: r.texto, en: r.en || '', nombre: r.nombre || '',
+      gravedad: r.gravedad || 'media', palabras: separarPalabras(r.palabras),
+    })),
+    revisor: { equipo: b.equipo, orientacion: b.orientacion },
+  };
+  NEGOCIOS.guardando = true;
+  pintarLight();
+  try {
+    const r = await pedir(`${BASE}/api/clientes/${encodeURIComponent(cliente.id)}/negocio`,
+      { method: 'PUT', cuerpo });
+    NEGOCIOS.porCliente[cliente.id] = r.negocio;
+    NEGOCIOS.borrador = borradorDeNegocio(r.negocio);
+    toast(`Ficha del negocio guardada${r.estilos ? `: la usan sus ${r.estilos} estilo${r.estilos === 1 ? '' : 's'}` : ''}`);
+    await cargarGaleriaLight(true);
+  } catch (err) {
+    toast(`no se ha podido guardar: ${err.message}`, true);
+  }
+  NEGOCIOS.guardando = false;
+  pintarLight();
+}
+
+async function borrarNegocio(cliente) {
+  if (!window.confirm(`¿Quitar la ficha del negocio de «${cliente.nombre}»? Sus estilos volverán a lo general.`)) return;
+  try {
+    await pedir(`${BASE}/api/clientes/${encodeURIComponent(cliente.id)}/negocio`, { method: 'DELETE' });
+    NEGOCIOS.porCliente[cliente.id] = null;
+    NEGOCIOS.borrador = borradorDeNegocio(null);
+    toast('Ficha del negocio quitada');
+    await cargarGaleriaLight(true);
+  } catch (err) {
+    toast(`no se ha podido quitar: ${err.message}`, true);
+  }
+  pintarLight();
+}
+
+/* COPIAR LA DE OTRO PROYECTO: se trae al editor, y se guarda con «Guardar». */
+async function copiarNegocioDeOtro(cliente) {
+  const otros = listaClientes().filter(c => c.id !== cliente.id && clienteAbierto(c));
+  if (!otros.length) { toast('no hay otro proyecto del que copiarla', true); return; }
+  const r = await dialogo({ titulo: 'Copiar la ficha de otro proyecto',
+    texto: 'Se trae a este editor; no se guarda hasta que pulses «Guardar la ficha».',
+    campos: [{ clave: 'cid', etiqueta: 'De qué proyecto', tipo: 'select', valor: otros[0].id,
+      opciones: otros.map(c => ({ valor: c.id, nombre: c.nombre })) }],
+    aceptar: 'Copiar' });
+  if (!r || !r.cid) return;
+  try {
+    const datos = await pedir(`${BASE}/api/clientes/${encodeURIComponent(r.cid)}/negocio`);
+    if (!datos.negocio) { toast('ese proyecto no tiene ficha del negocio', true); return; }
+    NEGOCIOS.borrador = borradorDeNegocio(datos.negocio);
+    toast('Copiada: revísala y pulsa «Guardar la ficha»');
+  } catch (err) {
+    toast(err.message, true);
+  }
+  pintarLight();
+}
+
+/* «AFINAR CON CLAUDE»: la misma ruta que las reglas del estilo; aquí solo se
+   usa la versión en inglés, que es lo que lee el generador. */
+async function afinarReglaDeNegocio(regla) {
+  if (!String(regla.texto || '').trim()) { toast('escribe primero lo que exige la regla', true); return; }
+  NEGOCIOS.afinando[regla.id] = true;
+  const textoPedido = regla.texto;
+  pintarLight();
+  try {
+    const r = await pedir(`${BASE}/api/reglas-estilo/afinar`, {
+      method: 'POST', cuerpo: { texto: textoPedido, palabras: separarPalabras(regla.palabras) } });
+    let listo = false;
+    for (let i = 0; i < 90 && !listo; i += 1) {
+      await new Promise(seguir => setTimeout(seguir, 2000));
+      const f = await pedir(`${BASE}/api/reglas-estilo/afinar/${encodeURIComponent(r.id)}`);
+      if (f.estado === 'listo') {
+        // escrita para el texto de ANTES: si lo cambiaste mientras tanto, no vale
+        if (regla.texto !== textoPedido) {
+          toast('Cambiaste la regla mientras Claude la afinaba: vuelve a pulsar «Afinar»', true);
+        } else {
+          regla.en = (f.propuesta || {}).en || regla.en;
+          regla.enDe = textoPedido;
+          if (!regla.nombre) regla.nombre = (f.propuesta || {}).nombre || '';
+        }
+        listo = true;
+      }
+      if (f.estado === 'error') { toast(`no se ha podido afinar: ${f.error || ''}`, true); listo = true; }
+    }
+    if (!listo) toast('Claude está tardando demasiado: vuelve a pulsar «Afinar» en un momento', true);
+  } catch (err) {
+    toast(`no se ha podido afinar: ${err.message}`, true);
+  }
+  delete NEGOCIOS.afinando[regla.id];
+  pintarLight();
+}
+
+function tarjetaReglaDeNegocio(b, regla, i) {
+  const en = h('textarea', {
+    rows: 2, value: regla.en, 'aria-label': `Versión para el generador de la regla ${i + 1}`,
+    placeholder: 'opcional: la regla en inglés, que es como mejor la sigue el generador («Afinar con Claude» la escribe)',
+    oninput: ev => { regla.en = ev.target.value; regla.enDe = regla.texto; },
+  });
+  en.dataset.foco = `negocio-regla:${regla.id}:en`;
+  const texto = h('textarea', {
+    rows: 2, value: regla.texto, 'aria-label': `Qué exige la regla ${i + 1}`,
+    placeholder: 'qué se exige, como se lo dirías a un fotógrafo: «las mamparas son de vidrio transparente con perfiles finos»',
+    oninput: ev => {
+      regla.texto = ev.target.value;
+      /* LA VERSIÓN EN INGLÉS ERA DE TU TEXTO DE ANTES, y es la que lee el
+         generador: si cambias el tuyo, se vacía (y se puede volver a afinar). */
+      if (regla.en && regla.enDe !== regla.texto) {
+        regla.en = ''; en.value = '';
+        en.placeholder = 'cambiaste tu texto: la versión en inglés de antes ya no vale. Pulsa «Afinar con Claude» otra vez o déjala vacía';
+      }
+    },
+  });
+  texto.dataset.foco = `negocio-regla:${regla.id}:texto`;
+  const palabras = h('input', {
+    type: 'text', value: regla.palabras, 'aria-label': `Cuándo aplica la regla ${i + 1}`,
+    placeholder: 'vacío = en todos los planos · o palabras: mampara, ducha',
+    oninput: ev => { regla.palabras = ev.target.value; },
+  });
+  palabras.dataset.foco = `negocio-regla:${regla.id}:palabras`;
+  return h('div', { clase: 'regla-estilo' },
+    h('div', { clase: 'fila' },
+      h('span', { clase: 'meta' }, `Regla ${i + 1}`),
+      h('span', { clase: 'crece' }),
+      h('button', {
+        clase: 'mini', disabled: !!NEGOCIOS.afinando[regla.id],
+        title: 'Claude la reescribe en inglés, concreta y física, para el generador de imágenes',
+        onclick: () => afinarReglaDeNegocio(regla),
+      }, NEGOCIOS.afinando[regla.id] ? 'Afinando…' : '✦ Afinar con Claude'),
+      h('button', {
+        clase: 'mini fantasma', title: 'Quitar esta regla',
+        onclick: () => { b.reglas = b.reglas.filter(r => r !== regla); pintarLight(); },
+      }, '✕')),
+    texto,
+    h('div', { clase: 'fila regla-estilo-campos' },
+      h('label', {}, h('span', { clase: 'meta' }, 'Solo si el plano habla de'), palabras)),
+    h('div', { clase: 'regla-estilo-en' },
+      h('span', { clase: 'meta' }, 'Versión para el generador (inglés, opcional)'), en));
+}
+
+/* EL PANEL DEL PROYECTO: la ficha del negocio, para llenarla o cambiarla. */
+function panelNegocioProyecto(cliente) {
+  const caja = h('div', { clase: 'panel-negocio-proyecto' });
+  const actual = negocioDe(cliente.id);
+  if (actual === undefined) {
+    if (NEGOCIOS.fallo[cliente.id]) {
+      caja.appendChild(cajaError(`No se ha podido leer la ficha: ${NEGOCIOS.fallo[cliente.id]}`));
+      caja.appendChild(h('button', { clase: 'mini', onclick: () => reintentarNegocio(cliente.id) }, 'Reintentar'));
+    } else {
+      caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo la ficha del negocio…'));
+    }
+    return caja;
+  }
+  if (!NEGOCIOS.borrador || NEGOCIOS.deCliente !== cliente.id) {
+    NEGOCIOS.deCliente = cliente.id;
+    NEGOCIOS.borrador = borradorDeNegocio(actual);
+  }
+  const b = NEGOCIOS.borrador;
+  // el título lo pone la sección del cajón «⚙ Ajustes del proyecto»
+  caja.appendChild(h('div', { clase: 'fila' },
+    botonGuia('tipo_negocio', null),
+    h('span', { clase: 'crece' }),
+    actual ? pastillaEstado('ok', 'la usan sus estilos') : pastillaEstado('', 'sin ficha: lo general')));
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Lo que el Studio debe saber de este cliente para que sus fotos parezcan de verdad. '
+    + 'Todos los estilos de este proyecto la usan solos: llega a los vídeos nuevos y a los ya '
+    + 'hechos con «Traer el estilo».'));
+  caja.appendChild(campoTexto('Qué hace este negocio', b.nombre, v => { b.nombre = v; },
+    { pista: 'Mamparas y baños a medida en Lima' }));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('strong', {}, 'Reglas de foto'),
+    h('span', { clase: 'crece' }),
+    h('button', {
+      clase: 'mini', disabled: b.reglas.length >= 20,
+      onclick: () => {
+        b.reglas.push({ id: `n${Date.now()}`, texto: '', en: '', enDe: '', palabras: '', nombre: '', gravedad: 'media' });
+        pintarLight();
+      },
+    }, '+ Añadir regla')));
+  if (!b.reglas.length) {
+    caja.appendChild(h('div', { clase: 'meta' },
+      'Sin reglas todavía: lo que el generador suele hacer mal en este negocio (materiales, cómo se '
+      + 'monta o se usa el producto, el sitio). Entran en cada imagen de foto, junto a las de la casa.'));
+  }
+  b.reglas.forEach((r, i) => caja.appendChild(tarjetaReglaDeNegocio(b, r, i)));
+  caja.appendChild(h('strong', {}, 'Lo que vigila el revisor'));
+  caja.appendChild(campoArea('El equipo o el producto', b.equipo, v => { b.equipo = v; },
+    'vacío = lo general · p. ej. «la mampara no es de vidrio, flota sin perfiles o tiene un tamaño imposible»',
+    'negocio-revisor-equipo'));
+  caja.appendChild(campoArea('Hacia dónde mira la gente', b.orientacion, v => { b.orientacion = v; },
+    'vacío = lo general · p. ej. «el instalador mira lo que hace, no a cámara»',
+    'negocio-revisor-orientacion'));
+  if (actual) {
+    caja.appendChild(h('div', { clase: 'meta revisor-fallo' },
+      'Si algún vídeo de foto de este proyecto ya usa la ficha, cambiar sus reglas cambia el '
+      + 'prompt de sus imágenes: quedarán para rehacer, y rehacerlas se paga.'));
+  }
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'primario', disabled: NEGOCIOS.guardando, onclick: () => guardarNegocio(cliente) },
+      NEGOCIOS.guardando ? 'Guardando…' : 'Guardar la ficha'),
+    h('button', { clase: 'mini', onclick: () => copiarNegocioDeOtro(cliente) }, 'Copiar la de otro proyecto'),
+    h('span', { clase: 'crece' }),
+    actual ? h('button', { clase: 'mini fantasma peligro', onclick: () => borrarNegocio(cliente) }, 'Quitar la ficha') : null));
+  return caja;
+}
+
+/* EN LA PESTAÑA «REGLAS» DEL ESTILO: el negocio de su proyecto, sin editarlo,
+   encima de las reglas propias del estilo. Así se ve en un solo sitio todo lo
+   que cada imagen tiene que cumplir. */
+function bloqueNegocioDelEstilo(ficha) {
+  const cid = clienteDe(ficha.id);
+  const cliente = fichaCliente(cid);
+  const caja = h('div', { clase: 'negocio-del-estilo' });
+  const ir = () => {
+    if (!cliente) return;
+    APP.light.ajustesProyecto = cid;
+    NEGOCIOS.deCliente = '';
+    NEGOCIOS.borrador = null;
+    apuntarCliente(cid);
+    irALight('galeria');
+  };
+  if (!cliente) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Negocio: lo general. Este estilo no está en ningún proyecto; mételo en el de su cliente '
+      + 'para que use la ficha del negocio de ese cliente.'));
+    return caja;
+  }
+  const negocio = negocioDe(cid);
+  if (negocio === undefined) {
+    caja.appendChild(NEGOCIOS.fallo[cid]
+      ? h('div', { clase: 'meta' }, `No se ha podido leer la ficha del negocio: ${NEGOCIOS.fallo[cid]}`,
+        ' ', h('button', { clase: 'mini', onclick: () => reintentarNegocio(cid) }, 'Reintentar'))
+      : h('div', { clase: 'cargando' }, 'leyendo la ficha del negocio…'));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('strong', {}, negocio ? `Negocio: ${negocio.nombre}` : 'Negocio: lo general'),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini', onclick: ir }, negocio ? '✎ Editar la ficha' : 'Llenar la ficha del negocio')));
+  if (!negocio) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      `El proyecto «${cliente.nombre}» no tiene ficha del negocio: sus imágenes no llevan reglas de ningún negocio.`));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'pista' },
+    `Viene de la ficha del proyecto «${cliente.nombre}»: se cambia allí y vale para todos sus estilos.`));
+  if (!(negocio.reglas || []).length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'La ficha no tiene reglas de foto.'));
+  }
+  (negocio.reglas || []).forEach(r => caja.appendChild(h('div', { clase: 'regla-negocio' },
+    h('span', { clase: 'pastilla' }, 'del negocio'),
+    h('span', {}, r.texto + ((r.palabras || []).length ? ` (solo si habla de: ${r.palabras.join(', ')})` : '')))));
+  return caja;
 }

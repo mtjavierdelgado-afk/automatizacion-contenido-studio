@@ -382,6 +382,23 @@ def _palabras_llanas(texto):
     return re.findall(r"\w+", sin.lower())
 
 
+def ancla_implicita(escena, texto):
+    """El ancla de un subtitulo escrito a mano que no trae la suya (28-10).
+
+    Solo cuenta en un plano cuya voz cambio al quitar o insertar una imagen
+    (`narracion_imagen` != `narracion`). Lo escrito se hizo para una de las dos
+    frases: la de antes (y entonces repetiria o perderia palabras: se deja de
+    usar) o la de ahora (y vale). Se decide por cual se parece mas en numero de
+    palabras, que es lo que distingue «la frase entera» de «un trozo». -> str"""
+    dibujada = " ".join(str((escena or {}).get("narracion_imagen") or "").split())
+    ahora = " ".join(str((escena or {}).get("narracion") or "").split())
+    if not texto or not dibujada or _palabras_llanas(dibujada) == _palabras_llanas(ahora):
+        return ""
+    n = len(_palabras_llanas(texto))
+    return dibujada if abs(n - len(_palabras_llanas(dibujada))) < abs(n - len(_palabras_llanas(ahora))) \
+        else ahora
+
+
 def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
               cap_trozo=None, ancla="", con_palabras=False):
     """[{"texto", "desde", "hasta"}] en el reloj DEL PLANO, o [] si no cuadra.

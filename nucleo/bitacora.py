@@ -2,7 +2,7 @@
 Bitacora del Estudio de Video: historial append-only de todo lo que pasa.
 
 Cada evento se escribe como una linea JSON en <proyecto>/bitacora.jsonl y, con
-el proyecto anotado, en C:\\IA\\estudio\\bitacora_global.jsonl. Nada se
+el proyecto anotado, en la carpeta del Studio (bitacora_global.jsonl). Nada se
 sobreescribe nunca: es el registro del que aprenden los agentes.
 
     b = Bitacora(proyecto)

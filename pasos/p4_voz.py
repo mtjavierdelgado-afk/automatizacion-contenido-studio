@@ -874,10 +874,15 @@ def _cortada(fallo, enviados, pcm, palabras):
     que habia.
     """
     segundos = len(b"".join(pcm)) / (SR * 2)
+    # se cuentan como en una toma entera: cada pausa, un caracter (costes-menores)
+    try:
+        from nucleo.coste import caracteres_cobrados    # noqa: PLC0415
+    except Exception:                                    # noqa: BLE001
+        caracteres_cobrados = len
     return TomaCortada(
         f"la conexion con Cartesia se ha cortado con la toma a medias "
         f"({segundos:.1f} s de audio recibidos): {fallo}",
-        caracteres=sum(len(t) for t in enviados), secciones=len(enviados),
+        caracteres=sum(caracteres_cobrados(t) for t in enviados), secciones=len(enviados),
         audio_s=segundos, palabras=len(palabras))
 
 

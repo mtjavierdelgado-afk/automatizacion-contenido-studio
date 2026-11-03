@@ -8,7 +8,7 @@ Los pasos que llaman a un modelo no emiten progreso: una invocacion de
 100% al terminar, que es peor que no reportar nada porque parece una medida.
 
 Aqui se guarda cuanto tardo DE VERDAD cada ejecucion (en
-C:\\IA\\estudio\\estadisticas.json), con que entrada y **con que ajuste**
+la carpeta del Studio, estadisticas.json), con que entrada y **con que ajuste**
 (modelo y esfuerzo), y con eso se estima la siguiente.
 
 Por que el ajuste es una dimension y no un adorno

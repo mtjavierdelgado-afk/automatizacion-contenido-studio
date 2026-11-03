@@ -162,10 +162,22 @@ def normalizar(crudo, bloques_validos=None):
     return salida
 
 
-#: Lo que en «ESTADOS DEL ESPACIO» quiere decir «sin cambio» (la base tal cual).
-_SIN_CAMBIO = ("", "-", "—", "…", "...", "ninguno", "ninguna", "nada", "sin cambios", "sin cambio",
-               "la base", "base", "none", "nothing", "no change", "unchanged")
+#: Lo que en «ESTADOS DEL ESPACIO» quiere decir «sin cambio» (la base tal cual):
+#: la frase ENTERA, en español o en inglés (Claude escribe los estados en
+#: inglés), o esa frase seguida de «:» y una explicación («vacío: es la base»).
+#: Un cambio de verdad que empiece por «nada…» no se vacía (revisión 03-11).
+_RE_SIN_CAMBIO = re.compile(
+    r"^(?:-+|—|…|\.\.\.|vacio|vacia|ninguno|ninguna|nada|sin cambios?|igual|igual que la base|"
+    r"la base(?: tal cual)?|base|la imagen base(?: tal cual)?|tal cual|"
+    r"none|nothing|empty|n/?a|no changes?|unchanged|same|same as (?:the )?base(?: image)?|"
+    r"(?:the )?base image|as is)\s*(?:[:—–-].*)?$")
 MAX_ESTADOS = 12
+
+
+def sin_cambio(texto):
+    """¿Este cambio de un estado es «la base tal cual»?"""
+    llano = _llano(re.sub(r"^[\[(«\"']+|[\])»\"'.]+$", "", str(texto or "").strip())).strip(" .")
+    return not llano or bool(_RE_SIN_CAMBIO.match(llano))
 
 
 def normalizar_estados(crudo):
@@ -180,9 +192,7 @@ def normalizar_estados(crudo):
         etiqueta = _etiqueta(clave)
         if not etiqueta:
             continue
-        cambio = _texto(re.sub(r"^\(|\)$", "", str(valor or "").strip()), 400)
-        if _llano(cambio).strip(" .") in _SIN_CAMBIO:
-            cambio = ""
+        cambio = "" if sin_cambio(valor) else _texto(valor, 400)
         salida[etiqueta] = cambio
     return salida
 

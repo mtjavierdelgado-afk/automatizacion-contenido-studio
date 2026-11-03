@@ -680,7 +680,7 @@ def leer_guion(texto):
                 espacio[espacio_clave] = (espacio[espacio_clave] + " " + linea).strip()
             continue
         if seccion == "estados":
-            m = re.match(r"^[-•*]\s*([^:]{1,40}?)\s*:\s*(.*)$", linea)
+            m = re.match(r"^(?:[-•*]|\d+[.)])?\s*([^:]{1,40}?)\s*:\s*(.*)$", linea)
             if m and _etiqueta_estado(m.group(1)):
                 estado_clave = _etiqueta_estado(m.group(1))
                 g["estados"][estado_clave] = m.group(2).strip()
@@ -728,16 +728,15 @@ def leer_guion(texto):
 
 
 def _cambio_de_estado(valor):
-    """El cambio de un estado tal cual, sin corchetes; «vacío…» es la base."""
-    t = _sin_relleno(re.sub(r"^\[|\]$", "", str(valor or "").strip()).strip())
-    if re.match(r"^(vac[ií]o|ninguno|ninguna|nada|sin cambios?|la base)\b", t, re.I):
-        return ""
-    return t
+    """El cambio de un estado tal cual, sin corchetes. Qué es «la base tal cual»
+    lo decide `guion_visual.sin_cambio`, el mismo para todos (revisión 03-11)."""
+    return _sin_relleno(re.sub(r"^\[|\]$", "", str(valor or "").strip()).strip())
 
 
 def _etiqueta_estado(valor):
     """«Después», «paleta 1», «[antes]» -> «despues», «paleta_1», «antes»."""
-    t = re.sub(r"\(.*?\)", " ", str(valor or ""))
+    # solo la etiqueta: «después — espejo nuevo» es «despues»
+    t = re.split(r"\s+[—–-]\s+|[,;:]", re.sub(r"\(.*?\)", " ", str(valor or "")), maxsplit=1)[0]
     t = unicodedata.normalize("NFKD", t.lower())
     t = "".join(c for c in t if not unicodedata.combining(c)).strip(" .[]…")
     if not t or t in ("…", "..."):
@@ -1409,7 +1408,7 @@ def pasar_al_encargo(raiz, cid, gid, indice=0, estilo=""):
         datos = _leer(raiz, cid)
         _m, g = _guion(datos, gid)
         leido = g.get("leido") or leer_guion(g.get("texto"))
-        if "espacio_fijo" not in leido:
+        if "espacio_fijo" not in leido or "estados" not in leido:
             # leído antes de que existiera ESPACIO FIJO: se lee otra vez
             leido = leer_guion(g.get("texto"))
         n = len(leido.get("encargos") or [])

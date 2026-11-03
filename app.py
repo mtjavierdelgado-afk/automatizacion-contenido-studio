@@ -5095,8 +5095,14 @@ def _ficha_tipo_relato(ctx):
     catalogo = params.get("catalogo") or {}
     # sin NINGUN cambio en ningun tramo, todos los planos serian la base tal cual:
     # falta que Claude diga que cambia (un «antes» sin cambio es normal, todos no)
+    # con los ESTADOS DEL ESPACIO de la Parrilla los cambios ya estan dichos
+    # (rama parrilla-estados): no se ofrece escribirlos tramo a tramo
+    try:
+        fijos_p = tr.estados_fijos(PASOS_MODULOS.p6_assets._catalogo_de(params, ctx.proyecto))
+    except Exception:                                       # noqa: BLE001
+        fijos_p = {}
     sin_cambios = (resuelto["modo"] == "espacio_que_cambia" and tr.activo(resuelto)
-                   and bool(catalogo.get("beats"))
+                   and not fijos_p and bool(catalogo.get("beats"))
                    and not any(b.get("cambio")
                                for b in catalogo.get("beats") or [] if isinstance(b, dict)))
     inicial = str(((catalogo.get("relato") or {}) if isinstance(catalogo.get("relato"), dict)
@@ -5219,7 +5225,33 @@ def _donde_se_usa_relato(ctx, params, sitio, pedidos):
     def ficha(clave):
         return salida.setdefault(clave, {"bloques": [], "planos": [], "_vistos": set()})
 
-    for beat in catalogo.get("beats") or []:
+    # CON LOS ESTADOS DE LA PARRILLA (rama parrilla-estados) los bloques de cada
+    # estado los dicen las lineas del guion visual, no los tramos del catalogo
+    # (sus etiquetas ya no mandan)
+    try:
+        fijos = tr.estados_fijos(PASOS_MODULOS.p6_assets._catalogo_de(params, ctx.proyecto))
+    except Exception:                                       # noqa: BLE001
+        fijos = {}
+    if fijos:
+        planos_gv, _origen = _guion_visual().efectivo(params, bloques)
+        tramos = [{"desde": pl.get("bloque"), "hasta": pl.get("bloque"),
+                   "estado": pl.get("estado") if pl.get("estado") in pedidos else ""}
+                  for pl in planos_gv or []]
+    else:
+        tramos = None
+    for beat in (tramos if tramos is not None else catalogo.get("beats") or []):
+        if tramos is not None:
+            estado = beat["estado"]
+            desde = posicion.get(str(beat.get("desde") or "").strip().upper())
+            if desde is None:
+                continue
+            f = ficha(estado)
+            if desde not in f["_vistos"]:
+                f["_vistos"].add(desde)
+                texto = " ".join(bloques[desde]["texto"].split())
+                f["bloques"].append({"id": bloques[desde]["id"], "n": desde + 1,
+                                     "texto": texto[:110] + ("…" if len(texto) > 110 else "")})
+            continue
         if not isinstance(beat, dict) or beat.get("set") not in (None, "", sitio):
             continue
         estado = tr.estado_de(beat)

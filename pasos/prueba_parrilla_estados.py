@@ -101,7 +101,7 @@ AVISOS
 def prueba_parrilla():
     seccion("1] la Parrilla lee «Estado:» y ESTADOS DEL ESPACIO")
     g = P.leer_guion(GUION)
-    igual(g["estados"], {"antes": "", "despues": "the old mirror is replaced by a round backlit mirror, "
+    igual(G.normalizar_estados(g["estados"]), {"antes": "", "despues": "the old mirror is replaced by a round backlit mirror, "
                                                 "and the vanity light is warm"},
           "los estados: «vacío» es la base, una línea que sigue se suma, sin tildes en la etiqueta")
     igual([e.get("estado") for e in g["escenas"]], ["antes", "despues", ""], "cada escena con su estado")
@@ -164,12 +164,14 @@ def prueba_mandan(gv):
                           {"set": "bano", "cambio": "", "estado": ""}]}
     igual(T.estados_del_catalogo(catalogo, "bano"), {"reforma": "a square mirror"},
           "sin la Parrilla, los del catálogo (como siempre)")
-    con = P6._catalogo_de({"imagenes": "guion", "guion_visual": gv, "catalogo": catalogo}, None)
+    cambia = {"modo": "espacio_que_cambia", "cambia": "objeto"}
+    con = P6._catalogo_de({"imagenes": "guion", "guion_visual": gv, "catalogo": catalogo, "tipo_relato": cambia}, None)
     igual(T.estados_del_catalogo(con, "bano"), {"despues": gv["estados"]["despues"]},
           "con la Parrilla, solo los suyos (el «antes» vacío es la base: no lleva imagen)")
-    voz = P6._catalogo_de({"guion_visual": gv, "catalogo": catalogo}, None)
+    voz = P6._catalogo_de({"guion_visual": gv, "catalogo": catalogo, "tipo_relato": cambia}, None)
     ok("estados_fijos" not in voz, "si las imágenes siguen la voz, no se meten")
-    sin = P6._catalogo_de({"imagenes": "guion", "guion_visual": dict(gv, estados={}), "catalogo": catalogo}, None)
+    sin = P6._catalogo_de({"imagenes": "guion", "guion_visual": dict(gv, estados={}), "catalogo": catalogo,
+                           "tipo_relato": cambia}, None)
     ok("estados_fijos" not in sin, "sin estados en la Parrilla, el catálogo sale sin una clave de más (regla 1)")
     ok("estados_fijos" not in catalogo, "y el catálogo guardado no se toca")
     return con
@@ -299,6 +301,42 @@ def prueba_al_crear():
         servidor._bloques_del_guion = real
 
 
+def prueba_revision():
+    import p6_assets as P6
+    seccion("8] lo que encontró la revisión del 03-11")
+    for texto in ("(vacío)", "vacío: es la imagen base tal cual", "No changes.", "empty", "N/A",
+                  "same as base", "[la base tal cual]", "—", "none"):
+        igual(G.normalizar_estados({"antes": texto}), {"antes": ""}, f"«{texto}» es la base tal cual")
+    for texto in ("nada de azulejos viejos: white tiles everywhere", "base cabinet painted sage green"):
+        igual(G.normalizar_estados({"despues": texto})["despues"], texto, f"«{texto[:30]}…» es un cambio de verdad")
+    g = P.leer_guion(GUION.replace("- antes: [vacío: es la imagen base tal cual]", "- antes: (vacío)"))
+    igual(G.normalizar_estados(P.encargo_de(g)["estados"]).get("antes"), "",
+          "el «antes» con «(vacío)» no pide una imagen de pago")
+    sin_vineta = GUION.replace("- antes: [vacío: es la imagen base tal cual]\n- Después:", "antes:\n2. Después:")
+    igual(sorted(P.leer_guion(sin_vineta)["estados"]), ["antes", "despues"], "los estados sin viñeta o numerados también")
+    g = P.leer_guion(GUION.replace("Estado: Después", "Estado: después — espejo nuevo"))
+    igual(g["escenas"][1]["estado"], "despues", "«Estado: después — espejo nuevo» es «despues»")
+    gv = G.normalizar({"origen": "parrilla", "planos": [], "estados": {"despues": "a mirror"}})
+    producto = P6._catalogo_de({"imagenes": "guion", "guion_visual": gv,
+                                "tipo_relato": {"modo": "producto"}, "catalogo": {"beats": []}}, None)
+    ok("estados_fijos" not in producto, "en «producto» los estados de la Parrilla no se usan (lo que avisa el Encargo)")
+    cambia = P6._catalogo_de({"imagenes": "guion", "guion_visual": gv,
+                              "tipo_relato": {"modo": "espacio_que_cambia", "cambia": "objeto"}, "catalogo": {"beats": []}}, None)
+    ok("estados_fijos" in cambia, "en «un espacio que cambia», sí")
+    # la lectura guardada de antes de esta rama se renueva al pasar al Encargo
+    raiz = tempfile.mkdtemp(prefix="estudio_pe_parrilla_")
+    cid = "cl_estados"
+    P._anadir_textos(raiz, cid, "", "Lote", [GUION], {"tipo": "pedir"})
+    datos = P._leer(raiz, cid)
+    g0 = datos["matrices"][0]["guiones"][0]
+    viejo = dict(g0.get("leido") or P.leer_guion(GUION))
+    viejo.pop("estados", None)
+    g0["leido"] = viejo
+    P._guardar(raiz, cid, datos)
+    enc = P.pasar_al_encargo(raiz, cid, g0["id"])
+    ok("despues" in (enc.get("estados") or {}), "un guion leído antes de esta rama pasa al Encargo con sus estados")
+
+
 def main():
     print("PRUEBA DE LOS ESTADOS Y EL ENCUADRE DE LA PARRILLA")
     enc = prueba_parrilla()
@@ -307,6 +345,7 @@ def main():
     prueba_plano(gv, con)
     prueba_sin_sorteo()
     prueba_al_crear()
+    prueba_revision()
     print("\n" + "=" * 70)
     if _fallos:
         print(f"FALLAN {len(_fallos)} de {_ok + len(_fallos)} comprobaciones:")

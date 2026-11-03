@@ -319,7 +319,10 @@ def _catalogo_de(params, proyecto):
     # video dibuja lo que dice el guion y la Parrilla trajo sus «ESTADOS DEL
     # ESPACIO», son esos (ver `tipo_relato.estados_del_catalogo`). Sin ellos
     # el catalogo sale como siempre, sin una clave de mas (regla 1).
-    if guion_visual.modo_de(params) == "guion":
+    # y solo en «un espacio que cambia», el unico modo que dibuja cada estado
+    # una vez y lo edita (en «producto» el objeto se reinventaria plano a plano)
+    if guion_visual.modo_de(params) == "guion" and \
+            tipo_relato.lleva_estados(tipo_relato.resolver(params)):
         try:
             fijos = guion_visual.normalizar(params.get("guion_visual")).get("estados")
         except ValueError:

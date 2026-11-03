@@ -864,6 +864,16 @@ GUIAS = {
             "ejemplo, uno vertical y uno horizontal): la ficha deja elegir cuál pasas.",
             "Cambiar Uso, Formato o Duración en la ficha cambia su línea en el texto "
             "(y en PARA EL ENCARGO si hay uno solo).",
+            "ESTADOS DEL ESPACIO y «Estado:» (opcionales, solo con «Tipo de relato: "
+            "espacio_que_cambia» e «Imágenes: guion»): la sección dice qué cambia en cada "
+            "estado respecto a la imagen base, en inglés y acumulado («- despues: the old "
+            "mirror is replaced by a round backlit mirror»; el estado que es la base tal "
+            "cual se deja vacío), y cada ESCENA lleva «Estado: antes» o el que toque. Cada "
+            "plano edita la imagen de SU estado, y esos estados mandan sobre los que "
+            "deduce el Studio. Una escena sin «Estado:» es la base.",
+            "En los vídeos que salen de la Parrilla, una línea «Visual:» sin cámara ya no "
+            "recibe un encuadre al azar: si quieres un primer plano o un detalle, dilo en "
+            "la línea («Close-up of…», «Detalle de…»).",
             "ESPACIO FIJO (opcional) es para los vídeos que ocurren enteros en un "
             "mismo sitio: «- Sitio:» (un nombre corto), «- Descripción:» (cómo es, en "
             "una frase), «- Luz:» y «- Secundarios:» (otros sitios que sí pueden "

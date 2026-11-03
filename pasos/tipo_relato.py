@@ -260,7 +260,15 @@ def lleva_estados(relato):
 
 
 def estados_del_catalogo(catalogo, sitio=None):
-    """{estado: cambio} de los tramos con cambio, en orden de aparicion."""
+    """{estado: cambio} de los tramos con cambio, en orden de aparicion.
+
+    Con `estados_fijos` (los ESTADOS DEL ESPACIO que escribio la Parrilla y que
+    `p6_assets._catalogo_de` pone en el catalogo; rama parrilla-estados, 03-11)
+    mandan esos y solo esos: son los que el dueño escribio. Un estado sin
+    cambio («antes») es el sitio tal cual la base y no lleva imagen propia."""
+    fijos = estados_fijos(catalogo)
+    if fijos:
+        return {k: v for k, v in fijos.items() if v}
     salida = {}
     for beat in (catalogo or {}).get("beats") or []:
         if not isinstance(beat, dict) or (sitio and beat.get("set") not in (None, "", sitio)):
@@ -269,6 +277,14 @@ def estados_del_catalogo(catalogo, sitio=None):
         if estado and estado not in salida:
             salida[estado] = _texto(beat.get("cambio"), 400)
     return salida
+
+
+def estados_fijos(catalogo):
+    """{estado: cambio} que trajo la Parrilla, o {} (ver `estados_del_catalogo`)."""
+    crudo = (catalogo or {}).get("estados_fijos") if isinstance(catalogo, dict) else None
+    if not isinstance(crudo, dict):
+        return {}
+    return {str(k): _texto(v, 400) for k, v in crudo.items() if str(k).strip()}
 
 
 def normalizar_de_estilo(crudo):

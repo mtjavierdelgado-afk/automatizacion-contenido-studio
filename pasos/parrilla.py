@@ -67,6 +67,7 @@ import shutil
 import subprocess
 import threading
 import time
+import unicodedata
 import uuid
 import zipfile
 from xml.etree import ElementTree
@@ -164,7 +165,8 @@ _REGLAS = """REGLAS GENERALES
 7. No inventes datos: teléfonos, precios o enlaces solo si están en el original. Si falta el CTA, pon [FALTA CTA].
 8. ESPACIO FIJO solo si el original dice que todo el vídeo ocurre en un mismo sitio (un local, una cocina, un plató). Si no lo dice, no pongas esa sección.
 9. "Tipo de relato" solo si el original pide una forma concreta de contarlo en imágenes: "espacio_que_cambia (objeto | acabados | estado | hora)" si es UN sitio que se ve siempre igual y en el que solo cambia lo que dice la voz (un antes y después, tres paletas, una sala vacía → montada); "recorrido" si son varios ambientes de un mismo lugar; "escenario_y_apoyos" si es un sitio con otros secundarios; "producto" si el producto manda y el fondo no cambia; "clase" si es una clase. Si no lo pide, quita la línea.
-10. "Imágenes: guion" solo si el original pide que las imágenes sigan las líneas «Visual:» y no lo que dice la voz (un guion de plano a plano, con su cámara); entonces cada línea «Visual:» es una imagen fija concreta, con quién, dónde, qué hace y desde dónde se ve. Si no lo pide, quita la línea."""
+10. "Imágenes: guion" solo si el original pide que las imágenes sigan las líneas «Visual:» y no lo que dice la voz (un guion de plano a plano, con su cámara); entonces cada línea «Visual:» es una imagen fija concreta, con quién, dónde, qué hace y desde dónde se ve. Si no lo pide, quita la línea.
+11. Con "Tipo de relato: espacio_que_cambia" y "Imágenes: guion", pon en cada ESCENA una línea "Estado:" con la etiqueta del estado del sitio en esa escena (corta, en minúsculas y sin espacios: antes, despues, paleta_1…) y la sección ESTADOS DEL ESPACIO con lo que cambia en cada estado respecto a la imagen base, EN INGLÉS y acumulado (el «después» dice todo lo que cambió, no solo lo último); el estado que es la base tal cual se deja vacío. Si no, quita las líneas «Estado:» y esa sección."""
 
 _AJUSTE_RED = """AJUSTE POR RED (en "adaptar" aplícalo; en "exacto" solo avisa con ⚠ si algo no encaja)
 - TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.
@@ -193,7 +195,12 @@ ESPACIO FIJO (solo si todo el vídeo ocurre en un mismo sitio; si no, quita esta
 - Luz: [hora del día y fuente de luz]
 - Secundarios: [otros sitios que sí pueden salir, «Nombre: descripción» separados por «;», o ninguno]
 
+ESTADOS DEL ESPACIO (solo con espacio_que_cambia e «Imágenes: guion»; si no, quita esta sección)
+- antes: [vacío: es la imagen base tal cual]
+- despues: [lo que cambia respecto a la base, en inglés]
+
 ESCENA 1 (tiempo, si lo hay)
+Estado: … (solo con ESTADOS DEL ESPACIO; si no, quita la línea)
 Visual: …
 Voz: «…»
 Texto en pantalla: …
@@ -525,12 +532,13 @@ def _uno_de(texto, opciones):
 
 
 def _nueva_escena(n, tiempo=""):
-    return {"n": n, "tiempo": tiempo, "visual": [], "voz": "", "texto_pantalla": ""}
+    return {"n": n, "tiempo": tiempo, "visual": [], "voz": "", "texto_pantalla": "", "estado": ""}
 
 
 _RE_ESCENA = re.compile(r"^ESCENA\s+(\d+)\s*(?:\((.*)\))?\s*[:.]?\s*(.*)$", re.I)
 _RE_SECCION = re.compile(
-    r"^(CIERRE DE MARCA|MARCA DEL CLIENTE|VERSIONES POR RED|PARA EL ENCARGO|ESPACIO FIJO|AVISOS)\b\s*(.*)$",
+    r"^(CIERRE DE MARCA|MARCA DEL CLIENTE|VERSIONES POR RED|PARA EL ENCARGO|ESPACIO FIJO|"
+    r"ESTADOS DEL ESPACIO|AVISOS)\b\s*(.*)$",
     re.I)
 _RE_ITEM_ESPACIO = re.compile(
     r"^[-•*]?\s*(Sitio|Descripci[oó]n|Luz|Secundarios?)\s*:\s*(.*)$", re.I)
@@ -548,7 +556,7 @@ def leer_guion(texto):
     g = {"codigo": "", "titulo": "", "cliente": "", "uso": "", "red": "", "formato": "",
          "duracion_s": None, "duracion_texto": "", "locucion": "", "objetivo": "", "cta": "",
          "tono": "", "escenas": [], "cierre": "", "marca": {"mostrar": "", "evitar": "", "otras": ""},
-         "versiones": "", "encargos": [], "avisos": [], "espacio_fijo": {}}
+         "versiones": "", "encargos": [], "avisos": [], "espacio_fijo": {}, "estados": {}}
     i = 0
     while i < len(lineas) and not lineas[i]:
         i += 1
@@ -569,6 +577,7 @@ def leer_guion(texto):
     seccion, escena, clave_escena, item = "cabecera", None, "", None
     marca_clave = ""
     espacio, espacio_clave = {"sitio": "", "descripcion": "", "luz": "", "secundarios": []}, ""
+    estado_clave = ""
     for linea in lineas[i:]:
         if not linea:
             continue
@@ -594,6 +603,8 @@ def leer_guion(texto):
                 seccion, item = "encargo", None
             elif nombre == "ESPACIO FIJO":
                 seccion, espacio_clave = "espacio", ""
+            elif nombre == "ESTADOS DEL ESPACIO":
+                seccion, estado_clave = "estados", ""
             else:
                 seccion = "avisos"
             continue
@@ -614,11 +625,15 @@ def leer_guion(texto):
                 g[clave] = valor
             continue
         if seccion == "escena":
-            m = re.match(r"^(Visual|Voz|Texto en pantalla)\s*:\s*(.*)$", linea, re.I)
+            m = re.match(r"^(Visual|Voz|Texto en pantalla|Estado)\s*:\s*(.*)$", linea, re.I)
             if m:
                 clave_escena = m.group(1).lower()
                 valor = m.group(2).strip()
-                if clave_escena == "visual":
+                if clave_escena == "estado":
+                    # rama parrilla-estados: el estado del sitio en esta escena
+                    escena["estado"] = _etiqueta_estado(valor)
+                    clave_escena = ""
+                elif clave_escena == "visual":
                     escena["visual"].append(valor)
                 elif clave_escena == "voz":
                     escena["voz"] = (escena["voz"] + " " + valor).strip()
@@ -664,6 +679,14 @@ def leer_guion(texto):
             elif espacio_clave and not linea.startswith("("):
                 espacio[espacio_clave] = (espacio[espacio_clave] + " " + linea).strip()
             continue
+        if seccion == "estados":
+            m = re.match(r"^(?:[-•*]|\d+[.)])?\s*([^:]{1,40}?)\s*:\s*(.*)$", linea)
+            if m and _etiqueta_estado(m.group(1)):
+                estado_clave = _etiqueta_estado(m.group(1))
+                g["estados"][estado_clave] = m.group(2).strip()
+            elif estado_clave and not linea.startswith("("):
+                g["estados"][estado_clave] = (g["estados"][estado_clave] + " " + linea).strip()
+            continue
         if seccion == "encargo":
             m = _RE_ITEM_ENCARGO.match(linea)
             if m:
@@ -700,7 +723,25 @@ def leer_guion(texto):
     for campo in ("cliente", "red", "objetivo", "cta", "tono", "locucion"):
         g[campo] = "" if g[campo] in ("…", "...") else g[campo]
     g["espacio_fijo"] = _espacio_fijo(espacio)
+    g["estados"] = {k: _cambio_de_estado(v) for k, v in g["estados"].items()}
     return g
+
+
+def _cambio_de_estado(valor):
+    """El cambio de un estado tal cual, sin corchetes. Qué es «la base tal cual»
+    lo decide `guion_visual.sin_cambio`, el mismo para todos (revisión 03-11)."""
+    return _sin_relleno(re.sub(r"^\[|\]$", "", str(valor or "").strip()).strip())
+
+
+def _etiqueta_estado(valor):
+    """«Después», «paleta 1», «[antes]» -> «despues», «paleta_1», «antes»."""
+    # solo la etiqueta: «después — espejo nuevo» es «despues»
+    t = re.split(r"\s+[—–-]\s+|[,;:]", re.sub(r"\(.*?\)", " ", str(valor or "")), maxsplit=1)[0]
+    t = unicodedata.normalize("NFKD", t.lower())
+    t = "".join(c for c in t if not unicodedata.combining(c)).strip(" .[]…")
+    if not t or t in ("…", "..."):
+        return ""
+    return re.sub(r"[^a-z0-9_]", "", re.sub(r"\s+", "_", t))[:30]
 
 
 def _tipo_relato(g, valor):
@@ -915,8 +956,26 @@ def encargo_de(guion, indice=0):
         extra["imagenes"] = g["imagenes"]      # «guion» o «voz» explícito
     if g.get("imagenes_aviso"):
         avisos.append(g["imagenes_aviso"])
-    visuales = [{"voz": _sin_comillas(e.get("voz")), "visual": list(e.get("visual") or [])}
+    visuales = [dict({"voz": _sin_comillas(e.get("voz")), "visual": list(e.get("visual") or [])},
+                     **({"estado": e["estado"]} if e.get("estado") else {}))
                 for e in g.get("escenas") or [] if e.get("visual")]
+    # LOS ESTADOS DEL ESPACIO (rama parrilla-estados, 03-11): viajan con las
+    # lineas «Visual:» y, en un espacio que cambia, mandan sobre los que deduce
+    # el catalogo. Una escena sin «Estado:» es la base tal cual.
+    estados = dict(g.get("estados") or {})
+    if estados:
+        extra["estados"] = estados
+        modo_relato = (g.get("tipo_relato") or {}).get("modo")
+        if modo_relato != "espacio_que_cambia" or g.get("imagenes") != "guion":
+            avisos.append("el guion trae ESTADOS DEL ESPACIO, pero solo se usan con «Tipo de relato: "
+                          "espacio_que_cambia» e «Imágenes: guion»")
+        sueltos = sorted({e["estado"] for e in visuales if e.get("estado") and e["estado"] not in estados})
+        if sueltos:
+            avisos.append(f"las escenas nombran estados que no están en ESTADOS DEL ESPACIO "
+                          f"({', '.join(sueltos)}): esas escenas se dibujan como la base")
+    elif any(e.get("estado") for e in visuales):
+        avisos.append("las escenas traen «Estado:», pero falta la sección ESTADOS DEL ESPACIO: "
+                      "se usarán los cambios que deduzca el Studio")
     if visuales:
         extra["visuales"] = visuales
         if g.get("imagenes") != "guion":
@@ -1349,7 +1408,7 @@ def pasar_al_encargo(raiz, cid, gid, indice=0, estilo=""):
         datos = _leer(raiz, cid)
         _m, g = _guion(datos, gid)
         leido = g.get("leido") or leer_guion(g.get("texto"))
-        if "espacio_fijo" not in leido:
+        if "espacio_fijo" not in leido or "estados" not in leido:
             # leído antes de que existiera ESPACIO FIJO: se lee otra vez
             leido = leer_guion(g.get("texto"))
         n = len(leido.get("encargos") or [])

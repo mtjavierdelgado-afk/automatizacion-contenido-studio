@@ -5095,8 +5095,14 @@ def _ficha_tipo_relato(ctx):
     catalogo = params.get("catalogo") or {}
     # sin NINGUN cambio en ningun tramo, todos los planos serian la base tal cual:
     # falta que Claude diga que cambia (un «antes» sin cambio es normal, todos no)
+    # con los ESTADOS DEL ESPACIO de la Parrilla los cambios ya estan dichos
+    # (rama parrilla-estados): no se ofrece escribirlos tramo a tramo
+    try:
+        fijos_p = tr.estados_fijos(PASOS_MODULOS.p6_assets._catalogo_de(params, ctx.proyecto))
+    except Exception:                                       # noqa: BLE001
+        fijos_p = {}
     sin_cambios = (resuelto["modo"] == "espacio_que_cambia" and tr.activo(resuelto)
-                   and bool(catalogo.get("beats"))
+                   and not fijos_p and bool(catalogo.get("beats"))
                    and not any(b.get("cambio")
                                for b in catalogo.get("beats") or [] if isinstance(b, dict)))
     inicial = str(((catalogo.get("relato") or {}) if isinstance(catalogo.get("relato"), dict)
@@ -5228,7 +5234,33 @@ def _donde_se_usa_relato(ctx, params, sitio, pedidos):
     def ficha(clave):
         return salida.setdefault(clave, {"bloques": [], "planos": [], "_vistos": set()})
 
-    for beat in catalogo.get("beats") or []:
+    # CON LOS ESTADOS DE LA PARRILLA (rama parrilla-estados) los bloques de cada
+    # estado los dicen las lineas del guion visual, no los tramos del catalogo
+    # (sus etiquetas ya no mandan)
+    try:
+        fijos = tr.estados_fijos(PASOS_MODULOS.p6_assets._catalogo_de(params, ctx.proyecto))
+    except Exception:                                       # noqa: BLE001
+        fijos = {}
+    if fijos:
+        planos_gv, _origen = _guion_visual().efectivo(params, bloques)
+        tramos = [{"desde": pl.get("bloque"), "hasta": pl.get("bloque"),
+                   "estado": pl.get("estado") if pl.get("estado") in pedidos else ""}
+                  for pl in planos_gv or []]
+    else:
+        tramos = None
+    for beat in (tramos if tramos is not None else catalogo.get("beats") or []):
+        if tramos is not None:
+            estado = beat["estado"]
+            desde = posicion.get(str(beat.get("desde") or "").strip().upper())
+            if desde is None:
+                continue
+            f = ficha(estado)
+            if desde not in f["_vistos"]:
+                f["_vistos"].add(desde)
+                texto = " ".join(bloques[desde]["texto"].split())
+                f["bloques"].append({"id": bloques[desde]["id"], "n": desde + 1,
+                                     "texto": texto[:110] + ("…" if len(texto) > 110 else "")})
+            continue
         if not isinstance(beat, dict) or beat.get("set") not in (None, "", sitio):
             continue
         estado = tr.estado_de(beat)
@@ -5372,7 +5404,10 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
     sitio, pedidos = p6.estados_del_relato(ctx.proyecto, params)
     if not sitio or estado not in pedidos:
         raise ErrorApi(404, f"este vídeo no tiene el estado «{estado}»")
-    if not ((params.get("catalogo") or {}).get("beats")):
+    # un estado que escribio la Parrilla (rama parrilla-estados) vive en el
+    # guion visual, no en los tramos del reparto: se cambia ALLI
+    de_parrilla = estado in tr.estados_fijos(p6._catalogo_de(params, ctx.proyecto))
+    if not de_parrilla and not ((params.get("catalogo") or {}).get("beats")):
         raise ErrorApi(409, "los cambios de este vídeo no están guardados en el reparto: "
                             "pulsa antes «Escribir qué cambia en cada tramo»")
     if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
@@ -5393,6 +5428,20 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
             if dibujando or _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
                 raise RuntimeError("se ha empezado a generar algo en este vídeo mientras "
                                    "se traducía: vuelve a guardar el cambio cuando termine")
+            if de_parrilla:
+                gv_mod = _guion_visual()
+                guardado = gv_mod.normalizar((ctx.estado.params("assets") or {}).get("guion_visual"))
+                estados_gv = dict(guardado.get("estados") or {})
+                if tr._texto(estados_gv.get(estado), 400) != tr._texto(anterior, 400):
+                    raise RuntimeError("los cambios de este estado se han reescrito mientras "
+                                       "se traducía: vuelve a abrirlo y guárdalo otra vez")
+                if ingles != tr._texto(anterior, 400):
+                    estados_gv[estado] = ingles
+                    ctx.estado.actualizar_params("assets", {"guion_visual": dict(guardado, estados=estados_gv)})
+                mod.guardar(raiz, {ingles: es})
+                ctx.bitacora.anotar("tipo_relato_estado_editado", "assets",
+                                    {"estado": estado, "tramos": 0, "parrilla": True})
+                return
             catalogo = copy.deepcopy((ctx.estado.params("assets") or {}).get("catalogo") or {})
             tocados = 0
             for beat in catalogo.get("beats") or []:
@@ -6010,7 +6059,9 @@ def guardar_guion_visual(pid: str, cuerpo: dict = Body(default=None)):
             antes = gv.normalizar(params.get("guion_visual"))
             nuevo = gv.normalizar({"origen": datos.get("origen") or antes.get("origen") or "manual",
                                    "planos": planos, "aprobado": False,
-                                   "visuales": antes.get("visuales") or []}, validos)
+                                   "visuales": antes.get("visuales") or [],
+                                   "estados": antes.get("estados") or {},
+                                   "sin_sorteo": antes.get("sin_sorteo") is True}, validos)
         except ValueError as fallo:
             raise ErrorApi(400, str(fallo))
         ctx.estado.actualizar_params("assets", {"guion_visual": nuevo})
@@ -6033,7 +6084,9 @@ def _correr_proponer_gv(avisar, ctx, ajuste):
         except ValueError:
             antes = {}
         nuevo = gv.normalizar({"origen": "claude", "planos": planos, "aprobado": False,
-                               "visuales": antes.get("visuales") or []})
+                               "visuales": antes.get("visuales") or [],
+                               "estados": antes.get("estados") or {},
+                               "sin_sorteo": antes.get("sin_sorteo") is True})
         ctx.estado.actualizar_params("assets", {"guion_visual": nuevo})
     ctx.bitacora.anotar("guion_visual_propuesto", "assets", {"planos": len(planos)})
     avisar(1.0, "guion visual escrito: revísalo y apruébalo")
@@ -18978,7 +19031,13 @@ def _opciones_al_crear(ctx, preset_id, opciones):
         # las lineas «Visual:» del guion de la Parrilla se guardan siempre que
         # lleguen: si el estilo dice «guion», o se elige despues, no se pierden
         cambios["guion_visual"] = {"origen": "parrilla", "planos": [],
-                                   "aprobado": False, "visuales": visuales}
+                                   "aprobado": False, "visuales": visuales,
+                                   # rama parrilla-estados (03-11): solo en los videos
+                                   # creados desde hoy; los de antes no ganan ninguna clave
+                                   "sin_sorteo": True}
+        estados_p = gv.normalizar_estados(opciones.get("estados"))
+        if estados_p:
+            cambios["guion_visual"]["estados"] = estados_p
     if cambios:
         ctx.estado.actualizar_params("assets", cambios)
     presencia = opciones.get("presencia")

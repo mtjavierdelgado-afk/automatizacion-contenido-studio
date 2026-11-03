@@ -5558,3 +5558,24 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 @media (max-width: 600px) {
   .campos-tema { grid-template-columns: minmax(0, 1fr); }
 }
+/* ---- CUENTAS QUE TE GUSTAN 3 (rama cuentas-gustan-3, 02-11-2026) ---- */
+.ejemplos-gancho { display: grid; gap: 4px; }
+.ejemplo-gancho { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; min-width: 0; }
+.ejemplo-gancho .meta { min-width: 0; overflow-wrap: anywhere; }
+.comparar-conjuntos { display: grid; gap: 6px; border-top: 1px solid var(--linea-suave); padding-top: 10px; min-width: 0; }
+.comparar-conjuntos h4 { margin: 0; }
+.comparar-conjuntos .fila { gap: 8px; flex-wrap: wrap; align-items: center; }
+.comparar-conjuntos select { max-width: 100%; min-width: 0; }
+.resultado-comparacion { display: grid; gap: 8px; min-width: 0; }
+.seccion-comparacion { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--linea); border-radius: 10px;
+  background: var(--panel); min-width: 0; overflow-wrap: anywhere; }
+.seccion-comparacion h5 { margin: 0; }
+.cambio-conjunto ul { margin: 2px 0 0; padding-left: 18px; }
+.cambio-conjunto.aparece b { color: var(--ok); }
+.cambio-conjunto.sigue b { color: var(--tenue); }
+.cambio-conjunto.desaparece b { color: var(--malo); }
+.cuentas-propias { display: grid; gap: 4px; }
+.cuentas-propias .fila { gap: 6px; flex-wrap: wrap; align-items: center; }
+.cuentas-propias .pastilla { text-transform: none; letter-spacing: 0; white-space: normal; overflow-wrap: anywhere;
+  display: inline-flex; gap: 4px; align-items: center; }
+.cuentas-propias select { max-width: 100%; min-width: 0; }

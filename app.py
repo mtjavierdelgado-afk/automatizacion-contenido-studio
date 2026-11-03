@@ -21870,10 +21870,44 @@ def parrilla_conjunto_ultimo(cuerpo: dict = Body(default=None)):
     return {"analisis": _por_temas(CJ.ultimo, raiz_proyectos(), _cuerpo(cuerpo).get("cuentas"))}
 
 
+@app.get("/api/parrilla/conjuntos/historial")
+def parrilla_conjuntos_historial():
+    """Los análisis de varias cuentas guardados, el más nuevo primero (ficha corta)."""
+    CJ, _T = _temas_mods()
+    return {"analisis": _por_temas(CJ.historial, raiz_proyectos()), "guardados": CJ.GUARDADOS}
+
+
 @app.get("/api/parrilla/conjuntos/{aid}")
 def parrilla_conjunto(aid: str):
     CJ, _T = _temas_mods()
     return _por_temas(CJ.analisis, raiz_proyectos(), aid)
+
+
+@app.get("/api/parrilla/conjuntos/{aid}/comparar")
+def parrilla_conjunto_comparar(aid: str, con: str = ""):
+    """?con=<otro análisis> -> qué fórmulas, temas y ganchos aparecen, siguen y
+    desaparecen. Sin `con`, contra el anterior de la misma selección (o el que
+    comparte más cuentas). Gratis: no llama a Claude."""
+    CJ, _T = _temas_mods()
+    return _por_temas(CJ.comparar, raiz_proyectos(), aid, con or None)
+
+
+@app.get("/api/parrilla/proyectos/{cid}/cuentas-propias")
+def parrilla_cuentas_propias(cid: str, peticion: Request):
+    """Las cuentas del proyecto cuyo contenido publicado entra en el cruce «ya lo tienes»."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    return _por_temas(T.cuentas_propias, raiz_proyectos(), cid)
+
+
+@app.put("/api/parrilla/proyectos/{cid}/cuentas-propias")
+def parrilla_guardar_cuentas_propias(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{cuentas: ["red:usuario"]} -> las cuentas propias (solo ya leídas; [] las quita)."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    r = _por_temas(T.guardar_cuentas_propias, raiz_proyectos(), cid, _cuerpo(cuerpo).get("cuentas"))
+    anotar_global("cuentas_propias", {"cid": cid, "cuentas": len(r["cuentas"])})
+    return r
 
 
 @app.get("/api/parrilla/proyectos/{cid}/temas")

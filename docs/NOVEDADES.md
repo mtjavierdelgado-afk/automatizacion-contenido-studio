@@ -10,6 +10,21 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Cuentas que te gustan: temas con sus vistas, ganchos, comparar y tus cuentas (2 de noviembre)**
+- **Todos los temas, agrupados**: el mismo tema en varias cuentas sale una sola
+  vez, con **qué cuentas lo hacen** y la **suma de vistas** de sus vídeos (la
+  suma la hace el Studio, no Claude).
+- **Ganchos que mejor funcionan**: cómo empiezan los vídeos que más funcionan
+  (pregunta, ❌/✅, antes y después…), del mejor al peor, con 2 o 3 ejemplos
+  enlazados y la primera frase de cada uno.
+- **Análisis guardados y comparación**: debajo de cada análisis, la lista de
+  los guardados para **abrir** uno o **compararlo**. «Comparar con el anterior»
+  dice qué fórmulas, temas y ganchos **aparecen**, **siguen** y
+  **desaparecen**. Es gratis: no llama a Claude.
+- **Tus cuentas**: en «Proponer temas» marcas qué cuentas leídas son tuyas, y
+  lo que ya publicaste en ellas también sale como «ya lo tienes» (parecido o
+  repetido).
+
 **El cupo de Claude al 90 % avisa, no frena (2 de noviembre)**
 - En Cuentas que te gustan, «Analizar seleccionadas», «Proponer temas» y
   «Escribir guiones aprobados» ya no se paran con el cupo al 90 %: sale una

@@ -911,11 +911,20 @@ YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
    Claude se van a usar (con el cupo al 90 % o más te avisa y puedes **seguir
    igualmente**; si Claude se queda sin cupo a medias, no se pierde nada). Sale qué fórmula se
    repite en varias cuentas, cuál funciona solo en una, los temas saturados y
-   los libres, cada cosa con sus vídeos de prueba enlazados.
+   los libres, cada cosa con sus vídeos de prueba enlazados. Además, **todos
+   los temas agrupados** (el mismo tema en varias cuentas es uno solo, con
+   qué cuentas lo hacen y la suma de vistas de sus vídeos) y los **ganchos que
+   mejor funcionan**, con ejemplos.
+   Debajo, **Análisis guardados y comparación**: abre uno anterior o pulsa
+   **Comparar con el anterior** (gratis, sin Claude) para ver qué aparece, qué
+   sigue y qué desaparece; sirve para comparar el análisis de este mes con el
+   del mes siguiente.
 3. **Proponer temas** (eliges cuántos): solo ideas, sin guiones. Cada tema trae
    gancho, tipo de vídeo, espacio, problema, sus vídeos de referencia, por qué
    y la duración sugerida (solo con 8 vídeos o más con duración). Las ideas
-   repetidas se unen; lo que ya está en tu Parrilla o en tus vídeos sale como
+   repetidas se unen; lo que ya está en tu Parrilla, en tus vídeos o en lo que
+   publicaste en **Tus cuentas** (las marcas ahí; antes léelas como cualquier
+   otra cuenta) sale como
    **parecido** o **repetido** (los repetidos no entran salvo **Incluir
    igualmente**); como mucho 3 por cuenta y 2 por fórmula, y cada uno en un
    espacio distinto.

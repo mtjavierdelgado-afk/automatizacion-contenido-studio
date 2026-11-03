@@ -398,7 +398,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/parrilla/conjuntos/plan` | {cuentas: ["red:usuario"]} -> cuántas cuentas y vídeos, tokens, cupo y aviso_cupo (al 90 % avisa, no frena). |
 | `GET` | `/api/parrilla/conjuntos/trabajos/{tid}` | — |
 | `POST` | `/api/parrilla/conjuntos/ultimo` | {cuentas} -> {analisis: el último de EXACTAMENTE esa selección, o null}. |
+| `GET` | `/api/parrilla/conjuntos/historial` | Los análisis de varias cuentas guardados, el más nuevo primero (ficha corta). |
 | `GET` | `/api/parrilla/conjuntos/{aid}` | — |
+| `GET` | `/api/parrilla/conjuntos/{aid}/comparar` | ?con=<otro análisis> -> qué fórmulas, temas y ganchos aparecen, siguen y desaparecen. Sin `con`, contra el anterior de la misma selección (o el que comparte más cuentas). Gratis: no llama a Claude. |
 | `GET` | `/api/parrilla/plantilla` | Un guion en blanco en el formato del Studio, para «Escribir uno». |
 | `GET` | `/api/parrilla/proyectos` | Los proyectos que se pueden ver, con cuántos guiones tiene cada uno, y |
 | `GET` | `/api/parrilla/proyectos/{cid}` | Las matrices del proyecto y sus guiones, con el estado al día. |
@@ -411,6 +413,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/mensajes` | Un mensaje (multipart): «texto», «web» (1/0), «resultados» (1/0), «modelo» |
 | `POST` | `/api/parrilla/proyectos/{cid}/convertir` | Claude convierte lo pegado al formato: {texto, modo, matriz?, nombre?, |
 | `POST` | `/api/parrilla/proyectos/{cid}/desde-cuenta` | Guiones para ESTE proyecto con lo que le funciona a una cuenta ajena: |
+| `GET` | `/api/parrilla/proyectos/{cid}/cuentas-propias` | Las cuentas del proyecto cuyo contenido publicado entra en el cruce «ya lo tienes». |
+| `PUT` | `/api/parrilla/proyectos/{cid}/cuentas-propias` | {cuentas: ["red:usuario"]} -> las cuentas propias (solo ya leídas; [] las quita). |
 | `GET` | `/api/parrilla/proyectos/{cid}/temas` | La propuesta de temas del proyecto (o {propuesta: null}). |
 | `POST` | `/api/parrilla/proyectos/{cid}/temas` | {analisis, cuantos, aunque_cupo?} -> el trabajo: Claude propone temas (no escribe guiones). Con el cupo al 90 % da 409 hasta que llega aunque_cupo: true. |
 | `POST` | `/api/parrilla/proyectos/{cid}/temas/escribir` | {confirmado: true, modo?, nombre?, aunque_cupo?} -> el trabajo de la Parrilla: un guion por tema aprobado. Sin proyecto elegido, o sin confirmar, no se escribe nada. |

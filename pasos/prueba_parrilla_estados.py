@@ -227,8 +227,14 @@ def prueba_sin_sorteo():
     ok(not nuevas[0].get("abstracta") and nuevas[0]["personajes"] == [], "ni abstracta ni gente que la línea no pide")
     relato = T.resolver({"tipo_relato": {"modo": "espacio_que_cambia", "cambia": "objeto"}})
     ok(T.plano_se_edita(dict(nuevas[0], set="bano"), relato, "bano",
-                        P6._familia_de_carta(nuevas[0].get("carta"), "ilustracion")),
+                        P6._familia_del_plano(nuevas[0], "ilustracion")),
        "sin la carta de retrato, en un espacio que cambia el plano edita la base (misma cámara)")
+    detalle = {"id": "S009", "linea_gv": {"visual": "Close-up of the new mirror's brass frame. No people."}}
+    igual(P6._familia_del_plano(detalle, "ilustracion"), "cerca",
+          "sin cámara ni carta, una línea «Close-up of…» es un detalle (no edita la base)")
+    igual(P6._familia_del_plano({"id": "S010", "carta": "retrato", "linea_gv": {"visual": "Close-up of x"}},
+                                "ilustracion"), P6._familia_de_carta("retrato", "ilustracion"),
+          "con su carta (vídeos de antes), la de la carta, como siempre")
 
 
 def prueba_al_crear():

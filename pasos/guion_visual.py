@@ -407,8 +407,9 @@ COMO
   - NO ilustres palabra por palabra lo que dice la voz: cuenta con imagenes lo
     que el video quiere contar. Si la voz menciona una alternativa o un «no
     hagas esto», decide tu que se ve para que se entienda.
-  - Nada que contradiga lo fijo de abajo: el sitio es ese y solo ese, y los
-    objetos que cambian solo pueden estar en uno de sus ESTADOS.
+  - Nada que contradiga lo fijo de abajo: el sitio es ese y solo ese (o, si
+    hay OTROS AMBIENTES DEL MISMO LUGAR, uno de ellos), y los objetos que
+    cambian solo pueden estar en uno de sus ESTADOS.
 {estados_txt}
 LO FIJO
 <<<
@@ -436,6 +437,10 @@ def _fijo_legible(espacio, reparto, estados):
     if espacio:
         partes.append(f"SITIO: {espacio.get('descripcion') or ''} "
                       f"(luz: {espacio.get('luz') or '-'})")
+        for otro in espacio.get("secundarios") or []:
+            if isinstance(otro, dict) and otro.get("descripcion"):
+                partes.append(f"OTRO AMBIENTE DEL MISMO LUGAR ({otro.get('nombre') or ''}): "
+                              f"{otro['descripcion']}")
     for pid, ficha in (reparto or {}).items():
         partes.append(f"PERSONAJE {pid}: {(ficha or {}).get('descripcion') or ''}")
     for est, cambio in (estados or {}).items():
@@ -515,7 +520,8 @@ INSTRUCCION_COMPROBAR = """Eres el script supervisor de un video. Abajo esta LO
 FIJO (el sitio, el reparto y los estados aprobados del objeto que cambia) y el
 GUION VISUAL, plano a plano. Di que planos piden algo que CONTRADICE lo fijo: un
 mueble o una pieza que el sitio no tiene, otro sitio, un estado que no existe,
-un personaje que no esta en el reparto. Lo fijo manda: si un plano lo
+un personaje que no esta en el reparto (un OTRO AMBIENTE DEL MISMO LUGAR de lo fijo
+no es otro sitio). Lo fijo manda: si un plano lo
 contradice, se dibujara lo fijo. No juzgues el estilo ni el gusto: solo
 contradicciones.
 

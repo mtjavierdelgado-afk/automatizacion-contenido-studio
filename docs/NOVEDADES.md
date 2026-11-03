@@ -10,6 +10,12 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**El cupo de Claude al 90 % avisa, no frena (2 de noviembre)**
+- En Cuentas que te gustan, «Analizar seleccionadas», «Proponer temas» y
+  «Escribir guiones aprobados» ya no se paran con el cupo al 90 %: sale una
+  advertencia y puedes **seguir igualmente**. Si Claude se queda sin cupo a
+  medias, el aviso lo dice y no se pierde nada: lo repites cuando se renueve.
+
 **Cuentas que te gustan: varias juntas, temas para aprobar y cifras justas (1 de noviembre)**
 - **Cada cuenta, con cifras relativas a ella misma**: «me gusta» y comentarios
   por cada 100 vistas, «×1,6 su mediana» y las vistas por duración, con
@@ -20,7 +26,7 @@ vídeos, estilos, claves y contraseña no se tocan.
   «Completar con Apify» la rellena (pregunta antes, con el precio y el tope).
 - **Varias cuentas juntas**: marca de 2 a 10 en «Ya leídas» y pulsa «Analizar
   seleccionadas». Antes te dice cuántas cuentas, vídeos y cupo de Claude se van
-  a usar; con el cupo al 90 % no arranca y no se pierde nada.
+  a usar; con el cupo al 90 % o más te avisa y puedes seguir igualmente.
 - **Proponer temas → aprobar → escribir**: Claude propone ideas (sin guiones),
   tú apruebas, editas o descartas, y solo los aprobados se escriben en la
   Parrilla del proyecto que confirmes. Sin duplicados, sin repetir lo que ya

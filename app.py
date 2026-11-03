@@ -21838,17 +21838,18 @@ def parrilla_cuenta_duraciones(red: str, usuario: str, cuerpo: dict = Body(defau
 
 @app.post("/api/parrilla/conjuntos/plan")
 def parrilla_conjunto_plan(cuerpo: dict = Body(default=None)):
-    """{cuentas: ["red:usuario"]} -> cuántas cuentas y vídeos, tokens, cupo y si se puede."""
+    """{cuentas: ["red:usuario"]} -> cuántas cuentas y vídeos, tokens, cupo y aviso_cupo (al 90 % avisa, no frena)."""
     CJ, _T = _temas_mods()
     return _por_temas(CJ.plan, raiz_proyectos(), _cuerpo(cuerpo).get("cuentas"))
 
 
 @app.post("/api/parrilla/conjuntos", status_code=202)
 def parrilla_conjunto_lanzar(cuerpo: dict = Body(default=None)):
-    """{cuentas} -> el trabajo: Claude compara las cuentas (con la membresía)."""
+    """{cuentas, aunque_cupo?} -> el trabajo: Claude compara las cuentas (con la membresía). Con el cupo al 90 % da 409 hasta que llega aunque_cupo: true."""
     CJ, _T = _temas_mods()
-    cuentas = _cuerpo(cuerpo).get("cuentas")
-    t = _por_temas(CJ.lanzar, raiz_proyectos(), cuentas)
+    d = _cuerpo(cuerpo)
+    cuentas = d.get("cuentas")
+    t = _por_temas(CJ.lanzar, raiz_proyectos(), cuentas, aunque_cupo=d.get("aunque_cupo") is True)
     anotar_global("cuentas_conjunto", {"cuentas": len(CJ.entender_lista(cuentas))})
     return t
 
@@ -21887,7 +21888,7 @@ def parrilla_temas(cid: str, peticion: Request):
 
 @app.post("/api/parrilla/proyectos/{cid}/temas/plan")
 def parrilla_temas_plan(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """{analisis, cuantos} -> lo que se mandará a Claude y si el cupo alcanza."""
+    """{analisis, cuantos} -> lo que se mandará a Claude y aviso_cupo (al 90 % avisa, no frena)."""
     cid = _proyecto_parrilla(cid, peticion)
     _CJ, T = _temas_mods()
     d = _cuerpo(cuerpo)
@@ -21897,12 +21898,12 @@ def parrilla_temas_plan(cid: str, peticion: Request, cuerpo: dict = Body(default
 
 @app.post("/api/parrilla/proyectos/{cid}/temas", status_code=202)
 def parrilla_temas_proponer(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """{analisis, cuantos} -> el trabajo: Claude propone temas (no escribe guiones)."""
+    """{analisis, cuantos, aunque_cupo?} -> el trabajo: Claude propone temas (no escribe guiones). Con el cupo al 90 % da 409 hasta que llega aunque_cupo: true."""
     cid = _proyecto_parrilla(cid, peticion)
     _CJ, T = _temas_mods()
     d = _cuerpo(cuerpo)
     t = _por_temas(T.lanzar_propuesta, raiz_proyectos(), cid, d.get("analisis"), d.get("cuantos"),
-                   _videos_creados_de(cid, peticion))
+                   _videos_creados_de(cid, peticion), aunque_cupo=d.get("aunque_cupo") is True)
     anotar_global("parrilla_proponer_temas", {"proyecto": cid, "cuantos": d.get("cuantos")})
     return t
 
@@ -21926,7 +21927,7 @@ def parrilla_tema_cambiar(cid: str, tid: str, peticion: Request, cuerpo: dict = 
 
 @app.post("/api/parrilla/proyectos/{cid}/temas/escribir", status_code=202)
 def parrilla_temas_escribir(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """{confirmado: true, modo?, nombre?} -> el trabajo de la Parrilla: un guion
+    """{confirmado: true, modo?, nombre?, aunque_cupo?} -> el trabajo de la Parrilla: un guion
     por tema aprobado. Sin proyecto elegido, o sin confirmar, no se escribe nada."""
     cid = _proyecto_parrilla(cid, peticion)
     P = _parrilla()
@@ -21936,10 +21937,7 @@ def parrilla_temas_escribir(cid: str, peticion: Request, cuerpo: dict = Body(def
     if d.get("confirmado") is not True:
         raise ErrorApi(409, f"confirma que van a la Parrilla de «{_nombres_de_clientes().get(cid, cid)}»")
     CJ, T = _temas_mods()
-    cupo = CJ.estado_cupo()
-    if cupo["malo"]:
-        raise ErrorApi(409, f"te queda poco de Claude: la ventana más llena va por el {round(cupo['uso'] * 100)} %. "
-                            "Espera a que se renueve: los temas aprobados siguen ahí.")
+    _por_temas(CJ.comprobar_cupo, d.get("aunque_cupo") is True)   # al 90 %: avisa; sigue si se dijo que sí
     datos, temas = _por_temas(T.para_escribir, raiz_proyectos(), cid)
     nombre = str(d.get("nombre") or "").strip() or f"Ideas de cuentas · {ahora()[:10]}"
     modo = d.get("modo") if d.get("modo") in P.USOS else "adaptar"

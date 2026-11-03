@@ -9436,11 +9436,20 @@ def cuentas_que_te_gustan_2(navegador, datos):
     marcadas = pg.p.locator(".tarjeta-cuenta-sel.marcada").count()
     ok(marcadas >= 3, f"«Seleccionar todas» marca las leídas ({marcadas})")
     ok(pg.esperar(".varias-cuentas button.primario", "Analizar seleccionadas", 5), "aparece «Analizar seleccionadas»")
-    pg.dialogos.clear()
-    pg.pulsar(".varias-cuentas button.primario", "Analizar seleccionadas")
-    ok(any("cuentas" in x and "vídeos" in x and "cupo" in x for x in pg.dialogos),
-       f"antes de llamar a Claude dice cuántas cuentas, vídeos y el cupo: {pg.dialogos[-1:]}")
-    ok(pg.esperar(".resultado-conjunto h4", "Fórmulas que se repiten", 30), "el análisis de varias cuentas")
+    # cupo-aviso (02-11): con el cupo al 93 % AVISA y deja seguir, no bloquea
+    cupo_ruta = os.path.join(datos["env"]["ESTUDIO_SECRETOS"], "cupo_claude.json")
+    with open(cupo_ruta, "w", encoding="utf-8") as fh:
+        json.dump({"p": {"cuenta": "principal", "ventanas": {"five_hour": {"uso": 0.93, "reinicia": time.time() + 3600}}}}, fh)
+    try:
+        pg.dialogos.clear()
+        pg.pulsar(".varias-cuentas button.primario", "Analizar seleccionadas")
+        ok(any("cuentas" in x and "vídeos" in x for x in pg.dialogos),
+           f"antes de llamar a Claude dice cuántas cuentas y vídeos: {pg.dialogos[-1:]}")
+        ok(any("93 %" in x and "seguir igualmente" in x for x in pg.dialogos),
+           f"con el cupo al 93 %, avisa y ofrece seguir igualmente: {pg.dialogos[-1:]}")
+        ok(pg.esperar(".resultado-conjunto h4", "Fórmulas que se repiten", 30), "y al aceptar, analiza (no se para)")
+    finally:
+        os.remove(cupo_ruta)
     ok(pg.visible(".pruebas-conjunto a.prueba"), "cada conclusión con sus vídeos de prueba, enlazados")
     pg.captura("varias_cuentas")
 

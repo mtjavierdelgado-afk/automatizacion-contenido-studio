@@ -402,20 +402,19 @@ def plan(raiz, cid, aid, cuantos, videos_creados=None):
     cupo = CJ.estado_cupo()
     return {"cuantos": cuantos, "n_cuentas": len(cargadas), "videos": sum(m["total"] for _d, m in cargadas),
             "existentes": len(existentes), "tokens": CJ.tokens_de(prompt), "cupo": cupo,
-            "puede": not cupo["malo"],
-            "motivo": (f"te queda poco de Claude: la ventana más llena va por el {round(cupo['uso'] * 100)} %. "
-                       "Espera a que se renueve.") if cupo["malo"] else "",
+            "puede": True, "aviso_cupo": bool(cupo["malo"]), "motivo": CJ.aviso_de_cupo(cupo),
             "hay_propuesta": bool(leer(raiz, cid))}
 
 
-def proponer(raiz, cid, aid, cuantos=CUANTOS_DEFECTO, videos_creados=None, limites=None, avance=None):
+def proponer(raiz, cid, aid, cuantos=CUANTOS_DEFECTO, videos_creados=None, limites=None, avance=None,
+             aunque_cupo=False):
     cuantos = _cuantos(cuantos)
     conjunto, cargadas, existentes, marca = preparar(raiz, cid, aid, videos_creados)
     prompt = instruccion(conjunto, cargadas, existentes, cuantos, marca)
-    cupo = CJ.estado_cupo()
-    if cupo["malo"]:
-        raise ErrorTemas(f"te queda poco de Claude (la ventana más llena va por el {round(cupo['uso'] * 100)} %): "
-                         "espera a que se renueve", 409, cupo=cupo)
+    try:
+        CJ.comprobar_cupo(aunque_cupo)
+    except CJ.ErrorConjunto as fallo:
+        raise ErrorTemas(str(fallo), 409, cupo=fallo.cupo) from None
     if avance:
         avance(f"Claude está proponiendo {cuantos} temas")
     if C._simular() and P.LLAMAR_CLAUDE is None:
@@ -540,10 +539,12 @@ def trabajo(tid):
 
 
 def lanzar_propuesta(raiz, cid, aid, cuantos=CUANTOS_DEFECTO, videos_creados=None, limites=None,
-                     en_hilo=True):
+                     en_hilo=True, aunque_cupo=False):
     p = plan(raiz, cid, aid, cuantos, videos_creados)          # errores claros antes de lanzar
-    if not p["puede"]:
-        raise ErrorTemas(p["motivo"], 409, cupo=p["cupo"])
+    try:
+        CJ.comprobar_cupo(aunque_cupo, p["cupo"])
+    except CJ.ErrorConjunto as fallo:
+        raise ErrorTemas(str(fallo), 409, cupo=fallo.cupo) from None
     cid = P._cid(cid)
     with _LOCK:
         if any(t["estado"] == "trabajando" and t["cid"] == cid for t in _TRABAJOS.values()):
@@ -559,7 +560,7 @@ def lanzar_propuesta(raiz, cid, aid, cuantos=CUANTOS_DEFECTO, videos_creados=Non
             with _LOCK:
                 _TRABAJOS[tid]["avance"] = texto
         try:
-            r = proponer(raiz, cid, aid, cuantos, videos_creados, limites, avance)
+            r = proponer(raiz, cid, aid, cuantos, videos_creados, limites, avance, aunque_cupo=True)  # lanzar ya avisó
             with _LOCK:
                 _TRABAJOS[tid].update(estado="listo", propuesta=r["id"], reloj=time.time())
         except Exception as fallo:                          # noqa: BLE001 - va a la pantalla

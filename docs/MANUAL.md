@@ -908,7 +908,8 @@ YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
 
 1. Marca las cuentas en **Ya leídas** (o **Seleccionar todas**; de 2 a 10).
 2. **Analizar seleccionadas**: antes te dice cuántas cuentas, vídeos y cupo de
-   Claude se van a usar (con el cupo al 90 % no arranca). Sale qué fórmula se
+   Claude se van a usar (con el cupo al 90 % o más te avisa y puedes **seguir
+   igualmente**; si Claude se queda sin cupo a medias, no se pierde nada). Sale qué fórmula se
    repite en varias cuentas, cuál funciona solo en una, los temas saturados y
    los libres, cada cosa con sus vídeos de prueba enlazados.
 3. **Proponer temas** (eliges cuántos): solo ideas, sin guiones. Cada tema trae

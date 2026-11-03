@@ -32330,8 +32330,8 @@ function selectorCuentaChat() {
  * «Proponer temas» para el proyecto, aprobar/editar/descartar cada uno y
  * «Escribir guiones aprobados». Lo de Claude va en un hilo del servidor y
  * aquí se pregunta cada 2 s. Antes de llamar a Claude se enseña cuántas
- * cuentas, vídeos y cuánto cupo; con el cupo al 90 % no arranca. La
- * selección vive en la pantalla (y en localStorage): no se pierde.
+ * cuentas, vídeos y cuánto cupo; con el cupo al 90 % avisa y deja
+ * «Seguir igualmente». La selección vive en la pantalla (y en localStorage): no se pierde.
  */
 const MAX_CUENTAS_JUNTAS = 10;
 const CLAVE_SELECCION_CUENTAS = 'cuentasSeleccion';
@@ -32431,15 +32431,29 @@ function textoCupo(cupo) {
 }
 
 /* El aviso antes de llamar a Claude: cuántas cuentas y vídeos y cuánto
-   cupo (punto D). Con el cupo al 90 %, no deja seguir. */
+   cupo (punto D). Con el cupo al 90 % o más AVISA y deja seguir (decisión
+   del dueño, 02-11-2026): «Aceptar» es «Seguir igualmente». -> null si se
+   cancela, o {aunque_cupo} para mandar al servidor. */
 function confirmarEnvioClaude(plan, que) {
-  if (!plan.puede) {
-    alert(`${plan.motivo || 'Ahora no se puede.'}\n\nNo se ha mandado nada a Claude: tu selección y lo leído siguen igual.`);
-    return false;
+  const resumen = `${que}\n\nSe mandarán a Claude ${plan.n_cuentas} cuentas y ${plan.videos} vídeos `
+    + `(≈${Number(plan.tokens || 0).toLocaleString('es')} tokens, con tu membresía; no se paga aparte).\n`;
+  if (plan.aviso_cupo) {
+    return confirm(`⚠ ${plan.motivo}\n\n${resumen}\nPulsa «Aceptar» para seguir igualmente o «Cancelar» para esperar.`)
+      ? { aunque_cupo: true } : null;
   }
-  return confirm(`${que}\n\nSe mandarán a Claude ${plan.n_cuentas} cuentas y ${plan.videos} vídeos `
-    + `(≈${Number(plan.tokens || 0).toLocaleString('es')} tokens, con tu membresía; no se paga aparte).\n`
-    + `${textoCupo(plan.cupo)}\n\n¿Seguir?`);
+  return confirm(`${resumen}${textoCupo(plan.cupo)}\n\n¿Seguir?`) ? {} : null;
+}
+
+/* Si el cupo se llenó entre el aviso y el clic, el servidor contesta pidiendo
+   «Seguir igualmente»: se pregunta y se repite con el sí. */
+async function conAvisoDeCupo(lanzar, extra) {
+  try {
+    return await lanzar(extra || {});
+  } catch (e) {
+    if (!/Seguir igualmente/.test(e.message || '') || (extra || {}).aunque_cupo) throw e;
+    if (!confirm(`⚠ ${e.message.replace(/ Confirma que quieres «Seguir igualmente».*$/, '')}\n\nPulsa «Aceptar» para seguir igualmente.`)) return null;
+    return lanzar(Object.assign({}, extra || {}, { aunque_cupo: true }));
+  }
 }
 
 function bloqueVariasCuentas() {
@@ -32484,8 +32498,11 @@ async function analizarSeleccionadas() {
       return;
     }
     const plan = await pedir(rutaConjuntos('/plan'), { method: 'POST', cuerpo: { cuentas } });
-    if (!confirmarEnvioClaude(plan, `Analizar juntas ${plan.n_cuentas} cuentas.`)) return;
-    PAR.conjuntoTrabajo = await pedirTrabajoParrilla(rutaConjuntos(), { cuentas });
+    const si = confirmarEnvioClaude(plan, `Analizar juntas ${plan.n_cuentas} cuentas.`);
+    if (!si) return;
+    const t = await conAvisoDeCupo(extra => pedirTrabajoParrilla(rutaConjuntos(), Object.assign({ cuentas }, extra)), si);
+    if (!t) return;
+    PAR.conjuntoTrabajo = t;
     pintarModulo();
     vigilarConjunto();
   } catch (e) { toast(e.message, true); }
@@ -32588,9 +32605,12 @@ async function proponerTemas(a) {
   try {
     const plan = await pedir(rutaTemas('/plan'), { method: 'POST', cuerpo: { analisis: a.id, cuantos: n } });
     const extra = plan.hay_propuesta ? '\nLa propuesta de temas que ya tienes en este proyecto se sustituye (los guiones ya escritos se quedan).' : '';
-    if (!confirmarEnvioClaude(plan, `Proponer ${n} temas para ${nombreProyectoParrilla() || 'este proyecto'}.`
-      + ` Se comparan con ${plan.existentes} guiones y vídeos que ya tiene.${extra}`)) return;
-    PAR.temasTrabajo = await pedirTrabajoParrilla(rutaTemas(), { analisis: a.id, cuantos: n });
+    const si = confirmarEnvioClaude(plan, `Proponer ${n} temas para ${nombreProyectoParrilla() || 'este proyecto'}.`
+      + ` Se comparan con ${plan.existentes} guiones y vídeos que ya tiene.${extra}`);
+    if (!si) return;
+    const t = await conAvisoDeCupo(mas => pedirTrabajoParrilla(rutaTemas(), Object.assign({ analisis: a.id, cuantos: n }, mas)), si);
+    if (!t) return;
+    PAR.temasTrabajo = t;
     pintarModulo();
     vigilarTemas();
   } catch (e) { toast(e.message, true); }
@@ -32742,14 +32762,15 @@ async function escribirTemasAprobados(n) {
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   await (PAR.temasCola || Promise.resolve());
   const nombre = nombreProyectoParrilla();
-  if (PAR.temasCupo && PAR.temasCupo.malo) {
-    alert(`${textoCupo(PAR.temasCupo)} Espera a que se renueve: los temas aprobados siguen ahí.`);
-    return;
-  }
-  if (!confirm(`Se escribirán ${n} guion${n === 1 ? '' : 'es'} y se añadirán a la Parrilla de «${nombre}».\n`
-    + `Claude los escribe con tu membresía (no se paga aparte). ${textoCupo(PAR.temasCupo)}\n\n¿Seguir?`)) return;
+  const cupoMalo = PAR.temasCupo && PAR.temasCupo.malo;
+  const aviso = cupoMalo ? `⚠ ${textoCupo(PAR.temasCupo)} Si sigues, puede cortarse a medias; si pasa, no se pierde nada.\n\n` : '';
+  if (!confirm(`${aviso}Se escribirán ${n} guion${n === 1 ? '' : 'es'} y se añadirán a la Parrilla de «${nombre}».\n`
+    + `Claude los escribe con tu membresía (no se paga aparte).${cupoMalo ? '' : ` ${textoCupo(PAR.temasCupo)}`}\n\n`
+    + (cupoMalo ? 'Pulsa «Aceptar» para seguir igualmente.' : '¿Seguir?'))) return;
   try {
-    const t = await pedir(rutaTemas('/escribir'), { method: 'POST', cuerpo: { confirmado: true, modo: PAR.temasModo || 'adaptar' } });
+    const t = await conAvisoDeCupo(mas => pedir(rutaTemas('/escribir'), { method: 'POST',
+      cuerpo: Object.assign({ confirmado: true, modo: PAR.temasModo || 'adaptar' }, mas) }), cupoMalo ? { aunque_cupo: true } : {});
+    if (!t) return;
     PAR.trabajo = t;
     toast(`Claude está escribiendo ${n} guion${n === 1 ? '' : 'es'}: aparecerán en la Parrilla`);
     pintarModulo();

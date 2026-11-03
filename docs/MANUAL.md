@@ -356,6 +356,14 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   aprobar, Claude avisa de los planos que contradicen lo fijo (el sitio, el
   reparto, los estados): manda lo fijo. Quién manda: el vídeo, luego el estilo
   («🎬 Qué dibujan las imágenes» en «Cómo se cuenta»), luego la voz.
+  **Estados desde la Parrilla:** en «Un espacio que cambia» con «Imágenes:
+  guion», el guion de la Parrilla puede traer una línea **«Estado: antes»** (o
+  `despues`, `paleta_1`…) en cada ESCENA y la sección **ESTADOS DEL ESPACIO**
+  (`- despues: lo que cambia, en inglés`; el estado que es la base tal cual se
+  deja vacío). Entonces esos estados mandan: cada línea edita la imagen de SU
+  estado. Y en los vídeos creados desde la Parrilla, una línea «Visual:» **sin
+  cámara** ya no recibe un encuadre al azar (un retrato, unas manos): la línea
+  dice el plano.
 - **El reparto y los sitios** (en un vídeo hecho): «Pedido para el reparto de
   sitios» es una frase para Claude al repartir; «Volver a repartir con este
   pedido» no paga imágenes.

@@ -17783,13 +17783,19 @@ function bloqueImagenesLight(e, ficha) {
     campoSelect('Qué dibujan las imágenes', e.imagenes || '', opciones,
       v => { e.imagenes = v; pintarLight(); },
       AYUDA_IMAGENES + (trae ? ` El guion de la Parrilla trae ${trae} escena(s) con líneas «Visual:»: `
-        + 'se guardan con el vídeo y son el guion visual cuando las imágenes siguen el guion.' : '')));
+        + 'se guardan con el vídeo y son el guion visual cuando las imágenes siguen el guion.'
+        + (Object.keys(e.estados_espacio || {}).length ? ` Trae también ${Object.keys(e.estados_espacio).length} estado(s) del espacio `
+          + `(${Object.keys(e.estados_espacio).join(', ')}): cada línea edita la imagen de su estado.` : '') : '')));
 }
 
 function imagenesParaCrear(e) {
   const salida = {};
   if (['guion', 'voz'].includes(e.imagenes)) salida.imagenes = e.imagenes;
   if ((e.visuales || []).length) salida.visuales = e.visuales.slice(0, 400);
+  /* los ESTADOS DEL ESPACIO de la Parrilla (rama parrilla-estados): viajan con las líneas */
+  if ((e.visuales || []).length && e.estados_espacio && Object.keys(e.estados_espacio).length) {
+    salida.estados = e.estados_espacio;
+  }
   return Object.keys(salida).length ? salida : null;
 }
 
@@ -31414,6 +31420,7 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   /* qué dibujan las imágenes y las líneas «Visual:» (rama guion-visual) */
   e.imagenes = ['guion', 'voz'].includes(r.imagenes) ? r.imagenes : '';
   e.visuales = Array.isArray(r.visuales) ? r.visuales : [];
+  e.estados_espacio = (r.estados && typeof r.estados === 'object' && !Array.isArray(r.estados)) ? r.estados : {};
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.fichaAbierta = false;
   PAR.datos = null;

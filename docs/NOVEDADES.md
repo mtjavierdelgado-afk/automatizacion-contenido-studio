@@ -10,6 +10,18 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**La Parrilla dice el estado de cada escena, y sin cámara no hay encuadre al azar (3 de noviembre)**
+- En «Un espacio que cambia» con «Imágenes: guion», el guion de la Parrilla
+  puede traer **«Estado: antes»** (o `despues`…) en cada ESCENA y una sección
+  **ESTADOS DEL ESPACIO** con lo que cambia en cada uno (en inglés). Cada plano
+  edita la imagen de **su** estado: el «después» ya no sale sobre el baño del
+  «antes», ni una toma del después igual que la primera. Esos estados mandan
+  sobre los que deduce el Studio, y se pueden cambiar en español como los demás.
+- En los vídeos **nuevos** de la Parrilla, una línea «Visual:» **sin cámara**
+  ya no recibe un encuadre sorteado (un retrato, unas manos que metían a una
+  persona aunque la línea dijera «No people in the shot»): la línea dice el
+  plano. Los vídeos ya creados no cambian.
+
 **Cuentas que te gustan: temas con sus vistas, ganchos, comparar y tus cuentas (2 de noviembre)**
 - **Todos los temas, agrupados**: el mismo tema en varias cuentas sale una sola
   vez, con **qué cuentas lo hacen** y la **suma de vistas** de sus vídeos (la

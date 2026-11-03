@@ -151,6 +151,39 @@ def normalizar(crudo, bloques_validos=None):
     visuales = crudo.get("visuales")
     if visuales:
         salida["visuales"] = normalizar_visuales(visuales)
+    # rama parrilla-estados (03-11): los ESTADOS DEL ESPACIO que trajo la
+    # Parrilla y si sus lineas sin camara van sin encuadre sorteado. Solo
+    # existen en los videos creados desde entonces (regla 1)
+    estados = normalizar_estados(crudo.get("estados"))
+    if estados:
+        salida["estados"] = estados
+    if crudo.get("sin_sorteo") is True:
+        salida["sin_sorteo"] = True
+    return salida
+
+
+#: Lo que en «ESTADOS DEL ESPACIO» quiere decir «sin cambio» (la base tal cual).
+_SIN_CAMBIO = ("", "-", "—", "…", "...", "ninguno", "ninguna", "nada", "sin cambios", "sin cambio",
+               "la base", "base", "none", "nothing", "no change", "unchanged")
+MAX_ESTADOS = 12
+
+
+def normalizar_estados(crudo):
+    """Los estados del espacio de la Parrilla: {etiqueta: cambio en ingles}.
+
+    Una etiqueta corta y sin espacios («antes», «despues», «paleta_1»). Un
+    cambio vacio (o «ninguno», «la base»…) es el sitio tal cual la base."""
+    if not isinstance(crudo, dict):
+        return {}
+    salida = {}
+    for clave, valor in list(crudo.items())[:MAX_ESTADOS]:
+        etiqueta = _etiqueta(clave)
+        if not etiqueta:
+            continue
+        cambio = _texto(re.sub(r"^\(|\)$", "", str(valor or "").strip()), 400)
+        if _llano(cambio).strip(" .") in _SIN_CAMBIO:
+            cambio = ""
+        salida[etiqueta] = cambio
     return salida
 
 
@@ -165,13 +198,17 @@ def normalizar_visuales(crudo):
         lineas = [_texto(x, MAX_VISUAL) for x in (escena.get("visual") or [])
                   if _texto(x, MAX_VISUAL)]
         if lineas:
-            salida.append({"voz": _texto(escena.get("voz"), 3000), "visual": lineas})
+            limpia = {"voz": _texto(escena.get("voz"), 3000), "visual": lineas}
+            estado = _etiqueta(escena.get("estado"))
+            if estado:
+                limpia["estado"] = estado          # «Estado:» de la escena (parrilla-estados)
+            salida.append(limpia)
     return salida
 
 
 def visuales_de_parrilla(escenas):
     """Las escenas de un guion de la Parrilla que traen «Visual:». -> [{voz, visual}]"""
-    return normalizar_visuales([{"voz": e.get("voz"), "visual": e.get("visual")}
+    return normalizar_visuales([{"voz": e.get("voz"), "visual": e.get("visual"), "estado": e.get("estado")}
                                 for e in (escenas or []) if isinstance(e, dict)])
 
 
@@ -253,8 +290,12 @@ def casar(visuales, bloques):
             avisos.append(f"la escena {n} de la Parrilla no casa con ningún bloque del guion: "
                           f"va con {elegido}; revísalo")
         ultimo = elegido
+        estado = _etiqueta(escena.get("estado"))
         for linea in escena.get("visual") or []:
-            planos.append({"bloque": elegido, "visual": linea})
+            plano = {"bloque": elegido, "visual": linea}
+            if estado:
+                plano["estado"] = estado           # el estado de su escena (parrilla-estados)
+            planos.append(plano)
     return planos, avisos
 
 

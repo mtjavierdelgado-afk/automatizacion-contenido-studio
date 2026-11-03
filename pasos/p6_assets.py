@@ -315,6 +315,17 @@ def _catalogo_de(params, proyecto):
     catalogo.setdefault("lugares", {})
     catalogo.setdefault("capitulos", {})
     catalogo.setdefault("beats", [])
+    # LOS ESTADOS DE LA PARRILLA MANDAN (rama parrilla-estados, 03-11): si el
+    # video dibuja lo que dice el guion y la Parrilla trajo sus «ESTADOS DEL
+    # ESPACIO», son esos (ver `tipo_relato.estados_del_catalogo`). Sin ellos
+    # el catalogo sale como siempre, sin una clave de mas (regla 1).
+    if guion_visual.modo_de(params) == "guion":
+        try:
+            fijos = guion_visual.normalizar(params.get("guion_visual")).get("estados")
+        except ValueError:
+            fijos = None
+        if fijos:
+            catalogo["estados_fijos"] = dict(fijos)
     return catalogo
 
 
@@ -1178,13 +1189,19 @@ def _asignar_cartas(escenas, p, texto=""):
     return cartas
 
 
-def _aplicar_lineas_gv(escenas, catalogo):
+def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=()):
     """La camara y la gente de cada linea del guion visual (rama guion-visual).
 
     La camara de la linea va LITERAL como encuadre (el SHOT TYPE del prompt) y
     el plano deja de ser abstracto; sin camara, la carta repartida de siempre.
     Los personajes de la linea mandan sobre los del tramo, pero solo los que
-    estan en el reparto (lo fijo manda: uno inventado no tiene hoja)."""
+    estan en el reparto (lo fijo manda: uno inventado no tiene hoja).
+
+    Con `sin_sorteo` (videos de la Parrilla creados desde la rama
+    parrilla-estados, 03-11), una linea SIN camara tampoco lleva la carta
+    sorteada: la linea ya dice el plano, y una carta de retrato o de manos
+    metia a una persona en primer plano aunque la linea dijera «No people in
+    the shot». Una carta forzada a mano en ese plano (`forzadas`) se respeta."""
     reparto = (catalogo or {}).get("reparto") or {}
     for escena in escenas:
         linea = escena.get("linea_gv")
@@ -1192,6 +1209,9 @@ def _aplicar_lineas_gv(escenas, catalogo):
             continue
         if linea.get("camara"):
             escena["encuadre"] = linea["camara"]
+        elif sin_sorteo and escena.get("id") not in forzadas:
+            escena.pop("encuadre", None)
+            escena.pop("carta", None)
         # la linea dice lo que SE VE: una carta abstracta («not a physical
         # location») le llevaria la contraria (guion-visual-2)
         escena.pop("abstracta", None)
@@ -1365,7 +1385,13 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     texto_video = json.dumps(catalogo or {}, ensure_ascii=False)
     _asignar_cartas(escenas, p, texto=texto_video)
     if lineas_gv:
-        _aplicar_lineas_gv(escenas, catalogo)
+        try:
+            sin_sorteo = bool(guion_visual.normalizar(p.get("guion_visual")).get("sin_sorteo"))
+        except ValueError:
+            sin_sorteo = False
+        forzadas = {e["id"] for e in escenas
+                    if _ajustes_unidad(p, f"escena:{e['id']}").get("carta")} if sin_sorteo else set()
+        _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=sin_sorteo, forzadas=forzadas)
     modo = modo_de(p["estilo"])
     # EL TIPO DE RELATO (rama tipo-de-relato). Solo con un modo EXPLICITO que
     # edita: sin el, `relato_edita` es False y ningun plano cambia.

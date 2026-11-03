@@ -10,6 +10,23 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Recorrido y clase con varios ambientes; los primeros planos con su cámara (3 de noviembre)**
+- **«Recorrido» y «Clase» ya son varios ambientes de un mismo lugar** (la
+  cocina, la sala y el dormitorio de una casa; la pizarra y la mesa de un
+  aula), con la misma luz y los mismos materiales. Antes se quedaban en un solo
+  sitio. Si escribes el espacio fijo, sus «Sitios secundarios» son los
+  ambientes; si no, los propone Claude al repartir.
+- **«Los ambientes del lugar»**, en el tipo de relato del vídeo: la imagen de
+  cada ambiente se dibuja y se aprueba (opcional; se paga una imagen por
+  ambiente, con su precio delante). Sus planos la llevan de referencia. Empieza
+  por el principal: los demás se dibujan a partir de él.
+- **En «Lo que dice el guion», un primer plano es un primer plano.** Con «Un
+  espacio que cambia», una línea cuya cámara pide un primer plano o un detalle
+  ya no edita la imagen base (que fijaba la cámara de siempre): la lleva de
+  referencia, con el estado de su objeto, y respeta su encuadre. Los vídeos
+  que ya estaban en «Lo que dice el guion» con un espacio que cambia pueden
+  ofrecer rehacer esos primeros planos: solo se rehacen si lo pides.
+
 **Cuentas que te gustan: temas con sus vistas, ganchos, comparar y tus cuentas (2 de noviembre)**
 - **Todos los temas, agrupados**: el mismo tema en varias cuentas sale una sola
   vez, con **qué cuentas lo hacen** y la **suma de vistas** de sus vídeos (la

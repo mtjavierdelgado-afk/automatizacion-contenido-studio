@@ -95,6 +95,18 @@ def hablan_de_lo_mismo(negocio, estilo, minimo=2):
     return pares
 
 
+def del_negocio(tipo):
+    """Las reglas que la persona ESCRIBIÓ en la ficha del negocio que recibe un
+    estilo (lo que da `dominios.fijado`). -> [{texto, palabras}]
+
+    No sirve `dominios.reglas_de_foto`: las da ya en el formato del prompt (en
+    inglés y sin las palabras «solo si…»), y con ellas la revisión salía vacía
+    (lo cazó la revisión independiente del 28-10)."""
+    crudas = ((tipo or {}).get("crudo") or {}).get("reglas") or []
+    return [{"texto": str(r.get("texto") or ""), "palabras": list(r.get("palabras") or [])}
+            for r in crudas if isinstance(r, dict) and str(r.get("texto") or "").strip()]
+
+
 # ------------------------------------------------------------------ con Claude
 
 SISTEMA = ("Eres director de fotografía y revisas reglas de un generador de "

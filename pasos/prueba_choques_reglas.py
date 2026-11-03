@@ -141,10 +141,45 @@ def prueba_revisar():
         cr.cli_claude.ejecutar = original
 
 
+def prueba_con_una_ficha_de_verdad():
+    seccion("con una ficha del negocio guardada de verdad (no listas a mano)")
+    import dominios                                         # noqa: PLC0415
+    antes = os.environ.get("ESTUDIO_DOMINIOS")
+    os.environ["ESTUDIO_DOMINIOS"] = os.path.join(_TMP, "dominios.json")
+    try:
+        ficha = dominios.guardar_de_cliente("estado-play", {
+            "nombre": "Consolas",
+            "reglas": [{"texto": "Cada tele va en su trípode o sobre un mueble, nunca flotando.",
+                        "palabras": ["consola"],
+                        "en": "Every TV stands on its tripod stand or a piece of furniture."}]})
+        tipo = dominios.fijado({"dominio": ficha["id"], "modo": "foto", "referencias": ["a.png"]})
+        negocio = cr.del_negocio(tipo)
+        igual(negocio, [{"texto": "Cada tele va en su trípode o sobre un mueble, nunca flotando.",
+                         "palabras": ["consola"]}],
+              "se compara lo que la persona escribió, con su «solo si…», no la versión en inglés")
+        ok(dominios.reglas_de_foto({"dominio": ficha["id"]}) and not any(
+            "texto" in r for r in dominios.reglas_de_foto({"dominio": ficha["id"]})),
+           "(las del prompt no traen «texto»: por eso no sirven aquí)")
+        igual(cr.del_negocio(None), [], "sin ficha, ninguna")
+        os.environ["ESTUDIO_SIMULAR"] = "1"
+        try:
+            r = cr.revisar(negocio, ESTILO)
+        finally:
+            os.environ.pop("ESTUDIO_SIMULAR", None)
+        ok(any((p["negocio"], p["estilo"]) == (0, 0) for p in r["pares"]),
+           "y la tele de la ficha choca con la del estilo")
+    finally:
+        if antes is None:
+            os.environ.pop("ESTUDIO_DOMINIOS", None)
+        else:
+            os.environ["ESTUDIO_DOMINIOS"] = antes
+
+
 def main():
     prueba_pista_gratis()
     prueba_limpiar()
     prueba_revisar()
+    prueba_con_una_ficha_de_verdad()
     print("\n" + "=" * 70)
     if _fallos:
         print(f"FALLAN {len(_fallos)} de {_ok + len(_fallos)} comprobaciones:")

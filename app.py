@@ -17186,17 +17186,14 @@ def revisar_choques_reglas(cuerpo: dict = Body(default=None), peticion: Request 
     # lo ESCRITO en la ficha que recibe el estilo (`fijado`, la misma fuente
     # que `reglas_de_foto`): `reglas_de_foto` las da ya en el formato del
     # prompt (inglés, sin «solo si…»), que no es lo que hay que comparar
-    tipo = PASOS_MODULOS.dominios.fijado(estilo)
-    negocio = [{"texto": r.get("texto") or "", "palabras": list(r.get("palabras") or [])}
-               for r in ((tipo or {}).get("crudo") or {}).get("reglas") or []
-               if str(r.get("texto") or "").strip()]
+    modulo = _choques_reglas()
+    negocio = modulo.del_negocio(PASOS_MODULOS.dominios.fijado(estilo))
     propias = [{"texto": r.get("texto") or "", "palabras": list(r.get("palabras") or [])}
                for r in _reglas_estilo().de_estilo(estilo)]
     if not negocio:
         raise ErrorApi(400, "a este estilo no le llega ninguna regla del negocio")
     if not propias:
         raise ErrorApi(400, "este estilo no tiene reglas propias que comparar")
-    modulo = _choques_reglas()
     rid = uuid.uuid4().hex[:12]
     with _LOCK_CHOQUES:
         if any(f.get("estado") == "pensando" for f in _CHOQUES.values()):

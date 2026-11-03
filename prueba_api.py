@@ -8401,7 +8401,7 @@ def probar_choques_de_reglas():
         presets.FICHERO = os.path.join(base, "presets.json")
         cid = servidor.crear_cliente({"nombre": "Estado Play"})["cliente"]["id"]
         refs = []
-        for i in range(2):
+        for i in range(3):        # un estilo pide al menos 3 fotogramas
             ruta = os.path.join(base, f"r{i}.png")
             _Imagen.new("RGB", (64, 40), (40 * i, 90, 160)).save(ruta)
             refs.append(ruta)

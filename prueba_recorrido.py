@@ -9396,7 +9396,7 @@ def reglas_claras(navegador, datos):
     cid = d["cliente"]["id"] if "cliente" in d else d.get("id")
     carpeta = tempfile.mkdtemp(prefix="reglas_claras_")
     refs = []
-    for i in range(2):
+    for i in range(3):            # un estilo pide al menos 3 fotogramas
         ruta = os.path.join(carpeta, f"ref{i}.png")
         Image.new("RGB", (400, 300), (60 * i + 40, 120, 90)).save(ruta)
         refs.append(ruta)
@@ -9407,8 +9407,11 @@ def reglas_claras(navegador, datos):
         estilo = {"referencias": refs, "reglas": propias}
         if modo:
             estilo["modo"] = modo
-        _r, d = api.post("/api/presets-canal", {"tipo": "canal", "nombre": nombre,
-                                                "datos": {"estilo": estilo, "guion": {"instrucciones": "x"}}})
+        r, d = api.post("/api/presets-canal", {"tipo": "canal", "nombre": nombre,
+                                               "datos": {"estilo": estilo, "guion": {"instrucciones": "x"}}})
+        ok(r.status_code == 200 and "preset" in d, f"se crea el estilo «{nombre}» ({r.status_code} {d})")
+        if "preset" not in d:
+            return
         ids[nombre] = d["preset"]["id"]
         api.put(f"/api/clientes/estilos/{ids[nombre]}", {"cliente": cid})
     r, _d = api.put(f"/api/clientes/{cid}/negocio", {

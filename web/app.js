@@ -9389,6 +9389,7 @@ function bloqueTipoRelatoDelVideo() {
         onclick: () => escribirCambiosDelRelato() }, 'Escribir qué cambia en cada tramo'))));
   }
   if (f.edita) caja.appendChild(imagenBaseDelRelato(est, corriendo));
+  if ((f.ambientes || []).length) caja.appendChild(ambientesDelRelato(est, corriendo));
   if (est.cambios) caja.appendChild(cambiosDelRelato(est, corriendo));
   return caja;
 }
@@ -17755,6 +17756,53 @@ function bloqueRelatoEstiloLight(ficha) {
   return caja;
 }
 
+/* ============================== AMBIENTES (rama tipo-de-relato-2, 25-10-2026)
+   «Recorrido» y «Clase»: varios ambientes de un mismo lugar. Cada uno puede
+   tener su imagen base (se paga una imagen, con su coste delante); no se
+   edita: la llevan de referencia los planos de ese ambiente, para que se vea
+   el mismo sitio en todos. La del principal va primero: con ella aprobada, la
+   de cada ambiente se dibuja con sus materiales y su luz. Opcional: sin bases,
+   los planos se dibujan como siempre. Pintar no escribe nada. */
+function ambientesDelRelato(est, corriendo) {
+  const f = est.ficha || {};
+  const usd = Number(f.usd_base || 0);
+  const principal = (f.ambientes || [])[0] || {};
+  const caja = h('div', { clase: 'ambientes-relato' },
+    h('label', {}, 'Los ambientes del lugar'),
+    h('div', { clase: 'pista' }, 'Opcional. La imagen base de cada ambiente la llevan sus planos '
+      + 'como referencia: mismo sitio, mismos materiales y misma luz en todas las imágenes. '
+      + 'Empieza por el primero: los demás se dibujan a partir de él.'));
+  (f.ambientes || []).forEach((a, i) => {
+    const fila = h('div', { clase: `ambiente-relato${a.aprobada ? ' aprobada' : ''}` },
+      h('strong', {}, `${i === 0 ? 'Principal · ' : ''}${a.nombre || a.sitio}`));
+    if (a.imagen_url) {
+      const url = `${BASE}${a.imagen_url}&v=${Date.now() % 100000}`;
+      fila.appendChild(h('a', { href: url, target: '_blank', rel: 'noopener', title: 'Abrir a tamaño completo' },
+        h('img', { src: url, alt: `la imagen base de ${a.nombre || a.sitio}`, clase: 'miniatura-imagen-base' })));
+    }
+    fila.appendChild(h('div', { clase: 'meta' }, a.aprobada ? '✓ Aprobada: sus planos la llevan de referencia.'
+      : (a.imagen_url ? 'Sin aprobar.' : 'Sin imagen base.')));
+    const botones = h('div', { clase: 'fila' });
+    if (a.imagen_url) {
+      botones.appendChild(h('button', { clase: `mini${a.aprobada ? ' fantasma' : ' primario'}`, disabled: est.ocupado,
+        onclick: () => accionDelRelato('/base/aprobar', { sitio: a.sitio, aprobada: !a.aprobada },
+          a.aprobada ? 'aprobación retirada' : 'imagen del ambiente aprobada') },
+      a.aprobada ? 'Retirar la aprobación' : 'Aprobar esta imagen'));
+    }
+    const espera = i > 0 && !principal.aprobada;
+    botones.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo || espera,
+      title: espera ? 'Aprueba antes la del principal' : '',
+      onclick: () => {
+        if (!confirm(`${a.imagen_url ? 'Otra imagen' : 'La imagen base'} de «${a.nombre || a.sitio}»: `
+          + `≈ ${usdCorto(usd)}.\n\nSe paga una imagen. Después la miras y la apruebas.`)) return;
+        trabajoDelRelato('/base/generar', { otra: !!a.imagen_url, usd, sitio: a.sitio });
+      } }, `${a.imagen_url ? 'Otra imagen' : 'Generar la imagen'} · ≈ ${usdCorto(usd)}`));
+    fila.appendChild(botones);
+    caja.appendChild(fila);
+  });
+  return caja;
+}
+
 /* ============================================ GUION VISUAL (rama guion-visual)
    «Qué dibujan las imágenes»: lo que dice la voz (como siempre: no se guarda
    nada) o lo que dice el guion. Con el guion, cada línea del guion visual es un
@@ -17783,13 +17831,19 @@ function bloqueImagenesLight(e, ficha) {
     campoSelect('Qué dibujan las imágenes', e.imagenes || '', opciones,
       v => { e.imagenes = v; pintarLight(); },
       AYUDA_IMAGENES + (trae ? ` El guion de la Parrilla trae ${trae} escena(s) con líneas «Visual:»: `
-        + 'se guardan con el vídeo y son el guion visual cuando las imágenes siguen el guion.' : '')));
+        + 'se guardan con el vídeo y son el guion visual cuando las imágenes siguen el guion.'
+        + (Object.keys(e.estados_espacio || {}).length ? ` Trae también ${Object.keys(e.estados_espacio).length} estado(s) del espacio `
+          + `(${Object.keys(e.estados_espacio).join(', ')}): cada línea edita la imagen de su estado.` : '') : '')));
 }
 
 function imagenesParaCrear(e) {
   const salida = {};
   if (['guion', 'voz'].includes(e.imagenes)) salida.imagenes = e.imagenes;
   if ((e.visuales || []).length) salida.visuales = e.visuales.slice(0, 400);
+  /* los ESTADOS DEL ESPACIO de la Parrilla (rama parrilla-estados): viajan con las líneas */
+  if ((e.visuales || []).length && e.estados_espacio && Object.keys(e.estados_espacio).length) {
+    salida.estados = e.estados_espacio;
+  }
   return Object.keys(salida).length ? salida : null;
 }
 
@@ -31420,6 +31474,7 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   /* qué dibujan las imágenes y las líneas «Visual:» (rama guion-visual) */
   e.imagenes = ['guion', 'voz'].includes(r.imagenes) ? r.imagenes : '';
   e.visuales = Array.isArray(r.visuales) ? r.visuales : [];
+  e.estados_espacio = (r.estados && typeof r.estados === 'object' && !Array.isArray(r.estados)) ? r.estados : {};
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.fichaAbierta = false;
   PAR.datos = null;
@@ -31993,6 +32048,8 @@ function seccionCuentasParrilla() {
   }
   caja.appendChild(estadoConexionesCuentas());  // las claves, en Configuración: lo encaja aquí rediseno-publicar
   caja.appendChild(bloqueTraerCuenta());
+  const varias = bloqueVariasCuentas();   // cuentas-gustan-2: analizar varias y proponer temas
+  if (varias) caja.appendChild(varias);
   if (PAR.cuentaAbierta) caja.appendChild(bloqueCuentaAbierta(PAR.cuentaAbierta));
   return caja;
 }
@@ -32062,18 +32119,32 @@ function bloqueTraerCuenta() {
   if (!lista.length) return bloque;
   /* LAS YA LEÍDAS, COMO TARJETAS (rediseno-automatizar): red, cuántos vídeos,
      cuándo se leyó y si Claude ya la analizó. Abrir una no paga nada. */
+  /* cuentas-gustan-2 (01-11-2026): cada tarjeta lleva su casilla para
+     analizar varias juntas, con «Seleccionar todas» y «Quitar selección». */
+  const sel = seleccionCuentas();
+  // las 20 primeras y, además, las marcadas: lo que entra en el análisis se ve
+  const visibles = lista.filter((c, i) => i < 20 || sel.has(claveCuenta(c)));
   return h('div', { clase: 'cuentas-y-leidas' }, bloque,
-    h('div', { clase: 'leidas-cuentas' }, h('h3', {}, 'Ya leídas'),
-      h('div', { clase: 'cuentas-guardadas' }, lista.slice(0, 20).map(c => {
+    h('div', { clase: 'leidas-cuentas' }, h('div', { clase: 'fila cab-leidas' }, h('h3', {}, 'Ya leídas'),
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini fantasma', onclick: () => marcarTodasCuentas(visibles, true) }, 'Seleccionar todas'),
+      h('button', { clase: 'mini fantasma', disabled: sel.size ? null : true, onclick: () => marcarTodasCuentas(visibles, false) }, 'Quitar selección')),
+      h('div', { clase: 'cuentas-guardadas' }, visibles.map(c => {
         const abierta = PAR.cuentaAbierta && PAR.cuentaAbierta.usuario === c.usuario && PAR.cuentaAbierta.red === c.red;
-        return h('button', { type: 'button', clase: `tarjeta-cuenta${abierta ? ' activa' : ''}`,
-          'aria-pressed': abierta ? 'true' : 'false',
-          title: `${c.videos} vídeos · ${String(c.traida || '').replace('T', ' ').slice(0, 16)}`,
-          onclick: () => abrirCuentaParrilla(c.red, c.usuario) },
-        h('b', {}, `@${c.usuario}`),
-        h('span', { clase: 'meta' }, `${NOMBRE_RED_CUENTA[c.red] || c.red} · ${c.videos} vídeos · leída el `
-          + `${String(c.traida || '').replace('T', ' ').slice(0, 10)}`),
-        h('span', { clase: `pastilla${c.analizada ? ' ok' : ''}` }, c.analizada ? '✓ analizada' : 'sin analizar'));
+        const clave = claveCuenta(c);
+        const marcada = sel.has(clave);
+        return h('div', { clase: `tarjeta-cuenta-sel${marcada ? ' marcada' : ''}` },
+          h('label', { clase: 'casilla-cuenta', title: marcada ? 'Quitar de la selección' : 'Marcar para analizar varias juntas' },
+            h('input', { type: 'checkbox', checked: marcada ? true : null, 'aria-label': `Seleccionar @${c.usuario}`,
+              onchange: ev => marcarCuenta(clave, ev.target.checked) })),
+          h('button', { type: 'button', clase: `tarjeta-cuenta${abierta ? ' activa' : ''}`,
+            'aria-pressed': abierta ? 'true' : 'false',
+            title: `${c.videos} vídeos · ${String(c.traida || '').replace('T', ' ').slice(0, 16)}`,
+            onclick: () => abrirCuentaParrilla(c.red, c.usuario) },
+          h('b', {}, `@${c.usuario}`),
+          h('span', { clase: 'meta' }, `${NOMBRE_RED_CUENTA[c.red] || c.red} · ${c.videos} vídeos · leída el `
+            + `${String(c.traida || '').replace('T', ' ').slice(0, 10)}`),
+          h('span', { clase: `pastilla${c.analizada ? ' ok' : ''}` }, c.analizada ? '✓ analizada' : 'sin analizar')));
       }))));
 }
 
@@ -32159,6 +32230,7 @@ async function trabajoCuentaAcabado(nuevo) {
   PAR.cuentaTrabajo = Object.assign({}, nuevo, { visto: true });
   if (nuevo.estado === 'listo') {
     if (nuevo.de_cache) toast('ya estaba leída hoy: no se ha vuelto a pagar');
+    else if (nuevo.tipo === 'duraciones') toast(`duraciones completadas${nuevo.coste_usd ? ` (≈${Number(nuevo.coste_usd).toFixed(2)} $)` : ''}`);
     else if (nuevo.coste_usd) toast(`leída con Apify (≈${Number(nuevo.coste_usd).toFixed(2)} $)`);
     else toast(nuevo.tipo === 'analizar' ? 'análisis listo' : 'cuenta leída');
     PAR.cuentas = null;
@@ -32207,6 +32279,7 @@ function bloqueCuentaAbierta(d) {
     bloque.appendChild(h('details', { clase: 'intentos-cuenta' }, h('summary', { clase: 'meta' }, 'Por qué esta vía'),
       h('ul', {}, d.intentos.map(x => h('li', { clase: 'meta' }, x)))));
   }
+  if (d.metricas) bloque.appendChild(cifrasDeCuenta(d));   // cuentas-gustan-2
 
   const analisis = h('div', { clase: 'analisis-cuenta' }, h('div', { clase: 'fila' }, h('h4', {}, 'Qué le funciona'),
     h('span', { clase: 'crece' }),
@@ -32240,10 +32313,16 @@ function bloqueCuentaAbierta(d) {
   (d.videos || []).forEach((v, i) => {
     const cifras = [v.vistas != null ? `${cifraCorta(v.vistas)} vistas` : 'sin vistas',
       v.me_gusta != null ? `${cifraCorta(v.me_gusta)} ♥` : '', v.comentarios != null ? `${cifraCorta(v.comentarios)} 💬` : '',
-      v.duracion_s ? `${Math.round(v.duracion_s)} s` : '', String(v.fecha || '').slice(0, 10)].filter(Boolean).join(' · ');
-    tabla.appendChild(h('div', { clase: 'fila video-cuenta' },
-      h('span', { clase: 'numero-video' }, String(i + 1)),
-      h('div', { clase: 'crece texto-video' }, h('div', {}, recortar(v.texto || '(sin texto)', 160)), h('div', { clase: 'meta' }, cifras)),
+      v.duracion_s ? `${Math.round(v.duracion_s)} s` : 'sin duración', v.tipo_nombre || '', String(v.fecha || '').slice(0, 10)].filter(Boolean).join(' · ');
+    // cuentas-gustan-2: lo relativo a la cuenta y por cada 100 vistas
+    const relativas = [v.rel != null ? `×${decimalCuenta(v.rel, 1)} su mediana` : '',
+      v.mg100 != null ? `${decimalCuenta(v.mg100, 1)} ♥ por 100 vistas` : '',
+      v.com100 != null ? `${decimalCuenta(v.com100, 2)} 💬 por 100 vistas` : ''].filter(Boolean).join(' · ');
+    tabla.appendChild(h('div', { clase: `fila video-cuenta${v.dudoso ? ' dudoso' : ''}` },
+      h('span', { clase: 'numero-video' }, String(v.n || i + 1)),
+      h('div', { clase: 'crece texto-video' }, h('div', {}, recortar(v.texto || '(sin texto)', 160)), h('div', { clase: 'meta' }, cifras),
+        relativas ? h('div', { clase: 'meta relativas-video' }, relativas) : null,
+        v.dudoso ? h('div', { clase: 'pastilla aviso pastilla-dudoso', title: v.motivo || '' }, `Dudoso: ${v.motivo || 'no cuenta como referencia'}`) : null),
       v.url ? h('a', { clase: 'mini fantasma', href: v.url, target: '_blank', rel: 'noopener noreferrer' }, 'Ver') : null));
   });
   bloque.appendChild(h('details', { clase: 'lista-videos-cuenta', open: true },
@@ -32303,6 +32382,634 @@ function selectorCuentaChat() {
   [h('option', { value: '' }, '📈 sin cuenta de referencia')].concat(lista.map(c => h('option', {
     value: `${c.red}:${c.usuario}`, selected: PAR.chatCuenta === `${c.red}:${c.usuario}` ? true : null },
   `📈 @${c.usuario} (${NOMBRE_RED_CUENTA[c.red] || c.red})`))));
+}
+
+/* ------------------------------------- CUENTAS QUE TE GUSTAN 2 (01-11-2026)
+ *
+ * Rama cuentas-gustan-2, pedido del dueño: las cifras de cada cuenta
+ * relativas a ella misma, analizar VARIAS juntas («Analizar seleccionadas»),
+ * «Proponer temas» para el proyecto, aprobar/editar/descartar cada uno y
+ * «Escribir guiones aprobados». Lo de Claude va en un hilo del servidor y
+ * aquí se pregunta cada 2 s. Antes de llamar a Claude se enseña cuántas
+ * cuentas, vídeos y cuánto cupo; con el cupo al 90 % avisa y deja
+ * «Seguir igualmente». La selección vive en la pantalla (y en localStorage): no se pierde.
+ */
+const MAX_CUENTAS_JUNTAS = 10;
+const CLAVE_SELECCION_CUENTAS = 'cuentasSeleccion';
+
+function claveCuenta(c) { return `${c.red}:${String(c.usuario || '').toLowerCase()}`; }
+
+function decimalCuenta(n, decimales) {
+  return Number.isFinite(n) ? n.toFixed(decimales).replace('.', ',') : '—';
+}
+
+function seleccionCuentas() {
+  if (!PAR.cuentasSel) {
+    let guardada = [];
+    try { guardada = JSON.parse(localStorage.getItem(CLAVE_SELECCION_CUENTAS) || '[]'); } catch (e) { guardada = []; }
+    PAR.cuentasSel = new Set(Array.isArray(guardada) ? guardada.filter(x => typeof x === 'string') : []);
+  }
+  // una cuenta olvidada deja de estar marcada
+  if (PAR.cuentas && Array.isArray(PAR.cuentas.cuentas)) {
+    const hay = new Set(PAR.cuentas.cuentas.map(claveCuenta));
+    [...PAR.cuentasSel].forEach(k => { if (!hay.has(k)) PAR.cuentasSel.delete(k); });
+  }
+  return PAR.cuentasSel;
+}
+
+function guardarSeleccionCuentas() {
+  try { localStorage.setItem(CLAVE_SELECCION_CUENTAS, JSON.stringify([...seleccionCuentas()])); } catch (e) { /* sin almacén */ }
+}
+
+function marcarCuenta(clave, si) {
+  const sel = seleccionCuentas();
+  if (si) sel.add(clave); else sel.delete(clave);
+  guardarSeleccionCuentas();
+  pintarModulo();
+}
+
+function marcarTodasCuentas(lista, si) {
+  const sel = seleccionCuentas();
+  if (si) lista.forEach(c => sel.add(claveCuenta(c))); else sel.clear();
+  guardarSeleccionCuentas();
+  pintarModulo();
+}
+
+/* ------------------------------------------------ las cifras de una cuenta */
+
+function cifrasDeCuenta(d) {
+  const m = d.metricas || {};
+  const caja = h('div', { clase: 'cifras-cuenta' });
+  const partes = [m.mediana_vistas != null ? `Mediana: ${cifraCorta(m.mediana_vistas)} vistas` : 'Sin vistas',
+    m.mediana_mg100 != null ? `${decimalCuenta(m.mediana_mg100, 1)} ♥ por 100 vistas` : '',
+    m.mediana_com100 != null ? `${decimalCuenta(m.mediana_com100, 2)} 💬 por 100 vistas` : '',
+    m.dudosos ? `${m.dudosos} dudoso${m.dudosos === 1 ? '' : 's'} (se ven, pero no cuentan)` : ''].filter(Boolean);
+  caja.appendChild(h('div', { clase: 'meta' }, partes.join(' · ')));
+  const filas = (m.rangos || []).filter(r => r.videos);
+  caja.appendChild(h('div', { clase: 'fila cab-rangos' }, h('b', {}, 'Vistas por duración'),
+    h('span', { clase: 'meta' }, `${m.con_duracion || 0} de ${m.total || 0} vídeos con ese dato`)));
+  if (filas.length) {
+    caja.appendChild(h('div', { clase: 'rangos-cuenta' }, filas.map(r => h('div', { clase: 'rango-cuenta' },
+      h('span', {}, r.rango), h('b', {}, r.mediana_rel != null ? `×${decimalCuenta(r.mediana_rel, 1)}` : '—'),
+      h('span', { clase: 'meta' }, `${r.videos} vídeo${r.videos === 1 ? '' : 's'}`)))));
+    caja.appendChild(h('div', { clase: 'pista' }, '«×1,6» = esos vídeos tienen 1,6 veces las vistas normales de esta cuenta.'
+      + (m.mejor_rango ? ` Lo que mejor le funciona: ${m.mejor_rango.rango}.` : ' Con menos de 8 vídeos con duración no se sugiere ninguna.')));
+  }
+  const dur = d.duraciones || {};
+  if (dur.faltan) {
+    const ocupado = PAR.cuentaTrabajo && PAR.cuentaTrabajo.estado === 'trabajando';
+    caja.appendChild(h('div', { clase: 'fila faltan-duraciones' },
+      h('span', { clase: 'meta crece' }, `A ${dur.faltan} vídeo${dur.faltan === 1 ? '' : 's'} le${dur.faltan === 1 ? '' : 's'} falta la duración.`
+        + (dur.se_puede ? '' : ` ${dur.motivo || ''}`)),
+      dur.se_puede ? h('button', { clase: 'mini', disabled: ocupado ? true : null, onclick: () => completarDuracionesCuenta(d) },
+        `Completar con Apify (≈${Number(dur.coste_usd || 0).toFixed(2)} $)`) : null));
+  }
+  return caja;
+}
+
+async function completarDuracionesCuenta(d) {
+  const dur = d.duraciones || {};
+  if (!confirm(`Completar la duración de ${dur.faltan} vídeos de @${d.usuario} con Apify costará unos `
+    + `${Number(dur.coste_usd || 0).toFixed(2)} $.\nGastado este mes: ${Number(dur.gasto_mes || 0).toFixed(2)} $ de `
+    + `${Number(dur.tope_usd || 0).toFixed(2)} $. Solo se rellena la duración: las demás cifras no cambian. ¿Seguir?`)) return;
+  try {
+    PAR.cuentaTrabajo = await pedirTrabajoParrilla(rutaCuentas(`/${encodeURIComponent(d.red)}/${encodeURIComponent(d.usuario)}/duraciones`),
+      { pagar: true });
+    pintarModulo();
+    vigilarCuentaParrilla();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------------------------------------------------- varias cuentas juntas */
+
+function rutaConjuntos(resto) { return `${BASE}/api/parrilla/conjuntos${resto || ''}`; }
+
+function hayProyectoParrilla() { return !!PAR.cid && PAR.cid !== '_sin'; }
+
+function textoCupo(cupo) {
+  if (!cupo || cupo.uso == null) return 'Tu cupo de Claude no está medido todavía (lo mide Configuración → Claude).';
+  return `Tu cupo de Claude va por el ${Math.round(cupo.uso * 100)} % en la ventana más llena.`;
+}
+
+/* El aviso antes de llamar a Claude: cuántas cuentas y vídeos y cuánto
+   cupo (punto D). Con el cupo al 90 % o más AVISA y deja seguir (decisión
+   del dueño, 02-11-2026): «Aceptar» es «Seguir igualmente». -> null si se
+   cancela, o {aunque_cupo} para mandar al servidor. */
+function confirmarEnvioClaude(plan, que) {
+  const resumen = `${que}\n\nSe mandarán a Claude ${plan.n_cuentas} cuentas y ${plan.videos} vídeos `
+    + `(≈${Number(plan.tokens || 0).toLocaleString('es')} tokens, con tu membresía; no se paga aparte).\n`;
+  if (plan.aviso_cupo) {
+    return confirm(`⚠ ${plan.motivo}\n\n${resumen}\nPulsa «Aceptar» para seguir igualmente o «Cancelar» para esperar.`)
+      ? { aunque_cupo: true } : null;
+  }
+  return confirm(`${resumen}${textoCupo(plan.cupo)}\n\n¿Seguir?`) ? {} : null;
+}
+
+/* Si el cupo se llenó entre el aviso y el clic, el servidor contesta pidiendo
+   «Seguir igualmente»: se pregunta y se repite con el sí. */
+async function conAvisoDeCupo(lanzar, extra) {
+  try {
+    return await lanzar(extra || {});
+  } catch (e) {
+    if (!/Seguir igualmente/.test(e.message || '') || (extra || {}).aunque_cupo) throw e;
+    if (!confirm(`⚠ ${e.message.replace(/ Confirma que quieres «Seguir igualmente».*$/, '')}\n\nPulsa «Aceptar» para seguir igualmente.`)) return null;
+    return lanzar(Object.assign({}, extra || {}, { aunque_cupo: true }));
+  }
+}
+
+function bloqueVariasCuentas() {
+  const sel = seleccionCuentas();
+  if (!sel.size && !PAR.conjunto && !(PAR.temasDe === PAR.cid && PAR.temas)) {
+    if (hayProyectoParrilla() && PAR.temasDe !== PAR.cid && !PAR.temasCargando) setTimeout(cargarTemasPropuestos, 0);
+    return null;
+  }
+  const caja = h('div', { clase: 'bloque varias-cuentas' });
+  const ocupado = PAR.conjuntoTrabajo && PAR.conjuntoTrabajo.estado === 'trabajando';
+  // al volver a Automatizar con un trabajo en marcha, se vuelve a preguntar por él
+  if (ocupado && !PAR.conjuntoReloj) setTimeout(vigilarConjunto, 0);
+  const demasiadas = sel.size > MAX_CUENTAS_JUNTAS;
+  caja.appendChild(h('div', { clase: 'fila' }, h('h3', {}, 'Analizar varias cuentas juntas'), h('span', { clase: 'crece' }),
+    h('button', { clase: 'primario', disabled: (ocupado || sel.size < 2 || demasiadas) ? true : null,
+      onclick: () => analizarSeleccionadas() }, `Analizar seleccionadas (${sel.size})`)));
+  caja.appendChild(h('div', { clase: 'pista' }, sel.size < 2
+    ? 'Marca al menos 2 cuentas en «Ya leídas». Se comparan con sus cifras relativas: una cuenta grande no manda solo por su tamaño.'
+    : demasiadas ? `Como mucho ${MAX_CUENTAS_JUNTAS} cuentas a la vez: quita ${sel.size - MAX_CUENTAS_JUNTAS}.`
+      : `Marcadas: ${[...sel].map(k => '@' + k.split(':')[1]).join(', ')}.`));
+  const t = PAR.conjuntoTrabajo;
+  if (t && t.estado === 'trabajando') {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' }, h('span', { clase: 'girando', 'aria-hidden': 'true' }),
+      h('span', { clase: 'crece' }, `${t.avance || 'trabajando'}… (suele tardar de 30 s a 2 min)`)));
+  } else if (t && t.estado === 'error') {
+    caja.appendChild(h('div', { clase: 'caja-error texto-error-cuenta' }, t.error));
+  }
+  if (PAR.conjunto) caja.appendChild(resultadoConjunto(PAR.conjunto));
+  const temas = bloqueTemasPropuestos();
+  if (temas) caja.appendChild(temas);
+  return caja;
+}
+
+async function analizarSeleccionadas() {
+  const cuentas = [...seleccionCuentas()];
+  try {
+    const previo = await pedir(rutaConjuntos('/ultimo'), { method: 'POST', cuerpo: { cuentas } });
+    if (previo.analisis && confirm(`Ya analizaste estas mismas cuentas el ${String(previo.analisis.al || '').replace('T', ' ').slice(0, 16)}.\n`
+      + '¿Usar ese análisis (gratis)? Pulsa «Cancelar» para hacer uno nuevo.')) {
+      PAR.conjunto = previo.analisis;
+      PAR.comparacion = null;
+      pintarModulo();
+      return;
+    }
+    const plan = await pedir(rutaConjuntos('/plan'), { method: 'POST', cuerpo: { cuentas } });
+    const si = confirmarEnvioClaude(plan, `Analizar juntas ${plan.n_cuentas} cuentas.`);
+    if (!si) return;
+    const t = await conAvisoDeCupo(extra => pedirTrabajoParrilla(rutaConjuntos(), Object.assign({ cuentas }, extra)), si);
+    if (!t) return;
+    PAR.conjuntoTrabajo = t;
+    pintarModulo();
+    vigilarConjunto();
+  } catch (e) { toast(e.message, true); }
+}
+
+function vigilarConjunto() {
+  clearTimeout(PAR.conjuntoReloj);
+  PAR.conjuntoReloj = null;
+  const t = PAR.conjuntoTrabajo;
+  if (!t || MODULOS.actual !== 'automatizar') return;
+  if (t.estado !== 'trabajando') { if (!t.visto) conjuntoAcabado(t); return; }
+  PAR.conjuntoReloj = setTimeout(async () => {
+    PAR.conjuntoReloj = null;
+    try {
+      PAR.conjuntoTrabajo = await pedirTrabajoParrilla(rutaConjuntos(`/trabajos/${encodeURIComponent(t.id)}`));
+    } catch (e) {
+      if (e.status === 404) PAR.conjuntoTrabajo = Object.assign({}, t, { estado: 'error', error: 'el servidor ya no conoce ese trabajo: vuelve a lanzarlo' });
+    }
+    repintarParrillaSinPisar();
+    vigilarConjunto();
+  }, 2000);
+}
+
+async function conjuntoAcabado(t) {
+  PAR.conjuntoTrabajo = Object.assign({}, t, { visto: true });
+  if (t.estado === 'listo' && t.analisis) {
+    try { PAR.conjunto = await pedir(rutaConjuntos(`/${encodeURIComponent(t.analisis)}`)); toast('análisis de las cuentas listo'); } catch (e) { toast(e.message, true); }
+    PAR.conjHistorial = null;          // hay uno nuevo: la lista se vuelve a pedir
+    PAR.comparacion = null;
+  }
+  repintarParrillaSinPisar();
+}
+
+function pruebasConjunto(pruebas) {
+  return h('div', { clase: 'pruebas-conjunto' }, h('span', { clase: 'meta' }, 'Pruebas:'),
+    (pruebas || []).map(p => p.url
+      ? h('a', { clase: 'pastilla prueba', href: p.url, target: '_blank', rel: 'noopener noreferrer', title: p.texto || '' },
+        `${p.ref}${p.rel != null ? ` ×${decimalCuenta(p.rel, 1)}` : ''}`)
+      : h('span', { clase: 'pastilla prueba', title: p.texto || '' }, p.ref)));
+}
+
+function resultadoConjunto(a) {
+  const r = a.resultado || {};
+  const caja = h('div', { clase: 'resultado-conjunto' });
+  caja.appendChild(h('div', { clase: 'meta' }, `${(a.cuentas || []).map(c => '@' + c.usuario).join(', ')} · ${a.videos || 0} vídeos · `
+    + `analizado el ${String(a.al || '').replace('T', ' ').slice(0, 16)}`));
+  if (r.resumen) caja.appendChild(h('p', { clase: 'resumen-conjunto' }, r.resumen));
+  const seccion = (titulo, pista, items, pinta) => {
+    if (!(items || []).length) return;
+    caja.appendChild(h('h4', {}, titulo));
+    if (pista) caja.appendChild(h('div', { clase: 'pista' }, pista));
+    items.forEach(x => caja.appendChild(pinta(x)));
+  };
+  const item = (titulo, texto, extra, pruebas) => h('div', { clase: 'item-conjunto' },
+    h('div', {}, h('b', {}, titulo), extra ? h('span', { clase: 'meta' }, ` · ${extra}`) : null),
+    texto ? h('div', {}, texto) : null, pruebasConjunto(pruebas));
+  seccion('Fórmulas que se repiten en varias cuentas', 'Las más fiables: funcionan en más de una cuenta.', r.formulas_comunes,
+    f => item(f.nombre, f.descripcion, (f.cuentas || []).map(c => '@' + c).join(', '), f.pruebas));
+  seccion('Fórmulas que funcionan solo en una', 'Pueden ser de esa cuenta y no de la fórmula: pruébalas con cuidado.', r.formulas_unicas,
+    f => item(f.nombre, f.descripcion, `solo @${f.cuenta}`, f.pruebas));
+  seccion('Temas saturados', 'Muchas cuentas los hacen: si los usas, busca otro ángulo.', r.temas_saturados,
+    t => item(t.tema, t.por_que, '', t.pruebas));
+  seccion('Temas libres', 'Funcionan y casi nadie los hace.', r.temas_libres, t => item(t.tema, t.por_que, '', t.pruebas));
+  seccion('Todos los temas, agrupados', 'El mismo tema en varias cuentas cuenta como uno. Las vistas son la suma de sus vídeos de prueba.',
+    r.temas, t => item(t.tema, '', cifrasTemaConjunto(t), t.pruebas));
+  seccion('Ganchos que mejor funcionan', 'Cómo empiezan los vídeos que más funcionan, del mejor al peor, con ejemplos.',
+    r.ganchos, g => h('div', { clase: 'item-conjunto' },
+      h('div', {}, h('b', {}, g.gancho), h('span', { clase: 'meta' }, ` · ${cifrasGanchoConjunto(g)}`)),
+      g.descripcion ? h('div', {}, g.descripcion) : null, ejemplosGancho(g.ejemplos)));
+  if (!('temas' in r)) caja.appendChild(h('div', { clase: 'pista' }, 'Este análisis es de antes de los temas agrupados y los ganchos: haz uno nuevo para verlos.'));
+  if (r.quitadas) caja.appendChild(h('div', { clase: 'pista' }, `${r.quitadas} conclusión(es) de Claude se quitaron porque no citaban ningún vídeo que exista.`));
+  caja.appendChild(bloqueCompararConjuntos(a));
+  caja.appendChild(bloqueProponerTemas(a));
+  return caja;
+}
+
+/* ------------------------- tercera vuelta (rama cuentas-gustan-3, 02-11-2026) */
+
+function fechaConjunto(al) { return String(al || '').replace('T', ' ').slice(0, 16); }
+
+function cuentasCortas(cuentas) { return (cuentas || []).map(c => '@' + (typeof c === 'string' ? c : c.usuario)).join(', '); }
+
+function cifrasTemaConjunto(t) {
+  return [`${t.n_cuentas} cuenta${t.n_cuentas === 1 ? '' : 's'}: ${cuentasCortas(t.cuentas)}`,
+    t.vistas_total != null ? `${cifraCorta(t.vistas_total)} vistas en ${t.n_videos} vídeo${t.n_videos === 1 ? '' : 's'}` : '',
+    t.rel_media != null ? `×${decimalCuenta(t.rel_media, 1)} su mediana` : ''].filter(Boolean).join(' · ');
+}
+
+function cifrasGanchoConjunto(g) {
+  return [g.rel_media != null ? `×${decimalCuenta(g.rel_media, 1)} su mediana de media` : '',
+    `${g.n_cuentas} cuenta${g.n_cuentas === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
+}
+
+function ejemplosGancho(ejemplos) {
+  return h('div', { clase: 'ejemplos-gancho' }, (ejemplos || []).map(p => h('div', { clase: 'ejemplo-gancho' },
+    p.url ? h('a', { clase: 'pastilla prueba', href: p.url, target: '_blank', rel: 'noopener noreferrer' },
+      `${p.ref}${p.rel != null ? ` ×${decimalCuenta(p.rel, 1)}` : ''}`) : h('span', { clase: 'pastilla prueba' }, p.ref),
+    h('span', { clase: 'meta crece' }, p.texto ? `«${recortar(p.texto, 110)}»` : ''))));
+}
+
+async function cargarHistorialConjuntos() {
+  if (PAR.conjHistorialCargando) return;
+  PAR.conjHistorialCargando = true;
+  try { PAR.conjHistorial = (await pedir(rutaConjuntos('/historial'))).analisis || []; PAR.conjHistorialError = ''; }
+  catch (e) { PAR.conjHistorial = []; PAR.conjHistorialError = e.message || 'no se pudo leer'; }
+  finally { PAR.conjHistorialCargando = false; }
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
+}
+
+function bloqueCompararConjuntos(a) {
+  const caja = h('div', { clase: 'comparar-conjuntos' }, h('h4', {}, 'Análisis guardados y comparación'));
+  if (!PAR.conjHistorial) {
+    setTimeout(cargarHistorialConjuntos, 0);
+    caja.appendChild(h('div', { clase: 'pista' }, 'Cargando los análisis guardados…'));
+    return caja;
+  }
+  if (PAR.conjHistorialError) {
+    caja.appendChild(h('div', { clase: 'caja-error fila' }, h('span', { clase: 'crece' }, `No se pudieron leer los análisis guardados: ${PAR.conjHistorialError}`),
+      h('button', { clase: 'mini', onclick: () => { PAR.conjHistorial = null; PAR.conjHistorialError = ''; pintarModulo(); } }, 'Reintentar')));
+    return caja;
+  }
+  const otros = PAR.conjHistorial.filter(x => x.id !== a.id);
+  if (!otros.length) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Es el único análisis guardado. Cuando hagas otro (por ejemplo, el mes que viene), aquí podrás compararlos: qué aparece, qué sigue y qué desaparece.'));
+    return caja;
+  }
+  if (!otros.some(x => x.id === PAR.conjOtro)) PAR.conjOtro = otros[0].id;
+  const elegir = h('select', { 'aria-label': 'Otro análisis', onchange: ev => { PAR.conjOtro = ev.target.value; } },
+    otros.map(x => h('option', { value: x.id, selected: x.id === PAR.conjOtro ? true : null },
+      `${fechaConjunto(x.al)} · ${cuentasCortas(x.cuentas)}`)));
+  elegir.dataset.foco = 'conjunto-otro';
+  caja.appendChild(h('div', { clase: 'fila' }, elegir,
+    h('button', { onclick: () => abrirConjunto(PAR.conjOtro) }, 'Abrir'),
+    h('button', { onclick: () => compararConjunto(a, PAR.conjOtro) }, 'Comparar con este'),
+    h('button', { clase: 'primario', onclick: () => compararConjunto(a, '') }, 'Comparar con el anterior')));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Comparar es gratis: no llama a Claude, mira qué nombres coinciden.'));
+  const c = PAR.comparacion;
+  if (c && c.vista_desde === a.id) caja.appendChild(resultadoComparacion(c));
+  return caja;
+}
+
+async function abrirConjunto(aid) {
+  if (!aid) return;
+  try { PAR.conjunto = await pedir(rutaConjuntos(`/${encodeURIComponent(aid)}`)); PAR.comparacion = null; pintarModulo(); }
+  catch (e) { toast(e.message, true); }
+}
+
+async function compararConjunto(a, con) {
+  try {
+    PAR.comparacion = await pedir(rutaConjuntos(`/${encodeURIComponent(a.id)}/comparar${con ? `?con=${encodeURIComponent(con)}` : ''}`));
+    if (!PAR.comparacion.con) toast('no hay un análisis anterior con esas cuentas: elige uno de la lista');
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+function resultadoComparacion(c) {
+  const caja = h('div', { clase: 'resultado-comparacion' });
+  if (!c.con) return caja;
+  caja.appendChild(h('div', { clase: 'meta' }, `Del análisis del ${fechaConjunto(c.con.al)} (${cuentasCortas(c.con.cuentas)}) `
+    + `al del ${fechaConjunto(c.analisis.al)}` + (c.misma_seleccion ? ', con las mismas cuentas.' : '. Ojo: no son exactamente las mismas cuentas.')
+    + (c.invertido ? ' (El que elegiste es el más nuevo: «Aparecen» es lo que tiene él y no este.)' : '')));
+  if (!c.temas_agrupados) caja.appendChild(h('div', { clase: 'pista' }, 'Uno de los dos es de antes de los temas agrupados: en Temas se comparan los saturados y libres de los dos.'));
+  const cifra = (tipo, n) => n == null ? '' : tipo === 'vistas' ? `${cifraCorta(n)} vistas`
+    : tipo === 'rel' ? `×${decimalCuenta(n, 1)}` : `${n} cuenta${n === 1 ? '' : 's'}`;
+  const nombres = { formulas: 'Fórmulas', temas: 'Temas', ganchos: 'Ganchos' };
+  Object.keys(nombres).forEach(que => {
+    const s = (c.secciones || {})[que];
+    if (!s) return;
+    const lista = (titulo, clase, items, texto) => items.length ? h('div', { clase: `cambio-conjunto ${clase}` },
+      h('b', {}, `${titulo} (${items.length})`), h('ul', {}, items.map(x => h('li', {}, texto(x))))) : null;
+    const vacio = !s.aparecen.length && !s.siguen.length && !s.desaparecen.length;
+    caja.appendChild(h('div', { clase: 'seccion-comparacion' }, h('h5', {}, nombres[que]),
+      vacio ? h('div', { clase: 'pista' }, 'Ninguno en los dos análisis.') : null,
+      s.antes_sin_datos ? h('div', { clase: 'pista' }, 'El análisis anterior es de antes de que se midieran los ganchos: todos salen como nuevos.') : null,
+      lista('Aparecen', 'aparece', s.aparecen, x => x.nombre + (x.cifra != null ? ` · ${cifra(s.cifra, x.cifra)}` : '')),
+      lista('Siguen', 'sigue', s.siguen, x => x.nombre + (x.antes && x.antes !== x.nombre ? ` (antes: «${x.antes}»)` : '')
+        + (x.cifra != null || x.cifra_antes != null ? ` · ${cifra(s.cifra, x.cifra_antes) || '—'} → ${cifra(s.cifra, x.cifra) || '—'}` : '')),
+      lista('Desaparecen', 'desaparece', s.desaparecen, x => x.nombre + (x.cifra != null ? ` · ${cifra(s.cifra, x.cifra)}` : ''))));
+  });
+  return caja;
+}
+
+/* Las cuentas propias del proyecto: lo publicado en ellas entra en el cruce
+   «ya lo tienes» al proponer temas. Se leen igual que las ajenas. */
+async function cargarCuentasPropias() {
+  if (!hayProyectoParrilla() || PAR.propiasCargando) return;
+  const cid = PAR.cid;
+  PAR.propiasCargando = true;
+  try {
+    const r = await pedir(rutaProyectoParrilla('/cuentas-propias'));
+    if (cid === PAR.cid) PAR.propias = { cid, cuentas: r.cuentas || [], maximo: r.maximo || 5 };
+  } catch (e) {
+    // sin la lista no se ofrece cambiarla: guardar pisaría lo que hay (revisión 02-11)
+    if (cid === PAR.cid) PAR.propias = { cid, cuentas: [], maximo: 5, error: e.message || 'no se pudo leer' };
+  } finally { PAR.propiasCargando = false; }
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
+}
+
+async function guardarCuentasPropias(claves) {
+  const cid = PAR.cid;
+  try {
+    const r = await pedir(rutaProyectoParrilla('/cuentas-propias'), { method: 'PUT', cuerpo: { cuentas: claves } });
+    // si mientras tanto se cambió de proyecto, la respuesta no es de este
+    if (cid === PAR.cid) { PAR.propias = { cid, cuentas: r.cuentas || [], maximo: r.maximo || 5 }; pintarModulo(); }
+  } catch (e) { toast(e.message, true); }
+}
+
+function bloqueCuentasPropias() {
+  const caja = h('div', { clase: 'cuentas-propias' });
+  if (!PAR.propias || PAR.propias.cid !== PAR.cid) {
+    setTimeout(cargarCuentasPropias, 0);
+    return caja;
+  }
+  if (PAR.propias.error) {
+    caja.appendChild(h('div', { clase: 'caja-error fila' }, h('span', { clase: 'crece' }, `No se pudieron leer tus cuentas: ${PAR.propias.error}`),
+      h('button', { clase: 'mini', onclick: () => { PAR.propias = null; pintarModulo(); } }, 'Reintentar')));
+    return caja;
+  }
+  const propias = PAR.propias.cuentas;
+  const claves = propias.map(claveCuenta);
+  const leidas = ((PAR.cuentas || {}).cuentas || []).filter(c => !claves.includes(claveCuenta(c)));
+  caja.appendChild(h('div', { clase: 'fila' }, h('b', {}, 'Tus cuentas'),
+    propias.length ? propias.map(c => h('span', { clase: `pastilla ${c.leida ? '' : 'aviso'}` },
+      `@${c.usuario} (${c.red})${c.leida ? ` · ${c.videos} publicaciones` : ' · ya no está leída'}`,
+      h('button', { clase: 'mini', 'aria-label': `Quitar @${c.usuario}`, title: 'Quitar',
+        onclick: () => guardarCuentasPropias(claves.filter(k => k !== claveCuenta(c))) }, '✕')))
+      : h('span', { clase: 'meta' }, 'ninguna'),
+    leidas.length && propias.length < PAR.propias.maximo ? h('select', { 'aria-label': 'Añadir una cuenta tuya',
+      onchange: ev => { if (ev.target.value) guardarCuentasPropias(claves.concat([ev.target.value])); } },
+      [h('option', { value: '' }, '+ Añadir una tuya…')].concat(leidas.map(c => h('option', { value: claveCuenta(c) }, `@${c.usuario} (${c.red})`))))
+      : null));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Lo que ya publicaste en tus cuentas también cuenta como «ya lo tienes». '
+    + 'Para añadir una, léela antes arriba como cualquier otra cuenta.'));
+  return caja;
+}
+
+/* -------------------------------------------------- proponer temas */
+
+function rutaTemas(resto) { return rutaProyectoParrilla(`/temas${resto || ''}`); }
+
+function bloqueProponerTemas(a) {
+  if (PAR.temasCuantos == null) PAR.temasCuantos = 10;
+  const caja = h('div', { clase: 'proponer-temas' }, h('h4', {}, 'Proponer temas'));
+  if (!hayProyectoParrilla()) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' }, 'Elige arriba un proyecto: los temas se comparan con su Parrilla y los guiones van allí.'));
+    return caja;
+  }
+  // el trabajo de proponer es de UN proyecto: en otro no se enseña ni apaga nada
+  const t = PAR.temasTrabajo && PAR.temasTrabajo.cid === PAR.cid ? PAR.temasTrabajo : null;
+  const ocupado = t && t.estado === 'trabajando';
+  if (ocupado && !PAR.temasReloj) setTimeout(vigilarTemas, 0);
+  const cuantos = h('input', { type: 'number', min: 1, max: 30, value: PAR.temasCuantos, clase: 'numero-corto',
+    'aria-label': 'Cuántos temas', oninput: ev => { PAR.temasCuantos = ev.target.value; } });
+  cuantos.dataset.foco = 'temas-cuantos';
+  caja.appendChild(h('div', { clase: 'fila' }, h('label', {}, 'Temas'), cuantos,
+    h('button', { clase: 'primario', disabled: ocupado ? true : null, onclick: () => proponerTemas(a) }, 'Proponer temas'),
+    h('span', { clase: 'pista crece' }, `Para ${nombreProyectoParrilla() || 'este proyecto'}. Solo ideas, sin guiones: luego tú apruebas cuáles se escriben.`)));
+  caja.appendChild(bloqueCuentasPropias());
+  if (t && t.estado === 'trabajando') {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' }, h('span', { clase: 'girando', 'aria-hidden': 'true' }),
+      h('span', { clase: 'crece' }, `${t.avance || 'trabajando'}…`)));
+  } else if (t && t.estado === 'error') {
+    caja.appendChild(h('div', { clase: 'caja-error texto-error-cuenta' }, t.error));
+  }
+  return caja;
+}
+
+async function proponerTemas(a) {
+  const n = Number(PAR.temasCuantos);
+  if (!Number.isInteger(n) || n < 1 || n > 30) { toast('pide de 1 a 30 temas', true); return; }
+  try {
+    const plan = await pedir(rutaTemas('/plan'), { method: 'POST', cuerpo: { analisis: a.id, cuantos: n } });
+    const extra = plan.hay_propuesta ? '\nLa propuesta de temas que ya tienes en este proyecto se sustituye (los guiones ya escritos se quedan).' : '';
+    const si = confirmarEnvioClaude(plan, `Proponer ${n} temas para ${nombreProyectoParrilla() || 'este proyecto'}.`
+      + ` Se comparan con ${plan.existentes} guiones, vídeos y publicaciones que ya tiene`
+      + `${plan.publicados ? ` (${plan.publicados} de tus cuentas)` : ''}.${extra}`);
+    if (!si) return;
+    const t = await conAvisoDeCupo(mas => pedirTrabajoParrilla(rutaTemas(), Object.assign({ analisis: a.id, cuantos: n }, mas)), si);
+    if (!t) return;
+    PAR.temasTrabajo = t;
+    pintarModulo();
+    vigilarTemas();
+  } catch (e) { toast(e.message, true); }
+}
+
+function vigilarTemas() {
+  clearTimeout(PAR.temasReloj);
+  PAR.temasReloj = null;
+  const t = PAR.temasTrabajo;
+  if (!t || MODULOS.actual !== 'automatizar') return;
+  if (t.estado !== 'trabajando') {
+    if (!t.visto) {
+      PAR.temasTrabajo = Object.assign({}, t, { visto: true });
+      if (t.estado === 'listo' && t.cid === PAR.cid) { toast('temas propuestos: revísalos abajo'); cargarTemasPropuestos(true); }
+      else if (t.estado === 'listo') PAR.temasDe = '';      // de otro proyecto: se leerán al volver a él
+      repintarParrillaSinPisar();
+    }
+    return;
+  }
+  PAR.temasReloj = setTimeout(async () => {
+    PAR.temasReloj = null;
+    try {
+      PAR.temasTrabajo = await pedirTrabajoParrilla(`${BASE}/api/parrilla/temas/trabajos/${encodeURIComponent(t.id)}`);
+    } catch (e) {
+      if (e.status === 404) PAR.temasTrabajo = Object.assign({}, t, { estado: 'error', error: 'el servidor ya no conoce ese trabajo: vuelve a lanzarlo' });
+    }
+    repintarParrillaSinPisar();
+    vigilarTemas();
+  }, 2000);
+}
+
+async function cargarTemasPropuestos(forzar) {
+  if (!hayProyectoParrilla() || (PAR.temasCargando && !forzar)) return;
+  const cid = PAR.cid;
+  PAR.temasCargando = true;
+  try {
+    const r = await pedir(rutaTemas());
+    if (cid === PAR.cid) { PAR.temas = r.propuesta; PAR.temasDe = cid; PAR.temasCupo = r.cupo || null; }
+  } catch (e) {
+    if (cid === PAR.cid) { PAR.temas = null; PAR.temasDe = cid; }
+  } finally {
+    PAR.temasCargando = false;
+  }
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
+}
+
+const NIVEL_CRUCE = { nuevo: ['nuevo', 'ok'], parecido: ['parecido', 'aviso'], repetido: ['repetido', 'error'] };
+const ESTADO_TEMA = { pendiente: 'por revisar', aprobado: '✓ aprobado', descartado: 'descartado' };
+
+/* Los cambios de los temas van DE UNO EN UNO (escribir en un campo y pulsar
+   «Aprobar» manda dos): así ninguno pisa al otro y la pantalla se queda con
+   la respuesta del último (revisión del 01-11-2026). */
+function cambiarTema(tid, cambios) {
+  const ruta = rutaTemas(`/${encodeURIComponent(tid)}`);
+  const cid = PAR.cid;
+  PAR.temasCola = (PAR.temasCola || Promise.resolve()).then(async () => {
+    try {
+      const r = await pedir(ruta, { method: 'PUT', cuerpo: cambios });
+      if (cid === PAR.cid) PAR.temas = r.propuesta;
+    } catch (e) { toast(e.message, true); }
+    repintarParrillaSinPisar();
+  });
+  return PAR.temasCola;
+}
+
+function campoTema(t, campo, etiqueta, largo) {
+  const entrada = h('input', { type: 'text', value: t[campo] || '', 'aria-label': etiqueta, maxlength: 300,
+    clase: largo ? 'largo' : '', disabled: t.guion ? true : null,
+    onchange: ev => { if (ev.target.value.trim() !== (t[campo] || '')) cambiarTema(t.id, { [campo]: ev.target.value }); } });
+  entrada.dataset.foco = `tema-${t.id}-${campo}`;
+  return h('label', { clase: `campo-tema${largo ? ' ancho' : ''}` }, h('span', { clase: 'meta' }, etiqueta), entrada);
+}
+
+function tarjetaTema(t) {
+  const [nivel, clase] = NIVEL_CRUCE[(t.cruce || {}).nivel] || NIVEL_CRUCE.nuevo;
+  const caja = h('div', { clase: `tarjeta-tema estado-${t.estado}${t.guion ? ' escrito' : ''}` });
+  caja.appendChild(h('div', { clase: 'fila cab-tema' },
+    h('span', { clase: `pastilla ${t.estado === 'aprobado' ? 'ok' : ''}` }, t.guion ? '✓ guion escrito' : ESTADO_TEMA[t.estado] || t.estado),
+    h('span', { clase: `pastilla ${clase}`, title: (t.cruce || {}).con ? `se cruza con: ${t.cruce.con}` : 'no se parece a nada del proyecto' },
+      nivel + ((t.cruce || {}).con ? ` · ${recortar(t.cruce.con, 50)}` : '')),
+    t.editado ? h('span', { clase: 'meta' }, 'editado') : null,
+    h('span', { clase: 'crece' }),
+    t.guion ? null : h('button', { clase: t.estado === 'aprobado' ? 'mini' : 'mini primario', disabled: t.grupo !== 'propuesta' ? true : null,
+      onclick: () => cambiarTema(t.id, { estado: t.estado === 'aprobado' ? 'pendiente' : 'aprobado' }) },
+    t.estado === 'aprobado' ? 'Quitar aprobación' : 'Aprobar'),
+    t.guion || t.estado === 'descartado' ? null : h('button', { clase: 'mini fantasma', onclick: () => cambiarTema(t.id, { estado: 'descartado' }) }, 'Descartar'),
+    !t.guion && t.estado === 'descartado' ? h('button', { clase: 'mini fantasma', onclick: () => cambiarTema(t.id, { estado: 'pendiente' }) }, 'Recuperar') : null));
+  caja.appendChild(h('div', { clase: 'campos-tema' }, campoTema(t, 'tema', 'Tema', true), campoTema(t, 'gancho', 'Gancho', true),
+    campoTema(t, 'tipo_video', 'Tipo de vídeo'), campoTema(t, 'espacio', 'Espacio'), campoTema(t, 'problema', 'Problema que resuelve', true)));
+  caja.appendChild(h('div', { clase: 'meta' }, [t.formula ? `Fórmula: ${t.formula}` : '',
+    t.duracion ? `Duración sugerida: ${t.duracion}` : 'Duración: sin datos suficientes para sugerirla'].filter(Boolean).join(' · ')));
+  if (t.por_que) caja.appendChild(h('div', { clase: 'por-que-tema' }, h('b', {}, 'Por qué: '), t.por_que));
+  caja.appendChild(pruebasConjunto(t.referencias));
+  if ((t.unido_con || []).length) caja.appendChild(h('div', { clase: 'pista' }, `Unido con otra idea casi igual: «${t.unido_con.join('», «')}».`));
+  if ((t.avisos_copia || []).length) {
+    caja.appendChild(h('div', { clase: 'caja-aviso aviso-copia' }, h('b', {}, '⚠ El guion repite frases de un vídeo original. Cámbialas en la Parrilla:'),
+      h('ul', {}, t.avisos_copia.map(f => h('li', {}, `«${f}»`)))));
+  }
+  return caja;
+}
+
+function bloqueTemasPropuestos() {
+  if (!hayProyectoParrilla()) return null;
+  // los guiones de los temas aprobados acaban de escribirse: se vuelven a leer marcados
+  const t = PAR.trabajo;
+  if (t && t.tipo === 'temas' && t.estado !== 'trabajando' && PAR.temasVisto !== t.id) {
+    PAR.temasVisto = t.id;
+    PAR.temasDe = '';
+  }
+  if (PAR.temasDe !== PAR.cid) { if (!PAR.temasCargando) setTimeout(cargarTemasPropuestos, 0); return null; }
+  const p = PAR.temas;
+  if (!p || !(p.temas || []).length) return null;
+  const propuesta = p.temas.filter(t => t.grupo === 'propuesta');
+  const repetidos = p.temas.filter(t => t.grupo === 'repetido');
+  const variedad = p.temas.filter(t => t.grupo === 'variedad');
+  const aprobados = propuesta.filter(t => t.estado === 'aprobado' && !t.guion);
+  const escritos = propuesta.filter(t => t.guion).length;
+  const caja = h('div', { clase: 'temas-propuestos' });
+  caja.appendChild(h('div', { clase: 'fila' }, h('h3', {}, `Temas para ${nombreProyectoParrilla() || 'este proyecto'}`),
+    h('span', { clase: 'meta crece' }, `de ${(p.cuentas || []).map(c => '@' + c.usuario).join(', ')} · propuestos el `
+      + `${String(p.creada || '').replace('T', ' ').slice(0, 16)}`)));
+  caja.appendChild(h('div', { clase: 'pista' }, `${propuesta.length} temas · ${aprobados.length} aprobados por escribir`
+    + (escritos ? ` · ${escritos} ya escritos` : '') + `. Como mucho ${(p.limites || {}).por_cuenta || 3} por cuenta y `
+    + `${(p.limites || {}).por_formula || 2} por fórmula, y cada uno en un espacio distinto.`));
+  propuesta.forEach(t => caja.appendChild(tarjetaTema(t)));
+  const plegado = (titulo, lista) => {
+    if (!lista.length) return;
+    caja.appendChild(h('details', { clase: 'temas-fuera' }, h('summary', {}, `${titulo} (${lista.length})`),
+      lista.map(t => h('div', { clase: 'fila tema-fuera' }, h('div', { clase: 'crece' }, h('b', {}, t.tema), h('div', { clase: 'meta' }, t.motivo || '')),
+        h('button', { clase: 'mini', onclick: () => cambiarTema(t.id, { incluir: true }) }, 'Incluir igualmente')))));
+  };
+  plegado('Repetidos: ya están en el proyecto y no se incluyen', repetidos);
+  plegado('No entran por variedad', variedad);
+  const ocupado = PAR.trabajo && PAR.trabajo.estado === 'trabajando';
+  const uso = h('select', { 'aria-label': 'Uso de los guiones', onchange: ev => { PAR.temasModo = ev.target.value; } },
+    [['adaptar', 'adaptar'], ['exacto', 'exacto']].map(([v, t]) => h('option', { value: v, selected: (PAR.temasModo || 'adaptar') === v ? true : null }, t)));
+  caja.appendChild(h('div', { clase: 'fila escribir-temas' },
+    h('label', {}, 'Uso'), uso,
+    h('button', { clase: 'primario', disabled: (!aprobados.length || ocupado) ? true : null, onclick: () => escribirTemasAprobados(aprobados.length) },
+      `Escribir guiones aprobados (${aprobados.length})`),
+    h('span', { clase: 'pista crece' }, aprobados.length ? `Van a la Parrilla de ${nombreProyectoParrilla()}. Nada se escribe hasta que lo pulses.`
+      : 'Aprueba los temas que quieras: solo esos se escriben.')));
+  return caja;
+}
+
+async function escribirTemasAprobados(n) {
+  if (!hayProyectoParrilla()) { toast('elige un proyecto: los guiones van a su Parrilla', true); return; }
+  // un campo a medio editar se guarda antes (sale del campo y espera la cola)
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  await (PAR.temasCola || Promise.resolve());
+  const nombre = nombreProyectoParrilla();
+  const cupoMalo = PAR.temasCupo && PAR.temasCupo.malo;
+  const aviso = cupoMalo ? `⚠ ${textoCupo(PAR.temasCupo)} Si sigues, puede cortarse a medias; si pasa, no se pierde nada.\n\n` : '';
+  if (!confirm(`${aviso}Se escribirán ${n} guion${n === 1 ? '' : 'es'} y se añadirán a la Parrilla de «${nombre}».\n`
+    + `Claude los escribe con tu membresía (no se paga aparte).${cupoMalo ? '' : ` ${textoCupo(PAR.temasCupo)}`}\n\n`
+    + (cupoMalo ? 'Pulsa «Aceptar» para seguir igualmente.' : '¿Seguir?'))) return;
+  try {
+    const t = await conAvisoDeCupo(mas => pedir(rutaTemas('/escribir'), { method: 'POST',
+      cuerpo: Object.assign({ confirmado: true, modo: PAR.temasModo || 'adaptar' }, mas) }), cupoMalo ? { aunque_cupo: true } : {});
+    if (!t) return;
+    PAR.trabajo = t;
+    toast(`Claude está escribiendo ${n} guion${n === 1 ? '' : 'es'}: aparecerán en la Parrilla`);
+    pintarModulo();
+    vigilarTrabajoParrilla();
+  } catch (e) { toast(e.message, true); }
 }
 
 montarModulos();

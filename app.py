@@ -5095,8 +5095,14 @@ def _ficha_tipo_relato(ctx):
     catalogo = params.get("catalogo") or {}
     # sin NINGUN cambio en ningun tramo, todos los planos serian la base tal cual:
     # falta que Claude diga que cambia (un «antes» sin cambio es normal, todos no)
+    # con los ESTADOS DEL ESPACIO de la Parrilla los cambios ya estan dichos
+    # (rama parrilla-estados): no se ofrece escribirlos tramo a tramo
+    try:
+        fijos_p = tr.estados_fijos(PASOS_MODULOS.p6_assets._catalogo_de(params, ctx.proyecto))
+    except Exception:                                       # noqa: BLE001
+        fijos_p = {}
     sin_cambios = (resuelto["modo"] == "espacio_que_cambia" and tr.activo(resuelto)
-                   and bool(catalogo.get("beats"))
+                   and not fijos_p and bool(catalogo.get("beats"))
                    and not any(b.get("cambio")
                                for b in catalogo.get("beats") or [] if isinstance(b, dict)))
     inicial = str(((catalogo.get("relato") or {}) if isinstance(catalogo.get("relato"), dict)
@@ -5104,7 +5110,16 @@ def _ficha_tipo_relato(ctx):
     # EN ESPAÑOL Y DÓNDE SE USA (rama estados-en-espanol): solo lectura, de un
     # fichero del proyecto y del plan. No escribe nada (regla 1).
     en_espanol = _relato_en_espanol(ctx, params, sitio_e, pedidos, estados, inicial)
+    # recorrido y clase (tipo-de-relato-2): los ambientes y la base de cada uno
+    try:
+        ambientes = [{"sitio": a["sitio"], "nombre": a["nombre"],
+                      "aprobada": bool((bases.get(a["sitio"]) or {}).get("aprobada")),
+                      "imagen_url": (bases.get(a["sitio"]) or {}).get("imagen_url")}
+                     for a in p6.ambientes_del_relato(ctx.proyecto, params)]
+    except Exception:                                       # noqa: BLE001
+        ambientes = []
     return {
+        "ambientes": ambientes,
         "tipo_relato": {k: v for k, v in guardado.items() if k != "bases"},
         "resuelto": dict(resuelto, nombre=tr.nombre(resuelto["modo"], resuelto.get("cambia"))),
         "del_estilo": tr.normalizar_de_estilo((params.get("estilo") or {}).get("relato"))
@@ -5219,7 +5234,33 @@ def _donde_se_usa_relato(ctx, params, sitio, pedidos):
     def ficha(clave):
         return salida.setdefault(clave, {"bloques": [], "planos": [], "_vistos": set()})
 
-    for beat in catalogo.get("beats") or []:
+    # CON LOS ESTADOS DE LA PARRILLA (rama parrilla-estados) los bloques de cada
+    # estado los dicen las lineas del guion visual, no los tramos del catalogo
+    # (sus etiquetas ya no mandan)
+    try:
+        fijos = tr.estados_fijos(PASOS_MODULOS.p6_assets._catalogo_de(params, ctx.proyecto))
+    except Exception:                                       # noqa: BLE001
+        fijos = {}
+    if fijos:
+        planos_gv, _origen = _guion_visual().efectivo(params, bloques)
+        tramos = [{"desde": pl.get("bloque"), "hasta": pl.get("bloque"),
+                   "estado": pl.get("estado") if pl.get("estado") in pedidos else ""}
+                  for pl in planos_gv or []]
+    else:
+        tramos = None
+    for beat in (tramos if tramos is not None else catalogo.get("beats") or []):
+        if tramos is not None:
+            estado = beat["estado"]
+            desde = posicion.get(str(beat.get("desde") or "").strip().upper())
+            if desde is None:
+                continue
+            f = ficha(estado)
+            if desde not in f["_vistos"]:
+                f["_vistos"].add(desde)
+                texto = " ".join(bloques[desde]["texto"].split())
+                f["bloques"].append({"id": bloques[desde]["id"], "n": desde + 1,
+                                     "texto": texto[:110] + ("…" if len(texto) > 110 else "")})
+            continue
         if not isinstance(beat, dict) or beat.get("set") not in (None, "", sitio):
             continue
         estado = tr.estado_de(beat)
@@ -5363,7 +5404,10 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
     sitio, pedidos = p6.estados_del_relato(ctx.proyecto, params)
     if not sitio or estado not in pedidos:
         raise ErrorApi(404, f"este vídeo no tiene el estado «{estado}»")
-    if not ((params.get("catalogo") or {}).get("beats")):
+    # un estado que escribio la Parrilla (rama parrilla-estados) vive en el
+    # guion visual, no en los tramos del reparto: se cambia ALLI
+    de_parrilla = estado in tr.estados_fijos(p6._catalogo_de(params, ctx.proyecto))
+    if not de_parrilla and not ((params.get("catalogo") or {}).get("beats")):
         raise ErrorApi(409, "los cambios de este vídeo no están guardados en el reparto: "
                             "pulsa antes «Escribir qué cambia en cada tramo»")
     if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
@@ -5384,6 +5428,20 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
             if dibujando or _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
                 raise RuntimeError("se ha empezado a generar algo en este vídeo mientras "
                                    "se traducía: vuelve a guardar el cambio cuando termine")
+            if de_parrilla:
+                gv_mod = _guion_visual()
+                guardado = gv_mod.normalizar((ctx.estado.params("assets") or {}).get("guion_visual"))
+                estados_gv = dict(guardado.get("estados") or {})
+                if tr._texto(estados_gv.get(estado), 400) != tr._texto(anterior, 400):
+                    raise RuntimeError("los cambios de este estado se han reescrito mientras "
+                                       "se traducía: vuelve a abrirlo y guárdalo otra vez")
+                if ingles != tr._texto(anterior, 400):
+                    estados_gv[estado] = ingles
+                    ctx.estado.actualizar_params("assets", {"guion_visual": dict(guardado, estados=estados_gv)})
+                mod.guardar(raiz, {ingles: es})
+                ctx.bitacora.anotar("tipo_relato_estado_editado", "assets",
+                                    {"estado": estado, "tramos": 0, "parrilla": True})
+                return
             catalogo = copy.deepcopy((ctx.estado.params("assets") or {}).get("catalogo") or {})
             tocados = 0
             for beat in catalogo.get("beats") or []:
@@ -5456,8 +5514,8 @@ def _cambios_del_relato(ctx):
             salida["hechas"] += 1
             papeles = {r.get("papel") for r in ficha.get("referencias") or []
                        if isinstance(r, dict)}
-            familia = (PASOS_MODULOS.encuadres.por_id_de(modo_img).get(escena.get("carta") or "")
-                       or {}).get("familia", "")
+            # la MISMA cuenta que el plan: en modo guion manda la camara de su linea
+            familia = PASOS_MODULOS.p6_assets._familia_del_plano(escena, modo_img)
             editaria = tr.plano_se_edita(dict(escena, set=previsto), relato, sitio, familia)
             cambia = False
             if editaria:
@@ -5466,6 +5524,15 @@ def _cambios_del_relato(ctx):
                 cambia = True
             elif tr.activo(relato) and previsto in bases and "espacio" not in papeles:
                 cambia = True
+            elif escena.get("ref_clave") in bases and "espacio" in papeles:
+                # UN DETALLE DE UN ESTADO (tipo-de-relato-2, revision 03-11): su
+                # referencia tiene que ser la imagen de ESE estado; la cache la
+                # nombra «<nombre de la imagen>__<huella>.png»
+                esperada = os.path.splitext(os.path.basename(str(bases[escena["ref_clave"]])))[0]
+                usadas = [os.path.splitext(os.path.basename(str(r.get("ruta") or "")))[0]
+                          for r in ficha.get("referencias") or []
+                          if isinstance(r, dict) and r.get("papel") == "espacio"]
+                cambia = not any(u == esperada or u.startswith(esperada + "__") for u in usadas)
             if cambia:
                 salida["planos"].append({
                     "id": escena["id"], "sitio": previsto,
@@ -5512,7 +5579,10 @@ def aplicar_tipo_relato(pid: str, cuerpo: dict = Body(default=None)):
         guardado = params.get("catalogo") or {}
         cambios_params = {}
         if tr.activo(relato) and (guardado.get("sets") or guardado.get("beats")):
-            espacio = _espacio_fijo_guardado(ctx) or catalogo_mod.espacio_del_catalogo(guardado)
+            # en recorrido y clase, los ambientes que declaro Claude se quedan
+            # (revision del 03-11: sin esto, «Aplicar» los juntaba en uno)
+            espacio = _espacio_fijo_guardado(ctx) or catalogo_mod.espacio_del_catalogo(
+                guardado, ambientes=relato["modo"] in tr.AMBIENTES)
             if espacio:
                 ids = [b["id"] for b in _bloques_del_guion(ctx)]
                 try:
@@ -5600,12 +5670,12 @@ def escribir_cambios_relato(pid: str, cuerpo: dict = Body(default=None)):
 
 @_medido_en("assets", "base")
 @_con_turno
-def _correr_base(avisar, ctx, rehacer):
-    """Genera (y paga) la imagen base del sitio. No la aprueba."""
+def _correr_base(avisar, ctx, rehacer, sitio=None):
+    """Genera (y paga) la imagen base del sitio (o la de un ambiente). No la aprueba."""
     p6 = PASOS_MODULOS.p6_assets
     avisar(0.1, "dibujando la imagen base del sitio (se paga una imagen)")
     hecho = p6.generar_imagen_base(ctx.proyecto, ctx.estado.params("assets") or {},
-                                   rehacer=rehacer)
+                                   rehacer=rehacer, sitio=sitio)
     tr = _tipo_relato()
     with _cerrojo_de_cadena(ctx.id):
         guardado = _tipo_relato_guardado(ctx)
@@ -5656,9 +5726,16 @@ def generar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
     params = ctx.estado.params("assets") or {}
-    if not tr.edita(tr.resolver(params)):
-        raise ErrorApi(400, "la imagen base que se edita es de «Un espacio que cambia» y "
-                            "«Producto»: elige antes uno de los dos")
+    resuelto = tr.resolver(params)
+    # recorrido y clase (tipo-de-relato-2): la base de CADA ambiente, de referencia
+    ambientes = (PASOS_MODULOS.p6_assets.ambientes_del_relato(ctx.proyecto, params)
+                 if tr.activo(resuelto) and resuelto.get("modo") in tr.AMBIENTES else [])
+    sitio = str(datos.get("sitio") or "").strip()
+    if not tr.edita(resuelto) and not ambientes:
+        raise ErrorApi(400, "la imagen base es de «Un espacio que cambia», «Producto», "
+                            "«Recorrido» y «Clase»: elige antes uno de ellos")
+    if sitio and sitio not in [a["sitio"] for a in ambientes]:
+        raise ErrorApi(404, f"«{sitio}» no es un ambiente de este vídeo")
     try:
         visto = float(datos.get("usd"))
     except (TypeError, ValueError):
@@ -5682,7 +5759,8 @@ def generar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
                                            bool(datos.get("otra")), paso="assets")
         else:
             trabajo_id = ctx.gestor.lanzar("tipo_relato_base", _correr_base, ctx,
-                                           bool(datos.get("otra")), paso="assets")
+                                           bool(datos.get("otra")), sitio or None,
+                                           paso="assets")
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
@@ -5862,6 +5940,15 @@ def _fijo_del_video(ctx):
         sitio, espacio = p6.espacio_del_relato(ctx.proyecto, params)
     except Exception:                                       # noqa: BLE001
         sitio, espacio = None, {}
+    # en un recorrido o una clase, los OTROS ambientes del lugar tambien son lo
+    # fijo: si no, el guion visual lo escribia todo en el principal (revision 03-11)
+    try:
+        ambientes = p6.ambientes_del_relato(ctx.proyecto, params)
+    except Exception:                                       # noqa: BLE001
+        ambientes = []
+    if len(ambientes) > 1:
+        espacio = dict(ambientes[0]["espacio"], secundarios=[
+            {"nombre": a["nombre"], "descripcion": a["espacio"]["descripcion"]} for a in ambientes[1:]])
     reparto = ((params.get("catalogo") or {}).get("reparto") or {})
     try:
         _s, estados = p6.estados_del_relato(ctx.proyecto, params)
@@ -5972,7 +6059,9 @@ def guardar_guion_visual(pid: str, cuerpo: dict = Body(default=None)):
             antes = gv.normalizar(params.get("guion_visual"))
             nuevo = gv.normalizar({"origen": datos.get("origen") or antes.get("origen") or "manual",
                                    "planos": planos, "aprobado": False,
-                                   "visuales": antes.get("visuales") or []}, validos)
+                                   "visuales": antes.get("visuales") or [],
+                                   "estados": antes.get("estados") or {},
+                                   "sin_sorteo": antes.get("sin_sorteo") is True}, validos)
         except ValueError as fallo:
             raise ErrorApi(400, str(fallo))
         ctx.estado.actualizar_params("assets", {"guion_visual": nuevo})
@@ -5995,7 +6084,9 @@ def _correr_proponer_gv(avisar, ctx, ajuste):
         except ValueError:
             antes = {}
         nuevo = gv.normalizar({"origen": "claude", "planos": planos, "aprobado": False,
-                               "visuales": antes.get("visuales") or []})
+                               "visuales": antes.get("visuales") or [],
+                               "estados": antes.get("estados") or {},
+                               "sin_sorteo": antes.get("sin_sorteo") is True})
         ctx.estado.actualizar_params("assets", {"guion_visual": nuevo})
     ctx.bitacora.anotar("guion_visual_propuesto", "assets", {"planos": len(planos)})
     avisar(1.0, "guion visual escrito: revísalo y apruébalo")
@@ -19025,7 +19116,13 @@ def _opciones_al_crear(ctx, preset_id, opciones):
         # las lineas «Visual:» del guion de la Parrilla se guardan siempre que
         # lleguen: si el estilo dice «guion», o se elige despues, no se pierden
         cambios["guion_visual"] = {"origen": "parrilla", "planos": [],
-                                   "aprobado": False, "visuales": visuales}
+                                   "aprobado": False, "visuales": visuales,
+                                   # rama parrilla-estados (03-11): solo en los videos
+                                   # creados desde hoy; los de antes no ganan ninguna clave
+                                   "sin_sorteo": True}
+        estados_p = gv.normalizar_estados(opciones.get("estados"))
+        if estados_p:
+            cambios["guion_visual"]["estados"] = estados_p
     if cambios:
         ctx.estado.actualizar_params("assets", cambios)
     presencia = opciones.get("presencia")
@@ -21806,8 +21903,10 @@ def parrilla_cuentas_trabajo(tid: str):
 
 @app.get("/api/parrilla/cuentas/{red}/{usuario}")
 def parrilla_cuenta(red: str, usuario: str):
+    """Lo guardado de la cuenta, con sus cifras relativas (`metricas`, rama
+    cuentas-gustan-2) y si se puede completar la duración que falta."""
     red, usuario = _cuenta_pedida(red, usuario)
-    return _por_cuentas(_cuentas().cuenta, raiz_proyectos(), red, usuario)
+    return _por_cuentas(_cuentas().cuenta_con_metricas, raiz_proyectos(), red, usuario)
 
 
 @app.delete("/api/parrilla/cuentas/{red}/{usuario}")
@@ -21846,6 +21945,222 @@ def parrilla_desde_cuenta(cid: str, peticion: Request, cuerpo: dict = Body(defau
         "analisis": datos.get("analisis") or "", "contexto": _contexto_parrilla(cid, d)})
     anotar_global("parrilla_desde_cuenta", {"proyecto": cid, "red": red, "usuario": usuario})
     return trabajo_
+
+
+# ------------------------------- CUENTAS QUE TE GUSTAN 2 (rama cuentas-gustan-2)
+# Pedido del dueño del 01-11-2026: completar la duración de una cuenta,
+# analizar varias juntas (`pasos/cuentas_conjunto.py`), proponer temas para un
+# proyecto y escribir solo los aprobados (`pasos/temas_cuentas.py`). Todo va
+# en `_sistema/parrilla/`, fuera de las firmas de cualquier vídeo (regla 1).
+# Lo de Claude, en un hilo: la pantalla pregunta por el trabajo.
+
+try:
+    import cuentas_conjunto as CONJUNTO  # noqa: E402
+    import temas_cuentas as TEMAS  # noqa: E402
+    ERROR_TEMAS = ""
+except Exception as _fallo_temas:  # noqa: BLE001
+    CONJUNTO = TEMAS = None
+    ERROR_TEMAS = f"{type(_fallo_temas).__name__}: {_fallo_temas}"
+
+
+def _temas_mods():
+    if CONJUNTO is None or TEMAS is None:
+        raise ErrorApi(503, f"«Analizar varias cuentas» no se ha podido cargar: {ERROR_TEMAS}")
+    return CONJUNTO, TEMAS
+
+
+def _por_temas(fn, *args, **kwargs):
+    CJ, T = _temas_mods()
+    try:
+        return fn(*args, **kwargs)
+    except (CJ.ErrorConjunto, T.ErrorTemas) as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+    except CUENTAS.ErrorCuentas as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+    except _parrilla().ErrorParrilla as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+def _videos_creados_de(cid, peticion, maximo=60):
+    """[{id, nombre, texto}] de los vídeos ya creados en ese proyecto (para que
+    una idea repetida se note). El texto es el material del Encargo."""
+    cerrados = _cerrados(peticion)
+    if cid in cerrados:
+        return []
+    asignaciones = CLIENTES._leer(raiz_proyectos())
+    fichas = []
+    for ficha in _listar_proyectos():
+        if ficha.get(CONFIG_TALLER):
+            continue
+        if CLIENTES.cliente_de(raiz_proyectos(), ficha.get(CONFIG_ESTILO_LIGHT) or "", ficha.get("id"),
+                               datos=asignaciones) == cid:
+            fichas.append(ficha)
+    fichas.sort(key=lambda f: str(f.get("creado") or ""), reverse=True)
+    salida = []
+    for ficha in fichas[:maximo]:
+        try:
+            texto = (contexto(ficha["id"]).estado.params("ingesta") or {}).get("texto") or ""
+        except Exception:                                   # noqa: BLE001
+            texto = ""
+        salida.append({"id": ficha["id"], "nombre": ficha.get("nombre") or ficha["id"],
+                       "texto": " ".join(str(texto).split())[:400]})
+    return salida
+
+
+@app.post("/api/parrilla/cuentas/{red}/{usuario}/duraciones", status_code=202)
+def parrilla_cuenta_duraciones(red: str, usuario: str, cuerpo: dict = Body(default=None)):
+    """{pagar} -> el trabajo. Completa con Apify la duración que falta (solo
+    Instagram; se paga: sin `pagar`, acaba pidiendo permiso con el precio)."""
+    red, usuario = _cuenta_pedida(red, usuario)
+    pagar = _cuerpo(cuerpo).get("pagar") is True
+    t = _por_cuentas(_cuentas().lanzar_duraciones, raiz_proyectos(), red, usuario, pagar)
+    anotar_global("cuenta_duraciones", {"red": red, "usuario": usuario, "pagar": pagar})
+    return t
+
+
+@app.post("/api/parrilla/conjuntos/plan")
+def parrilla_conjunto_plan(cuerpo: dict = Body(default=None)):
+    """{cuentas: ["red:usuario"]} -> cuántas cuentas y vídeos, tokens, cupo y aviso_cupo (al 90 % avisa, no frena)."""
+    CJ, _T = _temas_mods()
+    return _por_temas(CJ.plan, raiz_proyectos(), _cuerpo(cuerpo).get("cuentas"))
+
+
+@app.post("/api/parrilla/conjuntos", status_code=202)
+def parrilla_conjunto_lanzar(cuerpo: dict = Body(default=None)):
+    """{cuentas, aunque_cupo?} -> el trabajo: Claude compara las cuentas (con la membresía). Con el cupo al 90 % da 409 hasta que llega aunque_cupo: true."""
+    CJ, _T = _temas_mods()
+    d = _cuerpo(cuerpo)
+    cuentas = d.get("cuentas")
+    t = _por_temas(CJ.lanzar, raiz_proyectos(), cuentas, aunque_cupo=d.get("aunque_cupo") is True)
+    anotar_global("cuentas_conjunto", {"cuentas": len(CJ.entender_lista(cuentas))})
+    return t
+
+
+@app.get("/api/parrilla/conjuntos/trabajos/{tid}")
+def parrilla_conjunto_trabajo(tid: str):
+    CJ, _T = _temas_mods()
+    t = CJ.trabajo(tid)
+    if not t:
+        raise ErrorApi(404, "ese trabajo ya no existe (¿se reinició el servicio?)")
+    return t
+
+
+@app.post("/api/parrilla/conjuntos/ultimo")
+def parrilla_conjunto_ultimo(cuerpo: dict = Body(default=None)):
+    """{cuentas} -> {analisis: el último de EXACTAMENTE esa selección, o null}."""
+    CJ, _T = _temas_mods()
+    return {"analisis": _por_temas(CJ.ultimo, raiz_proyectos(), _cuerpo(cuerpo).get("cuentas"))}
+
+
+@app.get("/api/parrilla/conjuntos/historial")
+def parrilla_conjuntos_historial():
+    """Los análisis de varias cuentas guardados, el más nuevo primero (ficha corta)."""
+    CJ, _T = _temas_mods()
+    return {"analisis": _por_temas(CJ.historial, raiz_proyectos()), "guardados": CJ.GUARDADOS}
+
+
+@app.get("/api/parrilla/conjuntos/{aid}")
+def parrilla_conjunto(aid: str):
+    CJ, _T = _temas_mods()
+    return _por_temas(CJ.analisis, raiz_proyectos(), aid)
+
+
+@app.get("/api/parrilla/conjuntos/{aid}/comparar")
+def parrilla_conjunto_comparar(aid: str, con: str = ""):
+    """?con=<otro análisis> -> qué fórmulas, temas y ganchos aparecen, siguen y
+    desaparecen. Sin `con`, contra el anterior de la misma selección (o el que
+    comparte más cuentas). Gratis: no llama a Claude."""
+    CJ, _T = _temas_mods()
+    return _por_temas(CJ.comparar, raiz_proyectos(), aid, con or None)
+
+
+@app.get("/api/parrilla/proyectos/{cid}/cuentas-propias")
+def parrilla_cuentas_propias(cid: str, peticion: Request):
+    """Las cuentas del proyecto cuyo contenido publicado entra en el cruce «ya lo tienes»."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    return _por_temas(T.cuentas_propias, raiz_proyectos(), cid)
+
+
+@app.put("/api/parrilla/proyectos/{cid}/cuentas-propias")
+def parrilla_guardar_cuentas_propias(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{cuentas: ["red:usuario"]} -> las cuentas propias (solo ya leídas; [] las quita)."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    r = _por_temas(T.guardar_cuentas_propias, raiz_proyectos(), cid, _cuerpo(cuerpo).get("cuentas"))
+    anotar_global("cuentas_propias", {"cid": cid, "cuentas": len(r["cuentas"])})
+    return r
+
+
+@app.get("/api/parrilla/proyectos/{cid}/temas")
+def parrilla_temas(cid: str, peticion: Request):
+    """La propuesta de temas del proyecto (o {propuesta: null})."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    CJ, _T = _temas_mods()
+    return {"propuesta": _por_temas(T.leer, raiz_proyectos(), cid), "limites": T.LIMITES,
+            "max_cuantos": T.MAX_CUANTOS, "por_defecto": T.CUANTOS_DEFECTO, "cupo": CJ.estado_cupo()}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/temas/plan")
+def parrilla_temas_plan(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{analisis, cuantos} -> lo que se mandará a Claude y aviso_cupo (al 90 % avisa, no frena)."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    d = _cuerpo(cuerpo)
+    return _por_temas(T.plan, raiz_proyectos(), cid, d.get("analisis"), d.get("cuantos"),
+                      _videos_creados_de(cid, peticion))
+
+
+@app.post("/api/parrilla/proyectos/{cid}/temas", status_code=202)
+def parrilla_temas_proponer(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{analisis, cuantos, aunque_cupo?} -> el trabajo: Claude propone temas (no escribe guiones). Con el cupo al 90 % da 409 hasta que llega aunque_cupo: true."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    d = _cuerpo(cuerpo)
+    t = _por_temas(T.lanzar_propuesta, raiz_proyectos(), cid, d.get("analisis"), d.get("cuantos"),
+                   _videos_creados_de(cid, peticion), aunque_cupo=d.get("aunque_cupo") is True)
+    anotar_global("parrilla_proponer_temas", {"proyecto": cid, "cuantos": d.get("cuantos")})
+    return t
+
+
+@app.get("/api/parrilla/temas/trabajos/{tid}")
+def parrilla_temas_trabajo(tid: str):
+    _CJ, T = _temas_mods()
+    t = T.trabajo(tid)
+    if not t:
+        raise ErrorApi(404, "ese trabajo ya no existe (¿se reinició el servicio?)")
+    return t
+
+
+@app.put("/api/parrilla/proyectos/{cid}/temas/{tid}")
+def parrilla_tema_cambiar(cid: str, tid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{tema?, gancho?, tipo_video?, espacio?, problema?, estado?, incluir?} -> la propuesta."""
+    cid = _proyecto_parrilla(cid, peticion)
+    _CJ, T = _temas_mods()
+    return {"propuesta": _por_temas(T.editar, raiz_proyectos(), cid, tid, _cuerpo(cuerpo))}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/temas/escribir", status_code=202)
+def parrilla_temas_escribir(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{confirmado: true, modo?, nombre?, aunque_cupo?} -> el trabajo de la Parrilla: un guion
+    por tema aprobado. Sin proyecto elegido, o sin confirmar, no se escribe nada."""
+    cid = _proyecto_parrilla(cid, peticion)
+    P = _parrilla()
+    if cid == P.SIN_PROYECTO:
+        raise ErrorApi(409, "elige un proyecto: los guiones van a su Parrilla")
+    d = _cuerpo(cuerpo)
+    if d.get("confirmado") is not True:
+        raise ErrorApi(409, f"confirma que van a la Parrilla de «{_nombres_de_clientes().get(cid, cid)}»")
+    CJ, T = _temas_mods()
+    _por_temas(CJ.comprobar_cupo, d.get("aunque_cupo") is True)   # al 90 %: avisa; sigue si se dijo que sí
+    datos, temas = _por_temas(T.para_escribir, raiz_proyectos(), cid)
+    nombre = str(d.get("nombre") or "").strip() or f"Ideas de cuentas · {ahora()[:10]}"
+    modo = d.get("modo") if d.get("modo") in P.USOS else "adaptar"
+    t = _por_parrilla(P.lanzar, raiz_proyectos(), cid, "temas", {
+        "temas": temas, "modo": modo, "nombre": nombre, "contexto": _contexto_parrilla(cid, d)})
+    anotar_global("parrilla_escribir_temas", {"proyecto": cid, "temas": len(temas), "propuesta": datos.get("id")})
+    return t
 
 
 # ------------------------------------------------------------------------ main

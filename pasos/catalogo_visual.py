@@ -1091,6 +1091,10 @@ def espacio_del_catalogo(catalogo, ambientes=False):
             cuenta[beat["set"]] = cuenta.get(beat["set"], 0) + 1
     elegido = max(cuenta, key=lambda sid: (cuenta[sid], sid)) if cuenta else \
         (sorted(sets)[0] if sets else None)
+    if ambientes and cuenta:
+        # en recorrido y clase el principal es el PRIMERO que declaro Claude
+        # (asi se lo pide su criterio), no el que mas tramos tiene (revision 03-11)
+        elegido = next((sid for sid in sets if sid in cuenta), elegido)
     ficha = sets.get(elegido) or {}
     descripcion = " ".join(str(ficha.get("descripcion") or "").split())
     if not elegido or not descripcion:

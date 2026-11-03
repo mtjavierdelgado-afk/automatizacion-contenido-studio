@@ -5475,6 +5475,15 @@ def _cambios_del_relato(ctx):
                 cambia = True
             elif tr.activo(relato) and previsto in bases and "espacio" not in papeles:
                 cambia = True
+            elif escena.get("ref_clave") in bases and "espacio" in papeles:
+                # UN DETALLE DE UN ESTADO (tipo-de-relato-2, revision 03-11): su
+                # referencia tiene que ser la imagen de ESE estado; la cache la
+                # nombra «<nombre de la imagen>__<huella>.png»
+                esperada = os.path.splitext(os.path.basename(str(bases[escena["ref_clave"]])))[0]
+                usadas = [os.path.splitext(os.path.basename(str(r.get("ruta") or "")))[0]
+                          for r in ficha.get("referencias") or []
+                          if isinstance(r, dict) and r.get("papel") == "espacio"]
+                cambia = not any(u == esperada or u.startswith(esperada + "__") for u in usadas)
             if cambia:
                 salida["planos"].append({
                     "id": escena["id"], "sitio": previsto,
@@ -5521,7 +5530,10 @@ def aplicar_tipo_relato(pid: str, cuerpo: dict = Body(default=None)):
         guardado = params.get("catalogo") or {}
         cambios_params = {}
         if tr.activo(relato) and (guardado.get("sets") or guardado.get("beats")):
-            espacio = _espacio_fijo_guardado(ctx) or catalogo_mod.espacio_del_catalogo(guardado)
+            # en recorrido y clase, los ambientes que declaro Claude se quedan
+            # (revision del 03-11: sin esto, «Aplicar» los juntaba en uno)
+            espacio = _espacio_fijo_guardado(ctx) or catalogo_mod.espacio_del_catalogo(
+                guardado, ambientes=relato["modo"] in tr.AMBIENTES)
             if espacio:
                 ids = [b["id"] for b in _bloques_del_guion(ctx)]
                 try:
@@ -5879,6 +5891,15 @@ def _fijo_del_video(ctx):
         sitio, espacio = p6.espacio_del_relato(ctx.proyecto, params)
     except Exception:                                       # noqa: BLE001
         sitio, espacio = None, {}
+    # en un recorrido o una clase, los OTROS ambientes del lugar tambien son lo
+    # fijo: si no, el guion visual lo escribia todo en el principal (revision 03-11)
+    try:
+        ambientes = p6.ambientes_del_relato(ctx.proyecto, params)
+    except Exception:                                       # noqa: BLE001
+        ambientes = []
+    if len(ambientes) > 1:
+        espacio = dict(ambientes[0]["espacio"], secundarios=[
+            {"nombre": a["nombre"], "descripcion": a["espacio"]["descripcion"]} for a in ambientes[1:]])
     reparto = ((params.get("catalogo") or {}).get("reparto") or {})
     try:
         _s, estados = p6.estados_del_relato(ctx.proyecto, params)

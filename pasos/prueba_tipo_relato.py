@@ -528,6 +528,35 @@ def prueba_ambientes_y_camara():
     ok("ref_clave" not in sin_linea, "sin línea (modo voz), el detalle como siempre")
 
 
+def prueba_revision_03_11():
+    import guion_visual as G                                  # noqa: PLC0415
+    import p6_assets as P6                                    # noqa: PLC0415
+    seccion("15] lo que encontró la revisión del 03-11")
+    for camara, esperada in (("detalle de la bisagra", "cerca"), ("tight shot of the handle", "cerca"),
+                             ("insert of the key", "cerca"), ("ECU of the hinge", "cerca"),
+                             ("plano corto del grifo", "cerca"), ("medium close-up of Ana in the kitchen", "lejos"),
+                             ("plano medio de la cocina", "lejos"), ("wide shot from the door", "lejos")):
+        igual(P6._familia_del_plano({"linea_gv": {"camara": camara}}, "foto"), esperada,  # noqa: SLF001
+              f"la cámara «{camara}» es {esperada}")
+    # el principal de un recorrido es el primero que declaró Claude, aunque otro tenga más tramos
+    cat = {"sets": {"cocina": {"descripcion": "an oak kitchen", "luz": "day"},
+                    "sala": {"descripcion": "an oak living room", "luz": "day"}},
+           "beats": [{"set": "cocina", "desde": "B001", "hasta": "B001"},
+                     {"set": "sala", "desde": "B002", "hasta": "B002"},
+                     {"set": "sala", "desde": "B003", "hasta": "B003"}]}
+    igual(C.espacio_del_catalogo(cat, ambientes=True)["sitio"], "cocina", "con ambientes, el principal es el primero")
+    igual(C.espacio_del_catalogo(cat)["sitio"], "sala", "sin ambientes, el más usado (como siempre)")
+    # «Aplicar» un recorrido no junta los ambientes en uno
+    ajustado, _avisos = C.ajustar_catalogo(cat, C.espacio_del_catalogo(cat, ambientes=True), ["B001", "B002", "B003"])
+    igual(sorted(ajustado["sets"]), ["cocina", "sala"], "ajustar con los ambientes conserva los dos")
+    # el guion visual sabe de los otros ambientes
+    fijo = G._fijo_legible({"descripcion": "an oak kitchen", "luz": "day",  # noqa: SLF001
+                            "secundarios": [{"nombre": "Sala", "descripcion": "an oak living room"}]}, {}, {})
+    ok("OTRO AMBIENTE DEL MISMO LUGAR (Sala): an oak living room" in fijo, "lo fijo del guion visual lleva los ambientes")
+    igual(G._fijo_legible({"descripcion": "a bathroom", "luz": "day"}, {}, {}),  # noqa: SLF001
+          "SITIO: a bathroom (luz: day)", "con un solo sitio, igual que antes")
+
+
 def main():
     print("PRUEBA DEL TIPO DE RELATO")
     prueba_modos_y_lineas()
@@ -540,6 +569,7 @@ def main():
     prueba_presets()
     prueba_imagen_base()
     prueba_ambientes_y_camara()
+    prueba_revision_03_11()
     import shutil                                            # noqa: PLC0415
     shutil.rmtree(_TEMPORAL, ignore_errors=True)
     print("\n" + "=" * 70)

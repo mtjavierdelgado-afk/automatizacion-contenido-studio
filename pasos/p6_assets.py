@@ -2120,9 +2120,13 @@ def _familia_de_carta(carta, modo):
 #: Lo que dice la camara de una linea del guion visual que es «de cerca» (en
 #: ingles o en español, sin tildes): primer plano, detalle, macro, inserto.
 CAMARA_DE_CERCA = re.compile(
-    r"\bclose[- ]?ups?\b|\bcloseups?\b|\bextreme close|\bmacro\b|\bdetail (?:shot|of)\b|"
-    r"\binsert shot\b|\bprimer(?:isimo)? plano\b|\bplano (?:de )?detalle\b|\bde cerca\b",
+    r"\bclose[- ]?ups?\b|\bcloseups?\b|\bextreme close|\bmacro\b|\bdetail(?:ed)? (?:shot|of|view)\b|"
+    r"\binsert(?: shot)? of\b|\binsert shot\b|\btight (?:shot|framing)\b|\becu\b|\bxcu\b|\bcu of\b|"
+    r"\bprimer(?:isimo)? plano\b|\bplano (?:de )?detalle\b|\bdetalle de(?:l)?\b|\bde cerca\b|"
+    r"\bplano (?:corto|cerrado)\b|\binserto\b",
     re.IGNORECASE)
+#: «medium close-up» y «plano medio corto» enseñan el sitio: no son de cerca.
+CAMARA_MEDIA = re.compile(r"\bmedium close|\bplano medio\b|\bmcu\b", re.IGNORECASE)
 
 
 def _familia_del_plano(escena, modo):
@@ -2136,6 +2140,8 @@ def _familia_del_plano(escena, modo):
     if camara.strip():
         llano = unicodedata.normalize("NFKD", camara.lower())
         llano = "".join(c for c in llano if not unicodedata.combining(c))
+        if CAMARA_MEDIA.search(llano):
+            return "lejos"
         return "cerca" if CAMARA_DE_CERCA.search(llano) else "lejos"
     return _familia_de_carta(escena.get("carta"), modo)
 

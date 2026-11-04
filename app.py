@@ -17239,6 +17239,91 @@ def leer_afinado_regla(rid: str):
     return ficha
 
 
+# «REVISAR SI SE CONTRADICEN» (rama reglas-claras, 28-10-2026): Claude, por la
+# membresía, compara las reglas del negocio que RECIBE este estilo con las
+# suyas propias. Se leen del estilo GUARDADO, las mismas que entran en sus
+# imágenes (`dominios.reglas_de_foto` y `reglas_estilo.de_estilo`). SOLO LEE:
+# no escribe en el estilo, ni en la ficha, ni en ningún vídeo; el resultado
+# vive en memoria (como «Afinar»), y de una en una.
+_CHOQUES = {}
+_LOCK_CHOQUES = threading.Lock()
+
+
+def _choques_reglas():
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, "los pasos no están cargados")
+    import importlib                                         # noqa: PLC0415
+    return importlib.import_module("pasos.choques_reglas")
+
+
+@app.post("/api/reglas-estilo/choques", status_code=202)
+def revisar_choques_reglas(cuerpo: dict = Body(default=None), peticion: Request = None):
+    """{preset} -> {id}; el resultado ({pares, negocio, estilo}) en GET."""
+    datos = _cuerpo(cuerpo)
+    preset_id = str(datos.get("preset") or "").strip()
+    if not preset_id:
+        raise ErrorApi(400, "manda {preset: id del estilo}")
+    # la respuesta trae los textos de la ficha: un proyecto con clave, abierto
+    if peticion is not None:
+        cid = CLIENTES.cliente_de(raiz_proyectos(), estilo_id=preset_id) or ""
+        if cid and cid in _cerrados(peticion):
+            raise ErrorApi(403, "este proyecto tiene clave: ábrelo primero")
+    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    if ficha.get("tipo") != "canal":
+        raise ErrorApi(400, "esto no es un preset de canal")
+    estilo = (ficha.get("datos") or {}).get("estilo") or {}
+    if estilo.get("modo") != "foto":
+        raise ErrorApi(400, "este estilo es de dibujo: las reglas del negocio no le llegan")
+    # lo ESCRITO en la ficha que recibe el estilo (`fijado`, la misma fuente
+    # que `reglas_de_foto`): `reglas_de_foto` las da ya en el formato del
+    # prompt (inglés, sin «solo si…»), que no es lo que hay que comparar
+    modulo = _choques_reglas()
+    negocio = modulo.del_negocio(PASOS_MODULOS.dominios.fijado(estilo))
+    propias = [{"texto": r.get("texto") or "", "palabras": list(r.get("palabras") or [])}
+               for r in _reglas_estilo().de_estilo(estilo)]
+    if not negocio:
+        raise ErrorApi(400, "a este estilo no le llega ninguna regla del negocio")
+    if not propias:
+        raise ErrorApi(400, "este estilo no tiene reglas propias que comparar")
+    rid = uuid.uuid4().hex[:12]
+    with _LOCK_CHOQUES:
+        if any(f.get("estado") == "pensando" for f in _CHOQUES.values()):
+            raise ErrorApi(409, "Claude ya está revisando otras reglas: espera a que termine")
+        for viejo in list(_CHOQUES)[:-19]:
+            _CHOQUES.pop(viejo, None)
+        _CHOQUES[rid] = {"estado": "pensando"}
+
+    def correr():
+        try:
+            r = modulo.revisar(negocio, propias, cwd=RAIZ_ESTUDIO)
+            salida = {"estado": "listo", "pares": r["pares"], "segundos": r["segundos"],
+                      "simulado": r["simulado"],
+                      "negocio": [x["texto"] for x in negocio],
+                      "estilo": [x["texto"] for x in propias]}
+        except Exception as fallo:                          # noqa: BLE001
+            salida = {"estado": "error", "error": str(fallo)[:600]}
+        with _LOCK_CHOQUES:
+            _CHOQUES[rid] = salida
+
+    try:
+        threading.Thread(target=correr, daemon=True, name=f"choques-{rid}").start()
+    except RuntimeError as fallo:
+        with _LOCK_CHOQUES:
+            _CHOQUES[rid] = {"estado": "error", "error": str(fallo)[:300]}
+        raise ErrorApi(503, "no se ha podido arrancar: inténtalo otra vez")
+    return {"id": rid, "estado": "pensando"}
+
+
+@app.get("/api/reglas-estilo/choques/{rid}")
+def leer_choques_reglas(rid: str):
+    """Cómo va «Revisar si se contradicen», y los pares al terminar."""
+    with _LOCK_CHOQUES:
+        ficha = _CHOQUES.get(rid)
+    if not ficha:
+        raise ErrorApi(404, "esa revisión ya no está: vuelve a pedirla")
+    return ficha
+
+
 @app.delete("/api/presets-light/{preset_id}")
 def borrar_preset_light(preset_id: str):
     """A la papelera de presets, y su taller con el.

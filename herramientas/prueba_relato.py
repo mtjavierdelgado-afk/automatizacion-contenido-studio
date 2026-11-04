@@ -203,7 +203,9 @@ def main():
     if not est:
         est = {"inicio": time.time(), "estilo": "", "videos": {}, "hechas": [], "lineas": [],
                "tope": args.tope}
-        print(f"LA PRUEBA REAL DEL TIPO DE RELATO (3 vídeos, tope {args.tope:.2f} $; no toca tus vídeos)")
+        cuantos = len([e for e in ESCENARIOS if not args.solo or e["clave"] in args.solo])
+        print(f"LA PRUEBA REAL DEL TIPO DE RELATO ({cuantos} vídeo{'s' if cuantos != 1 else ''}, "
+              f"tope {args.tope:.2f} $; no toca tus vídeos)")
     tope = float(est.get("tope") or args.tope)
 
     def guardar():
@@ -691,7 +693,7 @@ def main():
             informe.comprueba(planos and not malos, f"Claude ve el MISMO sitio en los {len(planos)} planos",
                               f"distinto en {malos} {juicio.get('error') or ''}")
             informe.comprueba(planos and not objeto,
-                              "y lo que cambia (la mampara) sale igual que en su imagen en todos",
+                              "y lo que cambia sale igual que en su imagen en todos",
                               f"distinto en {objeto}: "
                               + "; ".join(f"{p.get('id')}: {p.get('por_que')}" for p in planos
                                           if p.get("id") in objeto)[:400])

@@ -543,14 +543,24 @@ def main():
         try:
             veredicto = _juez(
                 f"<material>\n{MATERIAL}\n</material>\n<guion>\n{guion}\n</guion>\n"
-                "¿El guion cuenta lo que dice el material, sin inventar datos que no "
-                "están (cifras, fechas, nombres)? Devuelve SOLO "
-                '{"fiel": true | false, "inventos": ["<dato inventado>"], "por_que": "<una frase>"}', raiz)
+                "Contesta por separado. 'fiel': ¿el guion NO inventa DATOS que no están en "
+                "el material (cifras, fechas, nombres, marcas, lugares o hechos que se puedan "
+                "comprobar)? 'anadidos': las frases de estilo, ejemplos, escenas o consejos "
+                "que el guion añade sin ser datos (eso es narrar, no inventar). Devuelve SOLO "
+                '{"fiel": true | false, "inventos": ["<dato inventado>"], '
+                '"anadidos": ["<frase añadida>"], "por_que": "<una frase>"}', raiz)
         except Exception as fallo:                          # noqa: BLE001
             veredicto = {"fiel": None, "por_que": f"no se pudo preguntar a Claude: {fallo}"}
         datos["juicio_guion"] = veredicto
-        informe.comprueba((veredicto or {}).get("fiel") is True, "el guion es fiel al material",
+        # FALLO solo si inventa DATOS; lo que añade para contar (escenas,
+        # consejos, humor que piden las indicaciones) es un aviso para leer.
+        # En la prueba del 04-11 el juez tumbó un guion que, según él mismo,
+        # «no inventa cifras, fechas ni nombres»: solo narraba
+        informe.comprueba((veredicto or {}).get("fiel") is True, "el guion no inventa datos",
                           f"{(veredicto or {}).get('inventos')}: {(veredicto or {}).get('por_que')}")
+        if (veredicto or {}).get("anadidos"):
+            informe.apunta("aviso", "el guion añade frases que no están en el material (léelas)",
+                           "; ".join(str(x) for x in (veredicto or {}).get("anadidos")[:4]))
         try:
             from pasos import ortografia                    # noqa: PLC0415
             faltas = ortografia.revisar({"guion": guion}, cwd=raiz)

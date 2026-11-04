@@ -556,7 +556,7 @@ def cartas_de_diagrama(escenas, explicativos, modo, forzadas=None):
     `tope_de` en el video. No se tocan los planos que ya traen carta forzada a
     mano (una decision mirando manda), ni los que no se dibujan (cartela,
     componente, segunda mitad de un plano largo), ni los que siguen una linea
-    del guion visual con camara: ahi la linea decide.
+    del guion visual: ahi la linea decide el plano.
     """
     if not activo(modo) or modo == "ninguna" or not explicativos:
         return {}

@@ -52,7 +52,13 @@ no() { printf '  %s✗%s %s\n' "$ROJO" "$N" "$*"; }
 [ "$(id -u)" -eq 0 ] || { echo "Hay que ser root."; exit 1; }
 
 # --------------------------------------------------- bajar el codigo de GitHub
-_token() { { tr -d '[:space:]' < "$FICHERO_TOKEN"; } 2>/dev/null || true; }
+# Solo letras, numeros y _ (como todo token de GitHub): una comilla o una barra
+# romperian la cabecera de curl, asi que algo raro se trata como «sin token».
+_token() {
+  local t; t="$( { tr -d '[:space:]' < "$FICHERO_TOKEN"; } 2>/dev/null || true)"
+  if printf '%s' "$t" | grep -Eq '^[A-Za-z0-9_]+$'; then printf '%s' "$t"; fi
+  return 0
+}
 
 # El token va a curl por la ENTRADA (-K -), nunca en la linea de mandatos: ahi
 # lo veria cualquiera con `ps`. curl no lo reenvia a codeload al seguir la
@@ -518,8 +524,10 @@ token() {
       printf '%s' "$nuevo" | grep -Eq '^[A-Za-z0-9_]+$' \
         || { no "eso no parece un token de GitHub (solo letras, numeros y _)"; exit 1; }
       mkdir -p "$(dirname "$FICHERO_TOKEN")"; chmod 700 "$(dirname "$FICHERO_TOKEN")"
-      previo="$(mktemp)"; cp -p "$FICHERO_TOKEN" "$previo" 2>/dev/null || : > "$previo"
-      ( umask 077; printf '%s\n' "$nuevo" > "$FICHERO_TOKEN" )
+      # la copia del que habia, junto a el (carpeta de root), no en /tmp
+      previo="$(mktemp "$(dirname "$FICHERO_TOKEN")/.anterior.XXXXXX")"
+      cp -p "$FICHERO_TOKEN" "$previo" 2>/dev/null || : > "$previo"
+      ( umask 077; printf '%s\n' "$nuevo" > "$FICHERO_TOKEN" ); chmod 600 "$FICHERO_TOKEN"
       if _existe_en_github "$REPO" "$RAMA"; then
         rm -f "$previo"
         si "token guardado: puede leer https://github.com/$REPO (rama $RAMA)"

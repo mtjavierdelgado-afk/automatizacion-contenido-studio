@@ -73,10 +73,16 @@ def prueba_revisar():
     ok("CON FALLOS" in texto and "1 bien, 1 con fallos" in texto, "el informe cuenta bien y mal")
     ok("asvs revisar" in texto, "y para el fallo de root dice qué hacer")
     ok("RARO: 3" in texto and "OK: nada" not in texto, "las herramientas: solo lo que no es de siempre")
-    m2 = RV.Marcador(["a.py"], {})
+    m2 = RV.Marcador(["a.py", "b.py"], {})
     m2.termina("a.py", "OK")
+    m2.termina("b.py", "OK")
     texto = RV.informe_final(m2, {}, ["herramientas/atributos_py.py     ATRIBUTOS QUE NO EXISTEN: 2"], 0)
     ok("TODO EN VERDE" in texto and "asvs probar completo" in texto, "todo bien: lo dice y sugiere la completa")
+    m4 = RV.Marcador(["a.py"], {})
+    m4.termina("a.py", "OK")
+    texto4 = RV.informe_final(m4, {}, [], 0)
+    ok("Esta prueba ya pasa" in texto4 and "probar completo" not in texto4,
+       "repetir una sola: dice que pasa, sin mandar a la completa")
     ok("ATRIBUTOS" not in texto, "lo de siempre de las herramientas no se repite")
     ok(RV.sesion_de_claude("") == "" and RV.sesion_de_claude("/no/existe") == "",
        "sin almacén de claves, la sesión de Claude es la de por defecto")

@@ -586,7 +586,11 @@ revisar() {
     cat "$registro" 2>/dev/null || echo "(todavía no se ha hecho ninguna)"
     return
   else
-    echo "La revisión prueba TODO el Studio sin gastar nada (motores simulados) y tarda 20-40 min."
+    if [ -n "$args" ]; then
+      echo "Repito solo «$2», sin gastar nada (motores simulados)."
+    else
+      echo "La revisión prueba TODO el Studio sin gastar nada (motores simulados) y tarda 1-2 horas."
+    fi
     echo "Mejor cuando no estés generando: usa bastante la máquina."
     echo "Corre APARTE de esta consola: si se corta, sigue sola. Para volver a verla:  asvs revisar"
     # lo que dejo una revision corrida como root: su carpeta temporal y

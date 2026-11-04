@@ -123,14 +123,18 @@ def barra(fraccion, ancho=24):
     return "[" + "█" * llenos + "░" * (ancho - llenos) + f"] {int(fraccion * 100):3d} %"
 
 
-def hora_de_fin(segundos):
-    """La hora (de Lima) a la que se espera terminar: «21:14»."""
+def ahora_lima():
+    """La hora de Lima (el servidor va en UTC)."""
     try:
         from zoneinfo import ZoneInfo                         # noqa: PLC0415
-        ahora = datetime.datetime.now(ZoneInfo("America/Lima"))
+        return datetime.datetime.now(ZoneInfo("America/Lima"))
     except Exception:                                           # noqa: BLE001
-        ahora = datetime.datetime.now()
-    return (ahora + datetime.timedelta(seconds=max(0, segundos))).strftime("%H:%M")
+        return datetime.datetime.now()
+
+
+def hora_de_fin(segundos):
+    """La hora (de Lima) a la que se espera terminar: «21:14»."""
+    return (ahora_lima() + datetime.timedelta(seconds=max(0, segundos))).strftime("%H:%M")
 
 
 def lista_corta(nombres, cuantos=3):
@@ -347,6 +351,8 @@ def informe_final(marcador, detalles, analisis, codigo):
     if not mal and codigo != 0:
         lineas.append("\npruebas.sh terminó con error sin decir qué prueba falló (mira las primeras "
                       "líneas del registro: ¿falta Python?).")
+    elif not mal and len(marcador.suites) == 1:
+        lineas.append("\nEsta prueba ya pasa.")
     elif not mal:
         lineas.append("\nTodo lo que se prueba sin gastar funciona. Para probar con vídeos de verdad: "
                       " asvs probar completo")
@@ -437,7 +443,7 @@ def main():
     print(texto, flush=True)
     try:
         os.makedirs(carpeta, exist_ok=True)
-        ruta = os.path.join(carpeta, "revisar_" + datetime.datetime.now().strftime("%Y-%m-%d_%H%M") + ".txt")
+        ruta = os.path.join(carpeta, "revisar_" + ahora_lima().strftime("%Y-%m-%d_%H%M") + ".txt")
         with open(ruta, "w", encoding="utf-8") as fh:
             fh.write(texto.lstrip() + "\n")
         print(f"\nInforme guardado en {ruta}", flush=True)

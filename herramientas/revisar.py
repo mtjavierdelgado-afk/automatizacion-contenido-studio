@@ -283,6 +283,33 @@ class Marcador:
         self.t_suite = time.time()
 
 
+def sesion_de_claude(secretos):
+    """La carpeta de la sesión de Claude que usa el Studio (su primera cuenta
+    con sesión), o "" si es la de por defecto o no se puede leer.
+
+    Las suites que llaman al CLI de verdad (`prueba_pasos_guion`) no ven el
+    almacén de claves --a propósito: no deben tocar los datos de verdad--, así
+    que sin esto el CLI iba a la sesión por defecto y decía «Not logged in»
+    aunque el Studio funcionara (revisión del 04-11-2026). Solo se lee."""
+    if not secretos or not os.path.isdir(secretos):
+        return ""
+    antes = os.environ.get("ESTUDIO_SECRETOS")
+    os.environ["ESTUDIO_SECRETOS"] = secretos
+    try:
+        sys.path.insert(0, os.path.join(RAIZ, "pasos"))
+        import importlib                                        # noqa: PLC0415
+        claves = importlib.import_module("claves")
+        cuentas = claves.cuentas_cli()
+        return str((cuentas[0] if cuentas else {}).get("config_dir") or "")
+    except Exception:                                           # noqa: BLE001
+        return ""
+    finally:
+        if antes is None:
+            os.environ.pop("ESTUDIO_SECRETOS", None)
+        else:
+            os.environ["ESTUDIO_SECRETOS"] = antes
+
+
 RE_SUITE = re.compile(r"^(OK|FALLA|CUPO)\s+(\S+)")
 
 
@@ -333,6 +360,9 @@ def main():
     ap.add_argument("--pruebas", default=os.path.join(RAIZ, "pruebas.sh"))
     ap.add_argument("--solo", default="", help="una suite suelta (como pruebas.sh --solo)")
     ap.add_argument("--cada", type=float, default=60.0, help="segundos entre barras (latido)")
+    ap.add_argument("--secretos", default="", help="el almacén de claves del servicio: de ahí "
+                    "sale la sesión de Claude de las suites que llaman al CLI de verdad "
+                    "(el almacén NO se pasa a las suites)")
     ap.add_argument("--informes", default="", help="carpeta del informe y de los tiempos "
                     "(por defecto <proyectos>/_sistema/pruebas_reales)")
     args = ap.parse_args()
@@ -358,6 +388,9 @@ def main():
     # servicio puestos una suite despistada escribiria en los de verdad
     entorno = {k: v for k, v in os.environ.items() if k not in DATOS_DEL_SERVICIO
                and not k.startswith("ESTUDIO_BANCO")}
+    sesion = sesion_de_claude(args.secretos)
+    if sesion and not entorno.get("CLAUDE_CONFIG_DIR"):
+        entorno["CLAUDE_CONFIG_DIR"] = sesion
     proceso = subprocess.Popen(orden, cwd=os.path.dirname(os.path.abspath(args.pruebas)), env=entorno,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                text=True, encoding="utf-8", errors="replace", bufsize=1)

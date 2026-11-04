@@ -29631,6 +29631,19 @@ function vueltaOAuthYouTube() {
 let ESCUCHA_FOCO_CANAL = false;
 const CANAL_PENDIENTE = { desde: 0 };
 
+/* COPIAR SIN ROMPER (revisión del 04-11-2026): el navegador puede negar el
+   portapapeles (sin permiso, sin foco, sin https) y la promesa rechazada salía
+   como error de la página y «Copiada» se decía igual. */
+function copiarAlPortapapeles(texto, aviso) {
+  const fallo = () => toast('No se ha podido copiar: selecciónalo y cópialo a mano', true);
+  try {
+    if (!navigator.clipboard) { fallo(); return; }
+    navigator.clipboard.writeText(texto).then(() => toast(aviso || 'Copiado'), fallo);
+  } catch (e) {
+    fallo();
+  }
+}
+
 function seccionCanalYouTube(ficha) {
   const yo = (ficha && ficha.youtube_oauth) || {};
   /* AL VOLVER DE LA PESTAÑA DE GOOGLE: solo mientras hay una conexión a medias,
@@ -29683,7 +29696,7 @@ function seccionCanalYouTube(ficha) {
       + 'consentimiento (tipo «Externo», tú como usuario de prueba) y crea Credenciales → «ID de cliente de '
       + 'OAuth» → «Aplicación web», con esta URI de redireccionamiento autorizada:'),
     h('div', { clase: 'fila' }, h('code', { clase: 'crece vuelta-oauth' }, vuelta),
-      h('button', { clase: 'mini', onclick: () => { navigator.clipboard && navigator.clipboard.writeText(vuelta); toast('Copiada'); } }, 'Copiar')),
+      h('button', { clase: 'mini', onclick: () => copiarAlPortapapeles(vuelta, 'Copiada') }, 'Copiar')),
     h('div', { clase: 'fila' }, h('b', {}, 'Canal'), h('span', { clase: 'crece' }), estado),
     yo.conectado && yo.desde ? h('div', { clase: 'meta' }, `Conectado el ${String(yo.desde).replace('T', ' ')}.`) : null,
     yo.caido ? h('div', { clase: 'meta aviso-busquedas' }, 'Google cortó la conexión. Si tu app de Google Cloud está «en prueba», lo hace cada 7 días: vuelve a conectar (o publícala en la pantalla de consentimiento para que no caduque).') : null,

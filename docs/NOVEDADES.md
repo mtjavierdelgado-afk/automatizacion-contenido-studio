@@ -10,6 +10,29 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Probar el Studio entero con dos comandos (22 de octubre; al servidor, 4 de noviembre)**
+- **`asvs revisar`** (gratis): todas las pruebas del Studio, incluido el recorrido
+  botón por botón, con motores simulados. Corre como el usuario del Studio (como
+  root salían fallos que no lo eran), sigue sola si la consola se corta, enseña
+  un cuadro de progreso (Avance · Tiempo, con la hora de fin · Hecho · Ahora ·
+  Pendiente), y termina con un informe en español
+  que dice qué falló y, si se conoce, qué hacer. `asvs revisar ver` la vuelve a
+  enseñar.
+- **`asvs probar completo`** (con tope, 5 $ por defecto): vídeos de verdad de punta
+  a punta. Al empezar pregunta el tema del vídeo de foto, en qué cuenta publicar
+  (solo salen las que tienen redes conectadas) y pide escribir SI. Después: un
+  vídeo normal con dos imágenes rehechas con notas; uno de foto con «Un espacio
+  que cambia» (imagen base, estados, el revisor y hasta dos rondas de rehacer);
+  la portada; los textos de cada red con emojis y el SEO, juzgados por Claude; y
+  **publica de verdad** y espera a que salga, con el enlace al final para poder
+  borrarlo. Barra de todo con el gasto frente al tope. `--sin-publicar` para no
+  subir nada.
+- **`asvs revisar solo <prueba>`** repite solo la que falló (por ejemplo
+  `asvs revisar solo prueba_recorrido.py`), y las pruebas que llaman a Claude de
+  verdad usan la sesión del Studio (antes decían «Not logged in»).
+- **«Copiar» de Configuración → YouTube: tu canal** ya no da error si el navegador
+  no deja copiar: lo dice y puedes copiarlo a mano.
+
 **La Parrilla dice el estado de cada escena, y sin cámara no hay encuadre al azar (3 de noviembre)**
 - En «Un espacio que cambia» con «Imágenes: guion», el guion de la Parrilla
   puede traer **«Estado: antes»** (o `despues`…) en cada ESCENA y una sección
@@ -355,23 +378,6 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
-**Probar el Studio entero con dos comandos (22 de octubre)**
-- **`asvs revisar`** (gratis): todas las pruebas del Studio, incluido el recorrido
-  botón por botón, con motores simulados. Corre como el usuario del Studio (como
-  root salían fallos que no lo eran), sigue sola si la consola se corta, enseña
-  un cuadro de progreso (Avance · Tiempo, con la hora de fin · Hecho · Ahora ·
-  Pendiente), y termina con un informe en español
-  que dice qué falló y, si se conoce, qué hacer. `asvs revisar ver` la vuelve a
-  enseñar.
-- **`asvs probar completo`** (con tope, 5 $ por defecto): vídeos de verdad de punta
-  a punta. Al empezar pregunta el tema del vídeo de foto, en qué cuenta publicar
-  (solo salen las que tienen redes conectadas) y pide escribir SI. Después: un
-  vídeo normal con dos imágenes rehechas con notas; uno de foto con «Un espacio
-  que cambia» (imagen base, estados, el revisor y hasta dos rondas de rehacer);
-  la portada; los textos de cada red con emojis y el SEO, juzgados por Claude; y
-  **publica de verdad** y espera a que salga, con el enlace al final para poder
-  borrarlo. Barra de todo con el gasto frente al tope. `--sin-publicar` para no
-  subir nada.
 **Publicar, nuevo (22 de octubre)** — la interfaz que aprobaste en la maqueta.
 Solo cambia cómo se ve y dónde está cada cosa: nada que hacía Publicar deja de
 estar, nada nuevo se paga y las preguntas dicen lo mismo de siempre.

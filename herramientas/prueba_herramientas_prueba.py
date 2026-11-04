@@ -78,6 +78,9 @@ def prueba_revisar():
     texto = RV.informe_final(m2, {}, ["herramientas/atributos_py.py     ATRIBUTOS QUE NO EXISTEN: 2"], 0)
     ok("TODO EN VERDE" in texto and "asvs probar completo" in texto, "todo bien: lo dice y sugiere la completa")
     ok("ATRIBUTOS" not in texto, "lo de siempre de las herramientas no se repite")
+    ok(RV.sesion_de_claude("") == "" and RV.sesion_de_claude("/no/existe") == "",
+       "sin almacén de claves, la sesión de Claude es la de por defecto")
+    ok("ESTUDIO_SECRETOS" in RV.DATOS_DEL_SERVICIO, "y el almacén nunca se pasa a las suites")
 
 
 # ------------------------------------------------------------ la API de mentira

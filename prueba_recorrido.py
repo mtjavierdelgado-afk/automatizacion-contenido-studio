@@ -1731,8 +1731,8 @@ def tus_proyectos_rediseno(navegador, datos):
        and all(t in titulos for t in ("Visibilidad", "Clave", "Publicar")),
        f"con Nombre, Logo, Visibilidad, Clave, Publicar y la zona de peligro abajo ({titulos})")
     ok(pg.p.evaluate("() => SECCIONES_AJUSTES_PROYECTO.map(s => s.id).join(',')")
-       == "nombre,logo,visibilidad,clave,publicar,peligro",
-       "hechas con SECCIONES_AJUSTES_PROYECTO (la Ficha del negocio entrará como una sección más)")
+       == "nombre,logo,ficha-negocio,visibilidad,clave,publicar,peligro",
+       "hechas con SECCIONES_AJUSTES_PROYECTO (con la Ficha del negocio, unida el 28-10)")
     ok(pg.visible(".cajon-proyecto .zona-peligro", "quedan en «Sin proyecto»"),
        "«Borrar el proyecto» lleva su explicación delante")
     caja = pg.p.locator(".cajon-proyecto .nombre-proyecto input")
@@ -8573,7 +8573,17 @@ def publicar_seo_real(navegador, datos):
     ok(pg.esperar(f"{nota} .parte-seo b", "Relevancia", 5), "la nota trae la parte de Relevancia")
     ok(pg.visible(f"{nota} .parte-seo b", "Demanda") and pg.visible(f"{nota} .parte-seo b", "Tu historial"),
        "y la de Demanda y Tu historial")
-    ok(pg.visible(f"{nota} .parte-seo .meta", "Investigar búsquedas"), "sin investigar, dice cómo medir la demanda")
+    # lo que dice la Demanda depende de si hay palabra y de si ya se investigó
+    # (en el servidor, otro escenario puede haberla dejado investigada): se
+    # comprueba contra lo que dice la API, no a ciegas (revisión del 04-11-2026)
+    _r, ficha_seo = api.get(f"/api/publicar/videos/{pid}")
+    seo_ahora = (ficha_seo or {}).get("seo") or {}
+    if seo_ahora.get("palabra") and not seo_ahora.get("real"):
+        ok(pg.visible(f"{nota} .parte-seo .meta", "Investigar búsquedas"), "sin investigar, dice cómo medir la demanda")
+    else:
+        ok(pg.visible(f"{nota} .parte-seo[data-parte=demanda] .meta"),
+           f"la Demanda dice algo (palabra «{seo_ahora.get('palabra')}», "
+           f"{'investigada' if seo_ahora.get('real') else 'sin investigar'})")
     ok(pg.visible(f"{nota} .titulo-forma-seo", "no cuentan"), "los detalles de forma, aparte y sin contar")
     pg.pulsar('.busquedas-seo button[data-accion="investigar-busquedas"]')
     ok(pg.esperar(".tabla-busquedas tbody tr", segundos=20), "«Investigar búsquedas»: la tabla de frases")
@@ -9137,7 +9147,11 @@ def quitar_e_igualar_imagenes(navegador, datos):
     hogar = next((e for e in previa.get("escenas") or [] if e["id"] == vecino), {})
     ok(not hogar.get("absorbe"), f"y {vecino} vuelve a ser solo suyo")
     _r, assets = api.get(f"/api/proyectos/{pid}/pasos/assets")
-    ok(f"escena:{sid}" not in (assets.get("unidades_obsoletas") or []),
+    # si ya estaba «por rehacer» ANTES de quitarla (otro escenario dejó el
+    # vídeo con imágenes obsoletas), devolverla no la arregla, y está bien: el
+    # Studio solo sella la que estaba al día (revisión del 04-11-2026)
+    ok(f"escena:{sid}" not in (assets.get("unidades_obsoletas") or [])
+       or f"escena:{sid}" in (assets_antes.get("unidades_obsoletas") or []),
        f"{sid} no queda «por rehacer»: se sella con su imagen de siempre ({assets.get('unidades_obsoletas')})")
     r, lanz = api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
     if r.status_code == 202:

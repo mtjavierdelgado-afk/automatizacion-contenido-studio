@@ -543,7 +543,7 @@ def _nueva_escena(n, tiempo=""):
 _RE_ESCENA = re.compile(r"^ESCENA\s+(\d+)\s*(?:\((.*)\))?\s*[:.]?\s*(.*)$", re.I)
 _RE_SECCION = re.compile(
     r"^(CIERRE DE MARCA|MARCA DEL CLIENTE|VERSIONES POR RED|PARA EL ENCARGO|ESPACIO FIJO|"
-    r"ESTADOS DEL ESPACIO|AVISOS|(?-i:PORTADA))\b\s*(.*)$",
+    r"ESTADOS DEL ESPACIO|AVISOS|(?-i:PORTADA)(?=\s*(?:\(.*\))?\s*:?\s*(?:(?i:texto|titular|t[ií]tulo|imagen|fondo|descripci[oó]n)\s*:.*)?$))\b\s*(.*)$",
     re.I)
 _RE_ITEM_ESPACIO = re.compile(
     r"^[-•*]?\s*(Sitio|Descripci[oó]n|Luz|Secundarios?)\s*:\s*(.*)$", re.I)
@@ -614,8 +614,14 @@ def leer_guion(texto):
             elif nombre == "ESTADOS DEL ESPACIO":
                 seccion, estado_clave = "estados", ""
             elif nombre == "PORTADA":
-                # rama portada-en-guion (04-11): la portada propuesta
+                # rama portada-en-guion (04-11): la portada propuesta; «PORTADA:
+                # Texto: …» en una sola línea también vale
                 seccion, portada_clave = "portada", ""
+                m_item = _RE_ITEM_PORTADA.match(re.sub(r"^\(.*?\)\s*:?\s*", "", resto))
+                if m_item:
+                    portada_clave = "texto" if m_item.group(1).lower() in ("texto", "titular", "título", "titulo") \
+                        else "imagen"
+                    portada[portada_clave] = m_item.group(2).strip()
             else:
                 seccion = "avisos"
             continue
@@ -704,7 +710,8 @@ def leer_guion(texto):
                 portada_clave = "texto" if m.group(1).lower() in ("texto", "titular", "título", "titulo") \
                     else "imagen"
                 portada[portada_clave] = m.group(2).strip()
-            elif portada_clave and not linea.startswith("("):
+            elif portada_clave and not linea.startswith("(") and not re.match(r"^[-•*]?\s*[^\s:]{1,30}( [^\s:]{1,30}){0,3}\s*:", linea):
+                # otra «Clave: …» que no es de la portada no se cuela en ella
                 portada[portada_clave] = (portada[portada_clave] + " " + linea).strip()
             continue
         if seccion == "encargo":

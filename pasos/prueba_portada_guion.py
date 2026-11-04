@@ -118,6 +118,19 @@ def prueba_parrilla():
     igual(solo_texto["portada"], {"texto": "Tu baño en 3 días"}, "sin imagen solo queda el texto")
     larga = P.leer_guion(GUION.replace("- Texto: «Tu baño en 3 días»", "- Texto: " + "x" * 300))
     igual(len(larga["portada"]["texto"]), P.MAX_TEXTO_PORTADA, "un texto larguísimo se corta")
+    # revisión independiente (04-11): un texto en pantalla en mayúsculas que
+    # empieza por PORTADA no abre la sección ni se come la voz de la escena
+    rev = P.leer_guion("G1 — x\nUso: exacto\n\nESCENA 1\nVisual: a\nTexto en pantalla:\n"
+                       "PORTADA DE REVISTA\nVoz: b\n")
+    ok(rev["escenas"][0]["voz"] == "b" and rev["escenas"][0]["texto_pantalla"] == "PORTADA DE REVISTA"
+       and rev["portada"] == {}, "«PORTADA DE REVISTA» en una escena sigue siendo de la escena")
+    for cab in ("## PORTADA", "**PORTADA**", "PORTADA:", "PORTADA (opcional; si no, quita esta sección)"):
+        r = P.leer_guion("G1 — x\n\nESCENA 1\nVoz: b\n\n" + cab + "\n- Imagen: una sala\n")
+        igual(r["portada"].get("imagen"), "una sala", f"«{cab}» abre la sección")
+    una = P.leer_guion("G1 — x\n\nESCENA 1\nVoz: b\n\nPORTADA: Texto: Hola mundo\n- Imagen: una sala\n")
+    igual(una["portada"], {"texto": "Hola mundo", "imagen": "una sala"}, "«PORTADA: Texto: …» en una línea también vale")
+    colada = P.leer_guion("G1 — x\n\nESCENA 1\nVoz: b\n\nPORTADA\n- Imagen: una sala\nTexto en pantalla: algo\n")
+    igual(colada["portada"].get("imagen"), "una sala", "otra «Clave:» no se cuela en la imagen")
     ok("PORTADA (opcional" in P._FORMATO_SALIDA and "12. PORTADA" in P._REGLAS,
        "las instrucciones de la Parrilla piden la sección y explican la regla")
     return g
@@ -172,7 +185,8 @@ def prueba_publicar():
     PUB.guardar_ficha(raiz, "video_1", {"portada_guion": {"texto": "Otro", "imagen": "otra"}})
     igual(PUB._leer_video(raiz, "video_1").get("portada_guion"),
           {"texto": "Otro", "imagen": "otra", "origen": "parrilla"}, "corregirla conserva el origen")
-    for malo, que in (({"texto": "x", "imagen": "  "}, "sin descripción"), ("no", "que no es un objeto")):
+    for malo, que in (({"texto": "x", "imagen": "  "}, "sin descripción"), ("no", "que no es un objeto"),
+                      ({"imagen": ["a"]}, "con una imagen que no es un texto")):
         try:
             PUB.guardar_ficha(raiz, "video_1", {"portada_guion": malo})
             ok(False, f"una portada {que} se rechaza")

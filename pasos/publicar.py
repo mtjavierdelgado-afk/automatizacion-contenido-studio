@@ -2296,6 +2296,9 @@ def guardar_ficha(raiz, pid, cambios):
             # corrige, no se borra; sin descripción no hay nada que dibujar
             if not isinstance(cambios["portada_guion"], dict):
                 raise ErrorPublicar("«portada_guion» es {texto, imagen}")
+            for campo in ("texto", "imagen"):
+                if not isinstance(cambios["portada_guion"].get(campo, ""), str):
+                    raise ErrorPublicar(f"«{campo}» de la portada es un texto")
             nueva = limpiar_portada_guion(cambios["portada_guion"])
             if not nueva.get("imagen"):
                 raise ErrorPublicar("la portada del guion necesita la descripción de su imagen")

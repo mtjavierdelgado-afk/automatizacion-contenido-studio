@@ -56,6 +56,7 @@ import json
 import math
 import os
 import re
+import unicodedata
 import shutil
 import subprocess
 import sys
@@ -315,6 +316,20 @@ def _catalogo_de(params, proyecto):
     catalogo.setdefault("lugares", {})
     catalogo.setdefault("capitulos", {})
     catalogo.setdefault("beats", [])
+    # LOS ESTADOS DE LA PARRILLA MANDAN (rama parrilla-estados, 03-11): si el
+    # video dibuja lo que dice el guion y la Parrilla trajo sus «ESTADOS DEL
+    # ESPACIO», son esos (ver `tipo_relato.estados_del_catalogo`). Sin ellos
+    # el catalogo sale como siempre, sin una clave de mas (regla 1).
+    # y solo en «un espacio que cambia», el unico modo que dibuja cada estado
+    # una vez y lo edita (en «producto» el objeto se reinventaria plano a plano)
+    if guion_visual.modo_de(params) == "guion" and \
+            tipo_relato.lleva_estados(tipo_relato.resolver(params)):
+        try:
+            fijos = guion_visual.normalizar(params.get("guion_visual")).get("estados")
+        except ValueError:
+            fijos = None
+        if fijos:
+            catalogo["estados_fijos"] = dict(fijos)
     return catalogo
 
 
@@ -1178,13 +1193,19 @@ def _asignar_cartas(escenas, p, texto=""):
     return cartas
 
 
-def _aplicar_lineas_gv(escenas, catalogo):
+def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=()):
     """La camara y la gente de cada linea del guion visual (rama guion-visual).
 
     La camara de la linea va LITERAL como encuadre (el SHOT TYPE del prompt) y
     el plano deja de ser abstracto; sin camara, la carta repartida de siempre.
     Los personajes de la linea mandan sobre los del tramo, pero solo los que
-    estan en el reparto (lo fijo manda: uno inventado no tiene hoja)."""
+    estan en el reparto (lo fijo manda: uno inventado no tiene hoja).
+
+    Con `sin_sorteo` (videos de la Parrilla creados desde la rama
+    parrilla-estados, 03-11), una linea SIN camara tampoco lleva la carta
+    sorteada: la linea ya dice el plano, y una carta de retrato o de manos
+    metia a una persona en primer plano aunque la linea dijera «No people in
+    the shot». Una carta forzada a mano en ese plano (`forzadas`) se respeta."""
     reparto = (catalogo or {}).get("reparto") or {}
     for escena in escenas:
         linea = escena.get("linea_gv")
@@ -1192,6 +1213,9 @@ def _aplicar_lineas_gv(escenas, catalogo):
             continue
         if linea.get("camara"):
             escena["encuadre"] = linea["camara"]
+        elif sin_sorteo and escena.get("id") not in forzadas:
+            escena.pop("encuadre", None)
+            escena.pop("carta", None)
         # la linea dice lo que SE VE: una carta abstracta («not a physical
         # location») le llevaria la contraria (guion-visual-2)
         escena.pop("abstracta", None)
@@ -1365,7 +1389,13 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     texto_video = json.dumps(catalogo or {}, ensure_ascii=False)
     _asignar_cartas(escenas, p, texto=texto_video)
     if lineas_gv:
-        _aplicar_lineas_gv(escenas, catalogo)
+        try:
+            sin_sorteo = bool(guion_visual.normalizar(p.get("guion_visual")).get("sin_sorteo"))
+        except ValueError:
+            sin_sorteo = False
+        forzadas = {e["id"] for e in escenas
+                    if _ajustes_unidad(p, f"escena:{e['id']}").get("carta")} if sin_sorteo else set()
+        _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=sin_sorteo, forzadas=forzadas)
     modo = modo_de(p["estilo"])
     # EL TIPO DE RELATO (rama tipo-de-relato). Solo con un modo EXPLICITO que
     # edita: sin el, `relato_edita` es False y ningun plano cambia.
@@ -1524,6 +1554,24 @@ def planificar(proyecto, params, inventario=None, replantear=False,
                 if principal else {}))
         # el encuadre lo dice su direccion: la carta del plano partido no es suya
         nueva.pop("encuadre", None)
+        # «DIRIGIR» SOBRE LA INSERTADA (28-10): su direccion o su parrafo
+        # escritos a mano para ESTE plano mandan sobre lo que se pidio al
+        # insertarla, igual que en cualquier otro plano (el bucle de arriba
+        # corre antes de que exista)
+        ajustes = _ajustes_unidad(p, f"escena:{nueva['id']}")
+        linea = " ".join(str(ajustes.get("direccion") or "").split())
+        if linea:
+            nueva["direccion"] = linea
+        parrafo = " ".join(str(ajustes.get("redactado") or "").split())
+        if parrafo:
+            nueva["redactado"] = parrafo
+            sitio = ajustes.get("redactado_set")
+            if sitio is not None:
+                sitio = str(sitio).strip()
+                if sitio and sitio in (catalogo.get("sets") or {}):
+                    nueva["set"], nueva["componente"] = sitio, None
+                elif not sitio:
+                    nueva["set"] = None
         nueva["prompt"] = _prompt_visual(nueva, beat, catalogo, modo=modo)
 
     insertados = insertar_planos.aplicar(escenas, getattr(proyecto, "raiz", None), _texto_clave,
@@ -2098,6 +2146,44 @@ def _familia_de_carta(carta, modo):
     return (encuadres.por_id_de(modo).get(carta or "") or {}).get("familia", "")
 
 
+#: Lo que dice la camara de una linea del guion visual que es «de cerca» (en
+#: ingles o en español, sin tildes): primer plano, detalle, macro, inserto.
+CAMARA_DE_CERCA = re.compile(
+    r"\bclose[- ]?ups?\b|\bcloseups?\b|\bextreme close|\bmacro\b|\bdetail(?:ed)? (?:shot|of|view)\b|"
+    r"\binsert(?: shot)? of\b|\binsert shot\b|\btight (?:shot|framing)\b|\becu\b|\bxcu\b|\bcu of\b|"
+    r"\bprimer(?:isimo)? plano\b|\bplano (?:de )?detalle\b|\bdetalle de(?:l)?\b|\bde cerca\b|"
+    r"\bplano (?:corto|cerrado)\b|\binserto\b",
+    re.IGNORECASE)
+#: «medium close-up» y «plano medio corto» enseñan el sitio: no son de cerca.
+CAMARA_MEDIA = re.compile(r"\bmedium close|\bplano medio\b|\bmcu\b", re.IGNORECASE)
+
+
+def _familia_del_plano(escena, modo):
+    """La familia que decide si el plano edita la base. En modo guion (rama
+    tipo-de-relato-2) manda la CAMARA de su linea: un primer plano o un detalle
+    es «cerca» y no edita la base -- editar fija la camara de la base, y el
+    detalle pedido salia como el plano general de siempre (prueba real del
+    23-10) --; cualquier otra camara escrita es un plano del sitio y la edita.
+    Sin linea o sin camara, la de su carta, como siempre."""
+    camara = str(((escena.get("linea_gv") or {}).get("camara")) or "")
+    if camara.strip():
+        llano = unicodedata.normalize("NFKD", camara.lower())
+        llano = "".join(c for c in llano if not unicodedata.combining(c))
+        if CAMARA_MEDIA.search(llano):
+            return "lejos"
+        return "cerca" if CAMARA_DE_CERCA.search(llano) else "lejos"
+    linea = escena.get("linea_gv") or {}
+    if linea and not escena.get("carta"):
+        # SIN CAMARA Y SIN CARTA (videos nuevos de la Parrilla, rama
+        # parrilla-estados): lo dice la propia linea («Close-up of the mirror»)
+        llano = unicodedata.normalize("NFKD", str(linea.get("visual") or "").lower())
+        llano = "".join(c for c in llano if not unicodedata.combining(c))
+        if CAMARA_DE_CERCA.search(llano) and not CAMARA_MEDIA.search(llano):
+            return "cerca"
+        return ""
+    return _familia_de_carta(escena.get("carta"), modo)
+
+
 def _marcar_edicion(escena, beat, relato, principal, modo, bases_rel):
     """Marca en el plano si se genera EDITANDO la base, y que cambia en el.
 
@@ -2105,10 +2191,17 @@ def _marcar_edicion(escena, beat, relato, principal, modo, bases_rel):
     el, el plano no gana ni una clave y el plan sale como siempre. `base` es la
     ruta RELATIVA de la base aprobada: viaja en el plan para la V2.0 fase 5, que
     arrancara los clips de ese sitio desde la misma imagen."""
-    familia = _familia_de_carta(escena.get("carta"), modo)
+    familia = _familia_del_plano(escena, modo)
     if not tipo_relato.plano_se_edita(escena, relato, principal, familia):
-        for clave in ("editar_base", "cambio", "estado", "base", "base_clave"):
+        for clave in ("editar_base", "cambio", "estado", "base", "base_clave", "ref_clave"):
             escena.pop(clave, None)
+        # UN DETALLE DE UN ESTADO, CON SU ESTADO (modo guion, tipo-de-relato-2):
+        # el primer plano de la puerta abierta no edita, pero su referencia del
+        # sitio es la imagen de ESE estado y no la base inicial
+        cambio = str(beat.get("cambio") or "").strip()
+        if escena.get("linea_gv") and cambio and principal and \
+                escena.get("set") == principal and tipo_relato.lleva_estados(relato):
+            escena["ref_clave"] = tipo_relato.clave_estado(principal, tipo_relato.estado_de(beat))
         return
     escena["editar_base"] = True
     escena["cambio"] = str(beat.get("cambio") or "").strip()
@@ -2679,6 +2772,14 @@ def frase_de_referencia(indice, ref, modo="ilustracion"):
         # LA IMAGEN BASE QUE SE EDITA (rama tipo-de-relato): la frase vive en
         # tipo_relato, con lo que cambia en este plano y su subtipo.
         return tipo_relato.frase_edicion(indice, ref, modo)
+    if ref["papel"] == "casa":
+        # LA BASE DEL AMBIENTE PRINCIPAL, al dibujar la de OTRO ambiente del
+        # mismo lugar (recorrido y clase, rama tipo-de-relato-2)
+        return (f"Reference image {indice} shows ANOTHER room of the same place "
+                f"('{ref.get('nombre') or 'the main room'}'). Use it ONLY for what "
+                f"the whole place shares: the materials, colours, finishes, style "
+                f"and light. This shot is a DIFFERENT room: never copy its layout, "
+                f"its furniture or its framing.")
     if ref["papel"] == "espacio":
         # LA IMAGEN DEL ESPACIO FIJO (rama espacio-fijo, 20-10-2026): el sitio
         # donde pasa todo el video, subido por quien lo encarga. Solo la llevan
@@ -3800,6 +3901,23 @@ def _recolocar_escenas(carpeta, escenas):
             if texto:
                 guardadas.append([nombre[:-5], texto])
 
+    # EL DIBUJO DE UNA IMAGEN INSERTADA (S004B) SOLO ES DE UNA INSERTADA
+    # (28-10, visto en el servidor). Al deshacerla, su plano de origen vuelve a
+    # decir la frase entera, y si su dibujo de siempre se hizo para una frase
+    # algo distinta (la voz se regrabo despues), el de la insertada --que dice
+    # justo el final de esa frase-- «se parecia mas» (`_mismo_dicho`, la vara
+    # de «uno dentro del otro») y se lo llevaba: S004 salia con las baldosas de
+    # S004B. Un plano normal no puede reclamar el dibujo de una insertada.
+    # Y AL REVES: una insertada se dibuja siempre para ella (con su
+    # direccion), asi que tampoco se lleva el dibujo de un plano normal que
+    # otro plano necesitaba. Si su plano de origen cambio de numero (S004B ->
+    # S005B) sigue encontrando el suyo.
+    def de_insertada(nombre):
+        return bool(re.fullmatch(r"S\d{3,4}[B-J]", nombre))
+
+    def puede_llevarse(escena, guardada):
+        return de_insertada(guardada) == bool(escena.get("insertada"))
+
     # DOS VUELTAS, Y EN ESTE ORDEN: primero las que dicen EXACTAMENTE lo mismo
     # y luego las parecidas. En una sola vuelta un plano parecido se lleva la
     # imagen que otro necesitaba palabra por palabra, y el que la tenia exacta
@@ -3823,13 +3941,29 @@ def _recolocar_escenas(carpeta, escenas):
                 continue
             texto = _texto_clave(escena)
             for par in guardadas:
-                if par[1] is None:
+                if par[1] is None or not puede_llevarse(escena, par[0]):
                     continue
                 if (par[1] == texto if exacta else _mismo_dicho(texto, par[1])):
                     quiere[escena["id"]] = par[0]
                     par[1] = None
                     break
     informe["obsoletas"] = [e["id"] for e in escenas if e["id"] not in quiere]
+
+    # EL DIBUJO DE UNA INSERTADA DESHECHA SE APARTA (no se borra): si se
+    # quedara con su nombre, una insertada nueva con la misma letra lo daria
+    # por suyo sin dibujarse (visto en la revision del 28-10). Va a
+    # `_deshechas/`, donde la rejilla no lo ve y nada lo reclama.
+    vivos = {e["id"] for e in escenas}
+    reclamados = set(quiere.values())
+    for nombre, _texto in guardadas:
+        if de_insertada(nombre) and nombre not in reclamados and nombre not in vivos:
+            apartado = os.path.join(carpeta, "_deshechas")
+            os.makedirs(apartado, exist_ok=True)
+            for ext in (".png", ".json"):
+                suyo = os.path.join(carpeta, nombre + ext)
+                if os.path.exists(suyo):
+                    os.replace(suyo, os.path.join(apartado, nombre + ext))
+            informe.setdefault("apartadas", []).append(nombre)
 
     mueve = {d: o for d, o in quiere.items() if d != o}
     if not mueve:
@@ -5601,12 +5735,21 @@ def _referencia_del_espacio(escena, p, dirs, cache):
     llevan los planos de un recorrido, de un escenario y apoyos, y los de
     detalle de un espacio que cambia. Sin modo explicito, lo de siempre."""
     bases = (dirs or {}).get("bases") or {}
-    if bases and escena.get("set") in bases:
+    clave = escena.get("ref_clave") if escena.get("ref_clave") in bases else escena.get("set")
+    if bases and clave in bases:
         imagen = medios.motor("imagen_openai/imagen.py")
         espacio = p.get("espacio_fijo") or {}
-        return [{"papel": "espacio",
-                 "nombre": espacio.get("sitio") or escena["set"],
-                 "ruta": imagen.normalizar(bases[escena["set"]], cache)}]
+        nombre = espacio.get("sitio") or escena["set"]
+        if espacio.get("descripcion"):
+            # la base de OTRO ambiente (un secundario, tipo-de-relato-2), con SU nombre
+            try:
+                principal, secundarios = catalogo_visual.ids_del_espacio(espacio)
+            except Exception:                               # noqa: BLE001
+                principal, secundarios = None, {}
+            if escena["set"] != principal and escena["set"] in secundarios:
+                nombre = secundarios[escena["set"]].get("nombre") or escena["set"]
+        return [{"papel": "espacio", "nombre": nombre,
+                 "ruta": imagen.normalizar(bases[clave], cache)}]
     ruta = (dirs or {}).get("espacio_fijo")
     espacio = p.get("espacio_fijo") or {}
     if not ruta or not espacio or not escena.get("set"):
@@ -5689,14 +5832,68 @@ def espacio_del_relato(proyecto, params):
     return principal, espacio
 
 
-def prompt_y_refs_de_base(proyecto, params, cache):
+def ambientes_del_relato(proyecto, params):
+    """Los ambientes de un recorrido o una clase (rama tipo-de-relato-2), el
+    principal primero. -> [{sitio, nombre, espacio}] o [] en cualquier otro modo.
+
+    Salen del espacio fijo (principal y secundarios) o, si nadie lo escribio,
+    de los sitios que declaro Claude; la descripcion y la luz de cada uno son
+    las del catalogo cuando las hay (ahi la luz ya es la misma en todos)."""
+    relato = tipo_relato.resolver(params)
+    if not tipo_relato.activo(relato) or relato.get("modo") not in tipo_relato.AMBIENTES:
+        return []
+    p = params or {}
+    catalogo = _catalogo_de(_con_defectos(p), proyecto) if proyecto is not None \
+        else (p.get("catalogo") or {})
+    try:
+        espacio = catalogo_visual.normalizar_espacio_fijo(p.get("espacio_fijo"))
+    except ValueError:
+        espacio = {}
+    if not espacio:
+        espacio = catalogo_visual.espacio_del_catalogo(catalogo, ambientes=True)
+    if not espacio:
+        return []
+    principal, secundarios = catalogo_visual.ids_del_espacio(espacio)
+    sets = (catalogo or {}).get("sets") or {}
+    luz = (sets.get(principal) or {}).get("luz") or espacio.get("luz") or ""
+    salida = [{"sitio": principal, "nombre": espacio.get("sitio") or principal,
+               "espacio": {"sitio": espacio.get("sitio") or principal,
+                           "descripcion": espacio["descripcion"], "luz": luz}}]
+    for sid, ficha in secundarios.items():
+        descripcion = " ".join(str((sets.get(sid) or {}).get("descripcion")
+                                   or ficha.get("descripcion") or ficha["nombre"]).split())
+        salida.append({"sitio": sid, "nombre": ficha["nombre"],
+                       "espacio": {"sitio": ficha["nombre"], "descripcion": descripcion,
+                                   "luz": (sets.get(sid) or {}).get("luz") or luz}})
+    return salida
+
+
+def prompt_y_refs_de_base(proyecto, params, cache, sitio=None):
     """El prompt y las referencias de la imagen base del sitio. -> (sitio, prompt, refs)
 
     Es un plano mas a ojos del generador: la misma cabecera, las mismas
     referencias de estilo y las mismas reglas de la casa (`_prompt_completo`),
-    con el sitio VACIO, entero y en su estado inicial. Lanza si no hay sitio."""
+    con el sitio VACIO, entero y en su estado inicial. Lanza si no hay sitio.
+
+    Con `sitio` de OTRO ambiente de un recorrido o una clase (rama
+    tipo-de-relato-2), es la base de ese ambiente, y si la del principal esta
+    aprobada va como referencia de lo que comparte el lugar (papel «casa»)."""
     p = _con_defectos(params)
-    sitio, espacio = espacio_del_relato(proyecto, params)
+    principal, espacio = espacio_del_relato(proyecto, params)
+    casa = []
+    if sitio and sitio != principal:
+        ambiente = next((a for a in ambientes_del_relato(proyecto, params)
+                         if a["sitio"] == sitio), None)
+        if not ambiente:
+            raise RuntimeError(f"«{sitio}» no es un ambiente de este vídeo")
+        espacio = ambiente["espacio"]
+        ruta_casa = rutas_de_bases(proyecto, params).get(principal) if principal else None
+        if ruta_casa:
+            imagen = medios.motor("imagen_openai/imagen.py")
+            casa = [{"papel": "casa", "nombre": ambientes_del_relato(proyecto, params)[0]["nombre"],
+                     "ruta": imagen.normalizar(ruta_casa, cache)}]
+    else:
+        sitio = principal
     if not espacio:
         raise RuntimeError("no hay sitio del que hacer la imagen base: escribe el "
                            "espacio fijo (o deduce antes el reparto y los sitios)")
@@ -5709,13 +5906,14 @@ def prompt_y_refs_de_base(proyecto, params, cache):
     refs = list(_referencias_estilo(p, cache, escena))
     if not refs:
         raise RuntimeError("sin referencias de estilo no se puede hacer la imagen base")
+    refs = casa + refs
     formato = p2_brief.comun.ficha_formato(p4_voz.formato_de_salida(proyecto)) \
         if proyecto is not None else {"id": ""}
     prompt = _prompt_completo(escena, refs, p["estilo"], formato=formato.get("id") or "")
     return sitio, prompt, refs
 
 
-def generar_imagen_base(proyecto, params, rehacer=False):
+def generar_imagen_base(proyecto, params, rehacer=False, sitio=None):
     """Genera (y paga) la imagen base del sitio del tipo de relato.
 
     -> {sitio, imagen (ruta relativa), coste, origen}. La guarda en la carpeta
@@ -5724,7 +5922,7 @@ def generar_imagen_base(proyecto, params, rehacer=False):
     p = _con_defectos(params)
     cache = proyecto.ruta("espacio_fijo", "_refs")
     os.makedirs(cache, exist_ok=True)
-    sitio, prompt, refs = prompt_y_refs_de_base(proyecto, params, cache)
+    sitio, prompt, refs = prompt_y_refs_de_base(proyecto, params, cache, sitio=sitio)
     temporal = proyecto.ruta("espacio_fijo", "_base_nueva.png")
     formato = p2_brief.comun.ficha_formato(p4_voz.formato_de_salida(proyecto))
     meta = _producir_imagen(f"base_{sitio}", prompt, [r["ruta"] for r in refs],

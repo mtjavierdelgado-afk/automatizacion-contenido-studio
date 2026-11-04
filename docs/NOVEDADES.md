@@ -10,6 +10,106 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**La Parrilla dice el estado de cada escena, y sin cámara no hay encuadre al azar (3 de noviembre)**
+- En «Un espacio que cambia» con «Imágenes: guion», el guion de la Parrilla
+  puede traer **«Estado: antes»** (o `despues`…) en cada ESCENA y una sección
+  **ESTADOS DEL ESPACIO** con lo que cambia en cada uno (en inglés). Cada plano
+  edita la imagen de **su** estado: el «después» ya no sale sobre el baño del
+  «antes», ni una toma del después igual que la primera. Esos estados mandan
+  sobre los que deduce el Studio, y se pueden cambiar en español como los demás.
+- En los vídeos **nuevos** de la Parrilla, una línea «Visual:» **sin cámara**
+  ya no recibe un encuadre sorteado (un retrato, unas manos que metían a una
+  persona aunque la línea dijera «No people in the shot»): la línea dice el
+  plano. Los vídeos ya creados no cambian.
+**Recorrido y clase con varios ambientes; los primeros planos con su cámara (3 de noviembre)**
+- **«Recorrido» y «Clase» ya son varios ambientes de un mismo lugar** (la
+  cocina, la sala y el dormitorio de una casa; la pizarra y la mesa de un
+  aula), con la misma luz y los mismos materiales. Antes se quedaban en un solo
+  sitio. Si escribes el espacio fijo, sus «Sitios secundarios» son los
+  ambientes; si no, los propone Claude al repartir.
+- **«Los ambientes del lugar»**, en el tipo de relato del vídeo: la imagen de
+  cada ambiente se dibuja y se aprueba (opcional; se paga una imagen por
+  ambiente, con su precio delante). Sus planos la llevan de referencia. Empieza
+  por el principal: los demás se dibujan a partir de él.
+- **En «Lo que dice el guion», un primer plano es un primer plano.** Con «Un
+  espacio que cambia», una línea cuya cámara pide un primer plano o un detalle
+  ya no edita la imagen base (que fijaba la cámara de siempre): la lleva de
+  referencia, con el estado de su objeto, y respeta su encuadre. Los vídeos
+  que ya estaban en «Lo que dice el guion» con un espacio que cambia pueden
+  ofrecer rehacer esos primeros planos: solo se rehacen si lo pides.
+
+**Cuentas que te gustan: temas con sus vistas, ganchos, comparar y tus cuentas (2 de noviembre)**
+- **Todos los temas, agrupados**: el mismo tema en varias cuentas sale una sola
+  vez, con **qué cuentas lo hacen** y la **suma de vistas** de sus vídeos (la
+  suma la hace el Studio, no Claude).
+- **Ganchos que mejor funcionan**: cómo empiezan los vídeos que más funcionan
+  (pregunta, ❌/✅, antes y después…), del mejor al peor, con 2 o 3 ejemplos
+  enlazados y la primera frase de cada uno.
+- **Análisis guardados y comparación**: debajo de cada análisis, la lista de
+  los guardados para **abrir** uno o **compararlo**. «Comparar con el anterior»
+  dice qué fórmulas, temas y ganchos **aparecen**, **siguen** y
+  **desaparecen**. Es gratis: no llama a Claude.
+- **Tus cuentas**: en «Proponer temas» marcas qué cuentas leídas son tuyas, y
+  lo que ya publicaste en ellas también sale como «ya lo tienes» (parecido o
+  repetido).
+
+**El cupo de Claude al 90 % avisa, no frena (2 de noviembre)**
+- En Cuentas que te gustan, «Analizar seleccionadas», «Proponer temas» y
+  «Escribir guiones aprobados» ya no se paran con el cupo al 90 %: sale una
+  advertencia y puedes **seguir igualmente**. Si Claude se queda sin cupo a
+  medias, el aviso lo dice y no se pierde nada: lo repites cuando se renueve.
+
+**Cuentas que te gustan: varias juntas, temas para aprobar y cifras justas (1 de noviembre)**
+- **Cada cuenta, con cifras relativas a ella misma**: «me gusta» y comentarios
+  por cada 100 vistas, «×1,6 su mediana» y las vistas por duración, con
+  cuántos vídeos tienen ese dato. Los vídeos de **colaboración** o con pinta de
+  **promoción** (muchas vistas y casi ningún «me gusta») salen marcados como
+  dudosos y no cuentan. A Claude le llegan los 50 vídeos, no 25.
+- **La duración de Instagram** se mide sin bajar el vídeo; si aun así falta,
+  «Completar con Apify» la rellena (pregunta antes, con el precio y el tope).
+- **Varias cuentas juntas**: marca de 2 a 10 en «Ya leídas» y pulsa «Analizar
+  seleccionadas». Antes te dice cuántas cuentas, vídeos y cupo de Claude se van
+  a usar; con el cupo al 90 % o más te avisa y puedes seguir igualmente.
+- **Proponer temas → aprobar → escribir**: Claude propone ideas (sin guiones),
+  tú apruebas, editas o descartas, y solo los aprobados se escriben en la
+  Parrilla del proyecto que confirmes. Sin duplicados, sin repetir lo que ya
+  tienes, como mucho 3 por cuenta y 2 por fórmula, y cada guion recuerda de qué
+  cuentas y vídeos salió.
+
+**Arreglo: «Deshacer» una imagen insertada le dejaba su dibujo a la de antes (28 de octubre)**
+- Si la imagen de antes (S004) se había dibujado para una frase algo distinta
+  (porque la voz se regrabó después), al deshacer la insertada (S004B) el Studio
+  le ponía a S004 el dibujo de S004B. Ya no: el dibujo de una imagen insertada
+  solo puede ser de una imagen insertada, y S004 recupera el suyo.
+**Reglas del negocio y del estilo, separadas a la vista (28 de octubre)**
+- **En la pestaña «📏 Reglas» de un estilo hay dos cajas**, cada una con su
+  título y su color: «Del negocio · todo el proyecto» (coral, se cambian en la
+  Ficha del negocio con «✎ Editar la ficha») y «De este estilo · solo…»
+  (violeta, se editan ahí mismo). Antes salían seguidas y parecían duplicadas.
+- **Arriba, un contador**: «Cada imagen de este estilo recibe N reglas: X del
+  negocio + Y de este estilo», con cuántas solo entran en ciertos planos. En un
+  estilo de dibujo dice que las del negocio no se le aplican (solo valen para
+  foto).
+- **Aviso de reglas que chocan, en dos capas**: una pista gratis que sale sola
+  cuando una regla del negocio y una del estilo hablan de lo mismo («léelas
+  juntas»), y el botón «Revisar si se contradicen», que le pide a Claude (con la
+  membresía, avisando antes) qué pares se contradicen o se repiten y qué
+  cambiar. Nunca cambia nada solo.
+- **En «⚙ Ajustes del proyecto → Ficha del negocio»**, una línea dice que sus
+  reglas se suman a las de cada estilo y cuántos estilos de foto la usan.
+- Nada de esto cambia qué reglas recibe cada imagen: es solo pantalla.
+
+**Quitar e insertar imágenes: los dos detalles que quedaban (28 de octubre)**
+- **Un subtítulo corregido a mano ya no repite ni pierde palabras** cuando partes
+  esa imagen (insertar) o le pasas la voz de otra (quitar): si lo escribiste
+  para la frase de antes, se deja de usar y sale el subtítulo de la voz; si lo
+  escribiste para la frase de ahora, se sigue usando.
+  Desde ahora, cada subtítulo que corriges recuerda la frase para la que lo
+  escribiste: si esa frase cambia más adelante, vuelve el de la voz en vez de
+  enseñar un texto que ya no es el que se oye.
+- **«Dirigir» funciona en una imagen insertada** (S004B): lo que escribas ahí
+  cambia su dibujo al rehacerla, como en cualquier otra imagen.
+
 **Enviar al Studio: la extensión de Chrome (28 de octubre)**
 - Mientras ves un post en Chrome (**Instagram, TikTok, YouTube, Facebook,
   LinkedIn, X** o cualquier web), pulsas el botón **«Enviar al Studio»** y el

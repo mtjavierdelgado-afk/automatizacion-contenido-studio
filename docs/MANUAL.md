@@ -306,8 +306,14 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   que cambia solo lo que dice la voz (un objeto, los acabados, el estado o la
   hora): cada plano se genera editando una **imagen base** del sitio, que se
   aprueba en el vídeo antes de generar las imágenes (la subida en «El espacio
-  fijo», gratis, o una generada, que se paga). **Recorrido**, **Escenario y
-  apoyos**, **Producto** y **Clase** completan la lista. En un vídeo hecho,
+  fijo», gratis, o una generada, que se paga). **Recorrido** y **Clase** son
+  varios ambientes de un mismo lugar (la cocina, la sala y el dormitorio de
+  una casa; la pizarra y la mesa de un aula) con la misma luz y los mismos
+  materiales: en el vídeo, «Los ambientes del lugar» deja dibujar y aprobar la
+  imagen de cada uno (opcional, se paga una imagen por ambiente), que sus
+  planos llevan de referencia; la del principal va primero y las demás se
+  dibujan a partir de ella. **Escenario y apoyos** y **Producto** completan la
+  lista. En un vídeo hecho,
   «Aplicar el tipo de relato» enseña qué planos cambian y cuánto cuesta, y
   eliges cuáles rehacer.
 
@@ -356,6 +362,14 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   aprobar, Claude avisa de los planos que contradicen lo fijo (el sitio, el
   reparto, los estados): manda lo fijo. Quién manda: el vídeo, luego el estilo
   («🎬 Qué dibujan las imágenes» en «Cómo se cuenta»), luego la voz.
+  **Estados desde la Parrilla:** en «Un espacio que cambia» con «Imágenes:
+  guion», el guion de la Parrilla puede traer una línea **«Estado: antes»** (o
+  `despues`, `paleta_1`…) en cada ESCENA y la sección **ESTADOS DEL ESPACIO**
+  (`- despues: lo que cambia, en inglés`; el estado que es la base tal cual se
+  deja vacío). Entonces esos estados mandan: cada línea edita la imagen de SU
+  estado. Y en los vídeos creados desde la Parrilla, una línea «Visual:» **sin
+  cámara** ya no recibe un encuadre al azar (un retrato, unas manos): la línea
+  dice el plano.
 - **El reparto y los sitios** (en un vídeo hecho): «Pedido para el reparto de
   sitios» es una frase para Claude al repartir; «Volver a repartir con este
   pedido» no paga imágenes.
@@ -896,6 +910,46 @@ YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
   **Configuración → Analizar cuentas** (son de todo el Studio). Aquí sale su
   estado («⚠ Falta la clave de YouTube», «✓ Apify conectado», lo gastado) y
   **Configurar ›**, que te lleva allí.
+- **Las cifras de cada cuenta, relativas a ella**: su mediana de vistas, «me
+  gusta» y comentarios **por cada 100 vistas**, y **vistas por duración**
+  (menos de 15 s, 15–30 s…) con cuántos vídeos tienen ese dato. «×1,6» quiere
+  decir 1,6 veces las vistas normales de ESA cuenta. Los vídeos **dudosos**
+  (colaboración, o muchas vistas con muy pocos «me gusta»: posible promoción)
+  se ven, pero no cuentan como referencia. Si a Instagram le falta la duración,
+  **«Completar con Apify»** la rellena (pregunta antes, con el precio).
+
+#### Varias cuentas juntas y temas para tu proyecto
+
+1. Marca las cuentas en **Ya leídas** (o **Seleccionar todas**; de 2 a 10).
+2. **Analizar seleccionadas**: antes te dice cuántas cuentas, vídeos y cupo de
+   Claude se van a usar (con el cupo al 90 % o más te avisa y puedes **seguir
+   igualmente**; si Claude se queda sin cupo a medias, no se pierde nada). Sale qué fórmula se
+   repite en varias cuentas, cuál funciona solo en una, los temas saturados y
+   los libres, cada cosa con sus vídeos de prueba enlazados. Además, **todos
+   los temas agrupados** (el mismo tema en varias cuentas es uno solo, con
+   qué cuentas lo hacen y la suma de vistas de sus vídeos) y los **ganchos que
+   mejor funcionan**, con ejemplos.
+   Debajo, **Análisis guardados y comparación**: abre uno anterior o pulsa
+   **Comparar con el anterior** (gratis, sin Claude) para ver qué aparece, qué
+   sigue y qué desaparece; sirve para comparar el análisis de este mes con el
+   del mes siguiente.
+3. **Proponer temas** (eliges cuántos): solo ideas, sin guiones. Cada tema trae
+   gancho, tipo de vídeo, espacio, problema, sus vídeos de referencia, por qué
+   y la duración sugerida (solo con 8 vídeos o más con duración). Las ideas
+   repetidas se unen; lo que ya está en tu Parrilla, en tus vídeos o en lo que
+   publicaste en **Tus cuentas** (las marcas ahí; antes léelas como cualquier
+   otra cuenta) sale como
+   **parecido** o **repetido** (los repetidos no entran salvo **Incluir
+   igualmente**); como mucho 3 por cuenta y 2 por fórmula, y cada uno en un
+   espacio distinto.
+4. **Aprueba, edita o descarta** cada tema.
+5. **Escribir guiones aprobados**: confirma el proyecto y solo esos se
+   escriben, en su Parrilla, con su origen (cuentas, vídeos, fórmula y fecha).
+   Si un guion repite una frase de un vídeo original, el tema lo avisa para que
+   la cambies.
+
+«Escribir guiones con lo que le funciona», dentro de una sola cuenta, sigue
+igual para cuando tengas prisa.
 
 ### Recibidos de Chrome
 

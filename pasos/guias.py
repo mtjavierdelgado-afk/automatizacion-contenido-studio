@@ -42,6 +42,16 @@ GUIAS = {
             "ficha usa lo general: ninguna regla de ningún negocio.",
             "El Studio no trae ningún negocio de fábrica: ni EstadoPlay ni ningún "
             "otro. Todo lo de un cliente está en su ficha.",
+            "LAS DEL NEGOCIO Y LAS DEL ESTILO SE SUMAN: cada imagen de foto lleva "
+            "las reglas de esta ficha (valen para todos los estilos de foto del "
+            "proyecto) más las propias de su estilo (valen solo para ese estilo). "
+            "Aquí va lo que vale para todo el cliente; lo específico de un estilo "
+            "(un montaje, un tipo de plano), en las reglas de ese estilo.",
+            "En la pestaña «📏 Reglas» de cada estilo se ven separadas, con cuántas "
+            "recibe cada imagen, y «Revisar si se contradicen» le pide a Claude "
+            "(con tu membresía, y avisando antes) que compare las dos listas; no "
+            "cambia nada, lo cambias tú. En un estilo de dibujo, las del negocio "
+            "no se aplican.",
             "Cada REGLA entra en el prompt de cada imagen de foto, junto a las "
             "reglas de la casa. Si le pones palabras en «Solo si el plano habla "
             "de…», solo entra en los planos que las nombran; si no, en todos.",
@@ -114,6 +124,11 @@ GUIAS = {
             "encuadres (plano general, manos en la acción, reacción...). Sirve "
             "para cualquier proyecto; lo propio de cada negocio (sus reglas de "
             "foto) va en la «Ficha del negocio» de su proyecto.",
+            "Las REGLAS DEL ESTILO (pestaña «📏 Reglas») valen solo para este "
+            "estilo; las de la Ficha del negocio valen para todos los estilos de "
+            "foto del proyecto, y cada imagen de foto recibe las dos listas "
+            "sumadas. Lo que vale para todo el cliente va en la ficha; aquí, lo "
+            "específico de este estilo.",
             "Las IMÁGENES que subes son la fuente principal: el sistema las mira y "
             "escribe una guía de dibujo de 260 a 400 palabras que va dentro de "
             "cada imagen que se genera. Sube de 1 a 24 (mejor 5 o más), todas con el aspecto "
@@ -864,6 +879,16 @@ GUIAS = {
             "ejemplo, uno vertical y uno horizontal): la ficha deja elegir cuál pasas.",
             "Cambiar Uso, Formato o Duración en la ficha cambia su línea en el texto "
             "(y en PARA EL ENCARGO si hay uno solo).",
+            "ESTADOS DEL ESPACIO y «Estado:» (opcionales, solo con «Tipo de relato: "
+            "espacio_que_cambia» e «Imágenes: guion»): la sección dice qué cambia en cada "
+            "estado respecto a la imagen base, en inglés y acumulado («- despues: the old "
+            "mirror is replaced by a round backlit mirror»; el estado que es la base tal "
+            "cual se deja vacío), y cada ESCENA lleva «Estado: antes» o el que toque. Cada "
+            "plano edita la imagen de SU estado, y esos estados mandan sobre los que "
+            "deduce el Studio. Una escena sin «Estado:» es la base.",
+            "En los vídeos que salen de la Parrilla, una línea «Visual:» sin cámara ya no "
+            "recibe un encuadre al azar: si quieres un primer plano o un detalle, dilo en "
+            "la línea («Close-up of…», «Detalle de…»).",
             "ESPACIO FIJO (opcional) es para los vídeos que ocurren enteros en un "
             "mismo sitio: «- Sitio:» (un nombre corto), «- Descripción:» (cómo es, en "
             "una frase), «- Luz:» y «- Secundarios:» (otros sitios que sí pueden "
@@ -1014,6 +1039,7 @@ GUIAS = {
             "7. No inventes datos: teléfonos, precios o enlaces solo si están en el original. Si falta el CTA, pon [FALTA CTA].\n"
             "8. ESPACIO FIJO solo si el original dice que todo el vídeo ocurre en un mismo sitio (un local, una cocina, un plató). Si no lo dice, no pongas esa sección.\n"
             "9. \"Tipo de relato\" solo si el original pide una forma concreta de contarlo en imágenes: \"espacio_que_cambia (objeto | acabados | estado | hora)\" si es UN sitio que se ve siempre igual y en el que solo cambia lo que dice la voz (un antes y después, tres paletas, una sala vacía → montada); \"recorrido\" si son varios ambientes de un mismo lugar; \"escenario_y_apoyos\" si es un sitio con otros secundarios; \"producto\" si el producto manda y el fondo no cambia; \"clase\" si es una clase. Si no lo pide, quita la línea.\n10. \"Imágenes: guion\" solo si el original pide que las imágenes sigan las líneas «Visual:» y no lo que dice la voz (un guion de plano a plano, con su cámara); entonces cada línea «Visual:» es una imagen fija concreta, con quién, dónde, qué hace y desde dónde se ve. Si no lo pide, quita la línea.\n"
+            "11. Con \"Tipo de relato: espacio_que_cambia\" y \"Imágenes: guion\", pon en cada ESCENA una línea \"Estado:\" con la etiqueta del estado del sitio en esa escena (corta, en minúsculas y sin espacios: antes, despues, paleta_1…) y la sección ESTADOS DEL ESPACIO con lo que cambia en cada estado respecto a la imagen base, EN INGLÉS y acumulado (el «después» dice todo lo que cambió, no solo lo último); el estado que es la base tal cual se deja vacío. Si no, quita las líneas «Estado:» y esa sección.\n"
             "\n"
             "AJUSTE POR RED (en \"adaptar\" aplícalo; en \"exacto\" solo avisa con ⚠ si algo no encaja)\n"
             "- TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.\n"
@@ -1042,7 +1068,12 @@ GUIAS = {
             "- Luz: [hora del día y fuente de luz]\n"
             "- Secundarios: [otros sitios que sí pueden salir, «Nombre: descripción» separados por «;», o ninguno]\n"
             "\n"
+            "ESTADOS DEL ESPACIO (solo con espacio_que_cambia e «Imágenes: guion»; si no, quita esta sección)\n"
+            "- antes: [vacío: es la imagen base tal cual]\n"
+            "- despues: [lo que cambia respecto a la base, en inglés]\n"
+            "\n"
             "ESCENA 1 (tiempo, si lo hay)\n"
+            "Estado: … (solo con ESTADOS DEL ESPACIO; si no, quita la línea)\n"
             "Visual: …\n"
             "Voz: «…»\n"
             "Texto en pantalla: …\n"
@@ -1391,9 +1422,21 @@ GUIAS = {
             "«Escribir guiones con lo que le funciona» los escribe para TU proyecto, con tu marca, "
             "inspirados y sin copiar sus frases ni sus datos. Van a la Parrilla, pendientes.",
             "«Hablar de ella en el chat» la pasa a «Conversar con Claude».",
+            "Cada cuenta enseña sus cifras RELATIVAS a ella: «me gusta» y comentarios por cada 100 "
+            "vistas, «×1,6 su mediana» y las vistas por duración. Los vídeos de colaboración o con "
+            "pinta de promoción salen como dudosos y no cuentan.",
+            "Marca varias en «Ya leídas» (de 2 a 10) y pulsa «Analizar seleccionadas»: fórmulas que "
+            "se repiten, las de una sola cuenta, los temas saturados y libres, todos los temas agrupados "
+            "(con qué cuentas los hacen y la suma de vistas) y los ganchos que mejor funcionan, con sus "
+            "pruebas. Luego «Proponer temas» → apruebas, editas o descartas → «Escribir guiones aprobados».",
+            "«Comparar con el anterior» (gratis, sin Claude) dice qué fórmulas, temas y ganchos aparecen, "
+            "siguen o desaparecen frente a otro análisis guardado: el de este mes contra el del pasado.",
+            "En «Tus cuentas» marcas las cuentas leídas que son tuyas: lo que ya publicaste en ellas "
+            "sale como «ya lo tienes» al proponer temas.",
         ],
         "si": [
             "Pega el enlace del PERFIL (no el de un vídeo) o escribe el @usuario y elige la red.",
+            "Para comparar cuentas, mejor de tu mismo tema: la propuesta sale más útil.",
             "Empieza con 30 vídeos: da para ver qué funciona y cuesta poco.",
             "Analiza antes de pedir guiones: los guiones usan el análisis.",
             "Pide en «algo más» lo que necesites: «para Navidad», «sin precios».",

@@ -260,7 +260,15 @@ def lleva_estados(relato):
 
 
 def estados_del_catalogo(catalogo, sitio=None):
-    """{estado: cambio} de los tramos con cambio, en orden de aparicion."""
+    """{estado: cambio} de los tramos con cambio, en orden de aparicion.
+
+    Con `estados_fijos` (los ESTADOS DEL ESPACIO que escribio la Parrilla y que
+    `p6_assets._catalogo_de` pone en el catalogo; rama parrilla-estados, 03-11)
+    mandan esos y solo esos: son los que el dueño escribio. Un estado sin
+    cambio («antes») es el sitio tal cual la base y no lleva imagen propia."""
+    fijos = estados_fijos(catalogo)
+    if fijos:
+        return {k: v for k, v in fijos.items() if v}
     salida = {}
     for beat in (catalogo or {}).get("beats") or []:
         if not isinstance(beat, dict) or (sitio and beat.get("set") not in (None, "", sitio)):
@@ -269,6 +277,14 @@ def estados_del_catalogo(catalogo, sitio=None):
         if estado and estado not in salida:
             salida[estado] = _texto(beat.get("cambio"), 400)
     return salida
+
+
+def estados_fijos(catalogo):
+    """{estado: cambio} que trajo la Parrilla, o {} (ver `estados_del_catalogo`)."""
+    crudo = (catalogo or {}).get("estados_fijos") if isinstance(catalogo, dict) else None
+    if not isinstance(crudo, dict):
+        return {}
+    return {str(k): _texto(v, 400) for k, v in crudo.items() if str(k).strip()}
 
 
 def normalizar_de_estilo(crudo):
@@ -457,6 +473,29 @@ y el encuadre, no el lugar.
   - 'luz': la eliges tu, en ingles, y es la misma en todo el video.
   - 'rotulo': vacio. Este video no lleva cabeceras de sitio.
   - TODOS los tramos van a ese sitio. Sigue habiendo un tramo por idea visual.
+
+"""
+
+#: Los modos de VARIOS AMBIENTES de un mismo lugar (rama tipo-de-relato-2):
+#: Claude declara varios sitios que comparten luz y materiales, y cada uno
+#: puede tener su imagen base (de referencia: estos modos no editan).
+AMBIENTES = ("recorrido", "clase")
+
+SETS_AMBIENTES = """SETS — donde ocurre: VARIOS AMBIENTES DE UN MISMO LUGAR
+El editor ha elegido un tipo de relato ({nombre}): el video recorre UN lugar
+(una casa, un local, un aula) por varios de sus ambientes, y eso va por delante
+de todo lo que se dice en este criterio sobre sitios.
+
+  - Declara en 'sets' entre 2 y 6 ambientes de ese lugar, con un id corto cada
+    uno (cocina, sala, dormitorio; pizarra, mesa de trabajo...). El PRIMERO es
+    el principal: el ambiente donde mas pasa.
+  - Cada 'descripcion', en ingles, EMPIEZA por lo que comparten todos (los
+    materiales, los colores, el estilo del lugar: la misma frase en todos) y
+    sigue con lo propio de ese ambiente: tamaño, forma, que hay en cada pared.
+  - 'luz': la eliges tu, en ingles, y es LA MISMA en todos los ambientes.
+  - 'rotulo': vacio. Este video no lleva cabeceras de sitio.
+  - Cada tramo va al ambiente donde pasa lo que cuenta. Sigue habiendo un tramo
+    por idea visual.
 
 """
 

@@ -8202,6 +8202,46 @@ def probar_detalles_insertar_quitar():
     ip = servidor._insertar_planos()
     igual(ip.letra_libre([], "x", 0, {"B"}), "C",
           "DIRIGIR: una letra que aún guarda params de otra insertada no se reutiliza")
+    # DESHACER NO PASA EL DIBUJO DE LA INSERTADA A SU PLANO (visto en el
+    # servidor el 28-10): S004 dibujado para una frase más vieja, S004B con el
+    # final de la de ahora; al deshacer, S004 se quedaba con las baldosas
+    carpeta = tempfile.mkdtemp(prefix="estudio_recolocar_")
+    for sid, texto, contenido in (("S004", "tres colores que cortaban la vista.", "BANO"),
+                                  ("S004B", "cortaban la vista. Por eso remodelamos.", "BALDOSAS")):
+        with open(os.path.join(carpeta, f"{sid}.json"), "w", encoding="utf-8") as fh:
+            json.dump({"id": sid, "narracion": texto, "png": f"escenas/{sid}.png"}, fh)
+        with open(os.path.join(carpeta, f"{sid}.png"), "w", encoding="utf-8") as fh:
+            fh.write(contenido)
+    p6._recolocar_escenas(carpeta, [{"id": "S004", "narracion":
+                                     "tres colores que se veían bien pero cortaban la vista. Por eso remodelamos."}])
+    igual(open(os.path.join(carpeta, "S004.png"), encoding="utf-8").read(), "BANO",
+          "DESHACER: S004 conserva su dibujo; no se queda con el de la insertada")
+    ok(not os.path.exists(os.path.join(carpeta, "S004B.png"))
+       and os.path.exists(os.path.join(carpeta, "_deshechas", "S004B.png")),
+       "DESHACER: el dibujo de la insertada deshecha se aparta (una nueva S004B no lo reutiliza)")
+    # Y SI EL PLANO DE ORIGEN CAMBIA DE NÚMERO, la insertada sigue con el suyo
+    carpeta = tempfile.mkdtemp(prefix="estudio_recolocar_")
+    for sid, texto, contenido in (("S004", "tres colores.", "BANO"),
+                                  ("S004B", "por eso remodelamos.", "BALDOSAS")):
+        with open(os.path.join(carpeta, f"{sid}.json"), "w", encoding="utf-8") as fh:
+            json.dump({"id": sid, "narracion": texto, "png": f"escenas/{sid}.png"}, fh)
+        with open(os.path.join(carpeta, f"{sid}.png"), "w", encoding="utf-8") as fh:
+            fh.write(contenido)
+    p6._recolocar_escenas(carpeta, [
+        {"id": "S005", "narracion": "tres colores.", "narracion_imagen": "tres colores."},
+        {"id": "S005B", "narracion": "por eso remodelamos.", "insertada": {"en": "S005"}}])
+    igual((open(os.path.join(carpeta, "S005.png"), encoding="utf-8").read(),
+           open(os.path.join(carpeta, "S005B.png"), encoding="utf-8").read()), ("BANO", "BALDOSAS"),
+          "RENUMERAR: S004→S005 y S004B→S005B, cada una con su dibujo y sin pagar")
+    carpeta = tempfile.mkdtemp(prefix="estudio_recolocar_")
+    with open(os.path.join(carpeta, "S007.json"), "w", encoding="utf-8") as fh:
+        json.dump({"id": "S007", "narracion": "la ducha nueva", "png": "escenas/S007.png"}, fh)
+    with open(os.path.join(carpeta, "S007.png"), "w", encoding="utf-8") as fh:
+        fh.write("DUCHA")
+    p6._recolocar_escenas(carpeta, [{"id": "S004B", "narracion": "la ducha nueva", "insertada": {"en": "S004"}},
+                                    {"id": "S008", "narracion": "la ducha nueva y la luz"}])
+    ok(not os.path.exists(os.path.join(carpeta, "S004B.png")),
+       "INSERTADA: no se lleva el dibujo de un plano normal (se dibuja para ella)")
     # «DIRIGIR» LA INSERTADA: de punta a punta en el recorrido
     # (`insertar_una_imagen`); aquí, que planificar lee su unidad
     fuente = open(os.path.join(RAIZ_ESTUDIO, "pasos", "p6_assets.py"), encoding="utf-8").read()
@@ -8252,6 +8292,40 @@ def probar_dominios():
            "null vuelve a automático: se quita la clave y el resto del estilo se queda")
     finally:
         presets.FICHERO = antes
+
+
+def probar_ambientes():
+    """Rama tipo-de-relato-2 (25-10-2026): los ambientes de un recorrido y la
+    base de cada uno. En este proceso y sin el CLI: nada se genera ni se paga."""
+    seccion("AMBIENTES: RECORRIDO Y CLASE")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_ambientes_")
+    servidor.fijar_raiz_proyectos(base)
+    pid = Proyecto.crear(base, "ambientes").id
+    Estado(servidor.contexto(pid).proyecto)
+    ctx = servidor.contexto(pid)
+    espacio = {"sitio": "Cocina", "descripcion": "an open kitchen, oak and white", "luz": "day",
+               "secundarios": [{"nombre": "Sala", "descripcion": "a living room, oak and white"}]}
+    servidor._opciones_al_crear(ctx, "", {"espacio_fijo": espacio, "tipo_relato": {"modo": "recorrido"}})
+    codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+    igual(codigo, 200, "AMBIENTES: leer, 200")
+    if codigo == 200:
+        igual([a["sitio"] for a in ficha["ambientes"]], ["cocina", "sala"],
+              "AMBIENTES: el principal y su secundario, en orden")
+        ok(not any(a["aprobada"] for a in ficha["ambientes"]), "AMBIENTES: ninguno aprobado todavía")
+        ok(not ficha["edita"], "AMBIENTES: un recorrido no edita la base")
+    codigo, _m = _llamar(servidor.generar_base_relato, pid, {"sitio": "garaje", "usd": 0.05})
+    igual(codigo, 404, f"AMBIENTES: un ambiente que no existe da 404 ({_m})")
+    codigo, _m = _llamar(servidor.generar_base_relato, pid, {"sitio": "sala"})
+    igual(codigo, 400, f"AMBIENTES: sin el coste que se vio da 400 ({_m})")
+    ok(not ctx.gestor.listar(activos=True), "AMBIENTES: y no se lanza nada")
+    codigo, _m = _llamar(servidor.aprobar_base_relato, pid, {"sitio": "sala", "aprobada": True})
+    igual(codigo, 404, f"AMBIENTES: aprobar uno sin imagen da 404 ({_m})")
+    servidor._opciones_al_crear(ctx, "", {"tipo_relato": {"modo": "producto"}})
+    codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+    ok(codigo == 200 and ficha["ambientes"] == [], "AMBIENTES: en producto, ninguno")
 
 
 def probar_tipos_de_negocio():
@@ -8366,6 +8440,105 @@ def probar_tipos_de_negocio():
             os.environ.pop("ESTUDIO_DOMINIOS", None)
         else:
             os.environ["ESTUDIO_DOMINIOS"] = antes_env
+
+
+def probar_choques_de_reglas():
+    """Rama reglas-claras (28-10-2026): «Revisar si se contradicen» compara las
+    reglas del negocio que RECIBE un estilo de foto con las suyas, con Claude
+    simulado, y NO ESCRIBE NADA: ni el estilo, ni la ficha."""
+    seccion("REGLAS CLARAS: ¿CHOCAN LAS DEL NEGOCIO CON LAS DEL ESTILO?")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    import threading as _hilos                                # noqa: PLC0415
+    from PIL import Image as _Imagen                          # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_choques_")
+    antes_env = os.environ.get("ESTUDIO_DOMINIOS")
+    antes_sim = os.environ.get("ESTUDIO_SIMULAR")
+    os.environ["ESTUDIO_DOMINIOS"] = os.path.join(base, "_sistema", "dominios.json")
+    os.environ["ESTUDIO_SIMULAR"] = "1"
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(os.path.join(base, "proyectos"))
+    presets = servidor._presets()
+    antes = presets.FICHERO
+    modulo = servidor._choques_reglas()
+    revisar_de_verdad = modulo.revisar
+
+    def esperar(rid):
+        for _ in range(100):
+            codigo, f = _llamar(servidor.leer_choques_reglas, rid)
+            if codigo != 200 or f.get("estado") != "pensando":
+                return codigo, f
+            time.sleep(0.05)
+        return 0, {}
+
+    try:
+        presets.FICHERO = os.path.join(base, "presets.json")
+        cid = servidor.crear_cliente({"nombre": "Estado Play"})["cliente"]["id"]
+        refs = []
+        for i in range(3):        # un estilo pide al menos 3 fotogramas
+            ruta = os.path.join(base, f"r{i}.png")
+            _Imagen.new("RGB", (64, 40), (40 * i, 90, 160)).save(ruta)
+            refs.append(ruta)
+        reglas_propias = [{"texto": "La tele va siempre en su trípode negro, nunca sobre un mueble."},
+                          {"texto": "Luz cálida de salón de fiestas."}]
+        pid = presets.guardar("canal", "Fiesta foto", {
+            "estilo": {"referencias": refs, "modo": "foto", "reglas": reglas_propias},
+            "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(pid, {"cliente": cid})
+        dib = presets.guardar("canal", "Fiesta dibujo", {
+            "estilo": {"referencias": refs, "reglas": reglas_propias},
+            "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(dib, {"cliente": cid})
+        codigo, _m = _llamar(servidor.revisar_choques_reglas, {"preset": pid})
+        igual(codigo, 400, "sin ficha del negocio no hay nada que comparar")
+        _llamar(servidor.guardar_negocio_cliente, cid, {
+            "nombre": "Alquiler de consolas",
+            "reglas": [{"texto": "Cada tele va en su trípode o sobre un mueble, nunca flotando."}]})
+        codigo, _m = _llamar(servidor.revisar_choques_reglas, {"preset": dib})
+        igual(codigo, 400, "un estilo de dibujo no recibe las del negocio: 400")
+        codigo, _m = _llamar(servidor.revisar_choques_reglas, {})
+        igual(codigo, 400, "sin preset, 400")
+        foto_presets = open(presets.FICHERO, "rb").read()
+        foto_dominios = open(os.environ["ESTUDIO_DOMINIOS"], "rb").read()
+        codigo, r = _llamar(servidor.revisar_choques_reglas, {"preset": pid})
+        ok(codigo == 200 and r.get("id"), f"POST …/choques arranca ({codigo} {r})")
+        codigo, f = esperar(r.get("id"))
+        ok(codigo == 200 and f.get("estado") == "listo", f"y termina ({codigo} {f})")
+        pares = f.get("pares") or []
+        ok(pares and (pares[0]["negocio"], pares[0]["estilo"]) == (0, 0),
+           f"señala la tele del negocio con la del estilo ({pares})")
+        ok("trípode o sobre un mueble" in (f.get("negocio") or [""])[0]
+           and "nunca sobre un mueble" in (f.get("estilo") or [""])[0],
+           "con los textos de las dos reglas, para enseñarlos")
+        igual(f.get("simulado"), True, "con ESTUDIO_SIMULAR no se llama al CLI")
+        ok(open(presets.FICHERO, "rb").read() == foto_presets, "no escribe nada en el estilo")
+        ok(open(os.environ["ESTUDIO_DOMINIOS"], "rb").read() == foto_dominios, "ni en la ficha")
+        # DE UNA EN UNA, como «Afinar»
+        suelta = _hilos.Event()
+        modulo.revisar = lambda *a, **k: (suelta.wait(5), {"pares": [], "segundos": 0, "simulado": True})[1]
+        codigo, r1 = _llamar(servidor.revisar_choques_reglas, {"preset": pid})
+        codigo2, _m = _llamar(servidor.revisar_choques_reglas, {"preset": pid})
+        igual(codigo2, 409, "una segunda revisión a la vez, 409")
+        suelta.set()
+        codigo, f = esperar(r1.get("id"))
+        ok(f.get("estado") == "listo" and f.get("pares") == [], "y la primera termina sin pares")
+        modulo.revisar = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("sin cupo"))
+        codigo, r = _llamar(servidor.revisar_choques_reglas, {"preset": pid})
+        codigo, f = esperar(r.get("id"))
+        ok(f.get("estado") == "error" and "sin cupo" in (f.get("error") or ""), "un fallo de Claude se dice")
+        codigo, _m = _llamar(servidor.leer_choques_reglas, "no-existe")
+        igual(codigo, 404, "una revisión que no existe, 404")
+    finally:
+        modulo.revisar = revisar_de_verdad
+        presets.FICHERO = antes
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        for clave, valor in (("ESTUDIO_DOMINIOS", antes_env), ("ESTUDIO_SIMULAR", antes_sim)):
+            if valor is None:
+                os.environ.pop(clave, None)
+            else:
+                os.environ[clave] = valor
+
+
 def probar_guion_visual():
     """Rama guion-visual (22-10-2026): qué dibujan las imágenes y el guion visual.
 
@@ -9077,7 +9250,9 @@ def main():
         probar_detalles_insertar_quitar()
         probar_dominios()
         probar_tipos_de_negocio()
+        probar_choques_de_reglas()
         probar_guion_visual()
+        probar_ambientes()
     finally:
         parar(proceso)
         if not argumentos.conservar:

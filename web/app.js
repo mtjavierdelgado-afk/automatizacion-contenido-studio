@@ -26193,7 +26193,7 @@ const PINTORES_INICIO = {
 function vistaAutomatizar() {
   /* LA PARRILLA (rama `parrilla`, 17-10-2026): todo vive en la sección
      PARRILLA del final del fichero; aquí solo se entra. El piloto automático
-     sigue «próximamente» (rama `lala-2`). */
+     (rama `video-completo`) vive en el bloque PILOTO del final. */
   return vistaParrilla();
 }
 

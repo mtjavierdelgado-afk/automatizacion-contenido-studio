@@ -286,7 +286,7 @@ def prueba_completa():
     hijos = os.path.join(temporal, "hijos")
     _hijos(hijos,
            {"veredicto": "APROBADA", "fallos": 0, "avisos": 1, "proyecto": "vid_basica", "lineas": []},
-           {"veredicto": "APROBADA", "fallos": 0, "avisos": 0, "proyectos": {"a": "vid_relato"},
+           {"veredicto": "APROBADA", "fallos": 0, "avisos": 0, "proyectos": {"b": "vid_relato"},
             "gastado_usd": 2.1, "lineas": []})
     _hijos(hijos,
            {"veredicto": "APROBADA", "fallos": 0, "avisos": 1, "proyecto": "vid_basica", "lineas": []},
@@ -315,6 +315,7 @@ def prueba_completa():
         ok(config["tope"] == 5, "y el tope")
         ok(config["escenario"] == "c", "y el tema del vídeo de foto (la sala de eventos)")
         ok("PUBLICAR DE VERDAD" in salida, "y avisa de que se publica de verdad")
+        ok("mampara" not in salida, "la mampara (el caso más difícil de dibujar) no se ofrece")
         # una respuesta que no es una opción
         codigo, _s = _correr(["--api", api, "--preparar"], ["1", "9"])
         ok(codigo == 1, "un número que no está en la lista no lanza nada")
@@ -370,7 +371,7 @@ def prueba_completa():
                "resultados": {}}
         PC._escribir_json(PC._ruta_estado(proyectos), est)                                  # noqa: SLF001
         _hijos(hijos, {"fallos": 0, "proyecto": "vid_basica"},
-               {"fallos": 0, "proyectos": {"a": "vid_relato"}, "lineas": []})
+               {"fallos": 0, "proyectos": {"b": "vid_relato"}, "lineas": []})
         mundo3 = Mundo()
         srv3 = servidor(mundo3)
         codigo, salida = _correr(["--api", f"http://127.0.0.1:{srv3.server_address[1]}", "--hijos", hijos,
@@ -402,7 +403,7 @@ def prueba_completa():
         PC._escribir_json(PC._ruta_estado(proyectos), est)                                  # noqa: SLF001
         carpeta_inf = os.path.join(proyectos, "_sistema", "pruebas_reales")
         PC._escribir_json(os.path.join(carpeta_inf, "relato_2099-01-01_0000.json"),           # noqa: SLF001
-                          {"fallos": 0, "proyectos": {"a": "vid_relato"}, "lineas": []})
+                          {"fallos": 0, "proyectos": {"b": "vid_relato"}, "lineas": []})
         os.remove(os.path.join(hijos, "args_prueba_relato.py.txt"))
         mundo5 = Mundo()
         srv5 = servidor(mundo5)

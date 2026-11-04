@@ -16,8 +16,8 @@ Las partes, en orden, con una barra de progreso de todo y el gasto a la vista:
   1. El servidor y las claves (OpenAI, Cartesia, Claude, Upload-Post).
   2. Un vídeo normal (`prueba_real.py`): guion, voz, imágenes, montaje, rehacer
      dos imágenes con notas y Claude comprobando que se aplicaron.
-  3. Un vídeo de foto con «Un espacio que cambia» (`prueba_relato.py`, el de la
-     mampara): imagen base, estados, planos editándolas, el revisor y hasta DOS
+  3. Un vídeo de foto con «Un espacio que cambia» (`prueba_relato.py`: el baño
+     de las tres paletas o la sala de eventos): imagen base, estados, planos editándolas, el revisor y hasta DOS
      rondas de rehacer lo que marca, con Claude juzgando cada imagen.
   4. La portada: Claude propone tres y se usa la primera.
   5. Los textos de cada red (con emojis) y el SEO real, y Claude los juzga.
@@ -65,7 +65,10 @@ MINIMO_BASICA = 1.2
 #: ~12 planos y alguna imagen rehecha, en foto).
 MINIMO_RELATO = 1.5
 #: Los temas del vídeo de foto (escenarios de prueba_relato.py).
-TEMAS = [("a", "Un baño: la mampara que choca con el inodoro (diseño de interiores)"),
+#: La mampara (escenario «a») NO se ofrece: una puerta que se abre es el caso
+#: más difícil de dibujar (pruebas del 21-10) y gastaría rondas de rehacer en
+#: un fallo ya conocido; aquí se prueba el sistema, no ese caso (dueño, 04-11).
+TEMAS = [("b", "Un baño sin ventana: 3 paletas de colores y materiales (diseño de interiores)"),
          ("c", "Una sala de eventos: vacía → consolas montadas → torneo (EstadoPlay)")]
 
 #: Las redes que se escriben si no se publica en ninguna.
@@ -139,7 +142,7 @@ def preparar(api, proyectos, args):
     if codigo != 200:
         print(f"El Studio no contesta (HTTP {codigo}): mira  asvs estado")
         return 2
-    config = {"tope": args.tope, "publicar": None, "escenario": "a",
+    config = {"tope": args.tope, "publicar": None, "escenario": "b",
               "creada": datetime.datetime.now().isoformat()}
     # EL TEMA DEL VÍDEO DE FOTO, que es el que se publica: que pegue con la cuenta
     print("¿De qué trata el vídeo de foto (el que se publica)?")
@@ -349,7 +352,7 @@ def main():
         config = _leer_json(_ruta_config(proyectos)) or {}
         est = {"inicio": time.time(), "tope": float(config.get("tope") or args.tope),
                "publicar": None if args.sin_publicar else config.get("publicar"),
-               "escenario": config.get("escenario") if config.get("escenario") in ("a", "b", "c") else "a",
+               "escenario": config.get("escenario") if config.get("escenario") in ("b", "c") else "b",
                "hechas": [], "empezadas": {}, "lineas": [], "videos": {}, "resultados": {}}
         print(f"LA PRUEBA COMPLETA DEL STUDIO (tope {est['tope']:.2f} $; no toca tus vídeos)")
         if est["publicar"]:
@@ -485,9 +488,9 @@ def main():
                            f"quedan {queda:.2f} $ y hacen falta al menos {MINIMO_RELATO:.2f} $")
         else:
             codigo, datos = hija("relato", "prueba_relato.py", r"relato_\d{4}-\d{2}-\d{2}_\d{4}\.json",
-                                 ["--solo", est.get("escenario") or "a", "--tope", f"{queda:.2f}"])
-            pid = ((datos or {}).get("proyectos") or {}).get(est.get("escenario") or "a") \
-                or video_a_medias("en_curso_relato.json", est.get("escenario") or "a")
+                                 ["--solo", est.get("escenario") or "b", "--tope", f"{queda:.2f}"])
+            pid = ((datos or {}).get("proyectos") or {}).get(est.get("escenario") or "b") \
+                or video_a_medias("en_curso_relato.json", est.get("escenario") or "b")
             if pid:
                 est["videos"]["relato"] = pid
             est["resultados"]["relato"] = _resumen_hijo(datos, codigo)

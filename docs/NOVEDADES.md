@@ -19,7 +19,8 @@ vídeos, estilos, claves y contraseña no se tocan.
   que dice qué falló y, si se conoce, qué hacer. `asvs revisar ver` la vuelve a
   enseñar.
 - **`asvs probar completo`** (con tope, 5 $ por defecto): vídeos de verdad de punta
-  a punta. Al empezar pregunta el tema del vídeo de foto, en qué cuenta publicar
+  a punta. Al empezar pregunta el tema del vídeo de foto (el baño de las tres
+  paletas o la sala de eventos; la mampara no, por difícil de dibujar), en qué cuenta publicar
   (solo salen las que tienen redes conectadas) y pide escribir SI. Después: un
   vídeo normal con dos imágenes rehechas con notas; uno de foto con «Un espacio
   que cambia» (imagen base, estados, el revisor y hasta dos rondas de rehacer);

@@ -166,7 +166,8 @@ _REGLAS = """REGLAS GENERALES
 8. ESPACIO FIJO solo si el original dice que todo el vídeo ocurre en un mismo sitio (un local, una cocina, un plató). Si no lo dice, no pongas esa sección.
 9. "Tipo de relato" solo si el original pide una forma concreta de contarlo en imágenes: "espacio_que_cambia (objeto | acabados | estado | hora)" si es UN sitio que se ve siempre igual y en el que solo cambia lo que dice la voz (un antes y después, tres paletas, una sala vacía → montada); "recorrido" si son varios ambientes de un mismo lugar; "escenario_y_apoyos" si es un sitio con otros secundarios; "producto" si el producto manda y el fondo no cambia; "clase" si es una clase. Si no lo pide, quita la línea.
 10. "Imágenes: guion" solo si el original pide que las imágenes sigan las líneas «Visual:» y no lo que dice la voz (un guion de plano a plano, con su cámara); entonces cada línea «Visual:» es una imagen fija concreta, con quién, dónde, qué hace y desde dónde se ve. Si no lo pide, quita la línea.
-11. Con "Tipo de relato: espacio_que_cambia" y "Imágenes: guion", pon en cada ESCENA una línea "Estado:" con la etiqueta del estado del sitio en esa escena (corta, en minúsculas y sin espacios: antes, despues, paleta_1…) y la sección ESTADOS DEL ESPACIO con lo que cambia en cada estado respecto a la imagen base, EN INGLÉS y acumulado (el «después» dice todo lo que cambió, no solo lo último); el estado que es la base tal cual se deja vacío. Si no, quita las líneas «Estado:» y esa sección."""
+11. Con "Tipo de relato: espacio_que_cambia" y "Imágenes: guion", pon en cada ESCENA una línea "Estado:" con la etiqueta del estado del sitio en esa escena (corta, en minúsculas y sin espacios: antes, despues, paleta_1…) y la sección ESTADOS DEL ESPACIO con lo que cambia en cada estado respecto a la imagen base, EN INGLÉS y acumulado (el «después» dice todo lo que cambió, no solo lo último); el estado que es la base tal cual se deja vacío. Si no, quita las líneas «Estado:» y esa sección.
+12. PORTADA solo si el original habla de la portada o la miniatura, o si te la piden: "Texto" son las 2–5 palabras grandes que irán encima (en el idioma del vídeo, sin emojis) e "Imagen" describe la imagen de fondo en una frase concreta (quién o qué sale, dónde, el encuadre y la luz), SIN letras, logotipos ni marcas de agua: el texto lo pone el Studio aparte. Si no, quita esa sección."""
 
 _AJUSTE_RED = """AJUSTE POR RED (en "adaptar" aplícalo; en "exacto" solo avisa con ⚠ si algo no encaja)
 - TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.
@@ -208,6 +209,10 @@ Texto en pantalla: …
 (…resto de escenas…)
 
 CIERRE DE MARCA: … (si lo hay)
+
+PORTADA (opcional; si no, quita esta sección)
+- Texto: [2–5 palabras grandes para la portada]
+- Imagen: [la imagen de fondo: quién o qué sale, dónde, encuadre y luz; sin letras]
 
 MARCA DEL CLIENTE (va una vez en su estilo, no en cada vídeo)
 - Mostrar: …
@@ -538,10 +543,12 @@ def _nueva_escena(n, tiempo=""):
 _RE_ESCENA = re.compile(r"^ESCENA\s+(\d+)\s*(?:\((.*)\))?\s*[:.]?\s*(.*)$", re.I)
 _RE_SECCION = re.compile(
     r"^(CIERRE DE MARCA|MARCA DEL CLIENTE|VERSIONES POR RED|PARA EL ENCARGO|ESPACIO FIJO|"
-    r"ESTADOS DEL ESPACIO|AVISOS)\b\s*(.*)$",
+    r"ESTADOS DEL ESPACIO|AVISOS|(?-i:PORTADA))\b\s*(.*)$",
     re.I)
 _RE_ITEM_ESPACIO = re.compile(
     r"^[-•*]?\s*(Sitio|Descripci[oó]n|Luz|Secundarios?)\s*:\s*(.*)$", re.I)
+_RE_ITEM_PORTADA = re.compile(
+    r"^[-•*]?\s*(Texto|Titular|T[ií]tulo|Imagen|Fondo|Descripci[oó]n)\s*:\s*(.*)$", re.I)
 _RE_ITEM_ENCARGO = re.compile(
     r"^[-•*]?\s*(Material|Indicaciones|Llamadas a la acci[oó]n|Duraci[oó]n)\s*:\s*(.*)$", re.I)
 
@@ -556,7 +563,7 @@ def leer_guion(texto):
     g = {"codigo": "", "titulo": "", "cliente": "", "uso": "", "red": "", "formato": "",
          "duracion_s": None, "duracion_texto": "", "locucion": "", "objetivo": "", "cta": "",
          "tono": "", "escenas": [], "cierre": "", "marca": {"mostrar": "", "evitar": "", "otras": ""},
-         "versiones": "", "encargos": [], "avisos": [], "espacio_fijo": {}, "estados": {}}
+         "versiones": "", "encargos": [], "avisos": [], "espacio_fijo": {}, "estados": {}, "portada": {}}
     i = 0
     while i < len(lineas) and not lineas[i]:
         i += 1
@@ -578,6 +585,7 @@ def leer_guion(texto):
     marca_clave = ""
     espacio, espacio_clave = {"sitio": "", "descripcion": "", "luz": "", "secundarios": []}, ""
     estado_clave = ""
+    portada, portada_clave = {"texto": "", "imagen": ""}, ""
     for linea in lineas[i:]:
         if not linea:
             continue
@@ -605,6 +613,9 @@ def leer_guion(texto):
                 seccion, espacio_clave = "espacio", ""
             elif nombre == "ESTADOS DEL ESPACIO":
                 seccion, estado_clave = "estados", ""
+            elif nombre == "PORTADA":
+                # rama portada-en-guion (04-11): la portada propuesta
+                seccion, portada_clave = "portada", ""
             else:
                 seccion = "avisos"
             continue
@@ -687,6 +698,15 @@ def leer_guion(texto):
             elif estado_clave and not linea.startswith("("):
                 g["estados"][estado_clave] = (g["estados"][estado_clave] + " " + linea).strip()
             continue
+        if seccion == "portada":
+            m = _RE_ITEM_PORTADA.match(linea)
+            if m:
+                portada_clave = "texto" if m.group(1).lower() in ("texto", "titular", "título", "titulo") \
+                    else "imagen"
+                portada[portada_clave] = m.group(2).strip()
+            elif portada_clave and not linea.startswith("("):
+                portada[portada_clave] = (portada[portada_clave] + " " + linea).strip()
+            continue
         if seccion == "encargo":
             m = _RE_ITEM_ENCARGO.match(linea)
             if m:
@@ -724,7 +744,25 @@ def leer_guion(texto):
         g[campo] = "" if g[campo] in ("…", "...") else g[campo]
     g["espacio_fijo"] = _espacio_fijo(espacio)
     g["estados"] = {k: _cambio_de_estado(v) for k, v in g["estados"].items()}
+    g["portada"] = _portada(portada)
     return g
+
+
+MAX_TEXTO_PORTADA = 80
+MAX_IMAGEN_PORTADA = 600
+
+
+def _portada(crudo):
+    """Lo leído en PORTADA → {texto, imagen} o {} (rama portada-en-guion).
+
+    SIN IMAGEN NO HAY PORTADA: lo que se dibuja es la descripción; el texto
+    solo, sin imagen, no dice qué pintar (se avisa en `encargo_de`). Los
+    huecos de la plantilla («[…]», «…») son lo mismo que no escribir nada."""
+    texto = _sin_relleno(re.sub(r"^[«\"“]|[»\"”]$", "", _sin_relleno(crudo.get("texto"))))
+    imagen = _sin_relleno(crudo.get("imagen"))
+    if not imagen:
+        return {"texto": texto[:MAX_TEXTO_PORTADA]} if texto else {}
+    return {"texto": texto[:MAX_TEXTO_PORTADA], "imagen": imagen[:MAX_IMAGEN_PORTADA]}
 
 
 def _cambio_de_estado(valor):
@@ -976,6 +1014,13 @@ def encargo_de(guion, indice=0):
     elif any(e.get("estado") for e in visuales):
         avisos.append("las escenas traen «Estado:», pero falta la sección ESTADOS DEL ESPACIO: "
                       "se usarán los cambios que deduzca el Studio")
+    # LA PORTADA PROPUESTA (rama portada-en-guion, 04-11): viaja con el vídeo
+    # y se guarda en su ficha de Publicar al crearlo, fuera de toda firma
+    portada = dict(g.get("portada") or {})
+    if portada.get("imagen"):
+        extra["portada"] = portada
+    elif portada.get("texto"):
+        avisos.append("la sección PORTADA trae texto pero no dice qué imagen: no se propone portada")
     if visuales:
         extra["visuales"] = visuales
         if g.get("imagenes") != "guion":
@@ -1408,7 +1453,7 @@ def pasar_al_encargo(raiz, cid, gid, indice=0, estilo=""):
         datos = _leer(raiz, cid)
         _m, g = _guion(datos, gid)
         leido = g.get("leido") or leer_guion(g.get("texto"))
-        if "espacio_fijo" not in leido or "estados" not in leido:
+        if "espacio_fijo" not in leido or "estados" not in leido or "portada" not in leido:
             # leído antes de que existiera ESPACIO FIJO: se lee otra vez
             leido = leer_guion(g.get("texto"))
         n = len(leido.get("encargos") or [])

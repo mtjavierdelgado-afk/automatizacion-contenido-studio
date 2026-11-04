@@ -9653,5 +9653,79 @@ def reglas_claras(navegador, datos):
         api._r("DELETE", f"/api/presets-light/{pid}")
     api._r("DELETE", f"/api/clientes/{cid}")
 
+
+@escenario
+def portada_del_guion(navegador, datos):
+    """Rama portada-en-guion (04-11): si el guion de la Parrilla traía su
+    portada, Publicar → Portada enseña «Portada propuesta en el guion» con su
+    texto y su descripción; «✦ Crear esta portada» abre el editor con el texto
+    en el título y el fondo con IA preparado (precio a la vista) SIN pagar.
+    Un vídeo sin portada en el guion no enseña la caja."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    ruta_ficha = os.path.join(datos["proyectos"], "_sistema", "publicar", "videos", f"{pid}.json")
+    pg = Pagina(navegador, datos, nombre="portada_guion")
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    _paso_ficha(pg, "portada")
+    ok(pg.esperar(".portada-publicar button", "Diseñar portada", 20), "Publicar abre el paso Portada")
+    ok(not pg.visible(".portada-guion"), "sin portada en el guion no sale la caja")
+    r, _f = api.put(f"/api/publicar/videos/{pid}", {"portada_guion": {
+        "texto": "Padres contra hijos", "imagen": "un salón con una consola y dos mandos, plano general, luz cálida"}})
+    ok(r.status_code == 200, "la portada del guion se guarda en la ficha")
+    try:
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        _paso_ficha(pg, "portada")
+        ok(pg.esperar(".portada-guion", "Portada propuesta en el guion", 20), "con portada en el guion sale la caja")
+        ok(pg.p.input_value(".portada-guion input[type=text]") == "Padres contra hijos"
+           and "consola y dos mandos" in pg.p.input_value(".portada-guion textarea"),
+           "con su texto y su descripción")
+        ok(pg.p.is_disabled(".portada-guion button:has-text('Guardar cambios')"), "«Guardar cambios» apagado sin tocar nada")
+        pg.p.fill(".portada-guion textarea", "un salón con una consola y dos mandos, plano general, luz de tarde")
+        ok(not pg.p.is_disabled(".portada-guion button:has-text('Guardar cambios')"), "al escribir se enciende")
+        pg.pulsar(".portada-guion button", "Guardar cambios")
+        pg.p.wait_for_timeout(800)
+        _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+        ok("luz de tarde" in (ficha.get("portada_guion") or {}).get("imagen", ""), "«Guardar cambios» la guarda")
+        pg.captura("portada_guion_caja", entera=False)
+        _r, antes = api.get(f"/api/trabajos?proyecto={pid}")
+        n_antes = len(antes if isinstance(antes, list) else (antes.get("trabajos") or []))
+        pg.pulsar(".portada-guion button", "Crear esta portada")
+        ok(pg.esperar(".capa-portada .antes-de-pagar", "El FONDO con IA", 30),
+           "«Crear esta portada» abre el editor con el fondo con IA preparado")
+        ok("luz de tarde" in pg.p.input_value(".capa-portada .antes-de-pagar textarea"),
+           "con la descripción del guion como lo que se le pide a la IA")
+        ok(pg.visible(".capa-portada .antes-de-pagar button", "Dibujar ("), "y el precio en el botón «Dibujar»")
+        titulo = pg.p.evaluate("() => ((PORT.diseno || {}).textos || {}).titulo || ''")
+        ok(titulo == "Padres contra hijos", f"el texto del guion va al título de la portada ({titulo!r})")
+        ok(pg.p.evaluate("() => ((PORT.diseno || {}).fondo || {}).tipo") == "ia", "el fondo pasa a «Hecho con IA»")
+        _r, despues = api.get(f"/api/trabajos?proyecto={pid}")
+        n_despues = len(despues if isinstance(despues, list) else (despues.get("trabajos") or []))
+        ok(n_despues == n_antes, "y no se ha lanzado ni pagado nada")
+        pg.captura("portada_guion_editor", entera=False)
+        pg.p.evaluate("() => { PORT.cambiado = false; }")
+        pg.pulsar(".capa-portada button", "Cerrar")
+        pg.pulsar(".portada-guion button", "Hacer otra portada")
+        ok(pg.esperar(".vista-portada-grande img", segundos=30), "«Hacer otra portada» abre el editor de siempre")
+        ok(not pg.visible(".capa-portada .antes-de-pagar"), "sin nada preparado para pagar")
+        pg.p.evaluate("() => { PORT.cambiado = false; }")
+        pg.pulsar(".capa-portada button", "Cerrar")
+        pg.p.set_viewport_size({"width": 390, "height": 780})
+        pg.p.wait_for_timeout(300)
+        ancho = pg.p.evaluate("() => { const e = document.querySelector('.portada-guion'); return e ? e.scrollWidth - e.clientWidth : -1; }")
+        ok(0 <= ancho <= 2, f"en el móvil la caja cabe ({ancho}px)")
+        pg.sin_errores("la portada del guion")
+    finally:
+        # la ficha vuelve a estar sin portada del guion: los demás escenarios
+        # no la esperan
+        try:
+            with open(ruta_ficha, encoding="utf-8") as fh:
+                ficha = json.load(fh)
+            ficha.pop("portada_guion", None)
+            with open(ruta_ficha, "w", encoding="utf-8") as fh:
+                json.dump(ficha, fh, ensure_ascii=False)
+        except OSError:
+            pass
+        pg.cerrar()
+
 if __name__ == "__main__":
     sys.exit(main())

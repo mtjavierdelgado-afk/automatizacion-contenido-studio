@@ -5630,3 +5630,14 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .cuentas-propias .pastilla { text-transform: none; letter-spacing: 0; white-space: normal; overflow-wrap: anywhere;
   display: inline-flex; gap: 4px; align-items: center; }
 .cuentas-propias select { max-width: 100%; min-width: 0; }
+
+/* ======================================================= PORTADA DEL GUION
+   rama portada-en-guion (04-11-2026): la caja «Portada propuesta en el guion»
+   de Publicar → Portada, con su texto y la descripción de la imagen. */
+.portada-guion { display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  padding: 10px 12px; border: 1px dashed var(--acento-borde); border-radius: 12px; }
+.portada-guion h4 { margin: 0; }
+.portada-guion .etiqueta-campo { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.portada-guion input[type="text"], .portada-guion .texto-portada-guion { width: 100%; box-sizing: border-box; }
+.portada-guion .texto-portada-guion { resize: vertical; min-height: 64px; }
+.portada-guion .fila { gap: 6px; flex-wrap: wrap; }

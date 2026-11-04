@@ -18904,6 +18904,7 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     if lleva:
         _aplicar_lleva(ctx, lleva, al_crear=True)
     avisos += _opciones_al_crear(ctx, preset_id, datos.get("opciones") or {})
+    avisos += _portada_guion_al_crear(ctx, datos.get("opciones") or {})
     avisos += _montaje_al_crear(ctx, datos, montaje_pedido)
     ctx.bitacora.anotar("video_light_creado", None, {
         "preset": preset_id, "estilo": ficha_preset.get("nombre"),
@@ -19163,6 +19164,22 @@ def _opciones_al_crear(ctx, preset_id, opciones):
         except ErrorApi as fallo:
             avisos.append(f"el logo no se ha podido poner: {fallo.mensaje}")
     return avisos
+
+
+def _portada_guion_al_crear(ctx, opciones):
+    """LA PORTADA PROPUESTA EN EL GUION de la Parrilla (rama portada-en-guion,
+    04-11): {texto, imagen} en `opciones.portada`. Va a la ficha de Publicar
+    del vídeo, fuera de params y firmas (regla 1): no dibuja nada ni cuesta
+    nada; en Publicar → Portada se ofrece crearla. -> avisos"""
+    pedida = opciones.get("portada") if isinstance(opciones, dict) else None
+    if not isinstance(pedida, dict) or not str(pedida.get("imagen") or "").strip():
+        return []
+    try:
+        _publicar().guardar_portada_guion(raiz_proyectos(), ctx.id, pedida)
+    except Exception as fallo:                              # noqa: BLE001
+        # una portada que no se guarda no impide crear el vídeo
+        return [f"la portada del guion no se ha podido guardar: {fallo}"]
+    return []
 
 
 def _sembrar_video_light(ctx, datos):
@@ -20564,7 +20581,7 @@ def publicar_ficha(pid: str, peticion: Request):
 @app.put("/api/publicar/videos/{pid}")
 def publicar_guardar_ficha(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """{redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?,
-    youtube_formato?: auto|short|video}"""
+    youtube_formato?: auto|short|video, portada_guion?: {texto, imagen}}"""
     ctx = _ctx_publicable(pid, peticion)
     _por_publicar(_publicar().guardar_ficha, raiz_proyectos(), ctx.id, _cuerpo(cuerpo))
     return publicar_ficha(pid, peticion)

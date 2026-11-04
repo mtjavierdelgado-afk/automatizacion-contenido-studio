@@ -413,9 +413,17 @@ def main():
                            if tr_.get("inicial") else "")
                         + " Contesta por separado: 'distribucion' (cada mueble fijo en la PARED que dice "
                         "y la puerta donde dice; cuánto ocupa cada uno y en qué punto exacto de su pared "
-                        "NO cuentan), 'objeto' (lo que luego cambia está, en su zona, y es un objeto real "
-                        "a escala: una puerta o un panel recto, vertical y plano, no torcido ni a medio "
-                        "abrir; el lado exacto de las bisagras NO cuenta; 'si' si no se pide ninguno) y 'acabados' (colores y materiales). Devuelve SOLO "
+                        "NO cuentan), "
+                        + ("'objeto' (lo que luego cambia está, en su zona, y es un objeto real "
+                           "a escala: una puerta o un panel recto, vertical y plano, no torcido ni a medio "
+                           "abrir; el lado exacto de las bisagras NO cuenta)"
+                           if esc["relato"].get("cambia") == "objeto" else
+                           # SIN OBJETO QUE CAMBIE no se juzga ninguno: con la
+                           # pregunta de la puerta, el juez tumbaba la base del
+                           # baño de las paletas por la puerta de ENTRADA
+                           # entreabierta (prueba del servidor, 04-11-2026)
+                           "'objeto' (en este vídeo no cambia ningún objeto: contesta 'si')")
+                        + " y 'acabados' (colores y materiales). Devuelve SOLO "
                         '{"distribucion": "si" | "no", "objeto": "si" | "no", "acabados": "si" | "no", '
                         '"por_que": "<una frase>"}', raiz)
                     # LO QUE IMPORTA es la distribucion y el objeto: los planos editan la
@@ -493,8 +501,10 @@ def main():
                             f"La del estado tiene que ser la MISMA habitación con la misma cámara, vacía, "
                             f"con UN cambio: «{e['cambio']}». Contesta por separado: 'mismo_sitio' (misma "
                             "distribución y cámara), 'cambio' (se ve el cambio pedido, y nada más del sitio "
-                            "cambia) y 'objeto' (lo que cambia es un objeto real a escala: recto, plano y "
-                            "vertical si es un vidrio o una puerta; no torcido ni deformado). Devuelve SOLO "
+                            "cambia) y 'objeto' (" + ("lo que cambia es un objeto real a escala: recto, "
+                            "plano y vertical si es un vidrio o una puerta; no torcido ni deformado"
+                            if esc["relato"].get("cambia") == "objeto" else
+                            "en este vídeo no cambia ningún objeto: contesta 'si'") + "). Devuelve SOLO "
                             '{"mismo_sitio": "si"|"no", "cambio": "si"|"no", "objeto": "si"|"no", '
                             '"por_que": "<una frase>"}', raiz)
                     except Exception as fallo:                          # noqa: BLE001

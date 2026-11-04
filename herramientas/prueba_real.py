@@ -308,7 +308,11 @@ def main():
         return 2
     codigo, claves = api.post("/api/claves/probar", {"claude": True})
     for p in claves.get("pruebas") or []:
-        opcional = p.get("proveedor") in ("jamendo", "freesound") or args.sin_claves
+        # SOLO las que hacen el vídeo son obligatorias: las de leer cuentas
+        # ajenas (lectura_*) o las de música y efectos, si faltan, es un aviso
+        # (prueba del servidor, 04-11-2026: sin clave de YouTube para leer
+        # cuentas salía un fallo que no tiene nada que ver con hacer un vídeo)
+        opcional = (p.get("proveedor") not in ("openai", "cartesia", "claude")) or args.sin_claves
         informe.comprueba(p.get("estado") == "ok", f"clave de {p.get('proveedor')}",
                           f"{p.get('estado')}: {p.get('mensaje')}", solo_aviso=opcional)
     imprescindibles = {p.get("proveedor"): p.get("estado") for p in claves.get("pruebas") or []}
@@ -333,7 +337,12 @@ def main():
         nombre = "Prueba real " + datetime.datetime.now().strftime("%Y-%m-%d %H.%M")
         codigo, creado = api.post(f"/api/presets-light/{estilo['id']}/video", {
             "nombre": nombre, "duracion_objetivo_s": args.segundos, "material": MATERIAL,
-            "indicaciones": "Cercano y con humor, frases cortas."})
+            "indicaciones": "Cercano y con humor, frases cortas.",
+            # EL VÍDEO NORMAL ES NORMAL aunque el estilo traiga un tipo de
+            # relato que edita una imagen base o «Imágenes: guion»: esos piden
+            # aprobar algo antes de pagar y la prueba se paraba ahí (04-11).
+            # Eso lo prueba la parte del tipo de relato, no esta.
+            "opciones": {"tipo_relato": {"modo": "documental"}, "imagenes": "voz"}})
         pid = (creado.get("proyecto") or {}).get("id") or ""
         if not informe.comprueba(codigo == 201 and pid, f"se crea «{nombre}» con el estilo «{estilo.get('nombre')}»",
                                  f"HTTP {codigo}: {creado}"):

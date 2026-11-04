@@ -574,7 +574,7 @@ def cartas_de_diagrama(escenas, explicativos, modo, forzadas=None):
         if escena.get("cartela") or escena.get("sigue_a") or escena.get("componente"):
             continue
         dibujables += 1
-        if forzadas.get(sid) or (escena.get("linea_gv") or {}).get("camara"):
+        if forzadas.get(sid) or escena.get("linea_gv"):
             continue
         bid = str((escena.get("origen") or {}).get("bloque") or "")
         if bid in por_bloque:

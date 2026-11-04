@@ -151,6 +151,49 @@ def normalizar(crudo, bloques_validos=None):
     visuales = crudo.get("visuales")
     if visuales:
         salida["visuales"] = normalizar_visuales(visuales)
+    # rama parrilla-estados (03-11): los ESTADOS DEL ESPACIO que trajo la
+    # Parrilla y si sus lineas sin camara van sin encuadre sorteado. Solo
+    # existen en los videos creados desde entonces (regla 1)
+    estados = normalizar_estados(crudo.get("estados"))
+    if estados:
+        salida["estados"] = estados
+    if crudo.get("sin_sorteo") is True:
+        salida["sin_sorteo"] = True
+    return salida
+
+
+#: Lo que en «ESTADOS DEL ESPACIO» quiere decir «sin cambio» (la base tal cual):
+#: la frase ENTERA, en español o en inglés (Claude escribe los estados en
+#: inglés), o esa frase seguida de «:» y una explicación («vacío: es la base»).
+#: Un cambio de verdad que empiece por «nada…» no se vacía (revisión 03-11).
+_RE_SIN_CAMBIO = re.compile(
+    r"^(?:-+|—|…|\.\.\.|vacio|vacia|ninguno|ninguna|nada|sin cambios?|igual|igual que la base|"
+    r"la base(?: tal cual)?|base|la imagen base(?: tal cual)?|tal cual|"
+    r"none|nothing|empty|n/?a|no changes?|unchanged|same|same as (?:the )?base(?: image)?|"
+    r"(?:the )?base image|as is)\s*(?:[:—–-].*)?$")
+MAX_ESTADOS = 12
+
+
+def sin_cambio(texto):
+    """¿Este cambio de un estado es «la base tal cual»?"""
+    llano = _llano(re.sub(r"^[\[(«\"']+|[\])»\"'.]+$", "", str(texto or "").strip())).strip(" .")
+    return not llano or bool(_RE_SIN_CAMBIO.match(llano))
+
+
+def normalizar_estados(crudo):
+    """Los estados del espacio de la Parrilla: {etiqueta: cambio en ingles}.
+
+    Una etiqueta corta y sin espacios («antes», «despues», «paleta_1»). Un
+    cambio vacio (o «ninguno», «la base»…) es el sitio tal cual la base."""
+    if not isinstance(crudo, dict):
+        return {}
+    salida = {}
+    for clave, valor in list(crudo.items())[:MAX_ESTADOS]:
+        etiqueta = _etiqueta(clave)
+        if not etiqueta:
+            continue
+        cambio = "" if sin_cambio(valor) else _texto(valor, 400)
+        salida[etiqueta] = cambio
     return salida
 
 
@@ -165,13 +208,17 @@ def normalizar_visuales(crudo):
         lineas = [_texto(x, MAX_VISUAL) for x in (escena.get("visual") or [])
                   if _texto(x, MAX_VISUAL)]
         if lineas:
-            salida.append({"voz": _texto(escena.get("voz"), 3000), "visual": lineas})
+            limpia = {"voz": _texto(escena.get("voz"), 3000), "visual": lineas}
+            estado = _etiqueta(escena.get("estado"))
+            if estado:
+                limpia["estado"] = estado          # «Estado:» de la escena (parrilla-estados)
+            salida.append(limpia)
     return salida
 
 
 def visuales_de_parrilla(escenas):
     """Las escenas de un guion de la Parrilla que traen «Visual:». -> [{voz, visual}]"""
-    return normalizar_visuales([{"voz": e.get("voz"), "visual": e.get("visual")}
+    return normalizar_visuales([{"voz": e.get("voz"), "visual": e.get("visual"), "estado": e.get("estado")}
                                 for e in (escenas or []) if isinstance(e, dict)])
 
 
@@ -253,8 +300,12 @@ def casar(visuales, bloques):
             avisos.append(f"la escena {n} de la Parrilla no casa con ningún bloque del guion: "
                           f"va con {elegido}; revísalo")
         ultimo = elegido
+        estado = _etiqueta(escena.get("estado"))
         for linea in escena.get("visual") or []:
-            planos.append({"bloque": elegido, "visual": linea})
+            plano = {"bloque": elegido, "visual": linea}
+            if estado:
+                plano["estado"] = estado           # el estado de su escena (parrilla-estados)
+            planos.append(plano)
     return planos, avisos
 
 
@@ -356,8 +407,9 @@ COMO
   - NO ilustres palabra por palabra lo que dice la voz: cuenta con imagenes lo
     que el video quiere contar. Si la voz menciona una alternativa o un «no
     hagas esto», decide tu que se ve para que se entienda.
-  - Nada que contradiga lo fijo de abajo: el sitio es ese y solo ese, y los
-    objetos que cambian solo pueden estar en uno de sus ESTADOS.
+  - Nada que contradiga lo fijo de abajo: el sitio es ese y solo ese (o, si
+    hay OTROS AMBIENTES DEL MISMO LUGAR, uno de ellos), y los objetos que
+    cambian solo pueden estar en uno de sus ESTADOS.
 {estados_txt}
 LO FIJO
 <<<
@@ -385,6 +437,10 @@ def _fijo_legible(espacio, reparto, estados):
     if espacio:
         partes.append(f"SITIO: {espacio.get('descripcion') or ''} "
                       f"(luz: {espacio.get('luz') or '-'})")
+        for otro in espacio.get("secundarios") or []:
+            if isinstance(otro, dict) and otro.get("descripcion"):
+                partes.append(f"OTRO AMBIENTE DEL MISMO LUGAR ({otro.get('nombre') or ''}): "
+                              f"{otro['descripcion']}")
     for pid, ficha in (reparto or {}).items():
         partes.append(f"PERSONAJE {pid}: {(ficha or {}).get('descripcion') or ''}")
     for est, cambio in (estados or {}).items():
@@ -464,7 +520,8 @@ INSTRUCCION_COMPROBAR = """Eres el script supervisor de un video. Abajo esta LO
 FIJO (el sitio, el reparto y los estados aprobados del objeto que cambia) y el
 GUION VISUAL, plano a plano. Di que planos piden algo que CONTRADICE lo fijo: un
 mueble o una pieza que el sitio no tiene, otro sitio, un estado que no existe,
-un personaje que no esta en el reparto. Lo fijo manda: si un plano lo
+un personaje que no esta en el reparto (un OTRO AMBIENTE DEL MISMO LUGAR de lo fijo
+no es otro sitio). Lo fijo manda: si un plano lo
 contradice, se dibujara lo fijo. No juzgues el estilo ni el gusto: solo
 contradicciones.
 

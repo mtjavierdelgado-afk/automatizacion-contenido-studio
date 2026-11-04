@@ -3403,6 +3403,51 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
   border-radius: 8px; padding: 6px 10px; background: var(--hueco); font-size: 13px; }
 .regla-negocio .pastilla { white-space: nowrap; }
 
+/* ================================================== REGLAS CLARAS
+   Rama reglas-claras: en «📏 Reglas», el contador y dos cajas con su color
+   (coral: del negocio; violeta: de este estilo), la pista de reglas que
+   hablan de lo mismo y «Revisar si se contradicen». */
+.contador-reglas { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px;
+  border: 1px solid var(--linea); border-radius: 10px; padding: 9px 12px; background: var(--hueco); }
+.contador-reglas strong { font-size: 14px; font-variant-numeric: tabular-nums; }
+.del-negocio { color: var(--coral-texto); font-weight: 600; }
+.del-estilo { color: var(--acento); font-weight: 600; }
+.caja-reglas { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--linea);
+  border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.negocio-del-estilo.caja-reglas { padding-bottom: 10px; border-bottom: 1px solid var(--coral-texto); }
+.caja-reglas-negocio { border-color: var(--coral-texto); background: var(--coral-fondo); }
+.caja-reglas-estilo { border-color: var(--acento-borde); }
+.caja-reglas-tit { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.caja-reglas-tit h4 { margin: 0; font-size: 14px; }
+.caja-reglas-negocio .caja-reglas-tit h4 { color: var(--coral-texto); }
+.caja-reglas-estilo .caja-reglas-tit h4 { color: var(--acento); }
+.etiqueta-reglas { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+  border: 1px solid; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.caja-reglas-negocio .etiqueta-reglas { color: var(--coral-texto); }
+.caja-reglas-estilo .etiqueta-reglas { color: var(--acento); }
+.nota-reglas { font-size: 12.5px; color: var(--tenue); }
+.caja-reglas-negocio .regla-negocio { background: var(--panel); }
+.caja-reglas-negocio .pastilla { color: var(--coral-texto); border-color: var(--coral-texto); }
+.aviso-choques-reglas { display: flex; flex-direction: column; gap: 8px; }
+.pista-reglas-parecidas, .revisar-choques { display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid var(--linea); border-radius: 10px; padding: 9px 12px; }
+.revisar-choques .fila { align-items: center; gap: 8px; flex-wrap: wrap; }
+.par-de-reglas { border-left: 3px solid var(--aviso); background: var(--hueco); border-radius: 6px;
+  padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.par-de-reglas mark { background: var(--aviso-fondo); color: var(--aviso); padding: 0 3px; border-radius: 3px; }
+.aviso-coste-choques { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--aviso-borde);
+  background: var(--aviso-fondo); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.aviso-coste-choques .fila { gap: 8px; flex-wrap: wrap; }
+.choque-de-reglas { display: flex; flex-direction: column; gap: 3px; border-left: 3px solid var(--aviso);
+  background: var(--hueco); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+.choque-de-reglas.se-repiten { border-left-color: var(--acento); }
+.choque-de-reglas .tipo-choque { font-size: 11.5px; letter-spacing: .05em; text-transform: uppercase; }
+.choque-de-reglas.se-contradicen .tipo-choque { color: var(--aviso); }
+.choque-de-reglas.se-repiten .tipo-choque { color: var(--acento); }
+.aviso-dibujo { color: var(--aviso); }
+.uso-ficha-negocio { display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--linea);
+  border-radius: 8px; padding: 8px 10px; background: var(--hueco); font-size: 13px; }
+
 /* Los elementos de una imagen (rama elementos-video), en su diapositiva. */
 .elementos-plano { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--linea);
   border-radius: 10px; padding: 8px 10px; margin-top: 8px; }
@@ -5415,6 +5460,12 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   .coste-origen { font-size: 10.5px; padding: 1px 7px; }
 }
 
+/* ====================================== AMBIENTES (rama tipo-de-relato-2) */
+.ambientes-relato { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; min-width: 0; }
+.ambiente-relato { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--linea);
+  border-radius: 8px; min-width: 0; }
+.ambiente-relato.aprobada { border-color: var(--ok-borde); }
+
 /* ============================================ GUION VISUAL (rama guion-visual) */
 .guion-visual { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .editor-gv { padding: 12px; border: 1px solid var(--linea); border-radius: 10px; margin-top: 10px; }
@@ -5501,3 +5552,81 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .tabla-consumo-claude th:first-child, .tabla-consumo-claude td.que { text-align: left; white-space: normal; overflow-wrap: anywhere; }
 /* medidor-claude-2: Claude de un vídeo, por tarea, en «Coste del vídeo» */
 .claude-del-video { margin: 6px 0 12px; }
+
+/* ======================================= CUENTAS QUE TE GUSTAN 2 (01-11-2026)
+   rama cuentas-gustan-2: casillas en «Ya leídas», cifras relativas de una
+   cuenta, el análisis de varias juntas y los temas propuestos. */
+.cab-leidas { gap: 6px; flex-wrap: wrap; align-items: center; }
+.cab-leidas h3 { margin: 4px 0; }
+.tarjeta-cuenta-sel { display: flex; align-items: stretch; gap: 0; min-width: 0; }
+.tarjeta-cuenta-sel .tarjeta-cuenta { flex: 1 1 auto; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.casilla-cuenta { display: flex; align-items: center; justify-content: center; padding: 0 10px; cursor: pointer;
+  border: 1px solid var(--linea); border-right: 0; border-radius: 12px 0 0 12px; background: var(--hueco); }
+.casilla-cuenta input { width: 18px; height: 18px; margin: 0; cursor: pointer; }
+.tarjeta-cuenta-sel.marcada .casilla-cuenta { border-color: var(--acento); background: var(--marcado); }
+.cifras-cuenta { border-top: 1px solid var(--linea-suave); margin-top: 10px; padding-top: 8px; display: grid; gap: 6px; }
+.cab-rangos { gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.rangos-cuenta { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 130px), 1fr)); }
+.rango-cuenta { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border: 1px solid var(--linea);
+  border-radius: 10px; background: var(--hueco); min-width: 0; }
+.faltan-duraciones { gap: 8px; flex-wrap: wrap; align-items: center; }
+.video-cuenta.dudoso { opacity: .78; }
+.relativas-video { font-variant-numeric: tabular-nums; }
+.pastilla-dudoso { display: inline-block; margin-top: 4px; white-space: normal; overflow-wrap: anywhere; text-transform: none; letter-spacing: 0; }
+.varias-cuentas { display: grid; gap: 8px; }
+.varias-cuentas > .fila { gap: 8px; flex-wrap: wrap; align-items: center; }
+.varias-cuentas h3 { margin: 0; }
+.resultado-conjunto { display: grid; gap: 8px; border-top: 1px solid var(--linea-suave); padding-top: 10px; min-width: 0; }
+.resultado-conjunto h4 { margin: 8px 0 0; }
+.resumen-conjunto { margin: 0; line-height: 1.5; }
+.item-conjunto { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--linea); border-radius: 10px;
+  background: var(--panel); min-width: 0; overflow-wrap: anywhere; }
+.pruebas-conjunto { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.pastilla.prueba { text-decoration: none; text-transform: none; letter-spacing: 0; }
+.cab-tema .pastilla { text-transform: none; letter-spacing: 0; white-space: normal; overflow-wrap: anywhere; }
+.proponer-temas { border-top: 1px solid var(--linea-suave); padding-top: 10px; display: grid; gap: 6px; }
+.proponer-temas h4 { margin: 0; }
+.proponer-temas .fila { gap: 8px; flex-wrap: wrap; align-items: center; }
+.temas-propuestos { display: grid; gap: 10px; border-top: 2px solid var(--linea); padding-top: 12px; margin-top: 6px; min-width: 0; }
+.temas-propuestos > .fila { gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.temas-propuestos h3 { margin: 0; }
+.tarjeta-tema { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--linea); border-radius: 12px;
+  background: var(--panel); min-width: 0; }
+.tarjeta-tema.estado-aprobado { border-color: var(--acento); }
+.tarjeta-tema.estado-descartado { opacity: .6; }
+.tarjeta-tema.escrito { border-style: dashed; }
+.cab-tema { gap: 6px; flex-wrap: wrap; align-items: center; }
+.campos-tema { display: grid; gap: 6px 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.campo-tema { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.campo-tema.ancho { grid-column: 1 / -1; }
+.campo-tema input { width: 100%; box-sizing: border-box; min-width: 0; }
+.por-que-tema { overflow-wrap: anywhere; }
+.aviso-copia ul { margin: 4px 0 0; padding-left: 18px; }
+.temas-fuera summary { cursor: pointer; }
+.tema-fuera { gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--linea-suave); min-width: 0; }
+.tema-fuera > .crece { min-width: 0; overflow-wrap: anywhere; }
+.escribir-temas { gap: 8px; flex-wrap: wrap; align-items: center; border-top: 1px solid var(--linea-suave); padding-top: 10px; }
+@media (max-width: 600px) {
+  .campos-tema { grid-template-columns: minmax(0, 1fr); }
+}
+/* ---- CUENTAS QUE TE GUSTAN 3 (rama cuentas-gustan-3, 02-11-2026) ---- */
+.ejemplos-gancho { display: grid; gap: 4px; }
+.ejemplo-gancho { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; min-width: 0; }
+.ejemplo-gancho .meta { min-width: 0; overflow-wrap: anywhere; }
+.comparar-conjuntos { display: grid; gap: 6px; border-top: 1px solid var(--linea-suave); padding-top: 10px; min-width: 0; }
+.comparar-conjuntos h4 { margin: 0; }
+.comparar-conjuntos .fila { gap: 8px; flex-wrap: wrap; align-items: center; }
+.comparar-conjuntos select { max-width: 100%; min-width: 0; }
+.resultado-comparacion { display: grid; gap: 8px; min-width: 0; }
+.seccion-comparacion { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--linea); border-radius: 10px;
+  background: var(--panel); min-width: 0; overflow-wrap: anywhere; }
+.seccion-comparacion h5 { margin: 0; }
+.cambio-conjunto ul { margin: 2px 0 0; padding-left: 18px; }
+.cambio-conjunto.aparece b { color: var(--ok); }
+.cambio-conjunto.sigue b { color: var(--tenue); }
+.cambio-conjunto.desaparece b { color: var(--malo); }
+.cuentas-propias { display: grid; gap: 4px; }
+.cuentas-propias .fila { gap: 6px; flex-wrap: wrap; align-items: center; }
+.cuentas-propias .pastilla { text-transform: none; letter-spacing: 0; white-space: normal; overflow-wrap: anywhere;
+  display: inline-flex; gap: 4px; align-items: center; }
+.cuentas-propias select { max-width: 100%; min-width: 0; }

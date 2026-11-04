@@ -8205,6 +8205,19 @@ def tipo_de_relato(navegador, datos):
            "(3) «El reparto y los sitios» con su pedido")
         ok(pg.visible(".pedido-sitios button", "Volver a repartir con este pedido"),
            "(3) y «Volver a repartir con este pedido»")
+        # (2c) tipo-de-relato-2 (25-10): un recorrido enseña sus ambientes, cada uno
+        # con su imagen base de referencia y su precio; no se genera nada
+        r, _d = api.post(f"/api/proyectos/{pid}/tipo_relato/aplicar",
+                         {"tipo_relato": {"modo": "recorrido"}})
+        ok(r.status_code == 200, f"(2c) el vídeo pasa a «Recorrido» ({r.status_code})")
+        pg.js("APP.light.video.relato = null; pintarLight();")
+        ok(pg.esperar(".ambientes-relato", "Los ambientes del lugar", 20),
+           "(2c) un recorrido enseña «Los ambientes del lugar»")
+        ok(pg.visible(".ambiente-relato button", "Generar la imagen")
+           or pg.visible(".ambiente-relato button", "Otra imagen"),
+           "(2c) cada ambiente con su botón y su precio")
+        ok(not pg.visible(".imagen-base-relato"), "(2c) y sin la imagen base que se edita")
+        pg.captura("tipo_relato_ambientes")
         # vuelta a lo de antes, para no cambiar nada de lo que venga detrás
         r, _d = api.post(f"/api/proyectos/{pid}/tipo_relato/aplicar", {"tipo_relato": None})
         ok(r.status_code == 200, f"(2) y se puede volver a lo del estilo ({r.status_code})")
@@ -9282,6 +9295,19 @@ def insertar_una_imagen(navegador, datos):
     sid, nuevo = elegida["id"], elegida["id"] + "B"
     palabras = elegida["insertar"]["palabras"]
     k = elegida["insertar"]["validas"][0]
+    # COMO EN EL SERVIDOR (28-10): el dibujo de este plano se hizo para una
+    # frase más vieja (la voz se regrabó después). Al deshacer, la insertada
+    # --que dice el final de la frase de ahora-- «se parecía más» y S004 se
+    # quedaba con su dibujo
+    activa_v = _version_de(datos, "assets", "")
+    ver_v = activa_v.get("activa") or activa_v.get("n") or activa_v.get("version")
+    ficha_vieja = os.path.join(datos["proyectos"], pid, "pasos", "assets", f"v{ver_v}",
+                               "escenas", f"{sid}.json")
+    with open(ficha_vieja, encoding="utf-8") as fh:
+        fv = json.load(fh)
+    fv["narracion"] = "una frase vieja que la voz ya no dice"
+    with open(ficha_vieja, "w", encoding="utf-8") as fh:
+        json.dump(fv, fh, ensure_ascii=False)
     antes = _huellas_de_planos(datos, pid)
     # UNA IMAGEN QUE FALTA en otro plano (una tanda cancelada): la tanda de la
     # insertada NO la dibuja, se pagó UNA (revisión del 26-10)
@@ -9430,6 +9456,254 @@ def diagramas_en_el_encargo(navegador, datos):
         api.put(f"/api/proyectos/{pid}/diagramas", {"diagramas": None})
         pg.sin_errores("los diagramas")
         pg.cerrar()
+
+
+@escenario
+def cuentas_que_te_gustan_2(navegador, datos):
+    """cuentas-gustan-2 (01-11-2026), con las fuentes simuladas: las cifras de
+    una cuenta (relativas, por duración, dudosos) y completar su duración;
+    marcar varias, «Analizar seleccionadas» (avisa de cuentas, vídeos y cupo),
+    «Proponer temas», editar y aprobar, «Escribir guiones aprobados» con el
+    nombre del proyecto, y que los temas queden escritos. Y en el móvil."""
+    api = datos["api"]
+    api.put("/api/parrilla/cuentas/conexiones", {"apify_token": "apify_api_recorrido_1234",
+                                                 "meta_token": "EAABrecorrido5678", "ig_id": "17841400000000000"})
+    for red, usuario in (("tiktok", "gusta_ana"), ("tiktok", "gusta_beto"), ("instagram", "gusta_estudio")):
+        r, t = api.post("/api/parrilla/cuentas/leer", {"texto": "@" + usuario, "red": red, "cuantos": 12, "pagar": True})
+        fin = time.time() + 30
+        while t.get("estado") == "trabajando" and time.time() < fin:
+            time.sleep(0.4)
+            _r, t = api.get(f"/api/parrilla/cuentas/trabajos/{t['id']}")
+        ok(t.get("estado") == "listo", f"@{usuario} leída ({t.get('estado')}: {t.get('error', '')[:80]})")
+    r, d = api.post("/api/clientes", {"nombre": "Ideas de cuentas"})
+    cid = ((d or {}).get("cliente") or {}).get("id")
+    ok(cid, "un proyecto para los temas")
+
+    pg = Pagina(navegador, datos, nombre="cuentas que te gustan 2")
+    pg.js("try { localStorage.removeItem('cuentasSeleccion'); } catch (e) {} PAR.cuentasSel = null;")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    pg.pulsar(".pestanas-automatizar button", "Cuentas que te gustan")
+    ok(pg.esperar(".tarjeta-cuenta-sel", "gusta_estudio", 10), "cada cuenta leída, con su casilla")
+    pg.pulsar(".cuentas-guardadas .tarjeta-cuenta", "gusta_estudio")
+    ok(pg.esperar(".cifras-cuenta", "Vistas por duración", 10), "la cuenta enseña sus cifras y las vistas por duración")
+    ok(pg.visible(".cifras-cuenta", "Mediana"), "con su mediana")
+    ok(pg.visible(".relativas-video", "su mediana"), "cada vídeo, relativo a la cuenta y por cada 100 vistas")
+    ok(pg.visible(".pastilla-dudoso", "Dudoso"), "los dudosos se ven, con su motivo")
+    ok(pg.visible(".faltan-duraciones", "falta la duración"), "Instagram sin duración: lo dice")
+    pg.dialogos.clear()
+    pg.pulsar(".faltan-duraciones button", "Completar con Apify")
+    ok(any("$" in x and "duración" in x for x in pg.dialogos), f"pregunta antes de pagar, con el precio: {pg.dialogos[-1:]}")
+    ok(pg.esperar(".cab-rangos .meta", "12 de 12", 20), "y completa la duración de los 12")
+    pg.captura("cuenta_con_cifras")
+
+    pg.pulsar(".cab-leidas button", "Seleccionar todas")
+    marcadas = pg.p.locator(".tarjeta-cuenta-sel.marcada").count()
+    ok(marcadas >= 3, f"«Seleccionar todas» marca las leídas ({marcadas})")
+    ok(pg.esperar(".varias-cuentas button.primario", "Analizar seleccionadas", 5), "aparece «Analizar seleccionadas»")
+    # cupo-aviso (02-11): con el cupo al 93 % AVISA y deja seguir, no bloquea
+    cupo_ruta = os.path.join(datos["env"]["ESTUDIO_SECRETOS"], "cupo_claude.json")
+    with open(cupo_ruta, "w", encoding="utf-8") as fh:
+        json.dump({"p": {"cuenta": "principal", "ventanas": {"five_hour": {"uso": 0.93, "reinicia": time.time() + 3600}}}}, fh)
+    try:
+        pg.dialogos.clear()
+        pg.pulsar(".varias-cuentas button.primario", "Analizar seleccionadas")
+        ok(any("cuentas" in x and "vídeos" in x for x in pg.dialogos),
+           f"antes de llamar a Claude dice cuántas cuentas y vídeos: {pg.dialogos[-1:]}")
+        ok(any("93 %" in x and "seguir igualmente" in x for x in pg.dialogos),
+           f"con el cupo al 93 %, avisa y ofrece seguir igualmente: {pg.dialogos[-1:]}")
+        ok(pg.esperar(".resultado-conjunto h4", "Fórmulas que se repiten", 30), "y al aceptar, analiza (no se para)")
+    finally:
+        os.remove(cupo_ruta)
+    ok(pg.visible(".pruebas-conjunto a.prueba"), "cada conclusión con sus vídeos de prueba, enlazados")
+    pg.captura("varias_cuentas")
+
+    # cuentas-gustan-3 (02-11): temas agrupados, ganchos, comparar y cuentas propias
+    ok(pg.visible(".resultado-conjunto h4", "Todos los temas, agrupados"), "los temas agrupados")
+    ok(pg.visible(".item-conjunto .meta", "vistas en"), "con la suma de vistas y las cuentas que los hacen")
+    ok(pg.visible(".resultado-conjunto h4", "Ganchos que mejor funcionan"), "los ganchos que mejor funcionan")
+    ok(pg.visible(".ejemplo-gancho a.prueba"), "con ejemplos enlazados")
+    ok(pg.esperar(".comparar-conjuntos .pista", "único análisis guardado", 10), "con un solo análisis, dice que aún no hay con qué comparar")
+    sel = pg.p.evaluate("() => [...seleccionCuentas()]")
+    r, t = api.post("/api/parrilla/conjuntos", {"cuentas": sel})
+    fin = time.time() + 30
+    while (t or {}).get("estado") == "trabajando" and time.time() < fin:
+        time.sleep(0.4)
+        _r, t = api.get(f"/api/parrilla/conjuntos/trabajos/{t['id']}")
+    ok((t or {}).get("estado") == "listo", "un segundo análisis de las mismas cuentas (el «del mes siguiente»)")
+    pg.js(f"PAR.conjHistorial = null; abrirConjunto('{(t or {}).get('analisis')}');")
+    ok(pg.esperar(".comparar-conjuntos button", "Comparar con el anterior", 10), "con dos, se pueden comparar")
+    pg.pulsar(".comparar-conjuntos button", "Comparar con el anterior")
+    ok(pg.esperar(".resultado-comparacion", "mismas cuentas", 10), "compara con el anterior de esas cuentas")
+    ok(pg.visible(".cambio-conjunto.sigue", "Siguen"), "y dice qué sigue, qué aparece y qué desaparece")
+    pg.p.locator(".resultado-comparacion").first.scroll_into_view_if_needed()
+    pg.captura("comparar_analisis")
+    pg.p.locator(".cuentas-propias select").first.select_option(label="@gusta_beto (tiktok)")
+    ok(pg.esperar(".cuentas-propias .pastilla", "publicaciones", 10), "marcar una cuenta tuya: lo publicado entra en el cruce")
+    _r, prop = api.get(f"/api/parrilla/proyectos/{cid}/cuentas-propias")
+    ok([c["usuario"] for c in (prop or {}).get("cuentas", [])] == ["gusta_beto"], "y se guarda en el proyecto")
+
+    pg.p.locator("[data-foco=temas-cuantos]").fill("4")
+    pg.dialogos.clear()
+    pg.pulsar(".proponer-temas button.primario", "Proponer temas")
+    ok(any("Ideas de cuentas" in x for x in pg.dialogos), "proponer temas dice para qué proyecto")
+    ok(any("de tus cuentas" in x for x in pg.dialogos), f"y cuántas publicaciones tuyas cruza: {pg.dialogos[-1:]}")
+    ok(pg.esperar(".tarjeta-tema", segundos=30), "la lista de temas para aprobar")
+    ok(pg.visible(".tarjeta-tema .pastilla", "nuevo"), "cada tema dice si es nuevo, parecido o repetido")
+    ok(pg.visible(".tarjeta-tema .pruebas-conjunto"), "con sus cuentas y vídeos de referencia")
+    pg.p.locator(".temas-propuestos").first.scroll_into_view_if_needed()
+    pg.captura("temas_propuestos")
+    pg.p.locator("[data-foco=tema-t01-gancho]").fill("Un gancho escrito por mí")
+    pg.p.locator("[data-foco=tema-t01-gancho]").press("Tab")
+    pg.p.wait_for_timeout(1500)
+    _r, temas = api.get(f"/api/parrilla/proyectos/{cid}/temas")
+    t01 = next((t for t in ((temas or {}).get("propuesta") or {}).get("temas", []) if t["id"] == "t01"), {})
+    ok(t01.get("gancho") == "Un gancho escrito por mí", f"editar el gancho se guarda ({t01.get('gancho')!r})")
+    ok(pg.p.locator(".escribir-temas button.primario").is_disabled(), "sin aprobar nada, «Escribir» no se puede pulsar")
+    for _ in range(2):
+        pg.pulsar(".tarjeta-tema.estado-pendiente .cab-tema button.primario", "Aprobar")
+        pg.p.wait_for_timeout(800)
+    ok(pg.esperar(".escribir-temas button.primario", "Escribir guiones aprobados (2)", 10), "dos aprobados")
+    pg.dialogos.clear()
+    pg.pulsar(".escribir-temas button.primario", "Escribir guiones aprobados")
+    ok(any("Parrilla de «Ideas de cuentas»" in x for x in pg.dialogos), f"confirma con el nombre del proyecto: {pg.dialogos[-1:]}")
+    fin = time.time() + 30
+    guiones = []
+    while time.time() < fin and len(guiones) < 2:
+        pg.p.wait_for_timeout(800)
+        _r, todo = api.get(f"/api/parrilla/proyectos/{cid}")
+        guiones = [g for m in (todo or {}).get("matrices", []) for g in m.get("guiones", [])]
+    ok(len(guiones) == 2, f"dos guiones en la Parrilla del proyecto ({len(guiones)})")
+    pg.p.wait_for_function("() => PAR.trabajo && PAR.trabajo.estado === 'listo' && PAR.seccion === 'parrilla'",
+                           timeout=30000)
+    ok(pg.esperar(".tarjeta-guion", segundos=10), "al acabar, la pantalla enseña la Parrilla con los guiones")
+    pg.pulsar(".pestanas-automatizar button", "Cuentas que te gustan")
+    ok(pg.esperar(".tarjeta-tema .pastilla", "guion escrito", 15), "y los temas quedan como escritos")
+    pg.pulsar(".cab-leidas button", "Quitar selección")
+    ok(pg.p.locator(".tarjeta-cuenta-sel.marcada").count() == 0, "«Quitar selección» las desmarca")
+    pg.sin_errores("cuentas que te gustan 2")
+    pg.cerrar()
+
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="movil")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}'); irASeccionParrilla('cuentas');")
+    ok(pg.esperar(".tarjeta-tema", segundos=15), "en el móvil, los temas")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
+    ok(ancho <= 391, f"y caben a lo ancho ({ancho} px)")
+    pg.captura("temas_movil")
+    pg.sin_errores("cuentas que te gustan 2 en el móvil")
+    pg.cerrar()
+
+# ======================================================================
+# REGLAS-CLARAS (28-10-2026). Tramo propio, al final.
+
+@escenario
+def reglas_claras(navegador, datos):
+    """Lo que vio el dueño el 28-10: en «📏 Reglas» las del negocio y las del
+    estilo salían seguidas y parecían duplicadas, y una de cada lista se
+    contradecían sin verse. Ahora: dos cajas con su título y su nota, el
+    contador «N reglas: X del negocio + Y de este estilo», la pista gratis y
+    «Revisar si se contradicen» (Claude simulado). Pintar y revisar no escriben
+    nada. Un proyecto y dos estilos propios, para no mover a los demás."""
+    from PIL import Image                                    # noqa: PLC0415
+    api = datos["api"]
+    _r, d = api.post("/api/clientes", {"nombre": "Reglas claras"})
+    cid = d["cliente"]["id"] if "cliente" in d else d.get("id")
+    carpeta = tempfile.mkdtemp(prefix="reglas_claras_")
+    refs = []
+    for i in range(3):            # un estilo pide al menos 3 fotogramas
+        ruta = os.path.join(carpeta, f"ref{i}.png")
+        Image.new("RGB", (400, 300), (60 * i + 40, 120, 90)).save(ruta)
+        refs.append(ruta)
+    propias = [{"texto": "La tele va siempre en su trípode negro, nunca sobre un mueble."},
+               {"texto": "Luz cálida de salón de fiestas, sin focos de estudio."}]
+    ids = {}
+    for nombre, modo in (("Fiesta foto", "foto"), ("Fiesta dibujo", None)):
+        estilo = {"referencias": refs, "reglas": propias}
+        if modo:
+            estilo["modo"] = modo
+        r, d = api.post("/api/presets-canal", {"tipo": "canal", "nombre": nombre,
+                                               "datos": {"estilo": estilo, "guion": {"instrucciones": "x"}}})
+        ok(r.status_code == 200 and "preset" in d, f"se crea el estilo «{nombre}» ({r.status_code} {d})")
+        if "preset" not in d:
+            return
+        ids[nombre] = d["preset"]["id"]
+        api.put(f"/api/clientes/estilos/{ids[nombre]}", {"cliente": cid})
+    r, _d = api.put(f"/api/clientes/{cid}/negocio", {
+        "nombre": "Alquiler de consolas",
+        "reglas": [{"texto": "Los mandos se sujetan con las dos manos.", "palabras": ["mando"]},
+                   {"texto": "Cada tele va en su trípode o sobre un mueble, nunca flotando."}]})
+    ok(r.status_code == 200, f"el proyecto de prueba tiene su ficha ({r.status_code})")
+
+    def foto_de_disco():
+        _r, lista = api.get("/api/presets-light")
+        estilos = {x["id"]: (x.get("datos") or {}).get("estilo") for x in lista.get("presets") or []
+                   if x.get("id") in ids.values()}
+        _r, negocio = api.get(f"/api/clientes/{cid}/negocio")
+        return json.dumps([estilos, negocio.get("negocio")], sort_keys=True)
+    antes = foto_de_disco()
+    pg = Pagina(navegador, datos)
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{ids['Fiesta foto']}' }});")
+    pg.p.wait_for_timeout(1500)
+    pg.pulsar("button", "📏 Reglas")
+    ok(pg.esperar(".contador-reglas", "recibe 4 reglas", 15),
+       "el contador dice cuántas reglas recibe cada imagen")
+    ok(pg.visible(".contador-reglas", "2 del negocio") and pg.visible(".contador-reglas", "2 de este estilo"),
+       "X del negocio + Y de este estilo")
+    ok(pg.visible(".caja-reglas-negocio h4", "Del negocio · todo el proyecto «Reglas claras»"),
+       "la caja del negocio lleva su título")
+    ok(pg.visible(".caja-reglas-negocio .nota-reglas", "Valen para todos los estilos de foto de este proyecto"),
+       "y su nota")
+    ok(pg.visible(".caja-reglas-negocio button", "Editar la ficha"), "con «✎ Editar la ficha»")
+    ok(pg.visible(".caja-reglas-estilo h4", "De este estilo · solo «Fiesta foto»"),
+       "la caja del estilo lleva su título")
+    ok(pg.visible(".caja-reglas-estilo .nota-reglas", "Valen solo para este estilo"), "y su nota")
+    ok(pg.esperar(".pista-reglas-parecidas", "léelas juntas", 10)
+       and pg.visible(".pista-reglas-parecidas mark", "mueble"),
+       "la pista gratis junta la tele del negocio con la del estilo")
+    pg.captura("reglas_claras_dos_cajas")
+    pg.pulsar(".revisar-choques button", "Revisar si se contradicen")
+    ok(pg.esperar(".aviso-coste-choques", "membresía de Claude", 5),
+       "antes de revisar avisa de que gasta la membresía")
+    pg.pulsar(".aviso-coste-choques button", "Sí, revisar")
+    ok(pg.esperar(".choque-de-reglas", "Se contradicen", 30),
+       "Claude (simulado) señala el par que se contradice")
+    ok(pg.visible(".revisar-choques", "No se ha cambiado nada"), "y dice que no ha cambiado nada")
+    pg.captura("reglas_claras_choques", entera=False)
+    pg.pulsar(".revisar-choques button", "Revisar otra vez")
+    ok(pg.esperar(".aviso-coste-choques", "no cambia nada", 5), "«Revisar otra vez» vuelve a avisar antes")
+    pg.pulsar(".aviso-coste-choques button", "Cancelar")
+    pg.p.wait_for_timeout(500)
+    ok(not pg.visible(".aviso-coste-choques") and pg.visible(".choque-de-reglas", "Se contradicen"),
+       "y «Cancelar» lo deja como estaba, sin llamar a Claude")
+    ok(foto_de_disco() == antes, "pintar y revisar no escriben nada (ni estilos ni ficha)")
+    pg.sin_errores("las reglas claras de un estilo de foto")
+
+    # EN UN ESTILO DE DIBUJO, las del negocio no se le aplican
+    pg.js(f"irALight('preset', {{ abierto: '{ids['Fiesta dibujo']}' }});")
+    pg.p.wait_for_timeout(1500)
+    pg.pulsar("button", "📏 Reglas")
+    ok(pg.esperar(".contador-reglas", "no se le aplican", 15),
+       "en un estilo de dibujo, el contador dice que las del negocio no se le aplican")
+    ok(pg.visible(".contador-reglas", "0 del negocio"), "y cuenta 0 del negocio")
+
+    # Y EN LA FICHA DEL NEGOCIO: que se suman, y cuántos estilos de foto la usan
+    pg.js(f"elegirCliente('{cid}'); irALight('galeria');")
+    ok(pg.esperar(".abrir-ajustes-proyecto", None, 15), "el proyecto con su «⚙ Ajustes del proyecto»")
+    pg.pulsar(".abrir-ajustes-proyecto")
+    ok(pg.esperar(".uso-ficha-negocio", "se suman", 10), "la ficha dice que sus reglas se suman a las del estilo")
+    ok(pg.visible(".uso-ficha-negocio", "La usan 1 estilo de foto de este proyecto (Fiesta foto)"),
+       "y cuántos estilos de foto la usan")
+    ok(pg.visible(".uso-ficha-negocio", "Los de dibujo (1) no la reciben"), "y que los de dibujo no")
+    pg.captura("reglas_claras_ficha", entera=False)
+    pg.js("cerrarAjustesProyecto();")
+    ok(foto_de_disco() == antes, "abrir la ficha tampoco escribe nada")
+    pg.sin_errores("la línea de la ficha del negocio")
+    pg.cerrar()
+    api._r("DELETE", f"/api/clientes/{cid}/negocio")
+    for pid in ids.values():
+        api._r("DELETE", f"/api/presets-light/{pid}")
+    api._r("DELETE", f"/api/clientes/{cid}")
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -77,6 +77,8 @@ QUE_PRUEBA = {
     "pasos/prueba_quitar_planos.py": "quitar una imagen e igualar con la vecina",
     "pasos/prueba_insertar_planos.py": "insertar una imagen dentro de otra",
     "pasos/prueba_consumo_claude.py": "el medidor del cupo de Claude",
+    "pasos/prueba_cuentas_gustan.py": "Cuentas que te gustan",
+    "pasos/prueba_parrilla_estados.py": "los estados de la Parrilla",
     "herramientas/prueba_herramientas_prueba.py": "estas mismas herramientas de prueba",
     "prueba_recorrido.py": "la pantalla entera, botón por botón",
 }

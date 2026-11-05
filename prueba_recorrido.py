@@ -5516,7 +5516,7 @@ def parrilla_analizar_una_cuenta(navegador, datos):
 @escenario
 def automatizar_tablero_y_panel(navegador, datos):
     """rediseno-automatizar (22-10-2026, maqueta aprobada por el dueño): la
-    cabecera con el proyecto y «+ Añadir guiones», las cinco pestañas (sin las
+    cabecera con el proyecto y «+ Añadir guiones», las seis pestañas (sin las
     que no se podían pulsar), la marca a la vista, el tablero Pendientes ·
     Usados · Publicados con sus filtros, la ficha en un panel lateral con
     «Pasar al Encargo ›» siempre abajo, las tarjetas de dónde salen los
@@ -5551,8 +5551,9 @@ def automatizar_tablero_y_panel(navegador, datos):
        "el proyecto, como chip en la cabecera")
     ok(pg.visible(".cab-automatizar .anadir-cabecera", "+ Añadir guiones"), "con «+ Añadir guiones» al lado")
     pestanas = pg.p.evaluate("() => [...document.querySelectorAll('.pestanas-automatizar button')].map(b => b.textContent.trim())")
-    ok(pestanas == ["Parrilla", "Añadir guiones", "Conversar con Claude", "Cuentas que te gustan", "Marca del cliente"],
-       f"cinco pestañas, todas pulsables: {pestanas}")
+    ok(pestanas == ["Parrilla", "Añadir guiones", "Conversar con Claude", "Cuentas que te gustan", "Marca del cliente",
+                    "Recibidos de Chrome"],
+       f"seis pestañas, todas pulsables: {pestanas}")
     ok(pg.p.evaluate("() => ![...document.querySelectorAll('#modulo button[disabled]')].some(b => "
                      "/Piloto|Ficha de un guion/.test(b.textContent))"), "sin pestañas desactivadas")
     # la marca, a la vista

@@ -10010,7 +10010,6 @@ def graficas(navegador, datos):
     pg.p.select_option(".form-graf select[aria-label='Letra de los títulos']", "anton")
     pg.p.evaluate("""() => { const i = document.querySelector('.form-graf input[aria-label="Color Secundario"]');
       i.value = '#00c2a8'; i.dispatchEvent(new Event('input', {bubbles: true})); }""")
-    ok(pg.esperar(".form-graf button", "Volver a los del kit", 1) or True, "el color se cambia solo en esta pieza")
     pg.p.wait_for_timeout(1500)
     pg.captura("editor_grafica")
     pg.pulsar(".guardar-grafica", "Guardar")

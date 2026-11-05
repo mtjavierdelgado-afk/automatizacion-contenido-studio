@@ -23531,7 +23531,7 @@ def _por_graficas(fn, *args, **kwargs):
 def _ficha_de_graficas(cid, peticion):
     """El proyecto, si existe y esta peticion puede verlo (los de clave, abiertos)."""
     raiz = raiz_proyectos()
-    for ficha in CLIENTES.listar(raiz):
+    for ficha in CLIENTES.listar(raiz)["clientes"]:
         if ficha["id"] == cid:
             if cid in CLIENTES.cerrados_para(raiz, peticion.headers.get("x-estudio-abiertos")):
                 raise ErrorApi(403, "este proyecto tiene clave: ábrelo primero")

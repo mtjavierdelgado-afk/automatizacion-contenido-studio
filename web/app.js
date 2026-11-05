@@ -2521,6 +2521,7 @@ function pintarConfig() {
   caja.appendChild(seccionCanalYouTube(ficha));  // tu canal con OAuth (rama seo-real-3)
   caja.appendChild(seccionClavesAnalizarCuentas());  // analizar cuentas: YouTube, Meta y Apify (rediseno-publicar)
   caja.appendChild(seccionEnviarAlStudio());  // la extensión de Chrome (enviar-al-studio)
+  caja.appendChild(seccionClaveVidiq(ficha));  // vidIQ por el Claude de la membresía (rama vidiq-1)
   caja.appendChild(h('div', { clase: 'fila' },
     h('button', {
       clase: 'mini fantasma',
@@ -27897,7 +27898,8 @@ function pasoSeoPublicar(f) {
     caja.appendChild(h('div', { clase: 'meta' }, 'Elige antes alguna red en «Redes».'));
     return caja;
   }
-  caja.appendChild(bloqueSeoVideo());  // lo encaja aquí rediseno-publicar; seo-real/seo-real-3 lo cambian por dentro
+  caja.appendChild(bloqueSeoVideo());
+  { const vq = bloqueVidiqSeo(f); if (vq) caja.appendChild(vq); }  // «Mejorar con vidIQ» (rama vidiq-1); sin clave, nada  // lo encaja aquí rediseno-publicar; seo-real/seo-real-3 lo cambian por dentro
   caja.appendChild(h('h3', { clase: 'titulo-notas-seo' }, 'La nota de cada red'));
   const rejilla = h('div', { clase: 'notas-seo-publicar' });
   (f.redes || []).forEach(r => rejilla.appendChild(h('section', { clase: 'nota-de-red-publicar', datos: { red: r } },
@@ -30235,6 +30237,8 @@ async function encontraronPublicar() {
     const f = PUB.ficha;
     f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { encontraron: {} }) });
     pintarModulo();
+    cargarPublicar(true);  // y se sigue preguntando hasta que acabe (antes se quedaba en «…» hasta recargar)
+    cargarPublicar(true);  // y se sigue preguntando hasta que acabe (antes se quedaba en «…» hasta recargar)
   } catch (e) { toast(e.message, true); }
 }
 
@@ -30244,6 +30248,8 @@ async function investigarBusquedasPublicar() {
     const f = PUB.ficha;
     f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { investigar: {} }) });
     pintarModulo();
+    cargarPublicar(true);  // y se sigue preguntando hasta que acabe (antes se quedaba en «…» hasta recargar)
+    cargarPublicar(true);  // y se sigue preguntando hasta que acabe (antes se quedaba en «…» hasta recargar)
   } catch (e) { toast(e.message, true); }
 }
 
@@ -32079,6 +32085,7 @@ function mensajesChatParrilla() {
     const burbuja = h('div', { clase: `chat-turno ${tuyo ? 'tuyo' : 'de-claude'} ${t.estado || ''}` });
     const marcas = [];
     if (tuyo && t.web) marcas.push('🌐 con internet');
+    if (tuyo && t.vidiq) marcas.push('📈 con vidIQ');  // rama vidiq-1
     if (tuyo && t.resultados) marcas.push('📊 con mis resultados');
     if (tuyo && t.cuenta) marcas.push(`📈 con ${t.cuenta}`);
     if (tuyo && (t.imagenes || []).length) marcas.push(`📎 ${t.imagenes.length} captura(s)`);
@@ -32166,6 +32173,7 @@ function entradaChatParrilla() {
         + 'fuera llevan su fuente y un aviso ⚠ para confirmarlos.'),
       interruptor('chatResultados', '📊 Con mis resultados', 'Le pasa a Claude tus vídeos que mejor funcionaron '
         + 'en este proyecto (cifras guardadas en Publicar).'),
+      interruptorVidiqChat(interruptor),  // «Ideas con vidIQ» (rama vidiq-1); sin clave, nada
       selectorCuentaChat(),
       modelos, h('span', { clase: 'crece' }),
       h('button', { clase: 'primario', disabled: ocupada ? true : null, onclick: () => enviarChatParrilla() },
@@ -32213,12 +32221,14 @@ async function enviarChatParrilla() {
     const datos = new FormData();
     datos.append('texto', texto);
     datos.append('web', PAR.chatWeb ? '1' : '0');
+    if (PAR.chatVidiq && vidiqPuesta()) datos.append('vidiq', '1');  // rama vidiq-1
     datos.append('resultados', PAR.chatResultados ? '1' : '0');
     if (PAR.chatCuenta) datos.append('cuenta', PAR.chatCuenta);
     datos.append('modelo', PAR.chatModelo || 'opus');
     PAR.chatCapturas.forEach(c => datos.append('capturas', c, c.name || 'captura.png'));
     const enviadas = PAR.chatCapturas.slice();
     PAR.chat = await pedir(rutaChatParrilla(`/${encodeURIComponent(PAR.chat.id)}/mensajes`), { method: 'POST', cuerpo: datos });
+    PAR.chatVidiq = false;  // vidIQ gasta créditos: es POR MENSAJE, se vuelve a marcar cada vez (vidiq-1)
     // lo escrito o adjuntado MIENTRAS se subía se queda para el siguiente
     if (PAR.chatTexto.trim() === texto) PAR.chatTexto = '';
     PAR.chatCapturas = PAR.chatCapturas.filter(c => !enviadas.includes(c));
@@ -34458,6 +34468,243 @@ function bloqueNegocioDelEstilo(ficha) {
   return caja;
 }
 
+/* ================================================================== VIDIQ
+   Rama `vidiq-1` (25-10-2026): vidIQ desde el Claude del Studio, con la
+   membresía (el CLI carga el servidor MCP de vidIQ; ver `pasos/vidiq.py`).
+   SIN CLAVE NO SE ENSEÑA NADA de esto fuera de Configuración: el Studio sigue
+   como antes. Todo es a pedido con un botón (gasta créditos de vidIQ):
+   - Configuración → vidIQ: la clave, «Probar» (créditos que quedan) y «Quitar».
+   - La Parrilla: «📈 Ideas con vidIQ», por mensaje y apagado por defecto.
+   - Publicar → SEO: «Mejorar con vidIQ» (palabra clave, nota del título y 3
+     alternativas). «Usar» es lo único que cambia algo, y lo cambia con el
+     mismo guardado de siempre de la ficha. */
+const VIDIQ_UI = { estado: null, pidiendo: false, videos: {}, relojes: {} };
+
+function rutaVidiq(resto) { return `${BASE}/api/vidiq${resto || ''}`; }
+
+async function cargarEstadoVidiq(forzar) {
+  if (VIDIQ_UI.pidiendo || (VIDIQ_UI.estado && !forzar)) return VIDIQ_UI.estado;
+  VIDIQ_UI.pidiendo = true;
+  try { VIDIQ_UI.estado = await pedir(rutaVidiq('/estado')); }
+  catch (e) { VIDIQ_UI.estado = { puesta: false, error: e.message, al: Date.now() }; }
+  finally { VIDIQ_UI.pidiendo = false; }
+  return VIDIQ_UI.estado;
+}
+
+/* La verdad de «hay clave» es el almacén de claves: si Configuración ya lo
+   leyó manda eso (cambia al guardar sin esperar a nadie); si no, el estado. */
+function vidiqPuesta() {
+  const ficha = APP.vista && APP.vista.config && APP.vista.config.ficha;
+  if (ficha && ficha.vidiq) return !!ficha.vidiq.puesta;
+  return !!(VIDIQ_UI.estado && VIDIQ_UI.estado.puesta);
+}
+
+/* La primera vez que una pantalla pregunta, se pide el estado y, si hay
+   clave, se repinta esa pantalla (sin pisar lo que se esté escribiendo). */
+function pedirEstadoVidiqUnaVez(repintar) {
+  const fallo = VIDIQ_UI.estado && VIDIQ_UI.estado.error;
+  // un estado que no se pudo leer se vuelve a pedir, pero no más de una vez por minuto
+  if (VIDIQ_UI.pidiendo || (VIDIQ_UI.estado !== null && !(fallo && Date.now() - (VIDIQ_UI.estado.al || 0) > 60000))) return;
+  cargarEstadoVidiq(true).then(() => { if (vidiqPuesta()) repintar(); });
+}
+
+function cifraVidiq(n) {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return '—';
+  return Math.abs(n) >= 1000 ? numeroCorto(n) : String(Math.round(n * 10) / 10).replace('.', ',');
+}
+
+function saldoVidiq() {
+  const e = VIDIQ_UI.estado || {};
+  if (typeof e.saldo !== 'number') return null;
+  return h('div', { clase: 'meta saldo-vidiq' },
+    `Te quedan ${e.saldo} créditos de vidIQ${e.saldo_al ? ` (a ${fechaCorta(e.saldo_al).slice(0, 16)})` : ''}.`);
+}
+
+/* -- Configuración */
+function seccionClaveVidiq(ficha) {
+  const v = (ficha && ficha.vidiq) || {};
+  const puesta = !!v.puesta;
+  if (VIDIQ_UI.estado === null && !VIDIQ_UI.pidiendo) cargarEstadoVidiq().then(() => repintarClaves());
+  const campo = h('input', { type: 'password', 'aria-label': 'Clave MCP de vidIQ',
+    placeholder: puesta ? `puesta (${v.cola || ''})` : 'sin poner' });
+  const resultado = h('div', { clase: 'meta resultado-vidiq' });
+  const tras = () => { VIDIQ_UI.estado = null; VIDIQ_UI.videos = {}; };
+  return h('section', { clase: 'bloque-config bloque-vidiq' },
+    h('h3', {}, 'vidIQ (ideas, palabras clave y títulos)'),
+    h('div', { clase: 'pista' },
+      'Opcional. La clave MCP de la cuenta de vidIQ del Studio (app.vidiq.com → Account settings → MCP → crear '
+      + 'clave). Con ella, la Parrilla puede pedir «Ideas con vidIQ» y Publicar ofrece «Mejorar con vidIQ» en el SEO '
+      + 'de cada vídeo. Va por el Claude de tu membresía (sin API de pago) y cada consulta gasta créditos de tu plan '
+      + 'de vidIQ: todo es a pedido, nunca solo. No hace falta conectar ningún canal.'),
+    h('div', { clase: 'fila' },
+      h('b', {}, 'vidIQ'), h('span', { clase: 'crece' }),
+      pastillaEstado(puesta ? 'ok' : 'vacio', puesta ? v.cola || 'puesta' : 'sin poner')),
+    puesta ? saldoVidiq() : null,
+    h('div', { clase: 'fila-clave' }, campo,
+      h('button', { clase: 'mini', onclick: async () => {
+        if (!campo.value.trim()) { toast('escribe la clave', true); return; }
+        const valor = campo.value.trim();
+        campo.value = '';
+        tras();
+        await guardarClaves({ vidiq: { clave: valor } });
+      } }, puesta ? 'Cambiar' : 'Guardar'),
+      puesta ? h('button', { clase: 'mini', datos: { accion: 'probar-vidiq' }, onclick: async ev => {
+        const boton = ev.currentTarget;
+        boton.disabled = true;
+        resultado.textContent = 'probando con vidIQ… (unos segundos)';
+        try {
+          const r = await pedir(rutaVidiq('/probar'), { method: 'POST' });
+          VIDIQ_UI.estado = r.estado;
+          resultado.textContent = `${r.prueba.estado === 'ok' ? '✓' : '⚠'} ${r.prueba.mensaje}`;
+        } catch (e) { resultado.textContent = e.message; }
+        boton.disabled = false;
+      } }, 'Probar') : null,
+      puesta ? h('button', { clase: 'mini fantasma peligro', onclick: async () => {
+        tras();
+        await guardarClaves({ vidiq: { clave: '' } });
+      } }, 'Quitar') : null),
+    resultado);
+}
+
+/* -- La Parrilla */
+function interruptorVidiqChat(interruptor) {
+  pedirEstadoVidiqUnaVez(() => {
+    const foco = document.activeElement;
+    if (MODULOS.actual === 'automatizar' && !(foco && foco.dataset && foco.dataset.foco === 'parrilla-chat')) pintarModulo();
+  });
+  if (!vidiqPuesta()) return null;
+  const aprox = ((VIDIQ_UI.estado || {}).creditos_aprox || {}).ideas || 'unos 5 a 15 por mensaje';
+  return interruptor('chatVidiq', '📈 Ideas con vidIQ', 'Este mensaje puede consultar vidIQ: palabras clave con su '
+    + 'volumen y competencia, vídeos que destacan en el nicho, tendencias y nota de títulos (datos de YouTube). '
+    + `Gasta créditos de vidIQ (${aprox}) y lo que saque lleva un aviso ⚠.`);
+}
+
+/* -- Publicar → SEO */
+async function cargarVidiqVideo(pid) {
+  try {
+    VIDIQ_UI.videos[pid] = await pedir(rutaVidiq(`/videos/${encodeURIComponent(pid)}`));
+  } catch (e) {
+    VIDIQ_UI.videos[pid] = { error: e.message };
+  }
+  if (PUB.pid === pid) repintarPublicarSinPisar();
+  seguirVidiqVideo(pid);
+}
+
+/* Mientras vidIQ consulta, se vuelve a preguntar cada 3 s; se para solo al
+   acabar o al salir de la ficha de ese vídeo. */
+function seguirVidiqVideo(pid) {
+  clearTimeout(VIDIQ_UI.relojes[pid]);
+  const v = VIDIQ_UI.videos[pid];
+  if (!v || !v.trabajando) return;
+  VIDIQ_UI.relojes[pid] = setTimeout(() => {
+    VIDIQ_UI.relojes[pid] = null;
+    if (MODULOS.actual !== 'publicar' || PUB.pid !== pid) return;
+    const antes = VIDIQ_UI.videos[pid];
+    cargarVidiqVideo(pid).then(() => {
+      const ahora = VIDIQ_UI.videos[pid] || {};
+      if (antes && antes.trabajando && !ahora.trabajando) {
+        if (ahora.error) toast(`vidIQ: ${ahora.error}`, true);
+        else toast('vidIQ ha terminado');
+        cargarEstadoVidiq(true).then(() => { if (PUB.pid === pid) repintarPublicarSinPisar(); });
+      }
+    });
+  }, 3000);
+}
+
+async function mejorarConVidiq(f) {
+  const aprox = ((VIDIQ_UI.estado || {}).creditos_aprox || {}).titulo || 'unos 15 a 20';
+  if (!(f.seo || {}).palabra) {
+    toast('Antes escribe la palabra clave del vídeo (o investiga búsquedas): sin ella vidIQ consultaría a ciegas', true);
+    return;
+  }
+  if (!(await preguntarPublicar(`vidIQ va a investigar «${f.seo.palabra}», puntuar el título y proponer 3 títulos. `
+    + `Gasta ${aprox} créditos de vidIQ y algo de uso de tu membresía de Claude. No cambia ningún texto: `
+    + 'tú eliges qué usar.', { titulo: 'Mejorar con vidIQ', aceptar: 'Consultar vidIQ' }))) return;
+  if (!(await guardarTextosPublicar())) return;
+  try {
+    VIDIQ_UI.videos[f.pid] = await pedir(rutaVidiq(`/videos/${encodeURIComponent(f.pid)}/titulo`), { method: 'POST' });
+    repintarPublicarSinPisar();
+    seguirVidiqVideo(f.pid);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function usarTituloVidiq(red, titulo) {
+  await guardarSeoVideoPublicar({ textos: { [red]: { titulo } } });
+}
+
+function filaFraseVidiq(c, enUso) {
+  return h('li', { clase: 'frase-vidiq' },
+    h('span', { clase: 'crece' }, h('b', {}, c.frase),
+      h('span', { clase: 'meta' }, ` · volumen ${typeof c.volumen === 'number' ? cifraVidiq(c.volumen) : (c.volumen_texto || '—')} · competencia ${cifraVidiq(c.competencia)}`
+        + ` · puntuación ${cifraVidiq(c.puntuacion)}`)),
+    enUso ? h('span', { clase: 'pastilla ok' }, 'en uso')
+      : h('button', { clase: 'mini', title: 'La deja como palabra clave de este vídeo',
+        onclick: () => guardarSeoVideoPublicar({ palabra_clave: c.frase }) }, 'Usar'));
+}
+
+function bloqueVidiqSeo(f) {
+  pedirEstadoVidiqUnaVez(() => { if (MODULOS.actual === 'publicar') repintarPublicarSinPisar(); });
+  if (!vidiqPuesta() || !f || !f.pid) return null;
+  const pid = f.pid;
+  if (VIDIQ_UI.videos[pid] === undefined) { VIDIQ_UI.videos[pid] = null; cargarVidiqVideo(pid); }
+  const v = VIDIQ_UI.videos[pid] || {};
+  const trabajando = !!v.trabajando;
+  // se salió de la ficha mientras consultaba: al volver, se sigue preguntando
+  if (trabajando && !VIDIQ_UI.relojes[pid]) seguirVidiqVideo(pid);
+  const r = v.resultado || null;
+  const aprox = ((VIDIQ_UI.estado || {}).creditos_aprox || {}).titulo || 'unos 15 a 20';
+  const plano = x => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  const caja = h('div', { clase: 'bloque vidiq-seo', datos: { bloque: 'vidiq' } },
+    h('div', { clase: 'fila' }, h('h3', { clase: 'crece' }, '📈 vidIQ'),
+      h('button', { clase: 'mini primario', disabled: trabajando, datos: { accion: 'mejorar-vidiq' },
+        title: 'vidIQ investiga la palabra clave, puntúa el título y propone 3 títulos. Gasta créditos de vidIQ.',
+        onclick: () => mejorarConVidiq(f) },
+      trabajando ? 'vidIQ está consultando…' : (r ? 'Volver a consultar' : 'Mejorar con vidIQ'))),
+    h('div', { clase: 'meta' }, `Investiga la palabra clave de este vídeo, puntúa su título y propone 3 títulos con `
+      + `emojis. Gasta ${aprox} créditos de vidIQ y algo de uso de tu membresía de Claude. No cambia nada hasta que pulses «Usar».`),
+    saldoVidiq());
+  if (v.error) caja.appendChild(cajaError(v.error));
+  if (!r) return caja;
+  if (v.palabra && plano(v.palabra) !== plano((f.seo || {}).palabra)) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' }, `Esto se consultó con la palabra «${v.palabra}»; la de este vídeo `
+      + `ahora es «${(f.seo || {}).palabra || '—'}». Vuelve a consultar si quieres lo de la nueva.`));
+  }
+  if (r.palabra) {
+    caja.appendChild(h('h4', {}, 'La palabra clave'));
+    caja.appendChild(h('ul', { clase: 'lista-vidiq' }, filaFraseVidiq(r.palabra, plano(r.palabra.frase) === plano((f.seo || {}).palabra))));
+    if (r.palabra.texto) caja.appendChild(h('div', { clase: 'meta' }, r.palabra.texto));
+  }
+  if ((r.relacionadas || []).length) {
+    caja.appendChild(h('h4', {}, 'Frases relacionadas que el vídeo trata'));
+    caja.appendChild(h('ul', { clase: 'lista-vidiq' },
+      ...r.relacionadas.map(c => filaFraseVidiq(c, plano(c.frase) === plano((f.seo || {}).palabra)))));
+  }
+  if (r.titulo_actual) {
+    caja.appendChild(h('h4', {}, 'Tu título'));
+    caja.appendChild(h('div', { clase: 'fila' }, h('span', { clase: 'crece' }, `«${r.titulo_actual.texto}»`),
+      typeof r.titulo_actual.nota === 'number'
+        ? h('span', { clase: `pastilla ${r.titulo_actual.nota >= 70 ? 'ok' : r.titulo_actual.nota >= 40 ? 'aviso' : 'error'}` },
+          `nota ${cifraVidiq(r.titulo_actual.nota)}`) : null));
+    if ((r.titulo_actual.consejos || []).length) {
+      caja.appendChild(h('ul', { clase: 'consejos-vidiq' }, ...r.titulo_actual.consejos.map(c => h('li', {}, c))));
+    }
+  }
+  const redesTitulo = TITULO_MANDA_PUBLICAR.filter(red => (f.redes || []).includes(red));
+  if ((r.alternativas || []).length) {
+    caja.appendChild(h('h4', {}, 'Títulos propuestos'));
+    caja.appendChild(h('ul', { clase: 'lista-vidiq' }, ...r.alternativas.map(a => h('li', { clase: 'titulo-vidiq' },
+      h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, a.titulo),
+        typeof a.nota === 'number' ? h('span', { clase: 'pastilla' }, `nota ${cifraVidiq(a.nota)}`) : null),
+      a.porque ? h('div', { clase: 'meta' }, a.porque) : null,
+      h('div', { clase: 'fila' }, ...(redesTitulo.length
+        ? redesTitulo.map(red => h('button', { clase: 'mini', title: `Lo pone como título de ${NOMBRES_RED[red]}`,
+          onclick: () => usarTituloVidiq(red, a.titulo) }, `Usar en ${NOMBRES_RED[red]}`))
+        : [h('button', { clase: 'mini fantasma', onclick: () => copiarTexto(a.titulo) }, 'Copiar')]))))));
+  }
+  (r.avisos || []).forEach(a => caja.appendChild(h('div', { clase: 'meta aviso-vidiq' }, `⚠ ${a}`)));
+  if (v.al) caja.appendChild(h('div', { clase: 'meta' }, `Consultado el ${fechaCorta(v.al).slice(0, 16)}.`));
+  return caja;
+}
 /* ===================================================================== PILOTO
  *
  * «🤖 HACER EL VÍDEO COMPLETO» (rama `video-completo`, 28-10-2026). Un botón en

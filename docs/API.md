@@ -34,6 +34,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/proyectos/{pid}` | Cambia el nombre VISIBLE del proyecto. -> la ficha. |
 | `GET` | `/api/proyectos/{pid}/diagramas` | — |
 | `PUT` | `/api/proyectos/{pid}/diagramas` | {diagramas: modo | null}: cuanto se explica dibujando en ESTE video. |
+
+| `GET` | `/api/proyectos/{pid}/diagramas` | El ajuste «Diagramas» de un vídeo: el que manda, el del vídeo, el del estilo y lo deducido (tramos que explican y gráficos). |
+| `PUT` | `/api/proyectos/{pid}/diagramas` | {diagramas: ninguna | solo_si_lo_pide | equilibrada | didactica | null}: el de ESTE vídeo; null vuelve al del estilo. No dibuja nada. |
 | `POST` | `/api/proyectos/{pid}/duplicar` | Copia un proyecto entero con lo que tiene puesto HOY. -> el nuevo. |
 | `POST` | `/api/proyectos/{pid}/elementos/aplicar` | Pone los elementos de varios planos de una vez: {planos: {sid: [...]}, |
 | `POST` | `/api/proyectos/{pid}/elementos/proponer` | Claude propone elementos para el video (o para {planos: [sid]}) con la |
@@ -549,8 +552,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/sistema/revisiones/{rid}` | — |
 | `GET` | `/api/sistema/terminos` | Los terminos de uso, tal cual estan en docs/TERMINOS.md (el pie). |
 | `POST` | `/api/sonido/subir` | Sube un audio tuyo (MP3, WAV, M4A, OGG) para la música o un efecto. |
+| `GET` | `/api/vidiq/estado` | {puesta, simulado, saldo, saldo_al, creditos_aprox, trabajando}. Sin la clave. |
+| `POST` | `/api/vidiq/probar` | Prueba la clave contra vidIQ (`vidiq_balance`): {estado, mensaje, saldo}. |
+| `GET` | `/api/vidiq/videos/{pid}` | El último «Mejorar con vidIQ» de un vídeo y si sigue consultando. |
+| `POST` | `/api/vidiq/videos/{pid}/titulo` | «Mejorar con vidIQ»: la palabra clave del vídeo, la nota de su título de |
 | `GET` | `/{fichero}` | Sirve un fichero suelto de web/ (app.js, estilo.css...). |
 
 ---
 
 **437 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+
+**429 endpoints.** Escrito por `generar_api.py` desde `app.py`.

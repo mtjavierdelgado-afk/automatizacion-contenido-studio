@@ -123,6 +123,10 @@ def _vacio():
         # de Google Cloud que pega la persona y lo que deja la conexión (el
         # token de refresco y el canal). No va al .env: solo lo usa Publicar.
         "youtube_oauth": dict(YOUTUBE_OAUTH_VACIO),
+        # vidIQ (rama vidiq-1): la clave MCP de la cuenta del Studio. Solo la
+        # usa `pasos/vidiq.py`, que la mete en el fichero MCP de cada llamada
+        # al CLI. No va al .env. Sin ella, nada cambia.
+        "vidiq": {"clave": ""},
         "claude_cli": {"cuentas": []},
     }
 
@@ -179,7 +183,7 @@ def _normalizar(datos):
     elif isinstance(cartesia, str):
         base["cartesia"]["clave"] = cartesia.strip()
 
-    for suelta in ("jamendo", "freesound", "uploadpost", "youtube"):
+    for suelta in ("jamendo", "freesound", "uploadpost", "youtube", "vidiq"):
         cruda = datos.get(suelta)
         if isinstance(cruda, dict):
             base[suelta]["clave"] = str(cruda.get("clave") or "").strip()
@@ -357,7 +361,7 @@ def _fusionar(actual, peticion):
     # es la que ya habia. Sin eso, editar la de Jamendo borraria la de Cartesia,
     # porque la clave de verdad no baja al navegador NUNCA y la pantalla manda
     # el centinela en su lugar.
-    for suelta in ("cartesia", "jamendo", "freesound", "uploadpost", "youtube"):
+    for suelta in ("cartesia", "jamendo", "freesound", "uploadpost", "youtube", "vidiq"):
         if suelta in peticion:
             ficha = peticion.get(suelta)
             clave = ficha.get("clave") if isinstance(ficha, dict) else ficha
@@ -637,6 +641,10 @@ def resumen(datos=None):
             "puesta": bool(datos["youtube"]["clave"]),
             "cola": tapar(datos["youtube"]["clave"]),
         },
+        "vidiq": {
+            "puesta": bool(datos["vidiq"]["clave"]),
+            "cola": tapar(datos["vidiq"]["clave"]),
+        },
         # sin el secreto ni el token: solo si están y qué canal se conectó
         "youtube_oauth": {
             "puesta": bool(datos["youtube_oauth"]["cliente_id"] and datos["youtube_oauth"]["secreto"]),
@@ -704,6 +712,11 @@ def apuntar_cuenta_cli(cuenta_id, config_dir=None, entrada=None, etiqueta=None):
             _escribir_json(FICHERO, datos)
             return dict(ficha)
     raise ErrorClaves(f"no hay ninguna cuenta del CLI con id '{cuenta_id}'")
+
+
+def vidiq():
+    """La clave MCP de vidIQ guardada aqui, si la hay (rama vidiq-1)."""
+    return leer()["vidiq"]["clave"] or ""
 
 
 def cartesia():

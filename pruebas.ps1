@@ -95,6 +95,7 @@ $suites = @(
   'pasos\prueba_piloto.py',
   'pasos\prueba_graficas.py',
   'pasos\prueba_choques_reglas.py',
+  'pasos\prueba_vidiq.py',
   'prueba_recorrido.py'
 )
 

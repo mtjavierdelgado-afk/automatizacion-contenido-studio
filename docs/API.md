@@ -438,6 +438,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/parrilla/temas/trabajos/{tid}` | — |
 | `DELETE` | `/api/parrilla/trabajos/{tid}` | Quita de la pantalla un trabajo terminado (el aviso de listo o de error). |
 | `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
+| `GET` | `/api/piloto` | La cola del piloto, la bandeja «Necesita revisión», los ajustes y el cupo. |
+| `PUT` | `/api/piloto/ajustes` | {si_falla?, umbral_pct?, vueltas?, tope_usd?, a_la_vez?, portadas?, |
+| `POST` | `/api/piloto/videos` | Manda un guion de la Parrilla al piloto: {cid, gid, indice?, estilo, |
+| `DELETE` | `/api/piloto/videos/{vid}` | Lo quita de la lista. El video, si se creo, se queda en Tus proyectos. |
+| `POST` | `/api/piloto/videos/{vid}/parar` | Para un video: si espera, sale de la cola; si trabaja, se cancela su |
+| `POST` | `/api/piloto/videos/{vid}/portada` | {id}: deja esa portada candidata como portada del video (gratis). |
+| `GET` | `/api/piloto/videos/{vid}/portadas/{cual}.png` | La imagen de una portada candidata. |
+| `POST` | `/api/piloto/videos/{vid}/seguir` | «Seguir igualmente» ({forzar: true}: salta el tope y el interruptor una |
 | `GET` | `/api/portadas/catalogo` | Plantillas, paletas, fuentes, elementos y formatos de las portadas. |
 | `GET` | `/api/pronunciaciones` | Las palabras que la voz dice como se escriben aqui (sobre todo en ingles). |
 | `PUT` | `/api/pronunciaciones` | {lista: [{escrito, dicho}]} -> la lista guardada. No graba nada ni paga nada. |
@@ -502,8 +510,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/youtube/probar` | Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo) |
 | `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para el generador: {texto, nombre?, palabras?}. |
 | `GET` | `/api/reglas-estilo/afinar/{rid}` | Como va «Afinar con Claude», y la propuesta al terminar. |
-| `POST` | `/api/reglas-estilo/choques` | «Revisar si se contradicen»: Claude compara las reglas del negocio que recibe un estilo de foto con las suyas: {preset}. Solo lee; de una en una (409). -> {id} |
-| `GET` | `/api/reglas-estilo/choques/{rid}` | Cómo va la revisión, y al terminar {pares: [{tipo: contradicen\|repiten, negocio, estilo, por_que, que_cambiar}], negocio, estilo}. |
+| `POST` | `/api/reglas-estilo/choques` | {preset} -> {id}; el resultado ({pares, negocio, estilo}) en GET. |
+| `GET` | `/api/reglas-estilo/choques/{rid}` | Cómo va «Revisar si se contradicen», y los pares al terminar. |
 | `GET` | `/api/sistema/estilos-perdidos` | Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira. |
 | `GET` | `/api/sistema/guias` | Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA. |
 | `POST` | `/api/sistema/guias/{gid}/revisar` | Lanza la revision de un texto contra la guia de su campo. -> {id} |
@@ -520,4 +528,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**404 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**414 endpoints.** Escrito por `generar_api.py` desde `app.py`.

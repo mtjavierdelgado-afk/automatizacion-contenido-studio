@@ -782,15 +782,16 @@ REGLAS_RED = {
                   "DM, link en bio. Hashtags: 5 a 8, mezclando amplios, de nicho y "
                   "locales si el material nombra la zona."),
     "youtube": ("YouTube: TÍTULO de 40 a 70 caracteres (nunca más de 70: se corta en "
-                "el móvil), con la palabra clave principal al principio, claro y "
-                "buscable, sin clickbait engañoso y sin «<» ni «>». DESCRIPCIÓN pensada "
+                "el móvil), buscable Y con gancho (lo de «EL TÍTULO ENGANCHA», abajo) y sin "
+                "«<» ni «>». DESCRIPCIÓN pensada "
                 "para el buscador: las dos primeras líneas repiten la palabra clave y "
                 "resumen la promesa del vídeo (es lo que sale en los resultados); "
                 "después 1 a 3 párrafos cortos con las palabras clave secundarias "
                 "dichas con naturalidad. CTA: suscribirse o el enlace de la "
                 "descripción. Hashtags: 3 a 5 (los tres primeros salen encima del "
                 "título)."),
-    "facebook": ("Facebook: TÍTULO corto (hasta 80 caracteres) y DESCRIPCIÓN que se "
+    "facebook": ("Facebook: TÍTULO corto (hasta 80 caracteres) con gancho (lo de «EL TÍTULO "
+                 "ENGANCHA», abajo), y DESCRIPCIÓN que se "
                  "entienda SIN SONIDO (mucha gente lo ve en silencio): di en el texto "
                  "lo que pasa en el vídeo. Gancho en la primera línea, párrafos cortos "
                  "y fáciles de leer, tono cercano. CTA: enviar mensaje, llamar o "
@@ -802,11 +803,51 @@ REGLAS_RED.update(RD.REGLAS)
 #: título se lee encima del vídeo mientras pasa, la descripción casi no se ve.
 REGLA_YOUTUBE_SHORT = (
     "YouTube SHORT (vertical de hasta 3 minutos): TÍTULO CORTO, de 30 a 60 "
-    "caracteres, que se lea de un vistazo encima del vídeo, con la palabra clave "
-    "principal al principio, sin «<» ni «>» y sin escribir «#Shorts» (lo pone el "
+    "caracteres, que se lea de un vistazo encima del vídeo, con gancho (lo de «EL "
+    "TÍTULO ENGANCHA», abajo), sin «<» ni «>» y sin escribir «#Shorts» (lo pone el "
     "Studio). DESCRIPCIÓN breve: 1 a 3 líneas, la primera con la palabra clave y "
     "la promesa del vídeo; nada de capítulos ni párrafos largos. CTA corto: "
     "suscribirse o comentar. Hashtags: 3 a 5.")
+
+
+#: Notas del dueño, 04-11-2026 (la prueba completa): los títulos de YouTube y
+#: Facebook salían descriptivos y planos, «dicen de qué va pero no dan ganas de
+#: abrirlo». Va aparte de REGLAS_RED para que la lean las redes con título y
+#: no las demás.
+REDES_TITULO_GANCHO = ("youtube", "facebook")
+#: Segunda vuelta del mismo día: el dueño vio los títulos «igual que antes».
+#: Con la frase clave ENTERA obligada al principio («paletas de colores para
+#: baño sin ventana», 40 letras) al gancho le quedaban ~20 caracteres. Ahora el
+#: título lleva las PALABRAS de la clave donde mejor suenen (YouTube y Facebook
+#: buscan por palabras, no por la frase exacta; la frase entera va en la
+#: primera línea del texto y en los hashtags) y el gancho manda.
+TIPOS_TITULO = (
+    ("gancho", "A · Gancho primero",
+     "empieza por el PROBLEMA o una PREGUNTA de quien lo sufre y después el tema "
+     "(«¿Baño sin ventana y oscuro? 💡 3 paletas de colores que lo cambian»)"),
+    ("tema", "B · Tema corto + gancho",
+     "el tema dicho CORTO (las 2-4 palabras que lo identifican) y detrás una "
+     "CURIOSIDAD fuerte («Baño sin ventana: el color que lo hace ver más grande 🤍»)"),
+    ("numero", "C · Número y beneficio",
+     "un NÚMERO y un BENEFICIO concreto que el vídeo cumple («3 colores para un baño "
+     "sin ventana (el 1.º da más luz) 💡»)"),
+    ("mezcla", "D · Mezcla",
+     "lo mejor de las tres: la combinación que más ganas dé de abrirlo para ESTE vídeo"),
+)
+REGLA_TITULO_GANCHO = (
+    "EL TÍTULO ENGANCHA (YouTube y Facebook): tiene que dar ganas de abrir el vídeo, "
+    "no solo decir de qué va. Lleva las PALABRAS de la palabra clave (no hace falta la "
+    "frase entera ni al principio: basta con sus palabras con significado, dichas como "
+    "suenen natural, dentro de los primeros 60 caracteres) y UN gancho sacado de lo que "
+    "el vídeo enseña de verdad. Elige la forma que mejor enganche para ESTE vídeo: "
+    + "; ".join(f"{n}: {d}" for _t, n, d in TIPOS_TITULO[:3]) + ". "
+    "MAL, porque solo describe o repite la palabra clave con una coletilla: «Paletas de "
+    "colores para baño sin ventana: cuál lo agranda». También mal: «Guía de…», «Todo "
+    "sobre…», «X: tres opciones», «En este vídeo…». Sin clickbait que el vídeo no "
+    "cumple, sin MAYÚSCULAS enteras y con un solo «¿?» o «¡!» como mucho. 1 o 2 emojis "
+    "bien puestos (los que pida el apartado de emojis): pegados a la palabra que "
+    "ilustran o cerrando el gancho, nunca en lugar de una palabra. YouTube y Facebook "
+    "llevan títulos DISTINTOS (otra forma u otro gancho).")
 
 
 # ------------------------------------------------------------------ los emojis
@@ -845,9 +886,9 @@ _TABLA_EMOJIS = {
     "google_business": ((0, 0), (0, 1), (0, 2)),
 }
 #: Lo mismo para el TÍTULO, en las redes que lo tienen. YouTube con cuidado:
-#: uno, al final, y nunca en lugar de la palabra clave.
+#: detrás de la palabra clave, nunca delante ni en lugar de ella.
 _TABLA_EMOJIS_TITULO = {
-    "youtube": ((0, 0), (0, 1), (1, 1)),
+    "youtube": ((0, 0), (1, 1), (1, 2)),       # 04-11: «1 o 2 emojis bien puestos»
     "facebook": ((0, 0), (1, 1), (1, 2)),
     "linkedin": ((0, 0), (0, 0), (0, 1)),
     "pinterest": ((0, 0), (0, 1), (1, 1)),
@@ -856,8 +897,8 @@ _TABLA_EMOJIS_TITULO = {
 EMOJIS_RED = {
     "tiktok": "uno abriendo el gancho y otro al cerrar la línea; nunca en lugar de una palabra clave",
     "instagram": "uno abriendo el gancho, uno de viñeta en cada párrafo o beneficio y otro en el CTA",
-    "youtube": ("de viñeta en cada párrafo o punto de la descripción (el del TÍTULO, al "
-                "final: nunca delante ni en lugar de la palabra clave)"),
+    "youtube": ("de viñeta en cada párrafo o punto de la descripción (los del TÍTULO, "
+                "detrás de la palabra clave: nunca delante ni en lugar de ella)"),
     "facebook": "uno abriendo el gancho y de viñeta en los párrafos",
     "linkedin": "sobrios, de viñeta en una lista de puntos; nada de caras ni fuegos",
     "x": "pegados a la idea, sin quitar sitio a las palabras (280 caracteres)",
@@ -1275,6 +1316,7 @@ CÓMO SE ESCRIBE (todas las redes)
 
 REGLAS POR RED
 {reglas}
+{titulo_gancho}
 
 {seo}
 
@@ -1328,6 +1370,8 @@ def instruccion_textos(info, redes, ajustes, seo="", datos_video=None):
                           + (REGLA_YOUTUBE_SHORT if r == "youtube" and encajes[r].get("tipo") == "Short"
                              else REGLAS_RED[r]) for r in redes),
         capitulos=capitulos,
+        titulo_gancho=(REGLA_TITULO_GANCHO if any(r in REDES_TITULO_GANCHO for r in redes)
+                       else ""),
         claves=", ".join(f'"{r}"' for r in redes),
         seo=seo or "",
         palabra_json=(',\n  "palabra_clave": "la propuesta para este vídeo"' if seo else ""),
@@ -1677,7 +1721,8 @@ def _optimizar(raiz, info, redes, ajustes, proyecto, cwd, aplicar=False):
         aprendido="\n".join(f"- {a}" for a in ((real or {}).get("ganchos") or [])[:5]) or "—",
         textos=json.dumps(textos, ensure_ascii=False, indent=1),
         nota=SR.nota_como_texto(notas),
-        reglas="\n".join(f"- {NOMBRE_RED[r]}: {REGLAS_RED[r]}" for r in textos),
+        reglas="\n".join(f"- {NOMBRE_RED[r]}: {REGLAS_RED[r]}" for r in textos)
+        + (f"\n{REGLA_TITULO_GANCHO}" if any(r in REDES_TITULO_GANCHO for r in textos) else ""),
         claves=", ".join(f'"{r}"' for r in textos))
     respuesta, _sobre = _hablar_con_claude(
         instruccion, SEO.SISTEMA_OPTIMIZAR, proyecto, cwd, "optimizar el SEO de los textos",
@@ -1813,6 +1858,121 @@ def usar_gancho(raiz, pid, red, indice):
         # la propuesta SEO de ese texto era sobre el de antes del gancho
         propuesta = ((ficha.get("seo_propuesta") or {}).get("redes")) or {}
         ((propuesta.get(red) or {}).get("campos") or {}).pop("descripcion", None)
+        if red in propuesta and not propuesta[red].get("campos"):
+            del propuesta[red]
+        if not propuesta:
+            ficha.pop("seo_propuesta", None)
+        _escribir(_ruta_video(raiz, pid), ficha)
+    return ficha
+
+
+# ------------------------------------------- «Dame 4 títulos» (titulos-gancho)
+# Notas del dueño, 04-11-2026: «dame las 3 opciones y una 4.ª de mezcla para
+# escoger». Una llamada corta, solo títulos, a pedido; quedan en la ficha de
+# Publicar (`titulos_opciones`), fuera de params y firmas, hasta que se elige.
+
+INSTRUCCION_TITULOS = """Escribe 4 títulos para {red} de este vídeo, uno de cada forma:
+{formas}
+
+Reglas:
+- Hasta {largo} caracteres cada uno (cuenta los emojis).
+- Llevan las palabras de la palabra clave «{palabra}» donde suenen natural (no hace
+  falta la frase entera ni al principio), dentro de los primeros 60 caracteres.
+- Cada uno con UN gancho sacado de lo que el vídeo enseña de verdad: nada que el vídeo
+  no cumpla, sin MAYÚSCULAS enteras, un solo «¿?» o «¡!» como mucho.
+- {emojis}
+- MAL (solo describe): «{palabra}: cuál lo agranda». Que ninguno sea así.
+- En el idioma y el tono del texto.
+
+<texto_actual>
+{texto}
+</texto_actual>
+
+<guion>
+{guion}
+</guion>
+
+Devuelve SOLO este JSON: {{"titulos": {{{claves}}}}}
+"""
+
+
+def normalizar_titulos(datos, largo):
+    """{tipo: título} -> [{"tipo", "nombre", "titulo"}] en el orden A, B, C, D."""
+    bruto = (datos or {}).get("titulos") if isinstance(datos, dict) else None
+    if isinstance(bruto, list):
+        bruto = {t: v for (t, _n, _d), v in zip(TIPOS_TITULO, bruto)}
+    salida = []
+    for tipo, nombre, _d in TIPOS_TITULO:
+        texto = " ".join(str((bruto or {}).get(tipo) or "").split())
+        texto = re.sub(r"[<>]", "", texto)[:largo].strip()
+        if texto and texto not in [x["titulo"] for x in salida]:
+            salida.append({"tipo": tipo, "nombre": nombre, "titulo": texto})
+    return salida
+
+
+def _largo_titulo(red, info, datos):
+    if red == "youtube":
+        return 60 if encaje_de(red, info, datos).get("tipo") == "Short" else 70
+    return 80
+
+
+def _titulos(raiz, info, red, ajustes, proyecto, cwd):
+    pid = info["pid"]
+    datos = _leer_video(raiz, pid)
+    largo = _largo_titulo(red, info, datos)
+    t = datos["textos"].get(red) or {}
+    nivel = nivel_emojis(ajustes)
+    mn, mx = rango_emojis(red, nivel, "titulo")
+    emojis = (f"De {mn} a {mx} emojis cada uno, pegados a la palabra que ilustran o "
+              "cerrando el gancho." if mx else "Sin emojis.")
+    instruccion = INSTRUCCION_TITULOS.format(
+        red=NOMBRE_RED[red], largo=largo,
+        formas="\n".join(f"- {tipo} ({n}): {d}" for tipo, n, d in TIPOS_TITULO),
+        palabra=SEO.palabra_del_video(datos, ajustes, info) or "(la de lo que trata el vídeo)",
+        emojis=emojis,
+        texto=(f"Título: {t.get('titulo') or '—'}\n" + str(t.get("descripcion") or ""))[:1500],
+        guion="\n".join(f"- {b.get('texto', '')}" for b in (info.get("guion") or []))[:3000] or "—",
+        claves=", ".join(f'"{tipo}": "..."' for tipo, _n, _d in TIPOS_TITULO))
+    respuesta, _s = _hablar_con_claude(
+        instruccion, SISTEMA, proyecto, cwd, "títulos para redes",
+        lambda: (json.dumps({"titulos": {
+            "gancho": f"¿Problema {red}? 💡 la solución",
+            "tema": f"Tema {red}: lo que nadie mira 🤍",
+            "numero": f"3 ideas para {red} (la 1.ª sorprende) 💡",
+            "mezcla": f"¿Problema {red}? 3 ideas que lo cambian 🎨"}}, ensure_ascii=False),
+                 {"_coste_anotado": True}))
+    titulos = normalizar_titulos(comun.extraer_json(respuesta, "los títulos"), largo)
+    if not titulos:
+        raise RuntimeError("Claude no ha devuelto ningún título")
+    with _lock(pid):
+        ficha = _leer_video(raiz, pid)
+        ficha.setdefault("titulos_opciones", {})[red] = titulos
+        _escribir(_ruta_video(raiz, pid), ficha)
+
+
+def lanzar_titulos(raiz, info, red, ajustes, proyecto=None, cwd=None, en_hilo=True):
+    if red not in REDES_TITULO_GANCHO:
+        raise ErrorPublicar("«Dame 4 títulos» va con YouTube y Facebook")
+    _en_marcha(f"titulos_{red}", info["pid"])
+    _lanzar_seo(f"titulos_{red}", info["pid"],
+                lambda: _titulos(raiz, info, red, ajustes, proyecto, cwd), en_hilo)
+
+
+def usar_titulo(raiz, pid, red, indice):
+    """Pone el título elegido en esa red. No toca nada más."""
+    with _lock(pid):
+        ficha = _leer_video(raiz, pid)
+        opciones = (ficha.get("titulos_opciones") or {}).get(red) or []
+        if isinstance(indice, bool) or not isinstance(indice, int) or not 0 <= indice < len(opciones):
+            raise ErrorPublicar("ese título ya no está")
+        actual = dict(ficha["textos"].get(red) or {})
+        actual["titulo"] = opciones[indice]["titulo"]
+        ficha["textos"][red] = actual
+        ficha["editado"] = True
+        ficha.get("titulos_opciones", {}).pop(red, None)
+        # la propuesta SEO del título era sobre el de antes
+        propuesta = ((ficha.get("seo_propuesta") or {}).get("redes")) or {}
+        ((propuesta.get(red) or {}).get("campos") or {}).pop("titulo", None)
         if red in propuesta and not propuesta[red].get("campos"):
             del propuesta[red]
         if not propuesta:
@@ -2186,6 +2346,37 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
 
 # ----------------------------------------------------------- textos a mano
 
+MAX_TEXTO_PORTADA_GUION = 80
+MAX_IMAGEN_PORTADA_GUION = 600
+
+
+def limpiar_portada_guion(valor):
+    """La portada propuesta en el guion de la Parrilla (rama portada-en-guion,
+    04-11): {texto, imagen} limpios, o {} si no dice qué imagen dibujar.
+
+    Vive en la ficha de Publicar del vídeo, fuera de params y firmas (regla 1):
+    la escribe la creación del vídeo y la corrige la caja de Publicar."""
+    valor = valor if isinstance(valor, dict) else {}
+    imagen = " ".join(str(valor.get("imagen") or "").split())[:MAX_IMAGEN_PORTADA_GUION]
+    if not imagen:
+        return {}
+    texto = " ".join(str(valor.get("texto") or "").split())[:MAX_TEXTO_PORTADA_GUION]
+    return {"texto": texto, "imagen": imagen}
+
+
+def guardar_portada_guion(raiz, pid, valor):
+    """La portada del guion, al crear el vídeo. Solo si el guion la trae: un
+    vídeo sin ella no gana ningún campo. -> lo guardado o {}"""
+    limpia = limpiar_portada_guion(valor)
+    if not limpia:
+        return {}
+    with _lock(pid):
+        ficha = _leer_video(raiz, pid)
+        ficha["portada_guion"] = dict(limpia, origen="parrilla")
+        _escribir(_ruta_video(raiz, pid), ficha)
+    return ficha["portada_guion"]
+
+
 def guardar_ficha(raiz, pid, cambios):
     cambios = cambios if isinstance(cambios, dict) else {}
     with _lock(pid):
@@ -2260,6 +2451,18 @@ def guardar_ficha(raiz, pid, cambios):
                 ficha.pop("youtube_formato", None)
             else:
                 ficha["youtube_formato"] = cambios["youtube_formato"]
+        if "portada_guion" in cambios:
+            # la portada propuesta en el guion (rama portada-en-guion): se
+            # corrige, no se borra; sin descripción no hay nada que dibujar
+            if not isinstance(cambios["portada_guion"], dict):
+                raise ErrorPublicar("«portada_guion» es {texto, imagen}")
+            for campo in ("texto", "imagen"):
+                if not isinstance(cambios["portada_guion"].get(campo, ""), str):
+                    raise ErrorPublicar(f"«{campo}» de la portada es un texto")
+            nueva = limpiar_portada_guion(cambios["portada_guion"])
+            if not nueva.get("imagen"):
+                raise ErrorPublicar("la portada del guion necesita la descripción de su imagen")
+            ficha["portada_guion"] = dict(ficha.get("portada_guion") or {}, **nueva)
         if "portada" in cambios:
             ficha["portada"] = _validar_portada(cambios["portada"], ficha.get("portada"))
             if cambios["portada"].get("quitar_imagen"):
@@ -2629,6 +2832,8 @@ def ficha(raiz, info, ajustes):
         "desactualizada": desactualizada, "escritos": datos.get("escritos") or "",
         "editado": bool(datos.get("editado")),
         "portada": portada_de(datos),
+        # la portada propuesta en el guion de la Parrilla ({} si no la trae)
+        "portada_guion": dict(datos.get("portada_guion") or {}),
         # ¿la cuenta de TikTok tiene «cover_image»? (portadas-2: entonces lleva tu imagen sola)
         "tiktok_portada_propia": tiktok_puede_portada(ajustes),
         # cuántos emojis lleva cada texto y si se queda corto (aviso aparte: la
@@ -2642,6 +2847,7 @@ def ficha(raiz, info, ajustes):
             "notas": notas_seo, "propuesta": datos.get("seo_propuesta") or {},
             "notas_con_propuesta": con_propuesta,
             "ganchos": datos.get("ganchos") or {},
+            "titulos": datos.get("titulos_opciones") or {},
             "trabajando": {t: dict(v) for (t, c), v in list(_SEO_TRABAJANDO.items()) if c == pid},
             "errores": {t: _error_seo(t, c) for (t, c) in list(_SEO_ERRORES) if c == pid
                         and _error_seo(t, c)},

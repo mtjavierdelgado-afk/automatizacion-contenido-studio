@@ -77,6 +77,7 @@ import quitar_planos  # noqa: E402
 import insertar_planos  # noqa: E402
 import cta  # noqa: E402
 import encuadres  # noqa: E402
+import diagramas  # noqa: E402
 import estadisticas  # noqa: E402
 import medios  # noqa: E402
 import moodboard  # noqa: E402
@@ -1115,6 +1116,9 @@ def _asignar_sets(escenas, catalogo, p):
     beats = []
     set_previo, consecutivos = None, 0
     repartidos = _beats_por_escena(escenas, catalogo)
+    # los graficos con cifras no se eligen por palabras: van al plano que dice
+    # sus cifras (abajo). Sin graficos, es el MISMO catalogo.
+    por_palabras = diagramas.sin_graficos(catalogo)
     for indice, escena in enumerate(escenas):
         texto = medios.normalizar_texto(escena["narracion"])
         beat = repartidos[indice]
@@ -1125,7 +1129,7 @@ def _asignar_sets(escenas, catalogo, p):
         beat = beat or {}
         set_nombre, punto = _elegir_set(texto, catalogo, set_previo, consecutivos,
                                         p["semilla"], escena["id"])
-        componente = beat.get("componente") or _elegir_componente(texto, catalogo, punto)
+        componente = beat.get("componente") or _elegir_componente(texto, por_palabras, punto)
         if beat.get("set"):
             set_nombre, componente = beat["set"], None
         if componente:
@@ -1146,6 +1150,16 @@ def _asignar_sets(escenas, catalogo, p):
         else:
             consecutivos = 1 if set_nombre else 0
         set_previo = set_nombre
+    # LOS GRAFICOS CON CIFRAS (rama diagramas-por-contenido): en el plano cuya
+    # voz dice sus cifras, aunque su tramo traiga sitio. Solo con el ajuste
+    # puesto; sin el, ningun catalogo los trae y esto no toca nada.
+    por_grafico = diagramas.planos_de_graficos(escenas, catalogo.get("componentes"),
+                                               diagramas.modo_de(p))
+    for escena in escenas:
+        if escena["id"] in por_grafico:
+            escena["componente"] = por_grafico[escena["id"]]
+            escena["set"] = None
+            escena["personajes"] = []
     return beats
 
 
@@ -1193,6 +1207,13 @@ def _asignar_cartas(escenas, p, texto=""):
     """
     forzadas = {e["id"]: str(_ajustes_unidad(p, f"escena:{e['id']}").get("carta")
                              or "") for e in escenas}
+    # DIAGRAMAS POR CONTENIDO (rama diagramas-por-contenido). Solo con el ajuste
+    # guardado: sin el, `extra` sale vacio y el reparto es la llamada de siempre.
+    # En ilustracion, el «diagrama» deja de salir por sorteo y sale en los
+    # tramos que explican; una carta forzada a mano sigue mandando. En foto no
+    # cambia nada todavia (la foto explicada va en la segunda vuelta).
+    modo_dg = diagramas.modo_de(p)
+    retocar = diagramas.activo(modo_dg) and modo_de(p.get("estilo")) != "foto"
     # EN MODO FOTO, SU ESCALERA (Etapa Foto A). La de ilustracion no se toca:
     # sin `estilo.modo` se reparte con la llamada de siempre, sin un argumento
     # de mas. `servicios` (param de assets, opcional) solo filtra la de foto.
@@ -1206,6 +1227,17 @@ def _asignar_cartas(escenas, p, texto=""):
         cartas = encuadres.repartir(
             escenas, semilla=p.get("semilla", 0),
             forzadas={k: v for k, v in forzadas.items() if v})
+        if retocar:
+            # el reparto de siempre, y encima SOLO los planos que cambian: los
+            # del diagrama por contenido y los que lo sacaron por sorteo
+            fijas = {k for k, v in forzadas.items() if v}
+            cartas = encuadres.sin_arrastrar(
+                escenas, cartas, semilla=p.get("semilla", 0),
+                quitar=diagramas.excluir_del_sorteo(modo_dg),
+                poner=diagramas.cartas_de_diagrama(
+                    escenas, (p.get("catalogo") or {}).get("explicativos") or [],
+                    modo_dg, {k: v for k, v in forzadas.items() if v}),
+                fijas=fijas)
     for escena in escenas:
         carta = cartas.get(escena["id"])
         if not carta:
@@ -1411,7 +1443,9 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # regla de no repetir familia mira a los vecinos, no a un plano suelto.
     # el texto con el que se reconoce de que servicio va el video (consolas,
     # simuladores...): lo que el guion ha decidido que sale, en el catalogo
-    texto_video = json.dumps(catalogo or {}, ensure_ascii=False)
+    # (sin lo de los diagramas: sus textos no deciden de que servicio va el
+    # video. Sin ajuste, el mismo catalogo y el mismo texto de siempre)
+    texto_video = json.dumps(diagramas.sin_diagramas(catalogo or {}), ensure_ascii=False)
     _asignar_cartas(escenas, p, texto=texto_video)
     if lineas_gv:
         try:
@@ -5466,11 +5500,18 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
         elif ficha["tipo"] in ("mapa", "grafico"):
             svg = os.path.join(dirs["componentes"], f"{ficha['nombre']}.svg")
             png = os.path.join(dirs["componentes"], f"{ficha['nombre']}.png")
+            # UN GRAFICO CON CIFRAS (rama diagramas-por-contenido) lo dibuja
+            # su motor; los mapas, y los graficos de antes, el de siempre
+            con_cifras = diagramas.es_grafico_con_cifras(ficha)
             if toca(uid) or not os.path.exists(png):
-                mapa = medios.motor("capa_vectorial/mapa.py")
-                medios.escribir_texto(svg, mapa.construir(ficha["config"]))
+                if con_cifras:
+                    motor = medios.motor("capa_vectorial/grafico.py")
+                else:
+                    motor = medios.motor("capa_vectorial/mapa.py")
+                medios.escribir_texto(svg, motor.construir(ficha["config"]))
                 medios.rasterizar(svg, png, *TAMANO, transparente=False)
-            resultados[uid] = {"tipo": "mapa", "svg": os.path.relpath(svg, trabajo),
+            resultados[uid] = {"tipo": "grafico" if con_cifras else "mapa",
+                               "svg": os.path.relpath(svg, trabajo),
                                "png": os.path.relpath(png, trabajo)}
         elif ficha["tipo"] == "cabecera":
             svg = os.path.join(dirs["cabeceras"], f"{ficha['nombre']}.svg")

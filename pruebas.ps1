@@ -76,6 +76,7 @@ $suites = @(
   'pasos\prueba_presets_light.py', 'pasos\prueba_modo_foto.py',
   'pasos\prueba_publicar.py', 'pasos\prueba_parrilla.py', 'pasos\prueba_cuentas.py', 'pasos\prueba_cuentas_gustan.py',
   'pasos\prueba_espacio_fijo.py',
+  'pasos\prueba_recibidos.py',
   'pasos\prueba_seo_real.py',
   'pasos\prueba_seo_canal.py',
   'herramientas\prueba_herramientas_prueba.py',
@@ -85,8 +86,11 @@ $suites = @(
   'pasos\prueba_quitar_planos.py',
   'pasos\prueba_insertar_planos.py',
   'pasos\prueba_guion_visual.py',
+  'pasos\prueba_diagramas.py',
   'pasos\prueba_parrilla_estados.py',
+  'pasos\prueba_portada_guion.py',
   'pasos\prueba_consumo_claude.py',
+  'pasos\prueba_piloto.py',
   'pasos\prueba_choques_reglas.py',
   'prueba_recorrido.py'
 )

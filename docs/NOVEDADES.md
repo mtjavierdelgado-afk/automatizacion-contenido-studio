@@ -20,6 +20,21 @@ vídeos, estilos, claves y contraseña no se tocan.
   otras paletas). Los demás vídeos rehacen exactamente como antes.
 - Si ya habías rehecho con nota algún plano de un vídeo así, puede ofrecerte
   rehacerlo: solo se rehace si lo pides.
+**Títulos de YouTube y Facebook que dan ganas de abrir (4 de noviembre)**
+- **«🎯 Dame 4 títulos»**, debajo del título de YouTube y de Facebook en Publicar:
+  Claude propone cuatro títulos distintos para que elijas uno con «Usar este».
+  **A · Gancho primero** (empieza por el problema o una pregunta), **B · Tema corto +
+  gancho**, **C · Número y beneficio** y **D · Mezcla** de las tres. No cambia nada
+  hasta que pulses «Usar este», y lo puedes retocar después a mano.
+- El SEO **ya no obliga a poner la palabra clave entera al principio del título**:
+  basta con que estén sus palabras, donde suenen natural, y manda el gancho. La
+  frase entera sigue yendo en la primera línea de la descripción y en los hashtags.
+  La nota SEO cuenta el punto si el título lleva al menos dos de cada tres palabras
+  importantes de la palabra clave.
+- Los títulos que escribe «Escribir con Claude» también llevan gancho y 1 o 2
+  emojis (con «Vistoso»; uno con «Normal»; ninguno con «Sobrio» o «Ninguno»), y
+  «Optimizar SEO» arregla un título que solo describe.
+- Los textos ya escritos no cambian solos.
 
 **Probar el Studio entero con dos comandos (22 de octubre; al servidor, 4 de noviembre)**
 - **`asvs revisar`** (gratis): todas las pruebas del Studio, incluido el recorrido
@@ -45,6 +60,37 @@ vídeos, estilos, claves y contraseña no se tocan.
 - **«Copiar» de Configuración → YouTube: tu canal** ya no da error si el navegador
   no deja copiar: lo dice y puedes copiarlo a mano.
 
+**El guion de la Parrilla puede traer su portada (4 de noviembre)**
+- Una sección nueva y opcional, **PORTADA**, con `- Texto:` (las palabras
+  grandes) y `- Imagen:` (cómo es la imagen de fondo, sin letras). Claude la
+  escribe al convertir un guion si el original habla de la portada o se la
+  pides, y también se puede escribir a mano.
+- Viaja con el vídeo al crearlo. En **Publicar → Portada** sale la caja
+  **«Portada propuesta en el guion»**: **✦ Crear esta portada** pide a la IA
+  solo el fondo con esa descripción (ves el precio antes de pagar) y el Studio
+  pone el texto encima, sin faltas; **Hacer otra portada** abre el editor de
+  siempre. El texto y la descripción se pueden corregir.
+- Los vídeos sin portada en el guion, y los ya creados, no cambian.
+
+**Diagramas por contenido: los gráficos con las cifras del guion (28 de octubre)**
+- **Un ajuste nuevo, «Diagramas»**, en el estilo (pestaña «Cómo se cuenta» →
+  📊 Diagramas) y en el Encargo de cada vídeo, que manda: Ninguno · Solo si el
+  guion lo pide · Equilibrado (como mucho 1 de cada 8 planos) · Didáctico (como
+  mucho 1 de cada 4). **Sin elegir nada, los vídeos salen exactamente como
+  antes**: no se regenera ni se paga nada.
+- Con un ajuste elegido, al deducir el reparto y los sitios se marcan los
+  tramos donde la voz **explica algo** (una medida, un proceso, una
+  comparación, un porcentaje, un paso a paso). En ilustración, el plano
+  «diagrama» sale en esos tramos y **deja de salir al azar**; los demás planos
+  salen con el mismo encuadre de siempre.
+- **Gráficos con las cifras del guion** (barras, comparación, proporción y
+  antes y después), dibujados por el Studio: exactos y **gratis**, sin pagar
+  ninguna imagen. Solo salen si **cada cifra está escrita en el guion**; si una
+  no lo está, el gráfico no sale.
+- Cambiar el ajuste no dibuja nada: en la siguiente tanda Claude lee el guion
+  (con la membresía) y marca lo que se explica, **sin volver a repartir los
+  sitios**; los planos que cambien se ofrecen para rehacer con su precio. La «foto explicada» (cotas y flechas
+  dibujadas sobre una foto) llega en una segunda vuelta.
 **La Parrilla dice el estado de cada escena, y sin cámara no hay encuadre al azar (3 de noviembre)**
 - En «Un espacio que cambia» con «Imágenes: guion», el guion de la Parrilla
   puede traer **«Estado: antes»** (o `despues`…) en cada ESCENA y una sección
@@ -111,6 +157,34 @@ vídeos, estilos, claves y contraseña no se tocan.
   tienes, como mucho 3 por cuenta y 2 por fórmula, y cada guion recuerda de qué
   cuentas y vídeos salió.
 
+**🤖 Hacer el vídeo completo, desde la Parrilla (28 de octubre)**
+- En la ficha de un guion, junto a «Pasar al Encargo», está **«🤖 Hacer el vídeo
+  completo»**. Lo manda al **piloto automático**, que sin más clics crea el
+  vídeo con su estilo, escribe el guion, pone la voz, dibuja las imágenes (el
+  revisor rehace solo lo que marca, hasta el tope de rondas que elijas), lo
+  monta en la cola de montaje y deja el **paquete de publicación**: títulos,
+  descripciones y hashtags de cada red, y dos portadas, una con un plano del
+  vídeo (gratis) y otra hecha con IA (una imagen). Queda puesta la primera y
+  cambias con «Usar esta». **No publica nada**: eso lo haces tú en Publicar.
+- **El interruptor**, por si quedan imágenes que siguen mal después de
+  rehacer: **Seguir y marcar** (monta igual y te las deja marcadas),
+  **Detenerse y avisar** (para antes de montar) o **Mezcla con regla** (para si
+  pasan del 25 %, que puedes cambiar). Se elige al mandar cada vídeo y se puede
+  guardar como el de siempre en «⚙ Ajustes del piloto».
+- **La cola sigue**: un vídeo con problemas pasa a **«Necesita revisión»** con
+  lo que hay que mirar y el siguiente arranca. Trabaja con dos vídeos a la vez
+  (ajustable); las imágenes y el montaje van igual por turnos en todo el Studio.
+- **Frena antes de gastar**: no arranca un vídeo con el cupo de Claude por
+  encima del 90 % (espera solo a que se libere) ni si lo previsto pasa tu tope
+  por vídeo (5 $ de fábrica).
+- La **imagen base** y el **guion visual**, si el vídeo los lleva, los aprueba el
+  piloto y te los apunta para revisar (en «Detenerse y avisar» te los pide).
+- Lo ves todo en el panel **«🤖 Piloto automático»**, bajo el tablero de la
+  Parrilla: lo que está en marcha con su barra, lo que necesita revisión
+  («Seguir igualmente», «Reintentar») y lo que está listo para publicar.
+- Si el servidor se reinicia con un vídeo a medias, no sigue solo: queda
+  «interrumpido» y «Reintentar» sigue donde iba, sin volver a pagar lo hecho.
+
 **Arreglo: «Deshacer» una imagen insertada le dejaba su dibujo a la de antes (28 de octubre)**
 - Si la imagen de antes (S004) se había dibujado para una frase algo distinta
   (porque la voz se regrabó después), al deshacer la insertada (S004B) el Studio
@@ -144,6 +218,21 @@ vídeos, estilos, claves y contraseña no se tocan.
   enseñar un texto que ya no es el que se oye.
 - **«Dirigir» funciona en una imagen insertada** (S004B): lo que escribas ahí
   cambia su dibujo al rehacerla, como en cualquier otra imagen.
+
+**Enviar al Studio: la extensión de Chrome (28 de octubre)**
+- Mientras ves un post en Chrome (**Instagram, TikTok, YouTube, Facebook,
+  LinkedIn, X** o cualquier web), pulsas el botón **«Enviar al Studio»** y el
+  Studio recibe el enlace, el autor, el texto, las cifras que se ven (vistas, me
+  gusta, comentarios, compartidos) y una captura. Si seleccionas un trozo de
+  texto, va aparte; y puedes añadir una nota.
+- Llega a **Automatizar → Recibidos de Chrome**. **«Usar en el chat»** se lo
+  pasa a Claude en «Conversar con Claude», con la captura, marcado como
+  referencia para escribir un guion con la misma fórmula, sin copiarlo.
+- Se instala desde **Configuración → Enviar al Studio**: descargar la extensión,
+  copiar la dirección de tu Studio y crear el **código de envío** (lo que impide
+  que otro mande cosas a tu Studio; se ve una sola vez).
+- Solo manda la pestaña que tienes delante cuando pulsas: no recorre perfiles
+  ni pide nada a ninguna red. No cambia nada de tus vídeos.
 
 **El Studio pasa a la versión 5.1 (28 de octubre)**
 - La versión se ve en el pie del Studio, en la página de acceso y en

@@ -5301,8 +5301,6 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .tarjeta-guion .datos-guion, .tarjeta-guion .video-guion { overflow-wrap: anywhere; min-width: 0; }
 .pie-tarjeta-guion { gap: 6px 8px; }
 .pie-tarjeta-guion .chip-enlace { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.piloto-parrilla { border-style: dashed; gap: 8px 10px; }
-.piloto-parrilla .meta { min-width: 0; }
 
 /* ---- la ficha de un guion: un panel a la derecha */
 .capa-cajon-guion {
@@ -5553,6 +5551,126 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 /* medidor-claude-2: Claude de un vídeo, por tarea, en «Coste del vídeo» */
 .claude-del-video { margin: 6px 0 12px; }
 
+/* ===================================================================== PILOTO
+   rama video-completo (28-10-2026): «🤖 Hacer el vídeo completo». El panel
+   bajo el tablero de la Parrilla, sus tarjetas por vídeo, las portadas
+   candidatas y el diálogo con el interruptor. */
+.panel-piloto { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.panel-piloto > .meta { margin: 0; }
+.cab-piloto { gap: 8px; align-items: center; flex-wrap: wrap; }
+.cab-piloto h3 { margin: 0; }
+.mini.activo { border-color: var(--acento); color: var(--acento); }
+.grupo-piloto { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cab-grupo-piloto { gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.grupo-revisar .tarjeta-piloto { border-color: var(--aviso-borde); }
+.tarjeta-piloto { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; min-width: 0;
+  border: 1px solid var(--linea); border-radius: 12px; background: var(--hueco); }
+.tarjeta-piloto.estado-trabajando { border-color: var(--acento-borde); }
+.tarjeta-piloto.estado-error { border-color: var(--malo-borde); }
+.cab-tarjeta-piloto { gap: 8px; align-items: center; flex-wrap: wrap; }
+.titulo-piloto { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.lineas-piloto { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.lineas-piloto .meta { overflow-wrap: anywhere; }
+.porque-piloto { overflow-wrap: anywhere; }
+.para-revisar-piloto { padding: 6px 10px; border-radius: 8px; border: 1px dashed var(--aviso-borde); }
+.para-revisar-piloto ul { margin: 4px 0 0; padding-left: 18px; }
+.para-revisar-piloto li { overflow-wrap: anywhere; }
+.botones-piloto { gap: 6px; flex-wrap: wrap; }
+.portadas-piloto { display: flex; gap: 10px; flex-wrap: wrap; }
+.portada-piloto { margin: 0; display: flex; flex-direction: column; gap: 4px; width: 140px; max-width: 45%;
+  padding: 6px; border: 1px solid var(--linea); border-radius: 10px; }
+.portada-piloto.puesta { border-color: var(--ok-borde); }
+.portada-piloto img { width: 100%; height: auto; border-radius: 6px; display: block; background: var(--panel); }
+.portada-piloto figcaption { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.ajustes-piloto { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--linea); border-radius: 10px; }
+.interruptor-piloto { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.interruptor-piloto .titulo-campo { font-weight: 600; }
+.opciones-piloto { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.opcion-piloto { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left;
+  padding: 10px; border-radius: 10px; border: 1px solid var(--linea); background: var(--panel); color: var(--texto);
+  cursor: pointer; min-width: 0; }
+.opcion-piloto .meta { white-space: normal; overflow-wrap: anywhere; }
+.opcion-piloto.elegida { border-color: var(--acento); background: var(--acento-relleno); }
+.campos-piloto { gap: 10px 14px; flex-wrap: wrap; align-items: flex-start; }
+.campo-piloto { display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  min-width: 0; max-width: 260px; }
+.campo-piloto > span:first-child { text-transform: none; letter-spacing: 0; font-weight: 600; }
+.campo-piloto .meta { text-transform: none; letter-spacing: 0; }
+.casilla-piloto { display: flex; gap: 8px; align-items: center; justify-content: flex-start;
+  text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--texto); cursor: pointer; }
+.casilla-piloto input { width: auto; margin: 0; flex: none; }
+.campo-portadas-piloto { max-width: none; width: 100%; }
+.campo-portadas-piloto select { max-width: 100%; }
+.mensaje-error-piloto { overflow-wrap: anywhere; }
+.dialogo-piloto { width: min(680px, 100%); max-height: calc(100vh - 32px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px; }
+.cab-dialogo-piloto { align-items: center; gap: 8px; flex-wrap: nowrap; }
+.cab-dialogo-piloto h3 { flex: 1; min-width: 0; }
+.pasos-piloto { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 2px; }
+.acciones-dialogo { justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.boton-piloto-guion { border-color: var(--acento); }
+.vacio-piloto { padding: 6px 0; }
+@media (max-width: 700px) {
+  .opciones-piloto { grid-template-columns: 1fr; }
+  .portada-piloto { width: calc(50% - 5px); max-width: none; }
+  .campo-piloto { max-width: none; flex: 1 1 140px; }
+  .pie-cajon .boton-piloto-guion { font-size: 13px; padding-left: 10px; padding-right: 10px; }
+}
+/* en móvil, con «🤖 Hacer el vídeo completo» y «Pasar al Encargo con «…»», los
+   dos botones se iban a tres renglones y la barra tapaba la ficha (visto a 360 px
+   aquí y a 390 px en el servidor, con otras fuentes): se reparten el ancho en una
+   fila, y cada uno cabe en dos renglones */
+@media (max-width: 480px) {
+  .cajon-guion .barra-accion.pie-cajon { padding-left: 8px; padding-right: 8px; }
+  .cajon-guion .pie-cajon .derecha { flex-wrap: nowrap; gap: 6px; }
+  .pie-cajon .boton-piloto-guion, .cajon-guion .pie-cajon .principal {
+    font-size: 12.5px; line-height: 1.2; padding: 6px 8px; min-height: 40px; min-width: 0; white-space: normal;
+  }
+  .pie-cajon .boton-piloto-guion { flex: 1 1 0; }
+  .cajon-guion .pie-cajon .principal { flex: 1.5 1 0; }
+}
+
+/* con los dos botones («🤖 Hacer el vídeo completo» y «Pasar al Encargo») el
+   estado de la ficha se quedaba en una columna de una palabra: en pantalla
+   ancha va en su renglón y los botones debajo, a la derecha */
+@media (min-width: 701px) {
+  .cajon-guion .pie-cajon .dentro { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .cajon-guion .pie-cajon .derecha { justify-content: flex-end; }
+}
+
+
+/* ============================================================ ENVIAR AL STUDIO
+   La extensión de Chrome (rama enviar-al-studio): la pestaña «Recibidos de
+   Chrome» de Automatizar y su bloque en Configuración. */
+.recibidos-parrilla { display: grid; gap: 12px; }
+.cab-recibidos h3 { margin: 0; }
+.rejilla-recibidos { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; align-items: start; }
+.tarjeta-recibido { background: var(--panel); border: 1px solid var(--linea-suave); border-radius: 12px;
+  overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.tarjeta-recibido.usado { opacity: .78; }
+.captura-recibido { display: block; background: var(--lienzo); aspect-ratio: 16 / 10; overflow: hidden; }
+.captura-recibido img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.cuerpo-recibido { padding: 10px 12px 12px; display: grid; gap: 6px; min-width: 0; }
+.cuerpo-recibido .fila { flex-wrap: wrap; gap: 6px; align-items: center; }
+.red-recibido { background: var(--marcado); color: var(--acento); }
+.titulo-recibido { font-weight: 600; overflow-wrap: anywhere; }
+.texto-recibido, .nota-recibido { margin: 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.nota-recibido { color: var(--tenue); }
+.cifras-recibido { font-variant-numeric: tabular-nums; }
+.mandos-recibido { margin-top: 4px; }
+.enviar-studio .paso-enviar { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--linea-suave); }
+.enviar-studio .numero-paso { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--acento-relleno); color: var(--sobre-acento); font-size: 12px; font-weight: 700; flex: none; }
+.enviar-studio .pasos-instalar { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 13px; }
+.enviar-studio a.boton { display: inline-block; text-decoration: none; padding: 5px 12px; font-size: 13px;
+  border-radius: 6px; border: 1px solid var(--acento); background: var(--acento-relleno); color: var(--sobre-acento);
+  font-weight: 600; }
+.mandos-recibido a { font-size: 12px; }
+@media (max-width: 640px) {
+  .rejilla-recibidos { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* ======================================= CUENTAS QUE TE GUSTAN 2 (01-11-2026)
    rama cuentas-gustan-2: casillas en «Ya leídas», cifras relativas de una
    cuenta, el análisis de varias juntas y los temas propuestos. */
@@ -5630,3 +5748,21 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .cuentas-propias .pastilla { text-transform: none; letter-spacing: 0; white-space: normal; overflow-wrap: anywhere;
   display: inline-flex; gap: 4px; align-items: center; }
 .cuentas-propias select { max-width: 100%; min-width: 0; }
+
+/* ---------------- PUBLICAR · «Dame 4 títulos» (titulos-gancho, 04-11) */
+.titulos-opciones { margin: 6px 0 10px; display: grid; gap: 4px; }
+.titulo-opcion { gap: 8px; align-items: center; padding: 4px 0; border-top: 1px solid var(--linea-suave); min-width: 0; }
+.titulo-opcion .crece { min-width: 0; overflow-wrap: anywhere; }
+.titulo-opcion .tipo-titulo { white-space: nowrap; text-transform: none; letter-spacing: 0; }
+@media (max-width: 600px) { .titulo-opcion { flex-wrap: wrap; } }
+
+/* ======================================================= PORTADA DEL GUION
+   rama portada-en-guion (04-11-2026): la caja «Portada propuesta en el guion»
+   de Publicar → Portada, con su texto y la descripción de la imagen. */
+.portada-guion { display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  padding: 10px 12px; border: 1px dashed var(--acento-borde); border-radius: 12px; }
+.portada-guion h4 { margin: 0; }
+.portada-guion .etiqueta-campo { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.portada-guion input[type="text"], .portada-guion .texto-portada-guion { width: 100%; box-sizing: border-box; }
+.portada-guion .texto-portada-guion { resize: vertical; min-height: 64px; }
+.portada-guion .fila { gap: 6px; flex-wrap: wrap; }

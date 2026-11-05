@@ -23523,6 +23523,160 @@ def parrilla_temas_escribir(cid: str, peticion: Request, cuerpo: dict = Body(def
 
 # ------------------------------------------------------------------------ main
 
+# ==================================================================== GRÁFICAS
+# El motor «Gráficas» (rama graficas-1, 05-11-2026): el Kit de marca de cada
+# cliente y las piezas hechas con plantilla. La lógica vive en pasos/graficas.py.
+# Todo está en <proyectos>/_sistema/graficas/, fuera de vídeos y firmas (regla 1):
+# ninguna de estas rutas toca un vídeo. Ninguna llama a una IA: no cuestan nada.
+
+try:
+    import graficas as GRAFICAS  # noqa: E402  (pasos/ ya esta en sys.path)
+    ERROR_GRAFICAS = ""
+except Exception as _fallo_graficas:  # noqa: BLE001
+    GRAFICAS = None
+    ERROR_GRAFICAS = f"{type(_fallo_graficas).__name__}: {_fallo_graficas}"
+
+
+def _graficas():
+    if GRAFICAS is None:
+        raise ErrorApi(503, f"Gráficas no se ha podido cargar: {ERROR_GRAFICAS}")
+    return GRAFICAS
+
+
+def _por_graficas(fn, *args, **kwargs):
+    G = _graficas()
+    try:
+        return fn(*args, **kwargs)
+    except G.ErrorGraficas as fallo:
+        raise ErrorApi(400, str(fallo))
+
+
+def _ficha_de_graficas(cid, peticion):
+    """El proyecto, si existe y esta peticion puede verlo (los de clave, abiertos)."""
+    raiz = raiz_proyectos()
+    for ficha in CLIENTES.listar(raiz)["clientes"]:
+        if ficha["id"] == cid:
+            if cid in CLIENTES.cerrados_para(raiz, peticion.headers.get("x-estudio-abiertos")):
+                raise ErrorApi(403, "este proyecto tiene clave: ábrelo primero")
+            return ficha
+    raise ErrorApi(404, "ese proyecto no existe")
+
+
+def _logos_de_graficas(ficha, kit):
+    logo = _ruta_logo_suelto((ficha.get("logo") or {}).get("fichero"))
+    oscuro = _ruta_logo_suelto((kit or {}).get("logo_oscuro"))
+    return logo, oscuro
+
+
+@app.get("/api/graficas/catalogo")
+def graficas_catalogo():
+    G = _graficas()
+    G.asegurar_fuentes()
+    return G.catalogo()
+
+
+@app.get("/api/graficas/{cid}/kit")
+def graficas_leer_kit(cid: str, peticion: Request):
+    _ficha_de_graficas(cid, peticion)
+    return {"kit": _por_graficas(_graficas().leer_kit, raiz_proyectos(), cid)}
+
+
+@app.put("/api/graficas/{cid}/kit")
+def graficas_guardar_kit(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    _ficha_de_graficas(cid, peticion)
+    return {"kit": _por_graficas(_graficas().guardar_kit, raiz_proyectos(), cid, cuerpo or {})}
+
+
+@app.post("/api/graficas/{cid}/imagen", status_code=201)
+async def graficas_subir_imagen(cid: str, peticion: Request):
+    await _en_hilo(_ficha_de_graficas, cid, peticion)
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
+    fichero = formulario.get("imagen")
+    if not hasattr(fichero, "read"):
+        raise ErrorApi(400, "manda la imagen en el campo «imagen»")
+    contenido = await fichero.read()
+    nombre = await _en_hilo(_por_graficas, _graficas().guardar_imagen, raiz_proyectos(), cid, contenido)
+    return {"nombre": nombre}
+
+
+@app.post("/api/graficas/{cid}/imagen/de-plano", status_code=201)
+def graficas_imagen_de_plano(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Copia la imagen ya hecha de un plano de un vídeo DE ESTE proyecto. Gratis."""
+    _ficha_de_graficas(cid, peticion)
+    cuerpo = cuerpo or {}
+    ctx = _ctx_publicable(str(cuerpo.get("pid") or ""), peticion)
+    if _cliente_del_video(ctx.proyecto) != cid:
+        raise ErrorApi(403, "ese vídeo es de otro proyecto")
+    rutas = {p["sid"]: p["ruta"] for p in _planos_para_portada(ctx)}
+    ruta = rutas.get(str(cuerpo.get("sid") or ""))
+    if not ruta:
+        raise ErrorApi(404, "ese plano no tiene imagen")
+    with open(ruta, "rb") as fh:
+        contenido = fh.read()
+    return {"nombre": _por_graficas(_graficas().guardar_imagen, raiz_proyectos(), cid, contenido)}
+
+
+@app.get("/api/graficas/{cid}/imagen/{nombre}")
+def graficas_ver_imagen(cid: str, nombre: str, peticion: Request):
+    _ficha_de_graficas(cid, peticion)
+    ruta = _por_graficas(_graficas().ruta_imagen, raiz_proyectos(), cid, nombre)
+    if not ruta:
+        raise ErrorApi(404, "esa imagen no está")
+    return servir_fichero(peticion, ruta)
+
+
+@app.post("/api/graficas/{cid}/vista")
+def graficas_vista(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Las miniaturas de los diseños con estos datos. No guarda nada."""
+    ficha = _ficha_de_graficas(cid, peticion)
+    G = _graficas()
+    cuerpo = cuerpo or {}
+    kit = _por_graficas(G.leer_kit, raiz_proyectos(), cid)
+    logo, oscuro = _logos_de_graficas(ficha, kit)
+    todas = [p[0] for p in G.CATALOGO]
+    pedidas = [n for n in (cuerpo.get("plantillas") or todas) if n in todas]
+    return _por_graficas(G.vistas, raiz_proyectos(), cid, cuerpo.get("pieza"), pedidas, logo, oscuro)
+
+
+@app.get("/api/graficas/{cid}/piezas")
+def graficas_piezas(cid: str, peticion: Request):
+    _ficha_de_graficas(cid, peticion)
+    return {"piezas": _por_graficas(_graficas().listar_piezas, raiz_proyectos(), cid)}
+
+
+@app.post("/api/graficas/{cid}/piezas", status_code=201)
+def graficas_crear_pieza(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    ficha = _ficha_de_graficas(cid, peticion)
+    G = _graficas()
+    logo, oscuro = _logos_de_graficas(ficha, _por_graficas(G.leer_kit, raiz_proyectos(), cid))
+    return _por_graficas(G.guardar_pieza, raiz_proyectos(), cid, cuerpo or {}, None, logo, oscuro)
+
+
+@app.put("/api/graficas/{cid}/piezas/{pieza_id}")
+def graficas_cambiar_pieza(cid: str, pieza_id: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    ficha = _ficha_de_graficas(cid, peticion)
+    G = _graficas()
+    logo, oscuro = _logos_de_graficas(ficha, _por_graficas(G.leer_kit, raiz_proyectos(), cid))
+    return _por_graficas(G.guardar_pieza, raiz_proyectos(), cid, cuerpo or {}, pieza_id, logo, oscuro)
+
+
+@app.delete("/api/graficas/{cid}/piezas/{pieza_id}")
+def graficas_borrar_pieza(cid: str, pieza_id: str, peticion: Request):
+    _ficha_de_graficas(cid, peticion)
+    _por_graficas(_graficas().borrar_pieza, raiz_proyectos(), cid, pieza_id)
+    return {"ok": True}
+
+
+@app.get("/api/graficas/{cid}/piezas/{pieza_id}/fichero.{extension}")
+def graficas_fichero(cid: str, pieza_id: str, extension: str, peticion: Request):
+    _ficha_de_graficas(cid, peticion)
+    ruta = _por_graficas(_graficas().ruta_final, raiz_proyectos(), cid, pieza_id, extension)
+    return servir_fichero(peticion, ruta)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Servicio HTTP del Estudio de Video")
     parser.add_argument("--puerto", type=int, default=8020)

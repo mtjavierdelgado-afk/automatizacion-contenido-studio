@@ -32,6 +32,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/proyectos/{pid}` | Mueve el proyecto a la papelera. No borra nada. |
 | `GET` | `/api/proyectos/{pid}` | Estado del proyecto: los ocho pasos, sus params, versiones y trabajos. |
 | `PUT` | `/api/proyectos/{pid}` | Cambia el nombre VISIBLE del proyecto. -> la ficha. |
+| `GET` | `/api/proyectos/{pid}/diagramas` | — |
+| `PUT` | `/api/proyectos/{pid}/diagramas` | {diagramas: modo | null}: cuanto se explica dibujando en ESTE video. |
 | `POST` | `/api/proyectos/{pid}/duplicar` | Copia un proyecto entero con lo que tiene puesto HOY. -> el nuevo. |
 | `POST` | `/api/proyectos/{pid}/elementos/aplicar` | Pone los elementos de varios planos de una vez: {planos: {sid: [...]}, |
 | `POST` | `/api/proyectos/{pid}/elementos/proponer` | Claude propone elementos para el video (o para {planos: [sid]}) con la |
@@ -160,8 +162,6 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/guion_visual` | Qué dibujan las imágenes de un vídeo, su guion visual y lo que hay que revisar. |
 | `PUT` | `/api/proyectos/{pid}/guion_visual` | {planos: [{bloque, visual, camara?, estado?, personajes?}]}: el guion visual |
 | `POST` | `/api/proyectos/{pid}/guion_visual/aprobar` | {aprobado: true|false}. Aprobar lanza también la comprobación contra lo |
-| `GET` | `/api/proyectos/{pid}/diagramas` | El ajuste «Diagramas» de un vídeo: el que manda, el del vídeo, el del estilo y lo deducido (tramos que explican y gráficos). |
-| `PUT` | `/api/proyectos/{pid}/diagramas` | {diagramas: ninguna | solo_si_lo_pide | equilibrada | didactica | null}: el de ESTE vídeo; null vuelve al del estilo. No dibuja nada. |
 | `PUT` | `/api/proyectos/{pid}/guion_visual/modo` | {imagenes: "guion" | "voz" | null}: qué dibujan las imágenes de ESTE vídeo. |
 | `POST` | `/api/proyectos/{pid}/guion_visual/proponer` | Claude escribe el guion visual leyendo el guion entero (solo texto, no se |
 
@@ -292,7 +292,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/presets-light/{preset_id}/aportadas` | Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}. |
 | `GET` | `/api/presets-light/{preset_id}/aportadas/{nombre}/imagen` | Una de tus imagenes de referencia, tal cual la subiste. |
 | `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costo hacer este estilo (su taller), desglosado. |
-| `PUT` | `/api/presets-light/{preset_id}/diagramas` | {diagramas: ninguna | solo_si_lo_pide | equilibrada | didactica | null}: el defecto de los vídeos NUEVOS de este estilo. |
+| `PUT` | `/api/presets-light/{preset_id}/diagramas` | {diagramas: modo | null}: el ajuste por defecto de un estilo. null lo |
 | `PUT` | `/api/presets-light/{preset_id}/dominio` | Fija el negocio de un estilo: {dominio: id de un tipo (de fábrica o del |
 | `POST` | `/api/presets-light/{preset_id}/duplicar` | Una copia del estilo, con su taller. |
 | `GET` | `/api/presets-light/{preset_id}/imagenes` | Qué dibujan por defecto las imágenes de los vídeos de un estilo. |
@@ -375,6 +375,18 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/clientes/{cid}/negocio` | Crea o cambia la ficha del negocio de un proyecto: {nombre, reglas?, |
 | `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee; sin nombres de proyectos con clave). |
 | `GET` | `/api/dominios` | El negocio general y las fichas de los clientes (Etapa Foto C). |
+| `GET` | `/api/graficas/catalogo` | — |
+| `POST` | `/api/graficas/{cid}/imagen` | — |
+| `POST` | `/api/graficas/{cid}/imagen/de-plano` | Copia la imagen ya hecha de un plano de un vídeo DE ESTE proyecto. Gratis. |
+| `GET` | `/api/graficas/{cid}/imagen/{nombre}` | — |
+| `GET` | `/api/graficas/{cid}/kit` | — |
+| `PUT` | `/api/graficas/{cid}/kit` | — |
+| `GET` | `/api/graficas/{cid}/piezas` | — |
+| `POST` | `/api/graficas/{cid}/piezas` | — |
+| `DELETE` | `/api/graficas/{cid}/piezas/{pieza_id}` | — |
+| `PUT` | `/api/graficas/{cid}/piezas/{pieza_id}` | — |
+| `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/fichero.{extension}` | — |
+| `POST` | `/api/graficas/{cid}/vista` | Las miniaturas de los diseños con estos datos. No guarda nada. |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
 | `GET` | `/api/inicio/resumen` | Lo del Inicio que no sale de otras rutas, en una sola llamada. |
@@ -541,4 +553,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**414 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**437 endpoints.** Escrito por `generar_api.py` desde `app.py`.

@@ -37,6 +37,13 @@ vídeos, estilos, claves y contraseña no se tocan.
 - Si ya habías rehecho con nota algún plano de un vídeo así, puede ofrecerte
   rehacerlo: solo se rehace si lo pides.
 
+**Gráficas: el Kit de marca y tus primeras piezas (5 de noviembre)**
+
+- En **⚙ Ajustes del proyecto** hay una sección nueva, **Kit de marca**: 5 colores, la letra de títulos y de texto, el logo para fondo oscuro, el estilo de imagen y las reglas de uso. Es de cada proyecto, así que sirve para cualquier cliente. Los vídeos no cambian.
+- En cada proyecto hay un botón **+ Nueva gráfica**: 14 diseños que se adaptan a 8 tamaños (Instagram, Facebook, LinkedIn, X, Threads, TikTok, Pinterest, historias). Escribes el texto, subes una imagen o usas una de un vídeo, eliges el diseño y lo descargas en PNG o JPG.
+- En cada pieza puedes cambiar los colores y la letra sin tocar el kit.
+- El texto queda fuera de lo que tapa o recorta cada red; si no cabe, la letra baja sola y, si aun así no cabe, te avisa. El Studio no gasta nada: no se usa ninguna IA.
+
 **Probar el Studio entero con dos comandos (22 de octubre; al servidor, 4 de noviembre)**
 - **`asvs revisar`** (gratis): todas las pruebas del Studio, incluido el recorrido
   botón por botón, con motores simulados. Corre como el usuario del Studio (como

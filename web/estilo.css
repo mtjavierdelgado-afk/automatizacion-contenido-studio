@@ -5766,3 +5766,46 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .portada-guion input[type="text"], .portada-guion .texto-portada-guion { width: 100%; box-sizing: border-box; }
 .portada-guion .texto-portada-guion { resize: vertical; min-height: 64px; }
 .portada-guion .fila { gap: 6px; flex-wrap: wrap; }
+
+/* ==================================================================== GRÁFICAS */
+.nueva-grafica { white-space: nowrap; }
+.seccion-graficas { margin-top: 18px; }
+.rejilla-piezas { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.tarjeta-pieza { display: flex; flex-direction: column; gap: 6px; background: var(--panel); border: 1px solid var(--linea); border-radius: 10px; padding: 8px; min-width: 0; }
+.tarjeta-pieza b { overflow-wrap: anywhere; }
+.tarjeta-pieza .fila { flex-wrap: wrap; gap: 4px; }
+.abrir-pieza { padding: 0; border: 0; background: none; display: block; width: 100%; }
+.abrir-pieza img { display: block; width: 100%; height: 170px; object-fit: contain; background: var(--lienzo); border-radius: 6px; }
+.panel-kit-marca { display: flex; flex-direction: column; gap: 10px; }
+.campo-graf { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.campo-graf > span { font-size: 13px; font-weight: 600; }
+.campo-graf select, .campo-graf input:not([type="color"]), .campo-graf textarea { width: 100%; box-sizing: border-box; }
+.colores-graf { display: flex; flex-wrap: wrap; gap: 8px; }
+.campo-graf.color { width: 76px; }
+.campo-graf.color > span { font-size: 11px; font-weight: 500; color: var(--tenue); }
+.campo-graf.color input { width: 100%; height: 40px; padding: 2px; }
+.capa-grafica { align-items: stretch; padding: 12px; }
+.dialogo.dialogo-grafica { width: min(1500px, 100%); max-height: none; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.cab-grafica { flex-wrap: wrap; gap: 8px; align-items: center; }
+.cab-grafica h3 { margin: 0; }
+.descargas-graf { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.cuerpo-grafica { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr) minmax(190px, 300px); gap: 14px; }
+.form-graf, .lado-grafica { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
+.centro-grafica { min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.vista-graf { flex: 1 1 0; min-height: 0; max-width: 100%; object-fit: contain; background: var(--lienzo); border-radius: 8px; }
+.aviso-graf { color: var(--aviso); font-size: 13px; }
+.rejilla-disenos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.elige-diseno { display: flex; flex-direction: column; gap: 4px; padding: 4px; background: var(--hueco); border: 2px solid transparent; border-radius: 8px; font-size: 12px; color: var(--texto); text-align: left; }
+.elige-diseno.activo { border-color: var(--acento); }
+.elige-diseno img { display: block; width: 100%; aspect-ratio: 4 / 5; object-fit: contain; background: var(--lienzo); border-radius: 4px; }
+.planos-graf { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; max-height: 170px; overflow-y: auto; }
+.plano-graf { padding: 0; border: 1px solid var(--linea); background: none; }
+.plano-graf img { display: block; width: 100%; height: 60px; object-fit: cover; }
+@media (max-width: 900px) {
+  .capa-grafica { padding: 0; }
+  .dialogo.dialogo-grafica { overflow-y: auto; border-radius: 0; }
+  .cuerpo-grafica { display: flex; flex-direction: column; flex: 0 0 auto; }
+  .form-graf, .lado-grafica { overflow: visible; }
+  .centro-grafica { order: -1; }
+  .vista-graf { flex: none; height: 56vh; }
+}

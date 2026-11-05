@@ -5617,13 +5617,20 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   .campo-piloto { max-width: none; flex: 1 1 140px; }
   .pie-cajon .boton-piloto-guion { font-size: 13px; padding-left: 10px; padding-right: 10px; }
 }
-/* a 360 px, con «🤖 Hacer el vídeo completo» y «Pasar al Encargo con «…»», los
-   dos botones se iban a tres renglones y la barra tapaba la ficha */
-@media (max-width: 380px) {
+/* en móvil, con «🤖 Hacer el vídeo completo» y «Pasar al Encargo con «…»», los
+   dos botones se iban a tres renglones y la barra tapaba la ficha (visto a 360 px
+   aquí y a 390 px en el servidor, con otras fuentes): se reparten el ancho en una
+   fila, y cada uno cabe en dos renglones */
+@media (max-width: 480px) {
   .cajon-guion .barra-accion.pie-cajon { padding-left: 8px; padding-right: 8px; }
-  .pie-cajon .boton-piloto-guion { font-size: 12px; padding-left: 7px; padding-right: 7px; }
-  .cajon-guion .pie-cajon .principal { font-size: 13px; padding-left: 10px; padding-right: 10px; }
+  .cajon-guion .pie-cajon .derecha { flex-wrap: nowrap; gap: 6px; }
+  .pie-cajon .boton-piloto-guion, .cajon-guion .pie-cajon .principal {
+    font-size: 12.5px; line-height: 1.2; padding: 6px 8px; min-height: 40px; min-width: 0; white-space: normal;
+  }
+  .pie-cajon .boton-piloto-guion { flex: 1 1 0; }
+  .cajon-guion .pie-cajon .principal { flex: 1.5 1 0; }
 }
+
 /* con los dos botones («🤖 Hacer el vídeo completo» y «Pasar al Encargo») el
    estado de la ficha se quedaba en una columna de una palabra: en pantalla
    ancha va en su renglón y los botones debajo, a la derecha */

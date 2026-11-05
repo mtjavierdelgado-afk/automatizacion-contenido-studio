@@ -1029,6 +1029,17 @@ Quién es, qué mostrar, qué evitar, el tono, el CTA y otras reglas, una vez po
 proyecto, en dos columnas, con **«Guardar la marca»** en la barra de abajo.
 Claude la usa en todo lo que escribe para él.
 
+## Gráficas
+
+1. Abre un proyecto y entra en **⚙ Ajustes del proyecto → Kit de marca**. Elige los colores y las letras y pulsa **Guardar el kit**. El logo es el de la sección «Logo»; si quieres, sube otro para fondos oscuros.
+2. En el proyecto, pulsa **+ Nueva gráfica**.
+3. Elige **Red y tamaño**, escribe los textos y añade una imagen: subida o de un vídeo de ese proyecto.
+4. A la derecha elige uno de los 14 diseños. La vista se actualiza sola.
+5. Si quieres, cambia los colores o la letra solo de esa pieza.
+6. Pulsa **Guardar** y descárgala en PNG o JPG. Para TikTok, usa el JPG.
+
+Las piezas quedan en la sección **Gráficas** del proyecto, donde se pueden abrir, duplicar o borrar.
+
 ## Configuración (⚙)
 
 - **Aspecto: la paleta**: Nocturno (la de siempre), Aurora, Brasa o Día (la

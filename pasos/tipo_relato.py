@@ -642,6 +642,37 @@ CIERRE_EDICION = (
     "moves, appears or disappears.")
 
 
+#: LA NOTA DEL REVISOR EN UN PLANO EDITADO (rama retoque-acotado, prueba
+#: completa del 04-11). La nota de siempre (`p6_assets._bloque_feedback`) dice
+#: que MANDA sobre la composicion y el tipo de plano, y era lo ultimo del
+#: prompt: al rehacer, el plano se redibujaba entero y se alejaba de la imagen
+#: de su estado («cambia de mas» en S002, S003 y S008). Aqui la nota se aplica
+#: DENTRO de la edicion, y el FINAL CHECK va detras.
+NOTA_EDICION = (
+    "The reviewer looked at the previous attempt at this shot and asked for ONE fix. "
+    "Apply only that fix, and apply it INSIDE the edit of reference image {indice}: it "
+    "never moves the camera, never reframes and never redraws the room. If the note is "
+    "about the room itself (something missing, misplaced, of the wrong size, shape, "
+    "colour or finish), the fix is to make that part exactly as it is in reference image "
+    "{indice}. Everything the note does not mention stays exactly as in reference image "
+    "{indice}. The reviewer's note is: {nota}.")
+
+#: La imagen rechazada de un plano editado: de ella, solo lo que no es el sitio.
+RECHAZADA_EDICION = (
+    "Reference image {indice} is the PREVIOUS ATTEMPT at this shot, which the reviewer "
+    "rejected. Take from it ONLY the people, their poses and the small loose objects, "
+    "where they were. Never take the room from it: the camera, framing, walls, floor, "
+    "fixed furniture, fittings and finishes come from reference image {base} only.")
+
+
+def nota_edicion(indice, nota):
+    return NOTA_EDICION.format(indice=indice, nota=nota)
+
+
+def rechazada_edicion(indice, base):
+    return RECHAZADA_EDICION.format(indice=indice, base=base)
+
+
 def cierre_edicion(indice, ref):
     cambia = ref.get("cambia") or ""
     cambio = _texto(ref.get("cambio"), 400) or SIN_CAMBIO

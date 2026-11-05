@@ -10,6 +10,17 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Rehacer una imagen marcada sin que se aleje de su estado (4 de noviembre)**
+- En un **«Espacio que cambia»**, cuando el revisor marca un plano y se rehace,
+  la nota ya no puede redibujar el sitio entero: se aplica dentro de la
+  edición de la imagen de su estado. Si la nota habla del sitio (falta el
+  toallero, el espejo es pequeño), se arregla dejándolo como en esa imagen.
+- La imagen rechazada solo aporta la gente y los objetos sueltos, nunca el
+  sitio, y al rehacer ya no se cuelan los planos vecinos (en «3 paletas» eran
+  otras paletas). Los demás vídeos rehacen exactamente como antes.
+- Si ya habías rehecho con nota algún plano de un vídeo así, puede ofrecerte
+  rehacerlo: solo se rehace si lo pides.
+
 **Probar el Studio entero con dos comandos (22 de octubre; al servidor, 4 de noviembre)**
 - **`asvs revisar`** (gratis): todas las pruebas del Studio, incluido el recorrido
   botón por botón, con motores simulados. Corre como el usuario del Studio (como

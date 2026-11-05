@@ -873,6 +873,31 @@ def _inventario_para_nota(escena, plan, dirs, p, trabajo, notas, proyecto):
     return fichas
 
 
+def _elegidas_en_edicion(elegidas, escena, dirs, p, notas=None):
+    """Lo que el corrector eligio, filtrado para un plano que EDITA su estado
+    (rama retoque-acotado). -> [referencias]
+
+    En la prueba completa del 04-11 el plano rehecho se alejaba de su estado
+    («cambia de mas»): el corrector puede adjuntar los planos vecinos -- que en
+    «3 paletas» son OTRAS paletas -- y versiones anteriores del plano, y la
+    rechazada se presentaba como «recreala tal cual». En un plano que edita, el
+    sitio sale SOLO de la imagen 1: se quedan las hojas del reparto, la
+    rechazada (como intento anterior: de ella solo la gente) y lo que adjunto el
+    revisor; fuera los vecinos y las versiones viejas."""
+    del_revisor = {os.path.abspath(a["ruta"]) for a in _adjuntos_de_la_nota(escena, dirs, p, notas)
+                   if a.get("papel") == "adjunta"}
+    salida = []
+    for ref in elegidas:
+        papel = ref.get("papel")
+        if papel == "rechazada":
+            salida.append(dict(ref, de_edicion=1))
+        elif papel == "reparto":
+            salida.append(ref)
+        elif papel == "adjunta" and os.path.abspath(str(ref.get("ruta") or "")) in del_revisor:
+            salida.append(ref)
+    return salida
+
+
 def _corregir_con_agente(escena, plan, dirs, p, trabajo, notas, proyecto,
                          nota_texto, avisar):
     """Llama al corrector con el inventario de este plano. -> dict|None"""
@@ -2980,6 +3005,10 @@ def frase_de_referencia(indice, ref, modo="ilustracion"):
                    "rendering -- it is a photo and this must stay flat vector "
                    "cartoon exactly as described above -- and ignore its "
                    "lighting, texture, depth of field, grain and grading."))
+    elif ref["papel"] == "rechazada" and ref.get("de_edicion"):
+        # un plano que EDITA su estado: de la rechazada, solo la gente
+        # (rama retoque-acotado); el sitio sale de la imagen que se edita
+        lineas.append(tipo_relato.rechazada_edicion(indice, ref["de_edicion"]))
     elif ref["papel"] == "rechazada" and foto:
         lineas.append(
             f"Reference image {indice} is THE IMAGE THAT WAS REJECTED: it is "
@@ -3343,8 +3372,13 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     base = next((r for r in referencias if r.get("papel") == "base"), None)
     if base is not None:
         indice = referencias.index(base) + 1
+        # CON NOTA, la nota va DENTRO de la edicion y el FINAL CHECK detras
+        # (rama retoque-acotado): con el bloque de siempre la nota «mandaba
+        # sobre la composicion» y el plano rehecho se alejaba de su estado
+        if feedback:
+            lineas.append(tipo_relato.nota_edicion(indice, feedback))
         lineas.append(tipo_relato.cierre_edicion(indice, base))
-    if feedback:
+    elif feedback:
         lineas.append(_bloque_feedback(feedback, foto=True) if foto
                       else _bloque_feedback(feedback))
     # Aqui iba «No text, no letters, no numbers, no watermarks anywhere», y era
@@ -4227,9 +4261,15 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                     # generacion (frase_de_referencia); el corrector solo
                     # elige cuales y anade el detalle
                     motor_imagen = medios.motor("imagen_openai/imagen.py")
+                    crudas = corregido["referencias"]
+                    if escena_final.get("editar_base"):
+                        # un plano que EDITA su estado: el sitio sale solo de la
+                        # imagen 1 (rama retoque-acotado)
+                        crudas = _elegidas_en_edicion(crudas, escena, dirs, p,
+                                                      notas_repaso)
                     elegidas = [dict(r, ruta=motor_imagen.normalizar(r["ruta"],
                                                                      dirs["cache"]))
-                                for r in corregido["referencias"]]
+                                for r in crudas]
                     # LA HOJA DE CADA PERSONAJE DEL PLANO VA SIEMPRE (M5,
                     # 16-10-2026). El corrector elige que adjuntar y a veces
                     # soltaba la hoja de reparto: el plano rehecho salia con
@@ -4245,6 +4285,11 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                     # todo y en lugar de la imagen del espacio (rama
                     # tipo-de-relato); sin ella, lo de siempre
                     base = _referencia_base(escena_final, p, dirs, dirs["cache"])
+                    if not base:
+                        # sin la base aprobada no hay imagen 1 que editar: la
+                        # rechazada vuelve a ser la de siempre
+                        elegidas = [{k: v for k, v in r.items() if k != "de_edicion"}
+                                    for r in elegidas]
                     referencias = (
                         list(base)
                         + list(_referencias_estilo(p, dirs["cache"], escena_final))
@@ -4919,7 +4964,13 @@ def _referencias_escena(escena, plan, dirs, p, cache, hechas, anteriores=None,
             continue
         referencias.append({"papel": "reparto", "nombre": quien, "de_nota": True,
                             "ruta": imagen.normalizar(hoja, cache)})
-    referencias.extend(_referencias_de_la_nota(escena, dirs, p, cache, notas))
+    de_la_nota = _referencias_de_la_nota(escena, dirs, p, cache, notas)
+    if base:
+        # EN UN PLANO QUE EDITA SU ESTADO la rechazada no es «el plano a
+        # recrear»: lo es la imagen 1 (rama retoque-acotado)
+        de_la_nota = [dict(r, de_edicion=1) if r.get("papel") == "rechazada" else r
+                      for r in de_la_nota]
+    referencias.extend(de_la_nota)
     return referencias
 
 

@@ -11,6 +11,7 @@
 #      asvs actualizar   traer la ultima version (sin tocar tus videos)
 #                        (no para una tanda en marcha; --forzar para hacerlo)
 #      asvs clave        ver o cambiar la contrasena de acceso
+#      asvs token        el permiso para bajar el codigo si el repositorio es privado
 #      asvs https        (re)intentar el certificado
 #      asvs repositorio  de donde se baja el codigo (y cambiarlo: asvs repositorio usuario/repo)
 #      asvs probar       la prueba real: un video de 30 s con tus claves (~1 $), comprobado solo;
@@ -37,6 +38,13 @@ FICHERO_REPO="$RAIZ/datos/repositorio"
 REPO_GUARDADO="$( { tr -d '[:space:]' < "$FICHERO_REPO"; } 2>/dev/null || true)"
 REPO="${ASVS_REPO:-${REPO_GUARDADO:-mtjavierdelgado-afk/automatizacion-contenido-studio}}"
 RAMA="${ASVS_RAMA:-main}"
+# EL TOKEN DE GITHUB, para un repositorio PRIVADO (CIS 7, 04-11-2026). Un
+# token «fine-grained» de SOLO LECTURA (Contents: read) y solo para ese repo.
+# Vive en /root/estudio, que es de root y 700: el usuario del servicio no lo
+# puede leer, ni el asistente del Studio. Fuera de datos/secretos a proposito:
+# el instalador hace chown -R de $RAIZ al usuario del servicio. Sin fichero,
+# todo es como antes: se baja de codeload sin credenciales (repo publico).
+FICHERO_TOKEN="${ASVS_TOKEN_FICHERO:-/root/estudio/github_token}"
 USUARIO="${ASVS_USUARIO:-studio}"
 
 if [ -t 1 ]; then N=$'\033[0m'; B=$'\033[1m'; VERDE=$'\033[32m'; ROJO=$'\033[31m'; GRIS=$'\033[90m'
@@ -46,6 +54,42 @@ si() { printf '  %s✓%s %s\n' "$VERDE" "$N" "$*"; }
 no() { printf '  %s✗%s %s\n' "$ROJO" "$N" "$*"; }
 
 [ "$(id -u)" -eq 0 ] || { echo "Hay que ser root."; exit 1; }
+
+# --------------------------------------------------- bajar el codigo de GitHub
+# Solo letras, numeros y _ (como todo token de GitHub): una comilla o una barra
+# romperian la cabecera de curl, asi que algo raro se trata como «sin token».
+_token() {
+  local t; t="$( { tr -d '[:space:]' < "$FICHERO_TOKEN"; } 2>/dev/null || true)"
+  if printf '%s' "$t" | grep -Eq '^[A-Za-z0-9_]+$'; then printf '%s' "$t"; fi
+  return 0
+}
+
+# El token va a curl por la ENTRADA (-K -), nunca en la linea de mandatos: ahi
+# lo veria cualquiera con `ps`. curl no lo reenvia a codeload al seguir la
+# redireccion (otro host); GitHub pone en la URL su propio permiso temporal.
+_curl_github() {
+  local token; token="$(_token)"
+  printf 'header = "Authorization: Bearer %s"\nheader = "Accept: application/vnd.github+json"\nheader = "X-GitHub-Api-Version: 2022-11-28"\n' "$token" \
+    | curl -K - "$@"
+}
+
+# $1 repo, $2 rama, $3 fichero .tgz de destino
+_bajar_codigo() {
+  if [ -n "$(_token)" ]; then
+    _curl_github -fsSL --max-time 300 "https://api.github.com/repos/$1/tarball/$2" -o "$3"
+  else
+    curl -fsSL "https://codeload.github.com/$1/tar.gz/refs/heads/$2" -o "$3"
+  fi
+}
+
+# ¿existe esa rama en ese repo y se puede bajar? (sin bajar nada)
+_existe_en_github() {
+  if [ -n "$(_token)" ]; then
+    _curl_github -fsS --max-time 20 -o /dev/null "https://api.github.com/repos/$1/branches/$2"
+  else
+    curl -fsSIL --max-time 20 -o /dev/null "https://codeload.github.com/$1/tar.gz/refs/heads/$2"
+  fi
+}
 
 _puerto() { sed -n 's/^PUERTO=//p' "$RAIZ/datos/entorno" 2>/dev/null | head -1; }
 _dominio() { sed -n 's|^APP_URL=https\?://||p' "$RAIZ/login/.env" 2>/dev/null | head -1; }
@@ -325,8 +369,11 @@ actualizar() {
 
   temporal="$(mktemp -d)"
   echo "Bajando la ultima version de $REPO ($RAMA)..."
-  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$RAMA" -o "$temporal/c.tgz" \
-    || { no "no se ha podido bajar el codigo"; rm -rf "$temporal"; exit 1; }
+  _bajar_codigo "$REPO" "$RAMA" "$temporal/c.tgz" \
+    || { no "no se ha podido bajar el codigo"
+         if [ -n "$(_token)" ]; then echo "  Con token: mira que siga vivo y que sea de este repositorio:  asvs token"
+         else echo "  Si el repositorio es privado, hace falta el token:  asvs token poner"; fi
+         rm -rf "$temporal"; exit 1; }
   mkdir -p "$temporal/codigo"
   tar -xzf "$temporal/c.tgz" -C "$temporal/codigo" --strip-components=1
   [ -f "$temporal/codigo/app.py" ] || { echo "lo bajado no es el estudio"; rm -rf "$temporal"; exit 1; }
@@ -444,12 +491,65 @@ repositorio() {
     || { no "«$1» no tiene la forma usuario/repositorio"; exit 1; }
   # Se comprueba ANTES de guardarlo: un nombre mal escrito haria fallar la
   # proxima actualizacion, y entonces nadie se acuerda de por que.
-  curl -fsSIL --max-time 20 -o /dev/null \
-       "https://codeload.github.com/$nuevo/tar.gz/refs/heads/$RAMA" \
-    || { no "no encuentro https://github.com/$nuevo (rama $RAMA). Tiene que existir y ser publico."; exit 1; }
+  _existe_en_github "$nuevo" "$RAMA" \
+    || { no "no encuentro https://github.com/$nuevo (rama $RAMA)."
+         if [ -n "$(_token)" ]; then echo "  Tiene que existir y el token tiene que tener permiso de lectura sobre el."
+         else echo "  Tiene que existir y ser publico, o poner antes el token:  asvs token poner"; fi
+         exit 1; }
   printf '%s\n' "$nuevo" > "$FICHERO_REPO"
   si "a partir de ahora el codigo se baja de https://github.com/$nuevo"
   echo "  Para traerlo ya:  asvs actualizar"
+}
+
+# EL TOKEN: verlo, ponerlo o quitarlo. Se pega en la consola SIN que se vea
+# (read -s) y se prueba ANTES de guardarlo: un token mal pegado haria fallar
+# la proxima actualizacion, y entonces nadie se acuerda de por que.
+token() {
+  local accion="${1:-ver}" nuevo previo
+  case "$accion" in
+    ver)
+      if [ -z "$(_token)" ]; then
+        echo "No hay token: el codigo se baja sin permiso (vale si el repositorio es publico)."
+        echo "Para un repositorio privado:  asvs token poner"
+        return
+      fi
+      echo "Hay un token guardado (termina en ...$(_token | tail -c 4))."
+      if _existe_en_github "$REPO" "$RAMA"; then si "puede leer https://github.com/$REPO (rama $RAMA)"
+      else no "NO puede leer https://github.com/$REPO (rama $RAMA): caducado, borrado o de otro repositorio"; exit 1; fi
+      ;;
+    poner)
+      if [ -n "${ASVS_TOKEN_NUEVO:-}" ]; then nuevo="$ASVS_TOKEN_NUEVO"
+      else
+        printf 'Pega el token y pulsa Enter (no se vera nada al pegar): '
+        IFS= read -rs nuevo || true; echo
+      fi
+      nuevo="$(printf '%s' "$nuevo" | tr -d '[:space:]')"
+      [ -n "$nuevo" ] || { no "no se ha pegado nada"; exit 1; }
+      printf '%s' "$nuevo" | grep -Eq '^[A-Za-z0-9_]+$' \
+        || { no "eso no parece un token de GitHub (solo letras, numeros y _)"; exit 1; }
+      mkdir -p "$(dirname "$FICHERO_TOKEN")"; chmod 700 "$(dirname "$FICHERO_TOKEN")"
+      # la copia del que habia, junto a el (carpeta de root), no en /tmp
+      previo="$(mktemp "$(dirname "$FICHERO_TOKEN")/.anterior.XXXXXX")"
+      cp -p "$FICHERO_TOKEN" "$previo" 2>/dev/null || : > "$previo"
+      ( umask 077; printf '%s\n' "$nuevo" > "$FICHERO_TOKEN" ); chmod 600 "$FICHERO_TOKEN"
+      if _existe_en_github "$REPO" "$RAMA"; then
+        rm -f "$previo"
+        si "token guardado: puede leer https://github.com/$REPO (rama $RAMA)"
+        echo "  Para comprobarlo de verdad:  asvs actualizar"
+      else
+        if [ -s "$previo" ]; then mv "$previo" "$FICHERO_TOKEN"; else rm -f "$previo" "$FICHERO_TOKEN"; fi
+        no "ese token NO puede leer https://github.com/$REPO (rama $RAMA): no se ha guardado"
+        echo "  Mira que sea de ese repositorio y tenga «Contents: Read-only»."
+        echo "  Si el repositorio es otro, cambialo antes:  asvs repositorio usuario/repositorio"
+        exit 1
+      fi
+      ;;
+    quitar)
+      rm -f "$FICHERO_TOKEN"
+      si "token quitado: el codigo se bajara sin permiso (solo vale con un repositorio publico)"
+      ;;
+    *) echo "Uso:  asvs token  |  asvs token poner  |  asvs token quitar"; exit 1 ;;
+  esac
 }
 
 https() {
@@ -660,11 +760,12 @@ case "${1:-estado}" in
   reiniciar)   reiniciar ;;
   actualizar)  actualizar "${2:-}" ;;
   clave)       shift; estudio-clave "$@" ;;
+  token)       token "${2:-ver}" ;;
   https)       https ;;
   repositorio) repositorio "${2:-}" ;;
   probar)      shift; probar "$@" ;;
   revisar)     shift; revisar "$@" ;;
   comparar-guion) shift; comparar_guion "$@" ;;
-  -h|--help|ayuda) sed -n '5,24p' "$0" | sed 's/^#  \{0,1\}//' ;;
+  -h|--help|ayuda) sed -n '5,25p' "$0" | sed 's/^#  \{0,1\}//' ;;
   *) echo "No entiendo «$1». Prueba:  asvs ayuda"; exit 1 ;;
 esac

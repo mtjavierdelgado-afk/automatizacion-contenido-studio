@@ -60,16 +60,24 @@ exit 0
 EOF
 cat > "$T/bin/curl" <<'EOF'
 #!/bin/sh
-destino=""; url=""
+destino=""; url=""; config=""
+echo "curl $*" >> "$PRUEBA/llamadas"
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) destino="$2"; shift 2 ;;
+    -K) [ "$2" = "-" ] && config="$(cat)" && printf '%s\n' "$config" > "$PRUEBA/curl_entrada"; shift 2 ;;
     -*) shift ;;
     *) url="$1"; shift ;;
   esac
 done
 case "$url" in
-  *codeload*) cp "$PRUEBA/nuevo.tgz" "$destino" ;;
+  *codeload*) [ -f "$PRUEBA/repo_privado" ] && exit 22; cp "$PRUEBA/nuevo.tgz" "$destino" ;;
+  # la API de GitHub: solo con el token bueno (que llega por la entrada)
+  *api.github.com/repos/*/tarball/*)
+    printf '%s' "$config" | grep -q "Bearer token_bueno" || exit 22
+    cp "$PRUEBA/nuevo.tgz" "$destino" ;;
+  *api.github.com/repos/*/branches/*)
+    printf '%s' "$config" | grep -q "Bearer token_bueno" || exit 22 ;;
   */api/trabajos*) echo '{"trabajos":[]}' ;;
   */api/salud*)
     # la version «nueva» no arranca si asi lo pide el escenario
@@ -119,7 +127,7 @@ tar -czf "$T/nuevo.tgz" -C "$T/fuente" repo-main
 # ---------------------------------------------- una instalacion v1 de pie
 montar() {
   local R="$T/raiz"
-  rm -rf "$R" "$T/llamadas" "$T/npm_roto" "$T/nueva_rota" "$T/pip_roto" "$T/binarios" \
+  rm -rf "$R" "$T/llamadas" "$T/curl_entrada" "$T/repo_privado" "$T/token" "$T/npm_roto" "$T/nueva_rota" "$T/pip_roto" "$T/binarios" \
          "$T/etc" "$T/nginx_roto" "$T/viejo" "$T/daemon_roto"
   mkdir -p "$R/app/motores/reglas" "$R/app/cache" "$R/app/despliegue/login" \
            "$R/login/node_modules/viejo" "$R/login/datos" "$R/datos" "$R/venv/bin" "$T/binarios"
@@ -173,6 +181,7 @@ EOF
 }
 
 correr() {
+  ASVS_TOKEN_FICHERO="$T/token/github_token" \
   ASVS_RAIZ="$T/raiz" RAIZ_FALSA="$T/raiz" ASVS_BIN="$T/binarios" ASVS_REPO="yo/estudio" \
     ASVS_SYSTEMD="$T/etc/systemd/system" ASVS_NGINX="$T/etc/nginx" ASVS_FUENTES="/fuentes/falsas" \
     bash ${ASVS_TRAZA:-} "$ASVS" actualizar > "$T/salida" 2>&1
@@ -292,6 +301,52 @@ ok '[ $codigo -eq 0 ] && grep -q v2 "$T/raiz/datos/tarifas.de_fabrica.json" && [
 montar; rm -f "$T/raiz/datos/tarifas.json"
 correr; codigo=$?
 ok '[ $codigo -eq 0 ] && grep -q v2 "$T/raiz/datos/tarifas.json"' "si no habia tarifas, se ponen"
+
+# EL REPOSITORIO PRIVADO (CIS 7, 04-11-2026): con token se baja por la API y el
+# token NUNCA va en la linea de mandatos (ahi lo veria `ps`), solo por la entrada.
+mandar() {  # asvs con un subcomando cualquiera, en la raiz falsa
+  ASVS_TOKEN_FICHERO="$T/token/github_token" ASVS_RAIZ="$T/raiz" RAIZ_FALSA="$T/raiz" \
+    ASVS_BIN="$T/binarios" ASVS_REPO="yo/estudio" ASVS_SYSTEMD="$T/etc/systemd/system" \
+    ASVS_NGINX="$T/etc/nginx" ASVS_FUENTES="/fuentes/falsas" bash "$ASVS" "$@" > "$T/salida" 2>&1
+}
+
+echo "[I] repositorio privado sin token: falla sin tocar nada y dice que hace falta el token"
+montar; touch "$T/repo_privado"; correr; codigo=$?
+ok '[ $codigo -ne 0 ] && grep -q "v1" "$T/raiz/app/app.py"' "sale con error y el codigo sigue siendo el de antes"
+ok '! grep -q "systemctl stop" "$T/llamadas"' "el estudio no se ha parado"
+ok 'grep -q "asvs token poner" "$T/salida"' "y dice como poner el token"
+
+echo "[J] con token: se baja por la API, el token por la entrada"
+montar; touch "$T/repo_privado"; mkdir -p "$T/token"; echo "token_bueno" > "$T/token/github_token"
+correr; codigo=$?
+ok '[ $codigo -eq 0 ] && grep -q "v2" "$T/raiz/app/app.py"' "sale bien con el codigo nuevo"
+ok 'grep -q "api.github.com/repos/yo/estudio/tarball/main" "$T/llamadas" && ! grep -q codeload "$T/llamadas"' \
+   "baja de la API de GitHub, no de codeload"
+ok '! grep -q token_bueno "$T/llamadas"' "el token NO sale en la linea de mandatos"
+ok 'grep -q "Authorization: Bearer token_bueno" "$T/curl_entrada"' "va por la entrada de curl"
+
+echo "[K] asvs token: poner (probado antes de guardar), ver y quitar"
+montar; touch "$T/repo_privado"
+ASVS_TOKEN_NUEVO="token_malo" mandar token poner; codigo=$?
+ok '[ $codigo -ne 0 ] && [ ! -f "$T/token/github_token" ]' "un token que no puede leer el repo no se guarda"
+ASVS_TOKEN_NUEVO="token_bueno" mandar token poner; codigo=$?
+ok '[ $codigo -eq 0 ] && grep -qx token_bueno "$T/token/github_token"' "el bueno se guarda"
+ok '[ "$(stat -c %a "$T/token/github_token")" = 600 ] && [ "$(stat -c %a "$T/token")" = 700 ]' \
+   "solo lo lee root (600, carpeta 700)"
+ok '! grep -q token_bueno "$T/salida" && ! grep -q token_bueno "$T/llamadas"' "y no se ensena en ningun sitio"
+ASVS_TOKEN_NUEVO="token_malo" mandar token poner; codigo=$?
+ok '[ $codigo -ne 0 ] && grep -qx token_bueno "$T/token/github_token"' "uno malo despues no pisa el bueno"
+ASVS_TOKEN_NUEVO="no vale!" mandar token poner; codigo=$?
+ok '[ $codigo -ne 0 ] && grep -qx token_bueno "$T/token/github_token"' "algo que no es un token se rechaza"
+mandar token; codigo=$?
+ok '[ $codigo -eq 0 ] && grep -q "puede leer" "$T/salida" && grep -q "\.\.\.ueno" "$T/salida"' \
+   "asvs token dice que puede leer (y solo ensena el final)"
+mandar repositorio otro/repo; codigo=$?
+ok '[ $codigo -eq 0 ] && grep -qx "otro/repo" "$T/raiz/datos/repositorio"' "asvs repositorio comprueba con el token"
+mandar token quitar; codigo=$?
+ok '[ $codigo -eq 0 ] && [ ! -f "$T/token/github_token" ]' "quitar lo borra"
+mandar repositorio otro/repo2; codigo=$?
+ok '[ $codigo -ne 0 ] && grep -q "asvs token poner" "$T/salida"' "sin token, un repo privado no se acepta y dice por que"
 
 echo
 if [ "$FALLOS" -gt 0 ]; then

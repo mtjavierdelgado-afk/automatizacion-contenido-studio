@@ -160,6 +160,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/guion_visual` | Qué dibujan las imágenes de un vídeo, su guion visual y lo que hay que revisar. |
 | `PUT` | `/api/proyectos/{pid}/guion_visual` | {planos: [{bloque, visual, camara?, estado?, personajes?}]}: el guion visual |
 | `POST` | `/api/proyectos/{pid}/guion_visual/aprobar` | {aprobado: true|false}. Aprobar lanza también la comprobación contra lo |
+| `GET` | `/api/proyectos/{pid}/diagramas` | El ajuste «Diagramas» de un vídeo: el que manda, el del vídeo, el del estilo y lo deducido (tramos que explican y gráficos). |
+| `PUT` | `/api/proyectos/{pid}/diagramas` | {diagramas: ninguna | solo_si_lo_pide | equilibrada | didactica | null}: el de ESTE vídeo; null vuelve al del estilo. No dibuja nada. |
 | `PUT` | `/api/proyectos/{pid}/guion_visual/modo` | {imagenes: "guion" | "voz" | null}: qué dibujan las imágenes de ESTE vídeo. |
 | `POST` | `/api/proyectos/{pid}/guion_visual/proponer` | Claude escribe el guion visual leyendo el guion entero (solo texto, no se |
 
@@ -290,6 +292,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/presets-light/{preset_id}/aportadas` | Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}. |
 | `GET` | `/api/presets-light/{preset_id}/aportadas/{nombre}/imagen` | Una de tus imagenes de referencia, tal cual la subiste. |
 | `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costo hacer este estilo (su taller), desglosado. |
+| `PUT` | `/api/presets-light/{preset_id}/diagramas` | {diagramas: ninguna | solo_si_lo_pide | equilibrada | didactica | null}: el defecto de los vídeos NUEVOS de este estilo. |
 | `PUT` | `/api/presets-light/{preset_id}/dominio` | Fija el negocio de un estilo: {dominio: id de un tipo (de fábrica o del |
 | `POST` | `/api/presets-light/{preset_id}/duplicar` | Una copia del estilo, con su taller. |
 | `GET` | `/api/presets-light/{preset_id}/imagenes` | Qué dibujan por defecto las imágenes de los vídeos de un estilo. |
@@ -438,6 +441,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/parrilla/temas/trabajos/{tid}` | — |
 | `DELETE` | `/api/parrilla/trabajos/{tid}` | Quita de la pantalla un trabajo terminado (el aviso de listo o de error). |
 | `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
+| `GET` | `/api/piloto` | La cola del piloto, la bandeja «Necesita revisión», los ajustes y el cupo. |
+| `PUT` | `/api/piloto/ajustes` | {si_falla?, umbral_pct?, vueltas?, tope_usd?, a_la_vez?, portadas?, |
+| `POST` | `/api/piloto/videos` | Manda un guion de la Parrilla al piloto: {cid, gid, indice?, estilo, |
+| `DELETE` | `/api/piloto/videos/{vid}` | Lo quita de la lista. El video, si se creo, se queda en Tus proyectos. |
+| `POST` | `/api/piloto/videos/{vid}/parar` | Para un video: si espera, sale de la cola; si trabaja, se cancela su |
+| `POST` | `/api/piloto/videos/{vid}/portada` | {id}: deja esa portada candidata como portada del video (gratis). |
+| `GET` | `/api/piloto/videos/{vid}/portadas/{cual}.png` | La imagen de una portada candidata. |
+| `POST` | `/api/piloto/videos/{vid}/seguir` | «Seguir igualmente» ({forzar: true}: salta el tope y el interruptor una |
 | `GET` | `/api/portadas/catalogo` | Plantillas, paletas, fuentes, elementos y formatos de las portadas. |
 | `GET` | `/api/pronunciaciones` | Las palabras que la voz dice como se escriben aqui (sobre todo en ingles). |
 | `PUT` | `/api/pronunciaciones` | {lista: [{escrito, dicho}]} -> la lista guardada. No graba nada ni paga nada. |
@@ -502,10 +513,18 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/youtube/oauth/empezar` | {redireccion} (la dirección de vuelta de ESTE Studio) -> {url} de Google |
 | `GET` | `/api/publicar/youtube/oauth/vuelta` | Adonde vuelve Google con el permiso: cambia el código por el token. |
 | `POST` | `/api/publicar/youtube/probar` | Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo) |
+| `GET` | `/api/recibidos` | Los recibidos (el más nuevo primero), el estado del código y la versión de la extensión. |
+| `POST` | `/api/recibidos` | {url, titulo?, autor?, texto?, seleccion?, nota?, cifras?, imagen?, captura?} -> el recibido. |
+| `POST` | `/api/recibidos/codigo` | Un código de envío nuevo (el de antes deja de valer). Se ve UNA vez. |
+| `GET` | `/api/recibidos/extension.zip` | La extensión de Chrome, en un ZIP para descomprimir y cargar. |
+| `GET` | `/api/recibidos/ping` | Lo que pulsa «Probar» en la extensión: el código vale y el Studio contesta. |
+| `DELETE` | `/api/recibidos/{rid}` | Lo borra, con su captura. |
+| `GET` | `/api/recibidos/{rid}/captura` | La captura de lo que se veía al enviarlo (PNG, JPG o WEBP). |
+| `POST` | `/api/recibidos/{rid}/usado` | Lo marca como usado (lo hace «Usar en el chat»). |
 | `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para el generador: {texto, nombre?, palabras?}. |
 | `GET` | `/api/reglas-estilo/afinar/{rid}` | Como va «Afinar con Claude», y la propuesta al terminar. |
-| `POST` | `/api/reglas-estilo/choques` | «Revisar si se contradicen»: Claude compara las reglas del negocio que recibe un estilo de foto con las suyas: {preset}. Solo lee; de una en una (409). -> {id} |
-| `GET` | `/api/reglas-estilo/choques/{rid}` | Cómo va la revisión, y al terminar {pares: [{tipo: contradicen\|repiten, negocio, estilo, por_que, que_cambiar}], negocio, estilo}. |
+| `POST` | `/api/reglas-estilo/choques` | {preset} -> {id}; el resultado ({pares, negocio, estilo}) en GET. |
+| `GET` | `/api/reglas-estilo/choques/{rid}` | Cómo va «Revisar si se contradicen», y los pares al terminar. |
 | `GET` | `/api/sistema/estilos-perdidos` | Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira. |
 | `GET` | `/api/sistema/guias` | Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA. |
 | `POST` | `/api/sistema/guias/{gid}/revisar` | Lanza la revision de un texto contra la guia de su campo. -> {id} |
@@ -522,4 +541,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**404 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**414 endpoints.** Escrito por `generar_api.py` desde `app.py`.

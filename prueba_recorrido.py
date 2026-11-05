@@ -1731,8 +1731,8 @@ def tus_proyectos_rediseno(navegador, datos):
        and all(t in titulos for t in ("Visibilidad", "Clave", "Publicar")),
        f"con Nombre, Logo, Visibilidad, Clave, Publicar y la zona de peligro abajo ({titulos})")
     ok(pg.p.evaluate("() => SECCIONES_AJUSTES_PROYECTO.map(s => s.id).join(',')")
-       == "nombre,logo,ficha-negocio,visibilidad,clave,publicar,peligro",
-       "hechas con SECCIONES_AJUSTES_PROYECTO (con la Ficha del negocio, unida el 28-10)")
+       == "nombre,logo,ficha-negocio,kit-marca,visibilidad,clave,publicar,peligro",
+       "hechas con SECCIONES_AJUSTES_PROYECTO (con la Ficha del negocio, unida el 28-10, y el Kit de marca de graficas-1)")
     ok(pg.visible(".cajon-proyecto .zona-peligro", "quedan en «Sin proyecto»"),
        "«Borrar el proyecto» lleva su explicación delante")
     caja = pg.p.locator(".cajon-proyecto .nombre-proyecto input")

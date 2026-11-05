@@ -34132,7 +34132,7 @@ async function usarTituloVidiq(red, titulo) {
 function filaFraseVidiq(c, enUso) {
   return h('li', { clase: 'frase-vidiq' },
     h('span', { clase: 'crece' }, h('b', {}, c.frase),
-      h('span', { clase: 'meta' }, ` · volumen ${cifraVidiq(c.volumen)} · competencia ${cifraVidiq(c.competencia)}`
+      h('span', { clase: 'meta' }, ` · volumen ${typeof c.volumen === 'number' ? cifraVidiq(c.volumen) : (c.volumen_texto || '—')} · competencia ${cifraVidiq(c.competencia)}`
         + ` · puntuación ${cifraVidiq(c.puntuacion)}`)),
     enUso ? h('span', { clase: 'pastilla ok' }, 'en uso')
       : h('button', { clase: 'mini', title: 'La deja como palabra clave de este vídeo',

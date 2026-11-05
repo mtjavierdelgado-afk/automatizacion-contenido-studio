@@ -22011,7 +22011,9 @@ def vidiq_mejorar_titulo(pid: str, peticion: Request):
                    if str((textos.get(r) or {}).get("titulo") or "").strip()), "")
     guion = " ".join(str(b.get("texto") or "") for b in (info.get("guion") or []))
     datos = {"nombre": info.get("nombre") or "", "palabra": (ficha.get("seo") or {}).get("palabra") or "",
-             "titulo": titulo, "guion": guion or str(info.get("material") or "")}
+             "titulo": titulo, "guion": guion or str(info.get("material") or ""),
+             # vidIQ puntúa distinto un Short: hasta 120 s es corto (decisión del dueño)
+             "formato": "short" if 0 < float(info.get("duracion_s") or 0) <= 120 else "long"}
     vista = _por_vidiq(_vidiq().lanzar_titulo, raiz_proyectos(), ctx.id, datos, proyecto=ctx.proyecto)
     anotar_global("vidiq_titulo", {"proyecto": ctx.id})
     return vista

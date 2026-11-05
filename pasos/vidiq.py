@@ -391,9 +391,9 @@ def probar(raiz):
 # ------------------------------------------------------------------ el título
 
 INSTRUCCION_TITULO = """Haz SOLO estas consultas a vidIQ, en este orden y ninguna más (cada una gasta créditos):
-1. vidiq_keyword_research con la palabra clave «{palabra}». Quédate con su volumen, su competencia y su puntuación, y con hasta 5 frases relacionadas QUE ESTE VÍDEO TRATE (una frase de la que el vídeo no habla no sirve, por mucho que se busque).
+1. vidiq_keyword_research con keyword «{palabra}», mode «research» y country «PE» (el público es de Perú). Quédate con su volumen, su competencia y su puntuación. Si vidIQ da el volumen como una estimación o un rango (p. ej. «menos de 750 al mes»), ponlo en «volumen_texto» con sus palabras y deja «volumen» en null: nunca pongas 0 si vidIQ no dijo 0. Quédate también con hasta 5 frases relacionadas QUE ESTE VÍDEO TRATE (una frase de la que el vídeo no habla no sirve, por mucho que se busque).
 2. {paso_actual}
-3. vidiq_generate_titles para este vídeo con esa palabra clave. Elige las 3 mejores y, si hace falta, mejóralas tú: en español, como mucho 90 caracteres, la palabra clave al principio si suena natural, y 1 o 2 emojis a juego con el vídeo (nunca en lugar de la palabra clave). Si vidIQ da una nota para alguna, ponla; si no, null.
+3. vidiq_generate_titles con title «{titulo_o_nombre}», description = lo que cuenta el vídeo (abajo, resumido), language «es», regionCode «PE», type «{tipo}» y numTitles 3. COPIA los 3 títulos de vidIQ TAL CUAL con la nota que les da vidIQ («nota»): no cambies palabras. Lo único que puedes hacer es añadir 1 o 2 emojis a juego con el vídeo al final o entre palabras (nunca en lugar de la palabra clave) si no traen ninguno. Si un título de vidIQ no lleva la palabra clave, dilo en «porque».
 4. vidiq_balance, para saber cuántos créditos quedan.
 
 EL VÍDEO
@@ -404,8 +404,8 @@ Lo que cuenta (guion o material): {guion}
 
 Contesta SOLO con este JSON:
 {{
-  "palabra": {{"frase": "…", "volumen": número o null, "competencia": número o null, "puntuacion": número o null, "texto": "una frase: qué tal está esta palabra para posicionar"}},
-  "relacionadas": [{{"frase": "…", "volumen": número o null, "competencia": número o null, "puntuacion": número o null}}],
+  "palabra": {{"frase": "…", "volumen": número o null, "volumen_texto": "lo que diga vidIQ si no es un número exacto, o \"\"", "competencia": número o null, "puntuacion": número o null, "texto": "una frase: qué tal está esta palabra para posicionar"}},
+  "relacionadas": [{{"frase": "…", "volumen": número o null, "volumen_texto": "…", "competencia": número o null, "puntuacion": número o null}}],
   "titulo_actual": {{"texto": "…", "nota": número o null, "consejos": ["…", "…"]}},
   "alternativas": [{{"titulo": "…", "nota": número o null, "porque": "una frase"}}],
   "avisos": ["lo que no se pudo consultar, si algo falló"],
@@ -448,6 +448,7 @@ def _frase(cruda):
     if not frase:
         return None
     return {"frase": frase, "volumen": _numero(cruda.get("volumen")),
+            "volumen_texto": _texto(cruda.get("volumen_texto"), 80),
             "competencia": _numero(cruda.get("competencia")),
             "puntuacion": _numero(cruda.get("puntuacion"))}
 
@@ -500,7 +501,7 @@ def lanzar_titulo(raiz, pid, datos, proyecto=None, en_hilo=True):
     pid = _id_seguro(pid)
     if not puesta():
         raise ErrorVidiq("no hay clave de vidIQ: ponla en Configuración → vidIQ", 409)
-    datos = {k: str((datos or {}).get(k) or "") for k in ("nombre", "palabra", "titulo", "guion")}
+    datos = {k: str((datos or {}).get(k) or "") for k in ("nombre", "palabra", "titulo", "guion", "formato")}
     if not datos["palabra"].strip():
         raise ErrorVidiq("este vídeo no tiene palabra clave: escríbela (o investiga búsquedas) "
                          "antes de consultar vidIQ, para no gastar créditos a ciegas", 409)
@@ -531,11 +532,14 @@ def lanzar_titulo(raiz, pid, datos, proyecto=None, en_hilo=True):
 def _titulo(raiz, pid, datos, proyecto):
     anterior = _leer(_ruta_video(raiz, pid), {})
     try:
-        paso_actual = (f"vidiq_score_title con el título actual «{datos['titulo']}»: su nota y "
-                       "hasta 3 consejos concretos para mejorarlo." if datos["titulo"].strip()
+        tipo = "short" if datos.get("formato") == "short" else "long"
+        paso_actual = (f"vidiq_score_title con title «{datos['titulo']}» y type «{tipo}»: su nota. "
+                       "Si vidIQ da consejos, ponlos; si no, da tú hasta 3 consejos concretos y empieza "
+                       "cada uno con «(mío)»." if datos["titulo"].strip()
                        else "No hay título actual: sáltate este paso (titulo_actual = null).")
         instruccion = INSTRUCCION_TITULO.format(
-            palabra=datos["palabra"][:120], paso_actual=paso_actual,
+            palabra=datos["palabra"][:120], paso_actual=paso_actual, tipo=tipo,
+            titulo_o_nombre=(datos["titulo"].strip() or datos["nombre"].strip() or datos["palabra"])[:150],
             nombre=datos["nombre"][:200] or "—", titulo=datos["titulo"][:150] or "—",
             guion=" ".join(datos["guion"].split())[:2500] or "—")
         if simulado():

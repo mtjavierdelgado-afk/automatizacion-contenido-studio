@@ -240,6 +240,14 @@ def prueba_titulo():
         ins = doble.llamadas[-1]["instruccion"]
         ok("«consolas para fiestas»" in ins and "«Cumple con consolas»" in ins, "la instrucción lleva palabra y título")
         ok("ninguna más" in ins and "emojis" in ins, "fija las consultas y pide emojis")
+        ok("country «PE»" in ins and "language «es»" in ins and "regionCode «PE»" in ins,
+           "vidIQ consulta para Perú y en español (no en inglés)")
+        ok("type «long»" in ins and "TAL CUAL" in ins, "un vídeo largo se puntúa como largo y sus títulos van tal cual")
+        V.lanzar_titulo(raiz, "v6", dict(datos, formato="short"), en_hilo=False)
+        ok("type «short»" in doble.llamadas[-1]["instruccion"], "un corto se puntúa como Short")
+        igual(V.normalizar_titulo({"palabra": {"frase": "x", "volumen": None,
+                                               "volumen_texto": "menos de 750 al mes"}})["palabra"]["volumen_texto"],
+              "menos de 750 al mes", "el volumen estimado se guarda como lo dice vidIQ (no como 0)")
         ok(not os.path.exists(doble.llamadas[-1]["ruta"]), "el fichero MCP se borra")
         # sin título actual, no se pide su nota
         V.lanzar_titulo(raiz, "v2", dict(datos, titulo=""), en_hilo=False)

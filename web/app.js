@@ -17844,6 +17844,11 @@ function imagenesParaCrear(e) {
   if ((e.visuales || []).length && e.estados_espacio && Object.keys(e.estados_espacio).length) {
     salida.estados = e.estados_espacio;
   }
+  /* la portada propuesta en el guion (rama portada-en-guion): no es un param,
+     el servidor la guarda en la ficha de Publicar del vídeo */
+  if (e.portada_guion && String(e.portada_guion.imagen || '').trim()) {
+    salida.portada = { texto: String(e.portada_guion.texto || ''), imagen: String(e.portada_guion.imagen) };
+  }
   return Object.keys(salida).length ? salida : null;
 }
 
@@ -27754,6 +27759,81 @@ function pasoSeoPublicar(f) {
 }
 
 /* 4 · PORTADA: el bloque de siempre; «Diseñar portada» abre el editor de hoy. */
+/* LA PORTADA PROPUESTA EN EL GUION (rama portada-en-guion, 04-11). Solo sale
+   si el guion de la Parrilla traía la sección PORTADA: su texto y la
+   descripción de la imagen, que se pueden corregir. «Crear esta portada» abre
+   el diseñador con ese texto en el título y pide a la IA SOLO el fondo (sin
+   letras): antes de pagar se ve el precio y se confirma ahí mismo, como
+   cualquier fondo con IA. El texto lo pone el Studio en capas, sin faltas.
+   Nada de aquí es un param del vídeo: vive en su ficha de Publicar. */
+function copiaPortadaDelGuion(f) {
+  const pg = f.portada_guion || {};
+  if (!PUB.portadaGuion || PUB.portadaGuion.pid !== f.pid) {
+    PUB.portadaGuion = { pid: f.pid, texto: String(pg.texto || ''), imagen: String(pg.imagen || ''), tocado: false };
+  }
+  return PUB.portadaGuion;
+}
+
+async function guardarPortadaDelGuion(f, copia) {
+  if (!String(copia.imagen || '').trim()) {
+    toast('Escribe qué imagen lleva la portada', true);
+    return false;
+  }
+  try {
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(f.pid)}`), { method: 'PUT',
+      cuerpo: { portada_guion: { texto: copia.texto, imagen: copia.imagen } } });
+    copia.tocado = false;
+    return true;
+  } catch (e) { toast(e.message, true); return false; }
+}
+
+async function crearPortadaDelGuion(f) {
+  const copia = copiaPortadaDelGuion(f);
+  if (copia.tocado && !(await guardarPortadaDelGuion(f, copia))) return;
+  const pid = f.pid;
+  await abrirEditorPortada(pid);
+  if (PORT.pid !== pid || !PORT.abierto || !PORT.diseno) return;
+  const texto = String(copia.texto || '').trim();
+  if (texto) {
+    /* el texto del guion va al título; una plantilla sin título pasa a «Titular» */
+    const actual = ((PORT.catalogo || {}).plantillas || []).find(x => x.id === PORT.diseno.plantilla);
+    const plantilla = actual && (actual.campos || []).includes('titulo') ? actual.id : 'titular';
+    await cambiarPlantillaPortada({ plantilla, textos: { titulo: texto } });
+    if (PORT.pid !== pid || !PORT.abierto) return;
+  }
+  PORT.diseno.fondo = Object.assign({}, PORT.diseno.fondo, { tipo: 'ia' });
+  tocarPortada(true);
+  /* solo enseña el prompt y el precio: no se paga hasta pulsar «Dibujar» */
+  await prepararIA('fondo', copia.imagen, 'low');
+}
+
+function bloquePortadaDelGuion(f) {
+  const pg = f.portada_guion || {};
+  if (!String(pg.imagen || '').trim()) return null;
+  const copia = copiaPortadaDelGuion(f);
+  const botonGuardar = h('button', { type: 'button', clase: 'mini', disabled: !copia.tocado,
+    onclick: async () => { if (await guardarPortadaDelGuion(f, copia)) { toast('Portada del guion guardada'); pintarModulo(); } } },
+  'Guardar cambios');
+  const tocar = () => { copia.tocado = true; botonGuardar.disabled = false; };
+  return h('div', { clase: 'bloque portada-guion' },
+    h('h4', {}, 'Portada propuesta en el guion'),
+    h('div', { clase: 'meta' }, 'Venía en el guion de la Parrilla. «Crear esta portada» abre el diseñador con este '
+      + 'texto y pide a la IA solo la imagen de fondo, sin letras: el texto lo pone el Studio encima. Antes de pagar '
+      + 'ves el precio y lo confirmas.'),
+    h('label', { clase: 'etiqueta-campo' }, 'Texto de la portada',
+      h('input', { type: 'text', maxlength: 80, value: copia.texto, datos: { foco: 'portada-guion-texto' },
+        placeholder: 'sin texto: se queda el del diseño',
+        oninput: ev => { copia.texto = ev.target.value; tocar(); } })),
+    h('label', { clase: 'etiqueta-campo' }, 'Imagen de fondo',
+      h('textarea', { rows: 3, maxlength: 600, clase: 'texto-portada-guion', value: copia.imagen,
+        datos: { foco: 'portada-guion-imagen' }, oninput: ev => { copia.imagen = ev.target.value; tocar(); } })),
+    h('div', { clase: 'fila' },
+      h('button', { type: 'button', clase: 'mini primario', onclick: () => crearPortadaDelGuion(f) }, '✦ Crear esta portada'),
+      h('button', { type: 'button', clase: 'mini', onclick: () => abrirEditorPortada(f.pid) }, 'Hacer otra portada'),
+      h('span', { clase: 'crece' }),
+      botonGuardar));
+}
+
 function pasoPortadaPublicar(f) {
   const caja = h('div', { clase: 'paso-portada-publicar' },
     cabPasoPublicar('Portada', 'Un fotograma del vídeo, una imagen tuya o una portada diseñada. Sin elegir nada, cada red pone la suya.'));
@@ -27761,6 +27841,7 @@ function pasoPortadaPublicar(f) {
     caja.appendChild(h('div', { clase: 'meta' }, 'La portada se elige con un vídeo montado y alguna red marcada.'));
     return caja;
   }
+  { const delGuion = bloquePortadaDelGuion(f); if (delGuion) caja.appendChild(delGuion); }  // portada-en-guion
   caja.appendChild(bloquePortadaPublicar());  // lo encaja aquí rediseno-publicar; portadas-2 lo cambia por dentro
   return caja;
 }
@@ -31488,6 +31569,10 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   e.imagenes = ['guion', 'voz'].includes(r.imagenes) ? r.imagenes : '';
   e.visuales = Array.isArray(r.visuales) ? r.visuales : [];
   e.estados_espacio = (r.estados && typeof r.estados === 'object' && !Array.isArray(r.estados)) ? r.estados : {};
+  /* la portada propuesta en el guion (rama portada-en-guion): viaja con el
+     vídeo y se ofrece en Publicar → Portada; un guion sin ella la quita */
+  e.portada_guion = (r.portada && typeof r.portada === 'object' && String(r.portada.imagen || '').trim())
+    ? { texto: String(r.portada.texto || ''), imagen: String(r.portada.imagen) } : null;
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.fichaAbierta = false;
   PAR.datos = null;
@@ -31504,7 +31589,8 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
      pintado, que apilaba otra entrada y pedía dos «atrás» para salir. */
   subirArriba('panel');
   irAModulo('crear');
-  toast(`Encargo lleno con «${recortar(r.nombre || 'el guion', 40)}»: revísalo y pulsa «Generar el guion»`);
+  toast(`Encargo lleno con «${recortar(r.nombre || 'el guion', 40)}»: revísalo y pulsa «Generar el guion»`
+    + (e.portada_guion ? '. Trae una portada propuesta: la verás en Publicar → Portada' : ''));
   if (soltado) {
     const quien = `«${recortar(soltado.nombre, 40)}»`;
     setTimeout(() => toast(soltado.ocupado

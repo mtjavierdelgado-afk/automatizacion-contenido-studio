@@ -34,6 +34,18 @@ vídeos, estilos, claves y contraseña no se tocan.
 - **«Copiar» de Configuración → YouTube: tu canal** ya no da error si el navegador
   no deja copiar: lo dice y puedes copiarlo a mano.
 
+**El guion de la Parrilla puede traer su portada (4 de noviembre)**
+- Una sección nueva y opcional, **PORTADA**, con `- Texto:` (las palabras
+  grandes) y `- Imagen:` (cómo es la imagen de fondo, sin letras). Claude la
+  escribe al convertir un guion si el original habla de la portada o se la
+  pides, y también se puede escribir a mano.
+- Viaja con el vídeo al crearlo. En **Publicar → Portada** sale la caja
+  **«Portada propuesta en el guion»**: **✦ Crear esta portada** pide a la IA
+  solo el fondo con esa descripción (ves el precio antes de pagar) y el Studio
+  pone el texto encima, sin faltas; **Hacer otra portada** abre el editor de
+  siempre. El texto y la descripción se pueden corregir.
+- Los vídeos sin portada en el guion, y los ya creados, no cambian.
+
 **La Parrilla dice el estado de cada escena, y sin cámara no hay encuadre al azar (3 de noviembre)**
 - En «Un espacio que cambia» con «Imágenes: guion», el guion de la Parrilla
   puede traer **«Estado: antes»** (o `despues`…) en cada ESCENA y una sección

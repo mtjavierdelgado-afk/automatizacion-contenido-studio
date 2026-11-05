@@ -6364,6 +6364,53 @@ def probar_elementos_del_video(cliente, pid):
     ok(r.status_code in (400, 404), "y sin texto no se apunta nada")
 
 
+def probar_portada_del_guion(cliente):
+    """Rama portada-en-guion (04-11): la portada propuesta en el guion de la
+    Parrilla viaja al crear el vídeo y vive en su ficha de Publicar, fuera de
+    params y firmas (regla 1)."""
+    seccion("LA PORTADA PROPUESTA EN EL GUION")
+    r, datos = cliente.post("/api/presets-canal", {
+        "tipo": "canal", "nombre": "Estilo con portada",
+        "datos": {"guion": {"idioma_salida": "es", "instrucciones": "Claro."},
+                  "voz": {"voz_id": "v-de-prueba", "idioma": "es", "velocidad": "normal"}}})
+    igual(r.status_code, 200, "hay un estilo para crear los vídeos")
+    estilo_id = (datos.get("preset") or {}).get("id") or ""
+    cuerpo = {"nombre": "Con portada", "duracion_objetivo_s": 30, "material": "Un baño nuevo en tres días.",
+              "opciones": {"portada": {"texto": "  Tu baño   en 3 días ",
+                                       "imagen": "baño reformado con mampara, plano general, luz cálida"}}}
+    r, con = cliente.post(f"/api/presets-light/{estilo_id}/video", cuerpo)
+    igual(r.status_code, 201, "crear un vídeo con portada en el guion responde 201")
+    vid = (con.get("proyecto") or {}).get("id") or ""
+    sin_cuerpo = dict(cuerpo, nombre="Sin portada", opciones={})
+    r, sin = cliente.post(f"/api/presets-light/{estilo_id}/video", sin_cuerpo)
+    vid_sin = (sin.get("proyecto") or {}).get("id") or ""
+    r, ficha = cliente.get(f"/api/publicar/videos/{vid}")
+    igual(r.status_code, 200, "la ficha de Publicar del vídeo se lee")
+    igual(ficha.get("portada_guion"), {"texto": "Tu baño en 3 días",
+                                       "imagen": "baño reformado con mampara, plano general, luz cálida",
+                                       "origen": "parrilla"},
+          "la ficha trae la portada del guion, limpia")
+    r, ficha_sin = cliente.get(f"/api/publicar/videos/{vid_sin}")
+    igual(ficha_sin.get("portada_guion"), {}, "un vídeo sin portada en el guion no trae nada")
+    r, a1 = cliente.get(f"/api/proyectos/{vid}/pasos/assets")
+    r, a2 = cliente.get(f"/api/proyectos/{vid_sin}/pasos/assets")
+    igual(a1.get("params"), a2.get("params"), "la portada no escribe ningún param del vídeo (regla 1)")
+    r, editada = cliente.put(f"/api/publicar/videos/{vid}",
+                             {"portada_guion": {"texto": "Baño nuevo", "imagen": "otra descripción"}})
+    igual(r.status_code, 200, "corregir la portada del guion responde 200")
+    igual(editada.get("portada_guion"), {"texto": "Baño nuevo", "imagen": "otra descripción", "origen": "parrilla"},
+          "y la deja corregida")
+    r, _m = cliente.put(f"/api/publicar/videos/{vid}", {"portada_guion": {"texto": "x", "imagen": "  "}})
+    igual(r.status_code, 400, "sin descripción de la imagen: 400")
+    r, _m = cliente.put(f"/api/publicar/videos/{vid}", {"portada_guion": "no"})
+    igual(r.status_code, 400, "una portada que no es un objeto: 400")
+    r, precio = cliente.post(f"/api/publicar/videos/{vid}/portada/ia",
+                             {"diseno": {"plantilla": "titular"}, "que": "fondo", "prompt": "otra descripción"})
+    ok(r.status_code == 202 and "trabajo_id" not in precio and precio.get("prompt") == "otra descripción"
+       and "SIN texto" in (precio.get("prompt_final") or ""),
+       "«Crear esta portada» enseña el precio con la descripción como prompt y sin letras, sin gastar")
+
+
 def probar_portadas(cliente, pid):
     """Rama `portadas`: las rutas que no gastan ni llaman a Claude."""
     seccion("LAS PORTADAS DISEÑADAS")
@@ -8874,6 +8921,7 @@ def main():
         probar_que_lo_lento_no_para_el_servicio()
         probar_ortografia_de_campos(cliente, pid)
         probar_portadas(cliente, pid)
+        probar_portada_del_guion(cliente)
         probar_elementos_del_video(cliente, pid)
         probar_lo_de_v2h()
         probar_notas_19oct()

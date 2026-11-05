@@ -835,6 +835,16 @@ el botón **«Dibujar»**. Recomendado: el fondo con IA y el texto en capas.
 respaldo) y **Usar como portada** (la que va a las redes). En el bloque Portada
 se ve **qué portada recibe cada red** y, en cada envío, cuál se mandó.
 
+**La portada propuesta en el guion.** Si el guion de la Parrilla traía la
+sección **PORTADA** (`- Texto:` y `- Imagen:`), en el paso Portada sale arriba
+la caja **«Portada propuesta en el guion»**, con el texto y la descripción de la
+imagen (se pueden corregir y **Guardar cambios**). **✦ Crear esta portada** abre
+el editor con ese texto en el título y prepara un fondo con IA con esa
+descripción: la IA dibuja solo la imagen, sin letras, y el texto lo pone el
+Studio encima. Se paga una imagen, y antes de pagar ves el precio y pulsas
+**«Dibujar»**. **Hacer otra portada** abre el editor de siempre. Un vídeo cuyo
+guion no traía portada no enseña la caja.
+
 ## Automatizar
 
 Lo que prepara los vídeos antes de crearlos. Arriba, el **proyecto** (el

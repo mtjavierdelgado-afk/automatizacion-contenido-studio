@@ -1150,7 +1150,14 @@ def renderizar_plano(tarea, navegador=None, avisar=None):
                         os.path.join(carpeta, "escena.html"),
                         capa_fija=tarea.get("capa_fija") or "", fps=fps)
 
+    # LO QUE TARDA CADA PARTE DEL PLANO (rama render-y-cotizador, 04-11): no
+    # cambia nada de lo que sale; viaja en la ficha como «tiempos» y `ejecutar`
+    # lo suma para la estadistica del paso y lo quita antes de sellar.
+    reloj = time.time()
+    tiempos = {}
     navegador.abrir(pagina)
+    tiempos["abrir"] = time.time() - reloj
+    reloj = time.time()
     for numero in range(total):
         navegador.pintar(numero / float(fps))
         if numero == 0 and (tarea["mov"].get("profundidad") or {}).get("mapa"):
@@ -1166,6 +1173,8 @@ def renderizar_plano(tarea, navegador=None, avisar=None):
     # plano siguiente, y lo que tiene que mirar es este plano limpio, no este
     # plano mezclado con el anterior.
     _guardar_ultimo(os.path.join(carpeta, f"f{total:05d}.png"), tarea["ultimo"])
+    tiempos["pintar_y_capturar"] = time.time() - reloj
+    reloj = time.time()
 
     corte = tarea.get("corte") or {}
     pintados = 0
@@ -1190,7 +1199,10 @@ def renderizar_plano(tarea, navegador=None, avisar=None):
             pintados = _cocer_transicion(navegador, tarea["pagina_trans"],
                                          anterior, carpeta, total, fps, corte)
 
+    tiempos["transicion"] = time.time() - reloj
+    reloj = time.time()
     _codificar(carpeta, tarea["clip"], fps, tarea["calidad"], avisar)
+    tiempos["codificar"] = time.time() - reloj
     medios.borrar(pagina)
     if not tarea.get("conservar_frames"):
         shutil.rmtree(carpeta, ignore_errors=True)
@@ -1199,7 +1211,8 @@ def renderizar_plano(tarea, navegador=None, avisar=None):
             "transicion": corte.get("tipo") or "corte",
             "ranura": corte.get("ranura") or "corte",
             "frames_transicion": pintados,
-            "origen": "renderizado"}
+            "origen": "renderizado",
+            "tiempos": {k: round(v, 3) for k, v in tiempos.items()}}
 
 
 def correr_lote(tareas, senal_vivo=None, al_plano=None, avisar=None):
@@ -1219,7 +1232,9 @@ def correr_lote(tareas, senal_vivo=None, al_plano=None, avisar=None):
     if not tareas:
         return []
     ancho, alto = [int(v) for v in tareas[0]["resolucion"]]
+    reloj = time.time()
     navegador = Navegador(ancho, alto)
+    arrancar = time.time() - reloj
     if senal_vivo:
         try:
             medios.escribir_texto(senal_vivo, "1")
@@ -1233,6 +1248,9 @@ def correr_lote(tareas, senal_vivo=None, al_plano=None, avisar=None):
         fichas = []
         for tarea in tareas:
             fichas.append(renderizar_plano(tarea, navegador, avisar))
+            if len(fichas) == 1 and isinstance(fichas[0].get("tiempos"), dict):
+                # arrancar el navegador es UNA vez por lote: va en su primer plano
+                fichas[0]["tiempos"]["arrancar"] = round(arrancar, 3)
             # EN FILA, CANCELAR SE OYE ENTRE PLANO Y PLANO: `al_plano` es el
             # `avisar` del paso, que lanza si alguien ha cancelado. Antes este
             # camino no avisaba nada hasta acabar todos los planos.
@@ -1682,8 +1700,12 @@ def _ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
                 and not os.path.exists(tarea["anterior"])):
             tarea["anterior"] = None
 
+    fases = {"preparar": time.time() - arranque_paso}
+    reloj_fase = time.time()
+    procesos = 0
     if tareas:
         lotes = _repartir_lotes(tareas, _cuantos_lotes(p, len(tareas)))
+        procesos = len(lotes)
         if len(lotes) <= 1:
             # UN SOLO PLANO (o el modo en fila): no hace falta sacar un proceso
             # para lanzar un navegador. Es el mismo cuerpo, corriendo aqui.
@@ -1697,6 +1719,14 @@ def _ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
             fichas = _correr_lotes_en_procesos(
                 lotes, trabajo, avisar, len(tareas),
                 dir_clips=dir_clips, desde=arranque_render)
+        por_plano = {}
+        for ficha in fichas.values():
+            for clave, valor in (ficha.pop("tiempos", None) or {}).items():
+                try:
+                    por_plano[clave] = por_plano.get(clave, 0.0) + float(valor)
+                except (TypeError, ValueError):
+                    pass
+        fases["planos_por_plano"] = {k: round(v, 1) for k, v in por_plano.items()}
         for sid, ficha in fichas.items():
             resultados[f"escena:{sid}"] = dict(
                 ficha, clip=os.path.relpath(
@@ -1709,6 +1739,8 @@ def _ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
     if not p["conservar_frames"]:
         shutil.rmtree(dir_frames, ignore_errors=True)
         shutil.rmtree(os.path.join(trabajo, "lotes"), ignore_errors=True)
+    fases["planos"] = time.time() - reloj_fase
+    reloj_fase = time.time()
 
     # ------------------------------------------------------------- sonido
     # Va DESPUES de los clips y antes de montar, y no toca el video: la banda
@@ -1754,6 +1786,8 @@ def _ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
         # alguien borro del banco no arregla nada. Se dice en los avisos.
         pista_musica = candidata if os.path.exists(candidata) else None
 
+    fases["sonido"] = time.time() - reloj_fase
+    reloj_fase = time.time()
     avisar(0.95, "montando el video")
     destino = os.path.join(trabajo, "video.mp4")
     try:
@@ -1770,6 +1804,8 @@ def _ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
                 fps=fps, calidad=p.get("calidad_video") or "media",
                 efectos_db=ajuste_efectos,
                 presencia=p.get("musica_presencia"), avisar=avisar)
+    fases["montar"] = time.time() - reloj_fase
+    reloj_fase = time.time()
     # EL LOGO, encima del video ya montado (ver `poner_logo`)
     ficha_logo = p.get("logo") or {}
     if isinstance(ficha_logo, dict) and ficha_logo.get("fichero"):
@@ -1780,6 +1816,7 @@ def _ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
             poner_logo(destino, ruta_logo, ficha_logo, p.get("calidad_video") or "media",
                        avisar=avisar)
     duracion = medios.duracion_media(destino)
+    fases["logo"] = time.time() - reloj_fase
 
     # los assets son unidades heredadas: no se renderizan, pero se sellan igual
     # o el paso nunca daria 'listo' aunque el video este hecho
@@ -1837,7 +1874,12 @@ def _ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
                                 detalle={"solo_montar": bool(solo_montar),
                                          "duracion_s": round(duracion, 1),
                                          "fps": fps,
-                                         "resolucion": [ancho, alto]})
+                                         "resolucion": [ancho, alto],
+                                         # dónde se va el tiempo (render-y-cotizador)
+                                         "procesos": procesos,
+                                         "planos": len(tareas),
+                                         "fases": {k: (round(v, 1) if isinstance(v, float) else v)
+                                                   for k, v in fases.items()}})
     except Exception:                                       # noqa: BLE001
         pass
     return {"salidas": salidas, "unidades": rehechas, "todas": resultados,

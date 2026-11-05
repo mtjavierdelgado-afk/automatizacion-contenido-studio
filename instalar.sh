@@ -8,6 +8,21 @@
 #      curl -fsSL https://raw.githubusercontent.com/mtjavierdelgado-afk/automatizacion-contenido-studio/main/instalar.sh -o instalar.sh
 #      bash instalar.sh
 #
+#  Si el repositorio es PRIVADO hace falta un token de GitHub de solo lectura
+#  (fine-grained, «Contents: Read-only», solo ese repositorio). Se pega sin que
+#  se vea y no queda en el historial ni en la lista de procesos:
+#
+#      read -rsp "Token: " ASVS_TOKEN; echo; export ASVS_TOKEN
+#      printf 'Authorization: Bearer %s' "$ASVS_TOKEN" | curl -fsSL -H @- \
+#        https://raw.githubusercontent.com/USUARIO/REPOSITORIO/main/instalar.sh -o instalar.sh
+#      ASVS_REPO=USUARIO/REPOSITORIO bash instalar.sh
+#      unset ASVS_TOKEN
+#
+#  El instalador lo guarda en /root/estudio/github_token (solo root) y desde
+#  ahi lo usa `asvs actualizar`. Si ya esta guardado, no hace falta pasarlo.
+#  (Instalando desde una copia del codigo, sin bajar nada, el token no se usa
+#  ni se guarda: luego, `asvs token poner`.)
+#
 #  Se puede volver a lanzar las veces que haga falta: no repite lo que ya esta
 #  hecho y NO toca los datos (los videos, los estilos ni las claves).
 #
@@ -16,6 +31,7 @@
 #      ASVS_CORREO=yo@ejemplo.com    para los avisos de caducidad del certificado
 #      ASVS_REPO=usuario/repositorio de donde se baja el codigo
 #      ASVS_RAMA=main                que rama
+#      ASVS_TOKEN=github_pat_...     token de solo lectura, si el repositorio es privado
 #      ASVS_SIN_TLS=1                no pedir certificado (para probar)
 # =============================================================================
 set -euo pipefail
@@ -24,6 +40,11 @@ VERSION_INSTALADOR="1.0.0"
 
 REPO="${ASVS_REPO:-mtjavierdelgado-afk/automatizacion-contenido-studio}"
 RAMA="${ASVS_RAMA:-main}"
+# El token de un repositorio privado (ver arriba). Mismo sitio que lee asvs.
+FICHERO_TOKEN="${ASVS_TOKEN_FICHERO:-/root/estudio/github_token}"
+# Se recoge y se quita del entorno YA: si no, lo heredarian npm y el node que
+# corre como el usuario del servicio (que podria leerlo en /proc).
+TOKEN_PASADO="${ASVS_TOKEN:-}"; unset ASVS_TOKEN
 RAIZ="${ASVS_RAIZ:-/opt/as-video-studio}"
 USUARIO="${ASVS_USUARIO:-studio}"
 CUENTA="${ASVS_CUENTA:-estudio}"
@@ -365,8 +386,33 @@ descargar_codigo() {
   else
     origen="$(mktemp -d)"
     nota "bajando $REPO ($RAMA)..."
-    curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$RAMA" -o "$origen/codigo.tgz" \
-      || fallo "no se ha podido bajar el codigo de https://github.com/$REPO (rama $RAMA). Comprueba que el repositorio es publico."
+    # El token que se pase se PRUEBA bajando con el y solo entonces se guarda
+    # (solo root) para que asvs actualizar lo use: uno mal pegado no pisa el
+    # bueno que hubiera.
+    local token nuevo=""
+    if [ -n "$TOKEN_PASADO" ]; then
+      nuevo="$(printf '%s' "$TOKEN_PASADO" | tr -d '[:space:]')"
+      printf '%s' "$nuevo" | grep -Eq '^[A-Za-z0-9_]+$' \
+        || fallo "ASVS_TOKEN no parece un token de GitHub (solo letras, numeros y _)."
+      token="$nuevo"
+    else
+      token="$( { tr -d '[:space:]' < "$FICHERO_TOKEN"; } 2>/dev/null || true)"
+      printf '%s' "$token" | grep -Eq '^[A-Za-z0-9_]+$' || token=""
+    fi
+    if [ -n "$token" ]; then
+      # por la entrada (-K -), no en la linea de mandatos: ahi lo veria `ps`
+      printf 'header = "Authorization: Bearer %s"\nheader = "Accept: application/vnd.github+json"\n' "$token" \
+        | curl -K - -fsSL --max-time 300 "https://api.github.com/repos/$REPO/tarball/$RAMA" -o "$origen/codigo.tgz" \
+        || fallo "no se ha podido bajar el codigo de https://github.com/$REPO (rama $RAMA) con el token. Mira que el token siga vivo y tenga permiso de lectura sobre ese repositorio."
+      if [ -n "$nuevo" ]; then
+        mkdir -p "$(dirname "$FICHERO_TOKEN")"; chmod 700 "$(dirname "$FICHERO_TOKEN")"
+        ( umask 077; printf '%s\n' "$nuevo" > "$FICHERO_TOKEN" ); chmod 600 "$FICHERO_TOKEN"
+        nota "token guardado en $FICHERO_TOKEN (solo root)"
+      fi
+    else
+      curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$RAMA" -o "$origen/codigo.tgz" \
+        || fallo "no se ha podido bajar el codigo de https://github.com/$REPO (rama $RAMA). Si el repositorio es privado, pasa el token: ASVS_TOKEN (ver la cabecera de este script)."
+    fi
     tar -xzf "$origen/codigo.tgz" -C "$origen" --strip-components=1
     rm -f "$origen/codigo.tgz"
   fi

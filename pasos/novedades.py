@@ -44,6 +44,13 @@ def _leer(ruta):
         return ""
 
 
+def _leer_trozo(ruta):
+    """Un fichero de la carpeta, sin la marca BOM que pone el PowerShell 5
+    (`Out-File -Encoding utf8`): con ella, un «## V…» no se veria como
+    titulo de version y caeria dentro de la version de antes."""
+    return _leer(ruta).lstrip("\ufeff").strip()
+
+
 def fragmentos(raiz):
     """[(nombre, texto)] de la carpeta, del mas nuevo al mas antiguo.
 
@@ -57,37 +64,46 @@ def fragmentos(raiz):
         return []
     salida = []
     for nombre in sorted(nombres, reverse=True):
-        texto = _leer(os.path.join(carpeta, nombre)).strip()
+        texto = _leer_trozo(os.path.join(carpeta, nombre))
         if texto:
             salida.append((nombre, texto))
     return salida
 
 
-def juntar(base, trozos):
-    """El texto de NOVEDADES.md `base` con los `trozos` (textos) metidos en su sitio."""
-    if not trozos:
-        return base
-    nuevas = [t for t in trozos if t.startswith("## ")]      # abren version
-    sueltas = [t for t in trozos if not t.startswith("## ")]  # van en la actual
+def _meter(base, trozo):
+    """Mete UN trozo en `base`: un «## V…» abre version encima de la primera;
+    una entrada suelta va debajo del primer titulo de version (la mas nueva)."""
+    trozo = trozo.strip("\n")
     m = _VERSION.search(base)
+    if not base.strip():
+        return trozo + "\n"
     if not m:
         # sin ningun titulo de version: detras de todo, como un bloque mas
-        cuerpo = "\n\n".join(nuevas + sueltas)
-        return base.rstrip("\n") + "\n\n" + cuerpo + "\n"
+        return base.rstrip("\n") + "\n\n" + trozo + "\n"
     antes, desde = base[:m.start()], base[m.start():]
+    if trozo.startswith("## "):
+        return antes + trozo + "\n\n" + desde
     fin_titulo = desde.find("\n")
     if fin_titulo < 0:
         titulo, resto = desde, ""
     else:
         titulo, resto = desde[:fin_titulo], desde[fin_titulo + 1:].lstrip("\n")
-    partes = [antes]
-    for t in nuevas:
-        partes.append(t.rstrip("\n") + "\n\n")
-    partes.append(titulo + "\n\n")
-    for t in sueltas:
-        partes.append(t.rstrip("\n") + "\n\n")
-    partes.append(resto)
-    return "".join(partes)
+    return antes + titulo + "\n\n" + trozo + "\n\n" + resto
+
+
+def juntar(base, trozos):
+    """El texto de NOVEDADES.md `base` con los `trozos` (del mas nuevo al mas
+    antiguo, como los da `fragmentos`) metidos en su sitio.
+
+    Se meten DEL MAS ANTIGUO AL MAS NUEVO, cada uno arriba del todo de la
+    version mas nueva que haya en ese momento: asi una entrada fechada despues
+    de un «## V5.2» suelto cae dentro de la 5.2, y una de antes, en la 5.1.
+    """
+    if not trozos:
+        return base
+    for trozo in reversed(list(trozos)):
+        base = _meter(base, trozo)
+    return base
 
 
 def texto(raiz):

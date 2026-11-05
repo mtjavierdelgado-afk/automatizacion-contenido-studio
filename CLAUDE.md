@@ -622,7 +622,11 @@ Tres cosas que ahorran perseguir fallos que no existen:
     se arreglan en su sitio.
   - **`docs/API.md`:** nadie lo escribe a mano. Se une sumando los dos lados
     (`.gitattributes`, `merge=union`) y después de cada `git merge` se corre
-    `python generar_api.py`; `prueba_api.py` falla si se queda viejo.
+    `python generar_api.py`: si dos ramas cambiaron la misma fila quedan las
+    dos, y `prueba_api.py` no lo ve (solo mira que estén todas las rutas).
+  - **`docs/NOVEDADES.md`:** una rama vieja que aún escribió arriba choca ahí
+    como siempre; se resuelve conservando las dos entradas, con una línea en
+    blanco entre ellas (sin ella, la pantalla las pega en una).
   - **`docs/MANUAL.md` y la lista de suites de `pruebas.sh`/`pruebas.ps1`**
     siguen como siempre: se cambian en su sitio y un choque ahí se resuelve
     sumando los dos lados.

@@ -118,14 +118,25 @@ def prueba_en_su_sitio():
 
 
 def prueba_version_nueva():
-    print("\n[3] un fichero que abre version va encima")
+    print("\n[3] un fichero que abre version va encima, y lo de despues, dentro")
     raiz = _raiz({
         "2026-11-10-v52.md": "## V5.2 · noviembre de 2026\n\n**Lo nuevo de la 5.2 (10 de noviembre)**\n- x\n",
         "2026-11-09-suelta.md": "**Una suelta (9 de noviembre)**\n- y\n",
+        "2026-11-11-despues.md": "**Una de despues (11 de noviembre)**\n- z\n",
     })
     texto = novedades.texto(raiz)
-    ok(texto.index("## V5.2") < texto.index("## V5.1") < texto.index("Una suelta") < texto.index("Lo de antes"),
-       "la 5.2 encima de la 5.1, y la suelta dentro de la 5.1 (la de NOVEDADES.md)")
+    ok(texto.index("## V5.2") < texto.index("Una de despues") < texto.index("Lo nuevo de la 5.2")
+       < texto.index("## V5.1") < texto.index("Una suelta") < texto.index("Lo de antes"),
+       "la 5.2 encima; lo fechado despues, dentro de la 5.2; lo de antes, en la 5.1")
+    ok("\n\n\n" not in texto, "sin huecos de mas")
+    shutil.rmtree(raiz)
+    raiz = _raiz({"2026-11-10-v52.md": "\ufeff## V5.2 · noviembre\n\n**Con BOM**\n- b\n"})
+    texto = novedades.texto(raiz)
+    ok("\ufeff" not in texto and texto.index("## V5.2") < texto.index("## V5.1"),
+       "un fichero con BOM (PowerShell 5) se lee bien: la 5.2 sigue siendo version")
+    shutil.rmtree(raiz)
+    raiz = _raiz({"2026-11-05-a.md": "**A**\n- a\n"}, base="")
+    ok(novedades.texto(raiz) == "**A**\n- a\n", "sin NOVEDADES.md, solo la entrada, sin huecos delante")
     shutil.rmtree(raiz)
 
 
@@ -265,7 +276,7 @@ def prueba_cargador_del_recorrido():
 
 
 def prueba_api_sin_choques():
-    print("\n[9] docs/API.md y docs/NOVEDADES.md se unen sin choques")
+    print("\n[9] docs/API.md se une sin choques; NOVEDADES.md no")
     ruta = os.path.join(RAIZ_ESTUDIO, ".gitattributes")
     try:
         with open(ruta, encoding="utf-8") as fh:
@@ -275,9 +286,10 @@ def prueba_api_sin_choques():
     reglas = {x[0]: x[1:] for x in lineas if x}
     ok("merge=union" in reglas.get("docs/API.md", []),
        "docs/API.md se une sumando los dos lados (se regenera con generar_api.py)")
-    ok("merge=union" in reglas.get("docs/NOVEDADES.md", []),
-       "docs/NOVEDADES.md también, para las ramas que aún escriben ahí")
-
+    ok("merge=union" not in reglas.get("docs/NOVEDADES.md", []),
+       "docs/NOVEDADES.md NO: sumar pega dos entradas y la pantalla las junta")
+    ok(reglas.get("*.py") == ["text", "eol=lf"] and reglas.get("*.sh") == ["text", "eol=lf"],
+       "las reglas de finales de línea de antes siguen ahí")
 
 if __name__ == "__main__":
     print("PRUEBA DE RAMAS SIN CHOQUES")

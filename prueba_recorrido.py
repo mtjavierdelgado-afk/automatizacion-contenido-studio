@@ -4337,7 +4337,50 @@ def editar_a_mano_conserva_la_pausa(navegador, datos):
                 {"params": params_antes, "reemplazar": True})
 
 
+#: Los escenarios de cada rama, en su fichero (rama ramas-sin-choques,
+#: 05-11-2026). Cada rama añadía su tramo AL FINAL de este fichero, y dos ramas
+#: abiertas a la vez escribían en las mismas líneas: un choque por unión. Ahora
+#: un escenario nuevo va en `pruebas/recorrido/<rama>.py` y se carga solo, detrás
+#: de los de aquí, en orden de nombre. Los de este fichero no se mueven.
+CARPETA_ESCENARIOS = os.path.join(RAIZ, "pruebas", "recorrido")
+
+
+def cargar_escenarios_de_ramas(carpeta=CARPETA_ESCENARIOS):
+    """Importa cada `pruebas/recorrido/*.py` (sin los que empiezan por «_»).
+
+    Se importan como módulos de verdad, pero ESTE fichero se registra antes como
+    `prueba_recorrido` en sys.modules: así su `from prueba_recorrido import …`
+    recibe estas mismas funciones (y la misma lista ESCENARIOS) en vez de cargar
+    una segunda copia del recorrido. Uno que no carga es un fallo, no se calla.
+    -> [nombres cargados]
+    """
+    import importlib.util  # noqa: PLC0415
+    sys.modules.setdefault("prueba_recorrido", sys.modules[__name__])
+    try:
+        nombres = sorted(n for n in os.listdir(carpeta)
+                         if n.endswith(".py") and not n.startswith("_"))
+    except OSError:
+        return []
+    cargados = []
+    for nombre in nombres:
+        modulo = f"recorrido_{nombre[:-3]}"
+        if modulo in sys.modules:
+            cargados.append(nombre)
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(modulo, os.path.join(carpeta, nombre))
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[modulo] = mod
+            spec.loader.exec_module(mod)
+            cargados.append(nombre)
+        except Exception as fallo:                       # noqa: BLE001
+            traceback.print_exc()
+            ok(False, f"pruebas/recorrido/{nombre} no carga: {type(fallo).__name__}: {fallo}")
+    return cargados
+
+
 def main():
+    cargar_escenarios_de_ramas()
     ap = argparse.ArgumentParser(description="El recorrido de la pantalla")
     ap.add_argument("--solo", default="", help="un escenario por nombre")
     ap.add_argument("--capturas", default="", help="carpeta para las capturas")

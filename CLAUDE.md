@@ -415,9 +415,12 @@ La burbuja de abajo a la derecha es `pasos/asistente.py` más las rutas
   `/opt/as-video-studio`, el comando `asvs`, los servicios `as-video-*`, el
   repositorio. Renombrarlos rompe las instalaciones que ya funcionan sin que
   nada lo diga.
-- **Todo cambio visible se apunta en `docs/NOVEDADES.md`.** Lo enseña
-  Configuración → Novedades y lo lee el asistente en el primer turno: si no se
-  apunta, el asistente explica el sistema de antes.
+- **Todo cambio visible se apunta en las Novedades**, y desde el 05-11-2026
+  en el fichero DE TU RAMA: `docs/novedades/<AAAA-MM-DD>-<rama>.md` (formato y
+  ejemplo en `docs/novedades/LEEME.md`), no arriba de `docs/NOVEDADES.md`.
+  Configuración → Novedades y el asistente lo leen ya junto
+  (`pasos/novedades.py`), en el mismo sitio en el que lo habrías escrito: si no
+  se apunta, el asistente explica el sistema de antes.
 - **Las guías de escritura viven en `pasos/guias.py`, y SOLO ahí.** La pantalla
   las pide a `/api/sistema/guias` y el asistente las lee con Read. Si cambia lo
   que hace un campo (el código que dice su clave `usa`), se revisa su guía.
@@ -607,6 +610,22 @@ Tres cosas que ahorran perseguir fallos que no existen:
 - **En `app.py`, nada bloqueante dentro de una ruta `async def`**: va a
   `_en_hilo` (run_in_threadpool). El bucle de eventos es uno para todo el
   servicio.
+- **Dónde escribe cada rama lo que comparten todas** (rama
+  `ramas-sin-choques`, 05-11-2026; antes cada una lo añadía en las mismas
+  líneas y cada unión era un choque):
+  - **Novedades:** `docs/novedades/<AAAA-MM-DD>-<rama>.md`. En `main`, después
+    de unir, `python herramientas/plegar_novedades.py` las pasa a
+    `NOVEDADES.md` sin cambiar lo que se ve (opcional; nunca en una rama).
+  - **Escenarios nuevos del recorrido:** `pruebas/recorrido/<rama>.py` (cabecera
+    en `pruebas/recorrido/LEEME.md`); `prueba_recorrido.py` los carga solos
+    detrás de los suyos. Los que ya estaban en `prueba_recorrido.py` se quedan y
+    se arreglan en su sitio.
+  - **`docs/API.md`:** nadie lo escribe a mano. Se une sumando los dos lados
+    (`.gitattributes`, `merge=union`) y después de cada `git merge` se corre
+    `python generar_api.py`; `prueba_api.py` falla si se queda viejo.
+  - **`docs/MANUAL.md` y la lista de suites de `pruebas.sh`/`pruebas.ps1`**
+    siguen como siempre: se cambian en su sitio y un choque ahí se resuelve
+    sumando los dos lados.
 - **Lo del despliegue no va en `pruebas.sh`**: si tocas `despliegue/asvs` o
   `estudio-clave`, corre a mano `bash despliegue/prueba/prueba_actualizar.sh` y
   `bash despliegue/prueba/prueba_estudio_clave.sh` (raíz falsa, no tocan nada).

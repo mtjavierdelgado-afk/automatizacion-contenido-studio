@@ -11,3 +11,13 @@ despliegue/*.conf         text eol=lf
 despliegue/*.service      text eol=lf
 *.py              text eol=lf
 *.js              text eol=lf
+
+# Ficheros que comparten todas las ramas y se UNEN SUMANDO los dos lados en vez
+# de pararse en un choque (rama ramas-sin-choques, 05-11-2026).
+#
+# docs/API.md lo escribe generar_api.py: tras unir, `python generar_api.py` lo
+# deja exacto, y prueba_api.py falla si alguien se olvida.
+# docs/NOVEDADES.md: las entradas nuevas van en docs/novedades/<fecha>-<rama>.md;
+# esto es para las ramas que aún escriben arriba (se suman, que es la regla 5).
+docs/API.md        merge=union
+docs/NOVEDADES.md  merge=union

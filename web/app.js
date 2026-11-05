@@ -34981,6 +34981,22 @@ function panelKitDeMarca(cliente) {
   return caja;
 }
 
+/* CON LA CABECERA DE LA CLAVE: un <a href> a secas da 403 en un proyecto con clave. */
+async function descargarGrafica(cid, id, extension) {
+  try {
+    const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
+    const r = await fetch(apiGraficas(cid, `/piezas/${id}/fichero.${extension}`),
+      { headers: pases ? { 'X-Estudio-Abiertos': pases } : {} });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const url = URL.createObjectURL(await r.blob());
+    const enlace = h('a', { href: url, download: `pieza-${id}.${extension}` });
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch (e) { toast(`No se ha podido descargar: ${e.message}`, true); }
+}
+
 function botonNuevaGrafica(cid) {
   return h('button', { clase: 'nueva-grafica', title: 'Una pieza para redes con el kit de este proyecto',
     onclick: () => abrirEditorGrafica(cid, null) }, '+ Nueva gráfica');
@@ -34996,11 +35012,16 @@ function seccionGraficasDelProyecto(cid) {
     if (!GRAF.pidiendo[cid]) {
       GRAF.pidiendo[cid] = true;
       pedir(apiGraficas(cid, '/piezas'))
-        .then(r => { GRAF.piezas[cid] = r.piezas; })
-        .catch(() => { GRAF.piezas[cid] = []; })
+        .then(r => { GRAF.piezas[cid] = r.piezas; GRAF.falloPiezas = ''; })
+        .catch(e => { GRAF.piezas[cid] = null; GRAF.falloPiezas = e.message; })
         .finally(() => { GRAF.pidiendo[cid] = false; pintarLight(); });
     }
     caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo las piezas…'));
+    return caja;
+  }
+  if (lista === null) {
+    caja.appendChild(cajaError(`No se han podido leer las piezas: ${GRAF.falloPiezas}`));
+    caja.appendChild(h('button', { clase: 'mini', onclick: () => { GRAF.piezas[cid] = undefined; pintarLight(); } }, 'Reintentar'));
     return caja;
   }
   if (!lista.length) {
@@ -35015,14 +35036,14 @@ function seccionGraficasDelProyecto(cid) {
       h('b', {}, p.nombre),
       h('span', { clase: 'meta' }, p.medida),
       h('div', { clase: 'fila' },
-        h('a', { clase: 'boton mini', href: apiGraficas(cid, `/piezas/${p.id}/fichero.png`), download: `pieza-${p.id}.png` }, 'PNG'),
-        h('a', { clase: 'boton mini', href: apiGraficas(cid, `/piezas/${p.id}/fichero.jpg`), download: `pieza-${p.id}.jpg` }, 'JPG'),
+        h('button', { clase: 'mini', onclick: () => descargarGrafica(cid, p.id, 'png') }, 'PNG'),
+        h('button', { clase: 'mini', onclick: () => descargarGrafica(cid, p.id, 'jpg') }, 'JPG'),
         h('button', { clase: 'mini', onclick: () => abrirEditorGrafica(cid, Object.assign({}, p, { id: '' })) }, 'Duplicar'),
         h('button', { clase: 'mini fantasma', onclick: async () => {
           if (!window.confirm(`¿Borrar «${p.nombre}»? No se puede deshacer.`)) return;
           try {
             await pedir(apiGraficas(cid, `/piezas/${p.id}`), { method: 'DELETE' });
-            GRAF.piezas[cid] = GRAF.piezas[cid].filter(x => x.id !== p.id);
+            GRAF.piezas[cid] = (GRAF.piezas[cid] || []).filter(x => x.id !== p.id);
             pintarLight();
           } catch (e) { toast(e.message, true); }
         } }, 'Borrar')));
@@ -35046,6 +35067,10 @@ async function abrirEditorGrafica(cid, pieza) {
   let cambiada = !pieza || !pieza.id;
   let turno = 0;
   let reloj = null;
+  let enCurso = false;
+  let pendiente = false;
+  let guardando = false;
+  let ediciones = 0;
   const kit = GRAF.kits[cid] || {};
   const cuerpoForm = h('div', { clase: 'form-graf' });
   const rejilla = h('div', { clase: 'rejilla-disenos' });
@@ -35066,14 +35091,15 @@ async function abrirEditorGrafica(cid, pieza) {
     });
   };
 
-  const pedirVistas = espera => {
-    clearTimeout(reloj);
-    const mio = ++turno;
-    estado.textContent = 'pintando…';
-    reloj = setTimeout(async () => {
-      try {
-        const r = await pedir(apiGraficas(cid, '/vista'), { method: 'POST', cuerpo: { pieza: p } });
-        if (mio !== turno) return;
+  /* UNA PETICIÓN A LA VEZ: cada una ocupa el motor unos segundos. Lo que se toca
+     mientras tanto se pinta al acabar, con los datos de ese momento. */
+  const lanzarVista = async () => {
+    enCurso = true;
+    pendiente = false;
+    const mio = turno;
+    try {
+      const r = await pedir(apiGraficas(cid, '/vista'), { method: 'POST', cuerpo: { pieza: p } });
+      if (mio === turno) {
         r.vistas.forEach(v => { if (miniaturas[v.n]) miniaturas[v.n].src = v.img; });
         if (r.grande) {
           grande.src = r.grande.img;
@@ -35081,9 +35107,22 @@ async function abrirEditorGrafica(cid, pieza) {
           r.grande.avisos.forEach(a => avisos.appendChild(h('div', { clase: 'aviso-graf' }, `⚠ ${a}`)));
         }
         estado.textContent = '';
-      } catch (e) {
-        if (mio === turno) estado.textContent = `No se ha podido pintar: ${e.message}`;
       }
+    } catch (e) {
+      if (mio === turno) estado.textContent = `No se ha podido pintar: ${e.message}`;
+    } finally {
+      enCurso = false;
+      if (pendiente && capa.isConnected) lanzarVista();
+    }
+  };
+  const pedirVistas = espera => {
+    clearTimeout(reloj);
+    turno += 1;
+    ediciones += 1;
+    estado.textContent = 'pintando…';
+    reloj = setTimeout(() => {
+      if (enCurso) pendiente = true;
+      else lanzarVista();
     }, espera);
   };
   const tocar = () => { cambiada = true; pedirVistas(700); };
@@ -35181,26 +35220,37 @@ async function abrirEditorGrafica(cid, pieza) {
   };
 
   const guardar = async () => {
+    if (guardando) return;       // un doble clic no crea dos piezas
+    guardando = true;
+    botonGuardar.disabled = true;
+    const edicionAlGuardar = ediciones;
     try {
       const metodo = piezaId ? 'PUT' : 'POST';
       const ruta = piezaId ? `/piezas/${piezaId}` : '/piezas';
-      const r = await pedir(apiGraficas(cid, ruta), { method: metodo, cuerpo: p });
+      // sin `nombre`: lo pone el servidor con el titular de ahora
+      const cuerpo = Object.assign({}, p);
+      delete cuerpo.nombre;
+      const r = await pedir(apiGraficas(cid, ruta), { method: metodo, cuerpo });
       piezaId = r.id;
-      cambiada = false;
+      if (ediciones === edicionAlGuardar) cambiada = false;  // lo escrito mientras tanto sigue sin guardar
       GRAF.piezas[cid] = undefined;
-      descargas.textContent = '';
-      descargas.append(
-        h('a', { clase: 'boton mini', href: apiGraficas(cid, `/piezas/${r.id}/fichero.png?v=${r.sello}`), download: `pieza-${r.id}.png` }, 'Descargar PNG'),
-        h('a', { clase: 'boton mini', href: apiGraficas(cid, `/piezas/${r.id}/fichero.jpg?v=${r.sello}`), download: `pieza-${r.id}.jpg` }, 'Descargar JPG'));
+      ponerDescargas();
       toast('Gráfica guardada');
-    } catch (e) { toast(e.message, true); }
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      guardando = false;
+      botonGuardar.disabled = false;
+    }
   };
   const descargas = h('span', { clase: 'descargas-graf' });
-  if (piezaId) {
+  const ponerDescargas = () => {
+    descargas.textContent = '';
     descargas.append(
-      h('a', { clase: 'boton mini', href: apiGraficas(cid, `/piezas/${piezaId}/fichero.png`), download: `pieza-${piezaId}.png` }, 'Descargar PNG'),
-      h('a', { clase: 'boton mini', href: apiGraficas(cid, `/piezas/${piezaId}/fichero.jpg`), download: `pieza-${piezaId}.jpg` }, 'Descargar JPG'));
-  }
+      h('button', { clase: 'mini', onclick: () => descargarGrafica(cid, piezaId, 'png') }, 'Descargar PNG'),
+      h('button', { clase: 'mini', onclick: () => descargarGrafica(cid, piezaId, 'jpg') }, 'Descargar JPG'));
+  };
+  if (piezaId) ponerDescargas();
   const teclas = ev => { if (ev.key === 'Escape') cerrar(); };
   const cerrar = () => {
     if (cambiada && (p.textos.titulo || p.textos.cita || p.imagen || piezaId)
@@ -35211,12 +35261,13 @@ async function abrirEditorGrafica(cid, pieza) {
     document.removeEventListener('keydown', teclas);
     pintarLight();
   };
+  const botonGuardar = h('button', { clase: 'mini primario guardar-grafica', onclick: guardar }, 'Guardar');
   const capa = h('div', { clase: 'capa-dialogo capa-grafica', id: 'editor-grafica' },
     h('div', { clase: 'dialogo dialogo-grafica', role: 'dialog', 'aria-label': 'Editor de la gráfica' },
       h('div', { clase: 'fila cab-grafica' },
         h('h3', { clase: 'crece' }, piezaId ? 'Cambiar gráfica' : 'Nueva gráfica'),
         descargas,
-        h('button', { clase: 'mini primario guardar-grafica', onclick: guardar }, 'Guardar'),
+        botonGuardar,
         h('button', { clase: 'mini fantasma cerrar-grafica', 'aria-label': 'Cerrar', onclick: cerrar }, 'Cerrar')),
       h('div', { clase: 'cuerpo-grafica' },
         cuerpoForm,

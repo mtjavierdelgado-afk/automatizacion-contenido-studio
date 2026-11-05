@@ -82,6 +82,8 @@ def la_pagina():
     ok(falla(G.limpiar_pieza, {"plantilla": 99}), "una plantilla que no existe se rechaza")
     ok(falla(G.limpiar_pieza, {"formato": "x"}), "un tamaño que no existe se rechaza")
     ok(falla(G.limpiar_pieza, {"imagen": "../../secreto.jpg"}), "una imagen con ruta rara se rechaza")
+    ok(falla(G.limpiar_pieza, {"textos": "x"}), "unos textos sin forma se rechazan")
+    ok(falla(G.limpiar_pieza, {"colores": ["x"]}), "unos colores sin forma se rechazan")
     ok(falla(G.limpiar_pieza, {"plantilla": True}), "la plantilla tiene que ser un número")
     ok(set(p[0] for p in G.CATALOGO) == set(G._PL.PLANTILLAS), "el catálogo y las plantillas coinciden")
     ok(len(G.CATALOGO) == 14, "son las 14 de la maqueta")

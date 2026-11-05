@@ -189,6 +189,8 @@ def _leer_json(ruta):
 
 def _limpiar_colores(valor):
     salida = {}
+    if valor is not None and not isinstance(valor, dict):
+        raise ErrorGraficas("los colores no tienen la forma esperada")
     for rol in ROLES:
         color = str((valor or {}).get(rol) or "").strip()
         if not color:
@@ -435,8 +437,11 @@ def limpiar_pieza(datos):
         raise ErrorGraficas("esa plantilla no existe")
     formato(datos.get("formato") or FORMATO_DEFECTO)
     textos = {}
+    crudos = datos.get("textos") or {}
+    if not isinstance(crudos, dict):
+        raise ErrorGraficas("los textos no tienen la forma esperada")
     for campo, (_, largo) in CAMPOS.items():
-        valor = " ".join(str((datos.get("textos") or {}).get(campo) or "").split())
+        valor = " ".join(str(crudos.get(campo) or "").split())
         if valor:
             textos[campo] = valor[:largo]
     imagen = str(datos.get("imagen") or "")
@@ -521,17 +526,25 @@ class Pincel:
 
     def __init__(self):
         import websocket                                    # noqa: PLC0415
+        try:
+            navegador = medios.edge()
+        except Exception as fallo:                          # noqa: BLE001
+            raise ErrorGraficas("no encuentro el navegador que pinta las gráficas") from fallo
         self.perfil = tempfile.mkdtemp(prefix="graficas_")
         self.ws = None
         puerto = _puerto_libre()
-        self.proceso = subprocess.Popen(
-            [medios.edge(), "--headless=new", "--disable-gpu", "--no-first-run",
-             "--disable-extensions", "--hide-scrollbars", "--mute-audio",
-             "--force-device-scale-factor=1", f"--user-data-dir={self.perfil}",
-             "--remote-allow-origins=*", f"--remote-debugging-port={puerto}",
-             # la red, cortada: nada de lo que hay en la pieza puede salir
-             "--host-resolver-rules=MAP * ~NOTFOUND", "about:blank"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **medios.SIN_VENTANA)
+        try:
+            self.proceso = subprocess.Popen(
+                [navegador, "--headless=new", "--disable-gpu", "--no-first-run",
+                 "--disable-extensions", "--hide-scrollbars", "--mute-audio",
+                 "--force-device-scale-factor=1", f"--user-data-dir={self.perfil}",
+                 "--remote-allow-origins=*", f"--remote-debugging-port={puerto}",
+                 # la red, cortada: nada de lo que hay en la pieza puede salir
+                 "--host-resolver-rules=MAP * ~NOTFOUND", "about:blank"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **medios.SIN_VENTANA)
+        except OSError as fallo:
+            shutil.rmtree(self.perfil, ignore_errors=True)
+            raise ErrorGraficas("el navegador no ha arrancado") from fallo
         try:
             self.ws = websocket.create_connection(self._url(puerto), timeout=60)
             self._id = 0

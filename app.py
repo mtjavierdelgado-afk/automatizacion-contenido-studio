@@ -23155,6 +23155,133 @@ def piloto_imagen_portada(vid: str, cual: str, peticion: Request):
     return FileResponse(ruta, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
+# ============================================================ ENVIAR AL STUDIO
+# La extensión de Chrome «Enviar al Studio» (rama enviar-al-studio, 28-10-2026):
+# lo que el dueño ve en una red llega aquí y se guarda en la bandeja
+# «Recibidos de Chrome» de la Parrilla. La lógica vive en pasos/recibidos.py.
+#
+# La ruta que recibe pide el CÓDIGO DE ENVÍO (cabecera X-Estudio-Envio) además
+# de la sesión del login que hay delante: la extensión puede llegar por su
+# cuenta o desde una pestaña del Studio, y en las dos el código es lo que dice
+# que es el dueño. Las demás rutas son las de la pantalla (solo la sesión).
+# Nada de aquí escribe params ni firmas (regla 1).
+
+try:
+    import recibidos as RECIBIDOS  # noqa: E402  (pasos/ ya esta en sys.path)
+    ERROR_RECIBIDOS = ""
+except Exception as _fallo_recibidos:  # noqa: BLE001
+    RECIBIDOS = None
+    ERROR_RECIBIDOS = f"{type(_fallo_recibidos).__name__}: {_fallo_recibidos}"
+
+
+def _recibidos():
+    if RECIBIDOS is None:
+        raise ErrorApi(503, f"«Enviar al Studio» no se ha podido cargar: {ERROR_RECIBIDOS}")
+    return RECIBIDOS
+
+
+def _por_recibidos(fn, *args, **kwargs):
+    R = _recibidos()
+    try:
+        return fn(*args, **kwargs)
+    except R.ErrorRecibidos as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+def _codigo_de_envio(peticion):
+    """El código de la extensión, o 401. Nunca se repite en el mensaje."""
+    R = _recibidos()
+    if not R.comprobar(peticion.headers.get("x-estudio-envio") or ""):
+        raise ErrorApi(401, "el código de envío no vale: crea uno en Configuración → Enviar al Studio")
+
+
+@app.get("/api/recibidos/ping")
+def recibidos_ping(peticion: Request):
+    """Lo que pulsa «Probar» en la extensión: el código vale y el Studio contesta."""
+    _codigo_de_envio(peticion)
+    return {"ok": True, "producto": NOMBRE_PRODUCTO}
+
+
+@app.post("/api/recibidos", status_code=201)
+async def recibidos_guardar(peticion: Request):
+    """{url, titulo?, autor?, texto?, seleccion?, nota?, cifras?, imagen?, captura?} -> el recibido.
+
+    El cuerpo se lee A MANO y con tope (6 MB), y el código se mira ANTES de
+    convertirlo: con `Body`, FastAPI leía y convertía cualquier cuerpo entero
+    (nginx deja pasar 2 GB) antes de saber si quien lo manda tiene código."""
+    R = _recibidos()
+    await _en_hilo(_codigo_de_envio, peticion)
+    try:
+        largo = int(peticion.headers.get("content-length") or 0)
+    except ValueError:
+        largo = 0
+    if largo > R.MAX_CUERPO:
+        raise ErrorApi(413, "lo enviado pesa demasiado (más de 6 MB): prueba sin captura")
+    crudo = bytearray()
+    async for trozo in peticion.stream():
+        crudo.extend(trozo)
+        if len(crudo) > R.MAX_CUERPO:
+            raise ErrorApi(413, "lo enviado pesa demasiado (más de 6 MB): prueba sin captura")
+
+    def _guardar():
+        try:
+            datos = json.loads(bytes(crudo).decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError):
+            raise ErrorApi(400, "lo enviado no es JSON") from None
+        guardado = _por_recibidos(R.guardar, raiz_proyectos(), datos if isinstance(datos, dict) else {})
+        anotar_global("recibido", {"red": guardado["red"], "captura": bool(guardado["captura"])})
+        return guardado
+
+    r = await _en_hilo(_guardar)
+    return {"ok": True, "id": r["id"], "red": r["red"]}
+
+
+@app.get("/api/recibidos")
+def recibidos_lista():
+    """Los recibidos (el más nuevo primero), el estado del código y la versión de la extensión."""
+    R = _recibidos()
+    datos = _por_recibidos(R.listar, raiz_proyectos())
+    datos.update({"codigo": R.estado_codigo(), "version_extension": R.version_extension()})
+    return datos
+
+
+@app.post("/api/recibidos/codigo")
+def recibidos_codigo():
+    """Un código de envío nuevo (el de antes deja de valer). Se ve UNA vez."""
+    datos = _por_recibidos(_recibidos().crear_codigo)
+    anotar_global("recibidos_codigo", {"cola": datos.get("cola")})
+    return datos
+
+
+@app.get("/api/recibidos/extension.zip")
+def recibidos_extension():
+    """La extensión de Chrome, en un ZIP para descomprimir y cargar."""
+    datos = _por_recibidos(_recibidos().zip_extension)
+    return Response(content=datos, media_type="application/zip", headers={
+        "Content-Disposition": 'attachment; filename="crearia-enviar-al-studio.zip"',
+        "Cache-Control": "no-store"})
+
+
+@app.get("/api/recibidos/{rid}/captura")
+def recibidos_captura(rid: str):
+    """La captura de lo que se veía al enviarlo (PNG, JPG o WEBP)."""
+    ruta = _por_recibidos(_recibidos().ruta_captura, raiz_proyectos(), rid)
+    tipo = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}.get(ruta.rsplit(".", 1)[-1], "image/jpeg")
+    return FileResponse(ruta, media_type=tipo, headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.post("/api/recibidos/{rid}/usado")
+def recibidos_usado(rid: str):
+    """Lo marca como usado (lo hace «Usar en el chat»)."""
+    return _por_recibidos(_recibidos().marcar_usado, raiz_proyectos(), rid)
+
+
+@app.delete("/api/recibidos/{rid}")
+def recibidos_borrar(rid: str):
+    """Lo borra, con su captura."""
+    _por_recibidos(_recibidos().borrar, raiz_proyectos(), rid)
+    return {"ok": True}
+
 # ------------------------------- CUENTAS QUE TE GUSTAN 2 (rama cuentas-gustan-2)
 # Pedido del dueño del 01-11-2026: completar la duración de una cuenta,
 # analizar varias juntas (`pasos/cuentas_conjunto.py`), proponer temas para un

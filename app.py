@@ -21029,6 +21029,29 @@ def publicar_usar_gancho(pid: str, peticion: Request, cuerpo: dict = Body(defaul
     return publicar_ficha(pid, peticion)
 
 
+@app.post("/api/publicar/videos/{pid}/titulos", status_code=202)
+def publicar_titulos(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Dame 4 títulos» (titulos-gancho): gancho primero, tema corto + gancho,
+    número y beneficio, y una mezcla, para YouTube o Facebook: {red}."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    P = _publicar()
+    ajustes = P.ajustes_de(raiz_proyectos(), info["cliente"])
+    _por_publicar(P.lanzar_titulos, raiz_proyectos(), info, str(_cuerpo(cuerpo).get("red") or ""),
+                  ajustes, proyecto=ctx.proyecto, cwd=ctx.proyecto.raiz)
+    return {"trabajando": True}
+
+
+@app.post("/api/publicar/videos/{pid}/titulos/usar")
+def publicar_usar_titulo(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Pone el título elegido: {red, indice}."""
+    ctx = _ctx_publicable(pid, peticion)
+    d = _cuerpo(cuerpo)
+    _por_publicar(_publicar().usar_titulo, raiz_proyectos(), ctx.id, str(d.get("red") or ""),
+                  d.get("indice"))
+    return publicar_ficha(pid, peticion)
+
+
 @app.post("/api/publicar/videos/{pid}/emojis")
 def publicar_mas_emojis(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """«✨ Más emojis» (rama `textos-emojis`): {red, campo: titulo|descripcion,

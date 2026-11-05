@@ -11,17 +11,20 @@ vídeos, estilos, claves y contraseña no se tocan.
 ## V5.1 · octubre de 2026
 
 **Títulos de YouTube y Facebook que dan ganas de abrir (4 de noviembre)**
-- Claude ya no escribe títulos que solo dicen de qué va el vídeo. Empiezan con la
-  palabra clave del SEO (para que te encuentren) y siguen con un **gancho** sacado
-  del vídeo: curiosidad, un beneficio concreto o el problema que resuelve. Por
-  ejemplo, «Paletas de colores para baño sin ventana: la que lo agranda 🛁» en vez
-  de «Paletas de colores para baño sin ventana 🛁».
-- Con el nivel de emojis «Vistoso», el título lleva **1 o 2 emojis**, siempre
-  detrás de la palabra clave; con «Normal», uno; con «Sobrio» o «Ninguno», sin
-  emojis, como antes.
-- «Optimizar SEO» también arregla un título que solo describe.
-- Vale para los textos que se escriban a partir de ahora: los ya escritos no
-  cambian solos. Para rehacerlos, «Escribir con Claude» en Publicar.
+- **«🎯 Dame 4 títulos»**, debajo del título de YouTube y de Facebook en Publicar:
+  Claude propone cuatro títulos distintos para que elijas uno con «Usar este».
+  **A · Gancho primero** (empieza por el problema o una pregunta), **B · Tema corto +
+  gancho**, **C · Número y beneficio** y **D · Mezcla** de las tres. No cambia nada
+  hasta que pulses «Usar este», y lo puedes retocar después a mano.
+- El SEO **ya no obliga a poner la palabra clave entera al principio del título**:
+  basta con que estén sus palabras, donde suenen natural, y manda el gancho. La
+  frase entera sigue yendo en la primera línea de la descripción y en los hashtags.
+  La nota SEO cuenta el punto si el título lleva al menos dos de cada tres palabras
+  importantes de la palabra clave.
+- Los títulos que escribe «Escribir con Claude» también llevan gancho y 1 o 2
+  emojis (con «Vistoso»; uno con «Normal»; ninguno con «Sobrio» o «Ninguno»), y
+  «Optimizar SEO» arregla un título que solo describe.
+- Los textos ya escritos no cambian solos.
 
 **Probar el Studio entero con dos comandos (22 de octubre; al servidor, 4 de noviembre)**
 - **`asvs revisar`** (gratis): todas las pruebas del Studio, incluido el recorrido

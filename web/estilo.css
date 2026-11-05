@@ -5630,3 +5630,10 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .cuentas-propias .pastilla { text-transform: none; letter-spacing: 0; white-space: normal; overflow-wrap: anywhere;
   display: inline-flex; gap: 4px; align-items: center; }
 .cuentas-propias select { max-width: 100%; min-width: 0; }
+
+/* ---------------- PUBLICAR · «Dame 4 títulos» (titulos-gancho, 04-11) */
+.titulos-opciones { margin: 6px 0 10px; display: grid; gap: 4px; }
+.titulo-opcion { gap: 8px; align-items: center; padding: 4px 0; border-top: 1px solid var(--linea-suave); min-width: 0; }
+.titulo-opcion .crece { min-width: 0; overflow-wrap: anywhere; }
+.titulo-opcion .tipo-titulo { white-space: nowrap; text-transform: none; letter-spacing: 0; }
+@media (max-width: 600px) { .titulo-opcion { flex-wrap: wrap; } }

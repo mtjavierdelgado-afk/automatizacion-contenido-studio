@@ -1,4 +1,4 @@
-/* Studio Videos IA — logica del formulario de acceso.
+/* CrearIA Studio — logica del formulario de acceso.
    Solo se pide la contraseña: ella dice de qué cuenta es (lib/acceso.js). */
 (function () {
   'use strict';
@@ -37,9 +37,9 @@
   /* Y se dice cual es, que si no el login de la v2 no se distingue del de la v1. */
   (function marcarVersion() {
     if (!window.location.pathname.startsWith('/v2/')) return;
-    document.title = 'Acceso · Automatización Contenido Studio';
+    document.title = 'Acceso · CrearIA Studio';
     const sub = document.querySelector('.card__sub');
-    if (sub) sub.textContent = 'Automatización Contenido Studio';
+    if (sub) sub.textContent = 'Automatización de contenido';
   })();
 
   /* --- token anti-CSRF: se pide al cargar y se refresca si caduca ---------- */

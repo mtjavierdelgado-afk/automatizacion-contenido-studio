@@ -1731,8 +1731,8 @@ def tus_proyectos_rediseno(navegador, datos):
        and all(t in titulos for t in ("Visibilidad", "Clave", "Publicar")),
        f"con Nombre, Logo, Visibilidad, Clave, Publicar y la zona de peligro abajo ({titulos})")
     ok(pg.p.evaluate("() => SECCIONES_AJUSTES_PROYECTO.map(s => s.id).join(',')")
-       == "nombre,logo,visibilidad,clave,publicar,peligro",
-       "hechas con SECCIONES_AJUSTES_PROYECTO (la Ficha del negocio entrará como una sección más)")
+       == "nombre,logo,ficha-negocio,visibilidad,clave,publicar,peligro",
+       "hechas con SECCIONES_AJUSTES_PROYECTO (con la Ficha del negocio, unida el 28-10)")
     ok(pg.visible(".cajon-proyecto .zona-peligro", "quedan en «Sin proyecto»"),
        "«Borrar el proyecto» lleva su explicación delante")
     caja = pg.p.locator(".cajon-proyecto .nombre-proyecto input")
@@ -3137,7 +3137,7 @@ def coste_en_detalle(navegador, datos):
     pg.pulsar("button.coste-light")
     ok(pg.esperar("#coste-video", "Coste del vídeo", 15), "y abre el coste del vídeo")
     texto = pg.p.locator("#coste-video").inner_text()
-    for parte in ("Imágenes nuevas", "Imágenes rehechas", "Personajes", "Voz", "Claude",
+    for parte in ("Planos del vídeo: nuevos", "Planos del vídeo: rehechos", "Referencias", "Voz", "Claude",
                   "Música", "Efectos", "Su estilo"):
         ok(parte in texto, f"con «{parte}»")
     _r, total = api.get(f"/api/proyectos/{pid}/coste")
@@ -6862,9 +6862,9 @@ def diseno_crearia(navegador, datos):
     ok(r.status_code == 400, "una tarjeta que no existe es un 400")
     api.put("/api/inicio/panel", {"usuario": "javier", "panel": None})
     _r, d = api.get("/api/salud")
-    ok(d.get("version") == "3.1", f"la versión es la 3.1 ({d.get('version')})")
+    ok(d.get("version") == "5.1", f"la versión es la 5.1 ({d.get('version')})")
     _r, d = api.get("/api/sistema/novedades")
-    ok(d.get("version") == "3.1" and "## V3.1" in d.get("texto", ""), "y Novedades empieza por la V3.1")
+    ok(d.get("version") == "5.1" and "## V5.1" in d.get("texto", ""), "y Novedades empieza por la V5.1")
     _r, d = api.get("/api/inicio/resumen")
     ok(isinstance(d.get("gasto_mes_usd"), (int, float)) and d.get("videos", 0) >= 1 and d.get("recientes"),
        f"/api/inicio/resumen: gasto del mes, vídeos y recientes ({d.get('gasto_mes_usd')}, {d.get('videos')})")
@@ -7539,6 +7539,69 @@ def publicar_arreglos_del_20_10(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def tipos_de_negocio(navegador, datos):
+    """Etapa Foto C (21-10-2026): la ficha del negocio vive en el PROYECTO
+    (cliente), no en Configuración; sus estilos la enseñan en «Reglas». Abrir
+    las pantallas no escribe nada; guardar es un botón."""
+    api, cid = datos["api"], datos["cliente"]
+
+    def negocio():
+        _r, d = api.get(f"/api/clientes/{cid}/negocio")
+        return d.get("negocio")
+    pg = Pagina(navegador, datos)
+    pg.js("conmutarConfig(true);")
+    pg.p.wait_for_timeout(1500)
+    ok(not pg.visible("#cuerpo-config h3", "Tipos de negocio"),
+       "Configuración ya no tiene «Tipos de negocio» (es del proyecto)")
+    pg.js("conmutarConfig(false);")
+    pg.js(f"elegirCliente('{cid}'); irALight('galeria');")
+    ok(pg.esperar(".abrir-ajustes-proyecto", None, 15), "dentro del proyecto está «⚙ Ajustes del proyecto»")
+    ok(negocio() is None, "el proyecto de prueba no tiene ficha")
+    pg.pulsar(".abrir-ajustes-proyecto")
+    ok(pg.esperar(".cajon-proyecto .ajustes-ficha-negocio", "Ficha del negocio", 10),
+       "el cajón de ajustes trae la sección «Ficha del negocio»")
+    ok(pg.esperar(".cajon-proyecto .panel-negocio-proyecto", "Qué hace este negocio", 10), "con su panel")
+    ok(negocio() is None, "abrirlo no guarda nada")
+    panel = pg.p.locator(".panel-negocio-proyecto")
+    panel.locator("input").first.fill("Alquiler de consolas para eventos")
+    pg.pulsar(".panel-negocio-proyecto button", "Añadir regla")
+    panel = pg.p.locator(".panel-negocio-proyecto")
+    ok(panel.locator("input").first.input_value() == "Alquiler de consolas para eventos",
+       "añadir una regla repinta sin perder lo escrito")
+    panel.locator(".regla-estilo textarea").nth(0).fill("Los mandos se sujetan con las dos manos")
+    panel.locator(".regla-estilo input").nth(0).fill("mando, consola")
+    panel.locator("textarea[data-foco='negocio-revisor-equipo']").fill("teles sin trípode")
+    ok(negocio() is None, "escribir no guarda nada todavía")
+    pg.captura("ficha_del_negocio", entera=False)
+    pg.pulsar(".panel-negocio-proyecto button", "Guardar la ficha")
+    pg.p.wait_for_timeout(1500)
+    n = negocio() or {}
+    ok(n.get("nombre") == "Alquiler de consolas para eventos"
+       and (n.get("reglas") or [{}])[0].get("palabras") == ["mando", "consola"]
+       and (n.get("revisor") or {}).get("equipo") == "teles sin trípode",
+       f"«Guardar la ficha» la guarda con su regla y su revisor ({n})")
+    ok(pg.esperar(".panel-negocio-proyecto", "la usan sus estilos", 10), "y el panel lo dice")
+    pg.js("cerrarAjustesProyecto();")
+    pg.sin_errores("la ficha del negocio en el proyecto")
+
+    # EN LA PESTAÑA «REGLAS» DEL ESTILO DEL PROYECTO
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{datos['preset']}' }});")
+    pg.p.wait_for_timeout(1500)
+    pg.pulsar("button", "📏 Reglas")
+    ok(pg.esperar(".negocio-del-estilo", "Negocio: Alquiler de consolas", 15),
+       "en «Reglas» del estilo se ve el negocio de su proyecto")
+    ok(pg.visible(".regla-negocio", "Los mandos se sujetan"), "con sus reglas, sin editarlas")
+    pg.captura("negocio_en_reglas_del_estilo", entera=False)
+    pg.pulsar(".negocio-del-estilo button", "Editar la ficha")
+    ok(pg.esperar(".cajon-proyecto .panel-negocio-proyecto", "Qué hace este negocio", 15),
+       "«✎ Editar la ficha» lleva al proyecto con el cajón de ajustes y la ficha abiertos")
+    pg.pulsar(".panel-negocio-proyecto button", "Quitar la ficha")
+    pg.p.wait_for_timeout(1500)
+    ok(negocio() is None, "«Quitar la ficha» (tras confirmar) la quita")
+    pg.sin_errores("el negocio en las reglas del estilo")
+    pg.cerrar()
+
 # ======================================================================
 # PORTADAS-2 (21-10-2026). Tramo propio, al final.
 
@@ -8132,6 +8195,7 @@ def tipo_de_relato(navegador, datos):
                 _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
                 ok(ficha.get("listo"), "(2b) con la base y sus estados aprobados, listo para dibujar")
                 pg.captura("tipo_relato_estados")
+                relato_en_espanol(pg, api, pid)
             else:
                 _r, f2 = api.get(f"/api/proyectos/{pid}/tipo_relato")
                 ok(False, "(2b) tras escribir qué cambia, salen los estados del vídeo: "
@@ -8141,6 +8205,19 @@ def tipo_de_relato(navegador, datos):
            "(3) «El reparto y los sitios» con su pedido")
         ok(pg.visible(".pedido-sitios button", "Volver a repartir con este pedido"),
            "(3) y «Volver a repartir con este pedido»")
+        # (2c) tipo-de-relato-2 (25-10): un recorrido enseña sus ambientes, cada uno
+        # con su imagen base de referencia y su precio; no se genera nada
+        r, _d = api.post(f"/api/proyectos/{pid}/tipo_relato/aplicar",
+                         {"tipo_relato": {"modo": "recorrido"}})
+        ok(r.status_code == 200, f"(2c) el vídeo pasa a «Recorrido» ({r.status_code})")
+        pg.js("APP.light.video.relato = null; pintarLight();")
+        ok(pg.esperar(".ambientes-relato", "Los ambientes del lugar", 20),
+           "(2c) un recorrido enseña «Los ambientes del lugar»")
+        ok(pg.visible(".ambiente-relato button", "Generar la imagen")
+           or pg.visible(".ambiente-relato button", "Otra imagen"),
+           "(2c) cada ambiente con su botón y su precio")
+        ok(not pg.visible(".imagen-base-relato"), "(2c) y sin la imagen base que se edita")
+        pg.captura("tipo_relato_ambientes")
         # vuelta a lo de antes, para no cambiar nada de lo que venga detrás
         r, _d = api.post(f"/api/proyectos/{pid}/tipo_relato/aplicar", {"tipo_relato": None})
         ok(r.status_code == 200, f"(2) y se puede volver a lo del estilo ({r.status_code})")
@@ -8496,7 +8573,17 @@ def publicar_seo_real(navegador, datos):
     ok(pg.esperar(f"{nota} .parte-seo b", "Relevancia", 5), "la nota trae la parte de Relevancia")
     ok(pg.visible(f"{nota} .parte-seo b", "Demanda") and pg.visible(f"{nota} .parte-seo b", "Tu historial"),
        "y la de Demanda y Tu historial")
-    ok(pg.visible(f"{nota} .parte-seo .meta", "Investigar búsquedas"), "sin investigar, dice cómo medir la demanda")
+    # lo que dice la Demanda depende de si hay palabra y de si ya se investigó
+    # (en el servidor, otro escenario puede haberla dejado investigada): se
+    # comprueba contra lo que dice la API, no a ciegas (revisión del 04-11-2026)
+    _r, ficha_seo = api.get(f"/api/publicar/videos/{pid}")
+    seo_ahora = (ficha_seo or {}).get("seo") or {}
+    if seo_ahora.get("palabra") and not seo_ahora.get("real"):
+        ok(pg.visible(f"{nota} .parte-seo .meta", "Investigar búsquedas"), "sin investigar, dice cómo medir la demanda")
+    else:
+        ok(pg.visible(f"{nota} .parte-seo[data-parte=demanda] .meta"),
+           f"la Demanda dice algo (palabra «{seo_ahora.get('palabra')}», "
+           f"{'investigada' if seo_ahora.get('real') else 'sin investigar'})")
     ok(pg.visible(f"{nota} .titulo-forma-seo", "no cuentan"), "los detalles de forma, aparte y sin contar")
     pg.pulsar('.busquedas-seo button[data-accion="investigar-busquedas"]')
     ok(pg.esperar(".tabla-busquedas tbody tr", segundos=20), "«Investigar búsquedas»: la tabla de frases")
@@ -8574,6 +8661,57 @@ def publicar_seo_canal(navegador, datos):
     _r, claves = api.get("/api/claves")
     api.put("/api/claves", {"youtube_oauth": {"cliente_id": "", "secreto": ""}})
 
+def relato_en_espanol(pg, api, pid):
+    """Rama estados-en-espanol (22-10): con un estado aprobado en pantalla, su
+    cambio sale en español (lo traduce sola la pantalla, con el CLI falso:
+    «ES: …»), con el inglés plegado y «Dónde se usa»; «✎ Cambiar» lo reescribe
+    en español, pasa al inglés («EN: …») y el estado pide otra imagen. No se
+    paga nada: ni traducir ni editar dibujan."""
+    ok(pg.esperar(".estado-relato .relato-es-texto", "ES:", 25),
+       "(2c) el cambio del estado sale en español, traducido solo al abrir")
+    ok(pg.visible(".estado-relato .relato-es-ingles summary", "En inglés"),
+       "(2c) con el inglés que se manda, plegado debajo")
+    ok(pg.visible(".estado-relato .relato-donde", "Dónde se usa")
+       and pg.visible(".estado-relato .relato-donde .meta", "Bloque"),
+       "(2c) y «Dónde se usa», con sus bloques del guion")
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    ok(((ficha.get("traduccion") or {}).get("faltan")) == 0,
+       f"(2c) el servidor ya no echa en falta ninguna traducción ({ficha.get('traduccion')})")
+    # UN ERROR EN EL ACTO (revisión del 22-10): Claude no devuelve nada y el
+    # hilo acaba antes de que conteste el POST. El texto NO se pierde.
+    pg.pulsar(".estado-relato button", "✎ Cambiar")
+    pg.p.locator(".estado-relato .relato-editor textarea").first.fill("ROMPER esto a propósito")
+    pg.pulsar(".estado-relato .relato-editor button", "Guardar el cambio")
+    pg.p.wait_for_timeout(3500)
+    ok(pg.esperar(".estado-relato .relato-editor textarea", segundos=10)
+       and pg.p.locator(".estado-relato .relato-editor textarea").first.input_value()
+       == "ROMPER esto a propósito",
+       "(2c) si Claude falla, el editor sigue abierto con lo que escribiste")
+    ok(any("No se ha guardado" in a for a in pg.avisos()), f"(2c) y lo dice ({pg.avisos()[-2:]})")
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    ok(((ficha.get("estados") or [{}])[0]).get("aprobada"), "(2c) y el estado sigue aprobado")
+    pg.pulsar(".estado-relato .relato-editor button", "Cancelar")
+    pg.pulsar(".estado-relato button", "✎ Cambiar")
+    ok(pg.esperar(".estado-relato .relato-editor textarea", segundos=5), "(2c) «✎ Cambiar» abre el editor")
+    pg.p.locator(".estado-relato .relato-editor textarea").first.fill("la mampara es corrediza de vidrio")
+    pg.dialogos.clear()
+    pg.pulsar(".estado-relato .relato-editor button", "Guardar el cambio")
+    ok(any("pierde su aprobación" in d for d in pg.dialogos),
+       f"(2c) antes de guardar avisa de que el estado pide otra imagen ({pg.dialogos[-1:]})")
+    ok(pg.esperar(".estado-relato .relato-es-texto", "la mampara es corrediza de vidrio", 25),
+       "(2c) guardado: sale lo escrito en español")
+    ok(pg.esperar(".estado-relato .meta", "hace falta otra imagen", 15),
+       "(2c) y el estado dice que hace falta otra imagen")
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    primero = (ficha.get("estados") or [{}])[0]
+    ok(str(primero.get("cambio") or "").startswith("EN: ") and not primero.get("aprobada"),
+       f"(2c) por dentro va en inglés y ya no está aprobado ({str(primero.get('cambio'))[:60]})")
+    _r, vivos = api.get(f"/api/trabajos?proyecto={pid}&activos=1")
+    lista = vivos if isinstance(vivos, list) else ((vivos or {}).get("trabajos") or [])
+    ok(not lista, f"(2c) ni traducir ni editar lanzan ningún trabajo ({len(lista)})")
+    pg.captura("tipo_relato_en_espanol")
+    pg.sin_errores("los estados en español")
+
 
 # ============================================================== GUION VISUAL
 # guion-visual (22-10-2026): «Qué dibujan las imágenes» en el Encargo de un
@@ -8632,6 +8770,64 @@ def guion_visual(navegador, datos):
         r, _d = api.put(f"/api/proyectos/{pid}/guion_visual/modo", {"imagenes": None})
         ok(getattr(r, "status_code", 0) == 200, "(4) y se vuelve a lo que diga el estilo")
         pg.sin_errores("el guion visual")
+        pg.cerrar()
+
+# ============================================================ NOTAS DEL 24-10
+@escenario
+def notas_del_24_10(navegador, datos):
+    """Notas de mejoras del dueño (24-10-2026): montar el vídeo aunque el
+    revisor haya dejado notas de rehacer (preguntando antes), y el «Cerrar» de
+    un error que no pisa el texto."""
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="notas del 24-10")
+    try:
+        pg.sin_trabajo(300)
+        pg.js(f"await abrirVideoLight('{pid}');")
+        ir_al_paso(pg, "Imágenes")
+        pg.p.wait_for_timeout(1200)
+        r = pg.js("""
+          const rep = estadoRepaso(); const antes = [rep.notas, rep.pendientes];
+          const vo = window.videoObsoletoLight, mo = window.montarElVideoLight, c = window.confirm;
+          rep.notas = [{ id: 'x', autor: 'revisor', estado: 'pendiente', texto: 'rehacer el mando' }];
+          rep.pendientes = 1;
+          let montajes = 0, pregunta = '', respuesta = false;
+          window.videoObsoletoLight = () => true;
+          window.montarElVideoLight = () => { montajes += 1; };
+          window.confirm = t => { pregunta = t; return respuesta; };
+          const salida = {};
+          try {
+            const nodo = botonRenderizarLight();
+            const b = nodo && (nodo.tagName === 'BUTTON' ? nodo : nodo.querySelector('button'));
+            salida.hay = !!b; salida.apagado = b ? b.disabled : null;
+            if (b) {
+              b.click(); salida.trasCancelar = montajes;
+              respuesta = true; b.click(); salida.trasAceptar = montajes;
+            }
+            salida.pregunta = pregunta;
+          } finally {
+            window.videoObsoletoLight = vo; window.montarElVideoLight = mo; window.confirm = c;
+            rep.notas = antes[0]; rep.pendientes = antes[1];
+          }
+          return salida;""") or {}
+        ok(r.get("hay") and r.get("apagado") is False,
+           f"con una nota del revisor sin aplicar, «Montar el vídeo» se puede pulsar ({r})")
+        ok("1 del revisor" in (r.get("pregunta") or "") and r.get("trasCancelar") == 0,
+           f"al pulsarlo pregunta antes, diciendo que es del revisor; «Cancelar» no monta ({r})")
+        ok(r.get("trasAceptar") == 1, f"y «Aceptar» monta ({r})")
+        pg.js(f"await abrirVideoLight('{pid}'); repintarVideo();")
+        # el error con «Cerrar»: el texto no pasa por debajo del botón
+        pg.js("ERRORES[CLAVE_VIDEO_LIGHT] = 'falta aprobar la imagen base de «bano_calido» (1 plano(s)), "
+              "«bano_calido», estado «despues» (4 plano(s)): genérala o usa la imagen en «El espacio fijo» "
+              "y apruébala antes de generar los planos'; repintarVideo();")
+        ok(pg.esperar(".error-cerrable", "falta aprobar", 10), "sale el error con su «Cerrar»")
+        cajas = pg.p.evaluate("""() => { const e = document.querySelector('.error-cerrable');
+          const t = e.querySelector('.titular').getBoundingClientRect();
+          const b = e.querySelector(':scope > .mini').getBoundingClientRect();
+          return { t: t.right, b: b.left }; }""")
+        ok(cajas["t"] <= cajas["b"] + 1, f"y el texto no pasa por debajo del «Cerrar» ({cajas})")
+        pg.js("limpiarError(CLAVE_VIDEO_LIGHT); repintarVideo();")
+        pg.sin_errores("las notas del 24-10")
+    finally:
         pg.cerrar()
 
 
@@ -8958,6 +9154,628 @@ def cola_del_studio(navegador, datos):
     pg.captura("cola_del_studio_movil", entera=False)
     pg.sin_errores("la cola del Studio en el móvil")
     pg.cerrar()
+
+
+
+# ============================================================ UNIR PLANOS
+# unir-planos (26-10-2026): en la diapositiva de Imágenes, «Igualar con la
+# anterior» escribe la nota; «Quitar esta imagen» pasa su voz a la de antes,
+# que conserva su dibujo, sin pagar nada; «Deshacer» la devuelve, también
+# gratis y con su misma imagen.
+@escenario
+def quitar_e_igualar_imagenes(navegador, datos):
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    escenas = previa.get("escenas") or []
+    elegida = next((e for e in escenas[1:] if (e.get("quitar") or {}).get("anterior")
+                    and e.get("imagen")), None)
+    ok(elegida is not None, "hay una imagen que se puede quitar hacia la anterior")
+    if elegida is None:
+        return
+    sid, vecino = elegida["id"], elegida["quitar"]["anterior"]
+    antes = _huellas_de_planos(datos, pid)
+    _r, assets_antes = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    pg = Pagina(navegador, datos, nombre="quitar imagen")
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+    pg.p.wait_for_function("() => (PREVIA.ficha || {}).escenas", timeout=20000)
+    pg.js(f"PREVIA.i = PREVIA.ficha.escenas.findIndex(x => x.id === '{sid}'); repintarVideo();")
+    ok(pg.esperar(".ajustar-imagen", "Ajustar esta imagen", 10), "la diapositiva trae «Ajustar esta imagen»")
+    pg.pulsar(".ajustar-imagen button", f"Igualar con la anterior ({vecino})")
+    nota = pg.p.evaluate(f"() => PREVIA.borrador['{sid}'] || ''")
+    ok(vecino in nota and "mismo sitio" in nota,
+       f"«Igualar con la anterior» deja escrita la nota con {vecino} ({nota[:60]})")
+    _r, repaso = api.get(f"/api/proyectos/{pid}/repaso")
+    ok(not any(n.get("plano") == sid and "mismo sitio" in str(n.get("texto"))
+               for n in (repaso.get("notas") or [])),
+       "y no guarda nada hasta que tú la guardes")
+    pg.js(f"PREVIA.borrador['{sid}'] = ''; repintarVideo();")
+    # UNA IMAGEN QUE FALTA (una tanda cancelada, una rechazada por el filtro):
+    # la pasada que vuelve a cortar NO puede dibujarla (revisión del 26-10)
+    falta = next((e["id"] for e in reversed(escenas) if e.get("imagen")
+                  and e["id"] not in (sid, vecino)), None)
+    activa = _version_de(datos, "assets", "")
+    version = activa.get("activa") or activa.get("n") or activa.get("version")
+    carpeta = os.path.join(datos["proyectos"], pid, "pasos", "assets", f"v{version}", "escenas")
+    apartada = os.path.join(datos["capturas"], f"{falta}.apartada.png")
+    if falta:
+        shutil.move(os.path.join(carpeta, f"{falta}.png"), apartada)
+    pg.pulsar(".ajustar-imagen button", "Quitar esta imagen")
+    ok(pg.visible(".ajustar-quitar .meta", "Gratis"), "al quitar, dice que es gratis y se deshace")
+    pg.pulsar(".ajustar-quitar button", f"Su voz pasa a {vecino}")
+    pg.p.wait_for_timeout(1500)
+    api.libre(pid, 300)
+    pg.p.wait_for_timeout(2500)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    ids = [e["id"] for e in previa.get("escenas") or []]
+    ok(sid not in ids, f"{sid} ya no está en el vídeo")
+    hogar = next((e for e in previa.get("escenas") or [] if e["id"] == vecino), {})
+    ok([a.get("id") for a in hogar.get("absorbe") or []] == [sid]
+       and elegida["narracion"] in hogar.get("narracion", ""),
+       f"{vecino} lleva también lo que se oía en {sid}")
+    ok(abs(float(hogar.get("t_out") or 0) - float(elegida["t_out"])) < 0.01,
+       f"{vecino} dura hasta donde acababa {sid}")
+    despues = _huellas_de_planos(datos, pid)
+    if falta:
+        ok(falta not in despues, f"la imagen que faltaba ({falta}) sigue sin dibujarse: no se ha pagado")
+        activa = _version_de(datos, "assets", "")
+        version = activa.get("activa") or activa.get("n") or activa.get("version")
+        shutil.copy(apartada, os.path.join(datos["proyectos"], pid, "pasos", "assets",
+                                           f"v{version}", "escenas", f"{falta}.png"))
+        despues = _huellas_de_planos(datos, pid)
+    ok(all(despues.get(x) == antes.get(x) for x in ids if x in antes),
+       "ninguna imagen ha cambiado: la que se queda conserva su dibujo")
+    _r, assets = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    ok(not (assets.get("unidades_obsoletas") or []) or
+       set(assets.get("unidades_obsoletas") or []) <= set(assets_antes.get("unidades_obsoletas") or []),
+       f"y no deja imágenes por rehacer ({assets.get('unidades_obsoletas')})")
+    _r, callouts = api.get(f"/api/proyectos/{pid}/pasos/callouts")
+    _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")
+    ok(render.get("estado") == "obsoleto",
+       f"el vídeo queda por volver a montar ({callouts.get('estado')}, {render.get('estado')})")
+    ok(pg.esperar(".ajustar-absorbe", f"Lleva también la voz de {sid}", 20),
+       f"la diapositiva de {vecino} dice que lleva su voz, con «Deshacer»")
+    ok(pg.visible(".pasos-carril", "Vídeo") and pg.p.evaluate(
+        "() => ((APP.light.video.fichas || {}).render || {}).estado") == "obsoleto",
+       "el carril también lo dice (sin recargar la página)")
+    pg.captura("quitar_imagen")
+    # Y SE MONTA: el plano que se queda dura los dos, gratis
+    r, lanz = api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
+    fin = api.esperar(lanz.get("trabajo_id"), 600) if r.status_code == 202 else lanz
+    _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")
+    ok(render.get("estado") == "listo", f"el vídeo se monta con la imagen quitada ({str(fin)[:160]})")
+    ok(_huellas_de_planos(datos, pid) == despues, "y montar no dibuja ninguna imagen")
+    pg.pulsar(".ajustar-absorbe button", "Deshacer")
+    pg.p.wait_for_timeout(1500)
+    api.libre(pid, 300)
+    pg.p.wait_for_timeout(2500)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    vuelta = next((e for e in previa.get("escenas") or [] if e["id"] == sid), None)
+    ok(vuelta is not None and vuelta.get("imagen"), f"«Deshacer» devuelve {sid}, con su imagen")
+    ok(_huellas_de_planos(datos, pid).get(sid) == antes.get(sid), f"la misma imagen de {sid}, sin pagar otra")
+    hogar = next((e for e in previa.get("escenas") or [] if e["id"] == vecino), {})
+    ok(not hogar.get("absorbe"), f"y {vecino} vuelve a ser solo suyo")
+    _r, assets = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    # si ya estaba «por rehacer» ANTES de quitarla (otro escenario dejó el
+    # vídeo con imágenes obsoletas), devolverla no la arregla, y está bien: el
+    # Studio solo sella la que estaba al día (revisión del 04-11-2026)
+    ok(f"escena:{sid}" not in (assets.get("unidades_obsoletas") or [])
+       or f"escena:{sid}" in (assets_antes.get("unidades_obsoletas") or []),
+       f"{sid} no queda «por rehacer»: se sella con su imagen de siempre ({assets.get('unidades_obsoletas')})")
+    r, lanz = api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
+    if r.status_code == 202:
+        api.esperar(lanz.get("trabajo_id"), 600)
+    _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")
+    ok(render.get("estado") == "listo", "y se vuelve a montar como estaba")
+    pg.sin_errores("quitar e igualar imágenes")
+
+
+@escenario
+def medidor_de_claude(navegador, datos):
+    """Rama medidor-claude (25-10): el cuadro «Claude · membresía» en la barra
+    lateral con una barra por ventana, la sección «Consumo de Claude» en
+    Configuración con «Medir ahora» (simulado: sin salir al CLI), el aviso al
+    pasar del 70 % y, en el móvil, la barra de módulos sin salirse."""
+    pg = Pagina(navegador, datos, nombre="medidor de claude")
+    ok(pg.esperar("#medidor-claude-menu .medidor-claude .gasto-etiqueta", "Claude", 15),
+       "la barra lateral tiene el cuadro «Claude · membresía»")
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#seccion-consumo-claude h3", "Consumo de Claude", 15), "Configuración tiene «Consumo de Claude»")
+    pg.pulsar("#seccion-consumo-claude button", "Medir ahora")
+    ok(pg.esperar("#seccion-consumo-claude .meta", "simulado", 20), "«Medir ahora» mide (simulado, sin salir al CLI)")
+    ventanas = pg.p.evaluate("() => [...document.querySelectorAll('#seccion-consumo-claude .ventana-claude .fila-ventana')]"
+                             ".map(x => x.innerText.replace(/\\s+/g, ' ').trim())")
+    ok(any("5 horas" in v and "42 %" in v for v in ventanas) and any("Semana" in v for v in ventanas),
+       f"con la ventana de 5 horas y la semana ({ventanas})")
+    ok(pg.visible("#seccion-consumo-claude .ventana-claude .meta", "se reinicia"), "y cuándo se reinicia cada una")
+    ok(pg.p.evaluate("() => !!document.querySelector('#medidor-claude-menu .ventana-claude')"),
+       "y el cuadro de la barra lateral se rellena con las ventanas")
+    pg.captura("medidor_claude_config")
+    # un cupo al 91 %: aviso una vez y la pastilla del móvil
+    pg.js("""MEDIDOR_CLAUDE.datos = Object.assign({}, MEDIDOR_CLAUDE.datos, {
+        avisos: [{ nivel: 'malo', cuenta: 'principal', ventana: 'five_hour', nombre: 'Ventana de 5 horas',
+                   uso: 0.91, reinicia: Date.now() / 1000 + 3600 }] });
+        try { localStorage.removeItem('estudio.claude.avisados'); } catch (e) {}
+        AVISADOS_CLAUDE.clear(); avisarCupoClaude(); repintarMedidorClaude();""")
+    ok(pg.esperar("#toast, .toast", "91 %", 6), "al pasar del 90 % avisa, con el porcentaje")
+    pg.sin_errores("el medidor de Claude")
+    pg.cerrar()
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="medidor móvil")
+    pg.p.wait_for_timeout(2000)
+    caja = pg.p.evaluate("() => { const b = document.querySelector('#barra-modulos'); "
+                         "return b ? [b.scrollWidth, b.clientWidth] : [0, 0]; }")
+    ok(caja[0] <= caja[1] + 2, f"con el medidor, la barra de módulos sigue cabiendo en 390 px ({caja})")
+    ok(not pg.visible("#barra-modulos .medidor-claude"), "en el móvil el cuadro no sale en la fila de módulos")
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#seccion-consumo-claude h3", "Consumo de Claude", 15), "y la sección se ve en el móvil")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2, f"sin salirse por los lados ({ancho}px)")
+    pg.captura("medidor_claude_movil", entera=False)
+    pg.sin_errores("el medidor de Claude en el móvil")
+    pg.cerrar()
+
+
+@escenario
+def descripcion_de_cada_plano(navegador, datos):
+    """Rama descripcion-planos (26-10): en Imágenes, debajo de cada imagen, «Lo
+    que se pidió dibujar» en español (lo escribe solo el CLI falso al abrir:
+    «DESC: …»), con el prompt en inglés plegado. No dibuja nada ni deja ninguna
+    imagen por rehacer."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    fichero = os.path.join(datos["proyectos"], pid, "descripciones.json")
+    if os.path.exists(fichero):
+        os.remove(fichero)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    escenas = previa.get("escenas") or []
+    elegida = next((e for e in escenas if e.get("prompt") and e.get("imagen")), None)
+    ok(elegida is not None, "hay un plano con imagen y prompt")
+    if elegida is None:
+        return
+    ok(not elegida.get("descripcion"), "sin descripciones.json, el plano aún no trae la suya")
+    viejas = sorted(e["id"] for e in escenas if e.get("obsoleta"))
+    _r, assets = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    for ancho, alto, nombre in ((1280, 900, "descripcion"), (390, 844, "descripcion móvil")):
+        pg = Pagina(navegador, datos, ancho=ancho, alto=alto, nombre=nombre)
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+        pg.p.wait_for_function("() => (PREVIA.ficha || {}).escenas", timeout=20000)
+        pg.js(f"PREVIA.i = PREVIA.ficha.escenas.findIndex(x => x.id === '{elegida['id']}'); repintarVideo();")
+        ok(pg.esperar(".plano-descripcion .meta", "Lo que se pidió dibujar", 10),
+           f"[{ancho}px] la diapositiva trae «Lo que se pidió dibujar»")
+        ok(pg.esperar(".plano-descripcion .plano-descripcion-texto", "DESC:", 25),
+           f"[{ancho}px] y se escribe sola en español al abrir")
+        ok(pg.visible(".plano-descripcion-ingles summary", "Ver el original en inglés"),
+           f"[{ancho}px] con el original en inglés plegado")
+        pg.pulsar(".plano-descripcion-ingles summary", "Ver el original en inglés")
+        ok(pg.visible(".plano-descripcion-prompt", elegida["prompt"][:30]),
+           f"[{ancho}px] que se despliega con el prompt de ese plano")
+        desborde = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        ok(desborde <= 2, f"[{ancho}px] sin salirse por los lados ({desborde}px)")
+        pg.captura("descripcion_de_cada_plano" + ("_movil" if ancho < 600 else ""), entera=False)
+        pg.sin_errores(f"la descripción del plano a {ancho}px")
+        pg.cerrar()
+    _r, ficha = api.get(f"/api/proyectos/{pid}/planos/descripciones")
+    ok(ficha.get("faltan") == 0 and ficha.get("total"),
+       f"el servidor ya no echa en falta ninguna descripción ({ficha.get('faltan')} de {ficha.get('total')})")
+    ok(os.path.exists(fichero), "y las guarda en descripciones.json del proyecto")
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    ahora = sorted(e["id"] for e in previa.get("escenas") or [] if e.get("obsoleta"))
+    ok(ahora == viejas, f"describir no deja ninguna imagen por rehacer ({viejas} -> {ahora})")
+    _r, assets_despues = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    ok((assets_despues or {}).get("firma") == (assets or {}).get("firma") and (assets or {}).get("firma"),
+       "ni mueve la firma de las imágenes")
+
+
+@escenario
+def claude_en_el_coste_del_video(navegador, datos):
+    """Rama medidor-claude-2 (26-10): en «Coste del vídeo» la fila de Claude
+    dice los tokens nuevos (y los de caché aparte, si hay), y en Configuración
+    la tabla del medidor tiene las columnas «Tokens nuevos» y «De caché»."""
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="claude en el coste")
+    pg.js(f"abrirCosteDelVideo('{pid}');")
+    ok(pg.esperar("#coste-video .tabla-coste th", "Claude", 15), "«Coste del vídeo» tiene su fila de Claude")
+    fila = pg.p.evaluate("() => { const th = [...document.querySelectorAll('#coste-video .tabla-coste th')]"
+                         ".find(x => x.textContent === 'Claude'); return th ? th.parentElement.innerText : ''; }")
+    ok("tokens nuevos" in fila and "suscripción" in fila, f"con los tokens nuevos y que va por la suscripción ({fila!r})")
+    pg.captura("claude_en_el_coste")
+    pg.sin_errores("Claude en el coste del vídeo")
+    pg.cerrar()
+    pg = Pagina(navegador, datos, nombre="columnas del medidor")
+    pg.js("""MEDIDOR_CLAUDE.datos = { umbrales: { ojo: 0.7, malo: 0.9 }, nombres: {}, avisos: [], cupo: [],
+        resumen: { dias: 7, hoy: { llamadas: 1, tokens: 100, cache: 30000, usd: 0.01 },
+                   semana: { llamadas: 1, tokens: 100, cache: 30000, usd: 0.01 },
+                   por_dia: [{ fecha: '2026-10-26', llamadas: 1, tokens: 100, cache: 30000, usd: 0.01 }],
+                   por_tarea: [], por_video: [], por_cuenta: [], agotados: [] } };
+        MEDIDOR_CLAUDE.detalleAbierto = true; conmutarConfig(true);""")
+    pg.p.wait_for_timeout(1500)
+    pg.js("clearTimeout(MEDIDOR_CLAUDE.reloj); MEDIDOR_CLAUDE.pidiendo = true; repintarMedidorClaude();")
+    cabeza = pg.p.evaluate("() => [...document.querySelectorAll('#seccion-consumo-claude .tabla-consumo-claude th')]"
+                           ".map(x => x.textContent)")
+    ok("Tokens nuevos" in cabeza and "De caché" in cabeza, f"el medidor separa nuevos y de caché ({cabeza})")
+    pg.sin_errores("las columnas del medidor")
+    pg.cerrar()
+
+
+
+@escenario
+def insertar_una_imagen(navegador, datos):
+    """Rama insertar-imagen (26-10): «Insertar una imagen aquí…» parte un plano
+    por la palabra que se pulsa; el de antes conserva su dibujo y la nueva
+    (S00xB) se dibuja sola, UNA imagen y con el precio confirmado. «Deshacer»
+    la quita gratis y el plano recupera toda su voz con su imagen de siempre."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    escenas = previa.get("escenas") or []
+    elegida = next((e for e in escenas[1:] if e.get("insertar") and e.get("imagen")
+                    and (e["insertar"].get("validas") or [])), None)
+    ok(elegida is not None, "hay una imagen en la que se puede insertar otra")
+    if elegida is None:
+        return
+    sid, nuevo = elegida["id"], elegida["id"] + "B"
+    palabras = elegida["insertar"]["palabras"]
+    k = elegida["insertar"]["validas"][0]
+    # COMO EN EL SERVIDOR (28-10): el dibujo de este plano se hizo para una
+    # frase más vieja (la voz se regrabó después). Al deshacer, la insertada
+    # --que dice el final de la frase de ahora-- «se parecía más» y S004 se
+    # quedaba con su dibujo
+    activa_v = _version_de(datos, "assets", "")
+    ver_v = activa_v.get("activa") or activa_v.get("n") or activa_v.get("version")
+    ficha_vieja = os.path.join(datos["proyectos"], pid, "pasos", "assets", f"v{ver_v}",
+                               "escenas", f"{sid}.json")
+    with open(ficha_vieja, encoding="utf-8") as fh:
+        fv = json.load(fh)
+    fv["narracion"] = "una frase vieja que la voz ya no dice"
+    with open(ficha_vieja, "w", encoding="utf-8") as fh:
+        json.dump(fv, fh, ensure_ascii=False)
+    antes = _huellas_de_planos(datos, pid)
+    # UNA IMAGEN QUE FALTA en otro plano (una tanda cancelada): la tanda de la
+    # insertada NO la dibuja, se pagó UNA (revisión del 26-10)
+    falta = next((e["id"] for e in reversed(escenas) if e.get("imagen") and e["id"] != sid), None)
+    activa = _version_de(datos, "assets", "")
+    version = activa.get("activa") or activa.get("n") or activa.get("version")
+    apartada = os.path.join(datos["capturas"], f"{falta}.apartada_insertar.png")
+    if falta:
+        shutil.move(os.path.join(datos["proyectos"], pid, "pasos", "assets", f"v{version}",
+                                 "escenas", f"{falta}.png"), apartada)
+        antes.pop(falta, None)
+    _r, assets_antes = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    pg = Pagina(navegador, datos, nombre="insertar imagen")
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+    pg.p.wait_for_function("() => (PREVIA.ficha || {}).escenas", timeout=20000)
+    pg.js(f"PREVIA.i = PREVIA.ficha.escenas.findIndex(x => x.id === '{sid}'); repintarVideo();")
+    pg.pulsar(".ajustar-imagen button", "Insertar una imagen aquí")
+    ok(pg.esperar(".insertar-imagen .meta", "Se dibuja UNA imagen", 15),
+       "el panel dice que se dibuja UNA imagen, con su precio")
+    ok(pg.p.locator(".insertar-imagen button[data-accion=insertar-imagen]").first.is_disabled(),
+       "sin palabra ni texto, el botón de insertar está apagado")
+    ok(pg.p.locator(".insertar-palabra").first.is_disabled(), "la primera palabra no se puede elegir")
+    ok(pg.p.locator(".insertar-palabra").nth(k).is_enabled()
+       and pg.p.locator(".insertar-palabra:disabled").count() == len(palabras) - len(elegida["insertar"]["validas"]),
+       "solo se pueden pulsar las palabras que dejan un segundo a cada lado")
+    pg.p.locator(".insertar-palabra").nth(k).click()
+    elegida_txt = pg.p.locator(".insertar-palabra").nth(k).inner_text().strip()
+    ok(pg.esperar(".insertar-reparto", f"nueva: «{elegida_txt}", 5),
+       f"al pulsar una palabra dice qué se queda cada imagen («{elegida_txt}…»)")
+    pg.p.locator(".insertar-imagen textarea").first.fill("un primer plano de las baldosas")
+    pg.captura("insertar_imagen_panel", entera=False)
+    pg.p.locator(".insertar-imagen button[data-accion=insertar-imagen]").first.click()
+    pg.p.wait_for_timeout(2500)
+    ok(any("UNA imagen nueva" in d for d in pg.dialogos), f"pregunta antes de pagar ({pg.dialogos[-1:]})")
+    api.libre(pid, 300)
+    pg.p.wait_for_timeout(3000)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    por_id = {e["id"]: e for e in previa.get("escenas") or []}
+    ok(nuevo in por_id and por_id[nuevo].get("imagen"), f"{nuevo} está en el vídeo, con su imagen")
+    ids = [e["id"] for e in previa.get("escenas") or []]
+    ok(nuevo in ids and ids.index(nuevo) == ids.index(sid) + 1, f"{nuevo} va justo detrás de {sid}")
+    ok(por_id.get(sid, {}).get("narracion", "").split() == palabras[:k]
+       and (por_id.get(nuevo, {}).get("narracion") or "").split() == palabras[k:],
+       f"{sid} se queda con lo de antes y {nuevo} con el resto de la voz")
+    despues = _huellas_de_planos(datos, pid)
+    ok(despues.get(sid) == antes.get(sid), f"{sid} conserva su dibujo")
+    ok(nuevo in despues and despues[nuevo] not in antes.values(), f"{nuevo} tiene una imagen nueva")
+    ok(all(despues.get(x) == antes.get(x) for x in antes if x != nuevo and x in despues),
+       "ninguna otra imagen cambia: se paga solo la nueva")
+    if falta:
+        ok(falta not in despues, f"la que faltaba ({falta}) sigue sin dibujarse: no se ha pagado")
+        activa = _version_de(datos, "assets", "")
+        version = activa.get("activa") or activa.get("n") or activa.get("version")
+        shutil.copy(apartada, os.path.join(datos["proyectos"], pid, "pasos", "assets",
+                                           f"v{version}", "escenas", f"{falta}.png"))
+    _r, assets = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    ok(set(assets.get("unidades_obsoletas") or []) <= set(assets_antes.get("unidades_obsoletas") or []),
+       f"y no deja imágenes por rehacer ({assets.get('unidades_obsoletas')})")
+    _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")
+    ok(render.get("estado") == "obsoleto", "el vídeo queda por volver a montar")
+    # «DIRIGIR» LA INSERTADA (28-10): su dirección escrita a mano manda
+    _r, dirigido = api.get(f"/api/proyectos/{pid}/direccion")
+    plan_dir = dict(dirigido.get("plan") or {})           # el PUT manda el plan entero
+    plan_dir[nuevo] = "a hand cleaning the grout between the grey tiles"
+    r, _d = api.put(f"/api/proyectos/{pid}/direccion", {"plan": plan_dir})
+    ok(r.status_code == 200, f"se puede dirigir {nuevo} ({r.status_code})")
+    r, lanz = api.post(f"/api/proyectos/{pid}/pasos/assets/ejecutar", {"unidades": [f"escena:{nuevo}"]})
+    if r.status_code == 202:
+        api.esperar(lanz.get("trabajo_id") or lanz.get("trabajo"), 300)
+    api.libre(pid, 300)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    dirigida = next((e for e in previa.get("escenas") or [] if e["id"] == nuevo), {})
+    ok("cleaning the grout" in (dirigida.get("prompt") or ""),
+       f"«Dirigir» sobre {nuevo} cambia su dibujo ({(dirigida.get('prompt') or '')[:80]})")
+    ok(_huellas_de_planos(datos, pid).get(sid) == antes.get(sid), f"y {sid} sigue con su dibujo")
+    pg.js("reiniciarPrevia(); cargarPreviaLight();")
+    pg.p.wait_for_function("() => (PREVIA.ficha || {}).escenas", timeout=20000)
+    pg.js(f"PREVIA.i = PREVIA.ficha.escenas.findIndex(x => x.id === '{nuevo}'); repintarVideo();")
+    ok(pg.esperar(".ajustar-absorbe", f"Imagen insertada en {sid}", 20),
+       f"la diapositiva de {nuevo} dice de dónde sale, con «Deshacer»")
+    pg.captura("insertar_imagen")
+    pg.pulsar(".ajustar-absorbe button", "Deshacer")
+    pg.p.wait_for_timeout(1500)
+    api.libre(pid, 300)
+    pg.p.wait_for_timeout(2500)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    por_id = {e["id"]: e for e in previa.get("escenas") or []}
+    ok(nuevo not in por_id, f"«Deshacer» quita {nuevo}")
+    ok((por_id.get(sid, {}).get("narracion") or "").split() == palabras,
+       f"y {sid} vuelve a tener toda su voz")
+    ok(_huellas_de_planos(datos, pid).get(sid) == antes.get(sid), f"con su imagen de siempre")
+    _r, assets = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    ok(set(assets.get("unidades_obsoletas") or []) <= set(assets_antes.get("unidades_obsoletas") or []),
+       f"sin dejar nada por rehacer ({assets.get('unidades_obsoletas')})")
+    pg.sin_errores("insertar una imagen")
+    pg.cerrar()
+
+
+@escenario
+def cuentas_que_te_gustan_2(navegador, datos):
+    """cuentas-gustan-2 (01-11-2026), con las fuentes simuladas: las cifras de
+    una cuenta (relativas, por duración, dudosos) y completar su duración;
+    marcar varias, «Analizar seleccionadas» (avisa de cuentas, vídeos y cupo),
+    «Proponer temas», editar y aprobar, «Escribir guiones aprobados» con el
+    nombre del proyecto, y que los temas queden escritos. Y en el móvil."""
+    api = datos["api"]
+    api.put("/api/parrilla/cuentas/conexiones", {"apify_token": "apify_api_recorrido_1234",
+                                                 "meta_token": "EAABrecorrido5678", "ig_id": "17841400000000000"})
+    for red, usuario in (("tiktok", "gusta_ana"), ("tiktok", "gusta_beto"), ("instagram", "gusta_estudio")):
+        r, t = api.post("/api/parrilla/cuentas/leer", {"texto": "@" + usuario, "red": red, "cuantos": 12, "pagar": True})
+        fin = time.time() + 30
+        while t.get("estado") == "trabajando" and time.time() < fin:
+            time.sleep(0.4)
+            _r, t = api.get(f"/api/parrilla/cuentas/trabajos/{t['id']}")
+        ok(t.get("estado") == "listo", f"@{usuario} leída ({t.get('estado')}: {t.get('error', '')[:80]})")
+    r, d = api.post("/api/clientes", {"nombre": "Ideas de cuentas"})
+    cid = ((d or {}).get("cliente") or {}).get("id")
+    ok(cid, "un proyecto para los temas")
+
+    pg = Pagina(navegador, datos, nombre="cuentas que te gustan 2")
+    pg.js("try { localStorage.removeItem('cuentasSeleccion'); } catch (e) {} PAR.cuentasSel = null;")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    pg.pulsar(".pestanas-automatizar button", "Cuentas que te gustan")
+    ok(pg.esperar(".tarjeta-cuenta-sel", "gusta_estudio", 10), "cada cuenta leída, con su casilla")
+    pg.pulsar(".cuentas-guardadas .tarjeta-cuenta", "gusta_estudio")
+    ok(pg.esperar(".cifras-cuenta", "Vistas por duración", 10), "la cuenta enseña sus cifras y las vistas por duración")
+    ok(pg.visible(".cifras-cuenta", "Mediana"), "con su mediana")
+    ok(pg.visible(".relativas-video", "su mediana"), "cada vídeo, relativo a la cuenta y por cada 100 vistas")
+    ok(pg.visible(".pastilla-dudoso", "Dudoso"), "los dudosos se ven, con su motivo")
+    ok(pg.visible(".faltan-duraciones", "falta la duración"), "Instagram sin duración: lo dice")
+    pg.dialogos.clear()
+    pg.pulsar(".faltan-duraciones button", "Completar con Apify")
+    ok(any("$" in x and "duración" in x for x in pg.dialogos), f"pregunta antes de pagar, con el precio: {pg.dialogos[-1:]}")
+    ok(pg.esperar(".cab-rangos .meta", "12 de 12", 20), "y completa la duración de los 12")
+    pg.captura("cuenta_con_cifras")
+
+    pg.pulsar(".cab-leidas button", "Seleccionar todas")
+    marcadas = pg.p.locator(".tarjeta-cuenta-sel.marcada").count()
+    ok(marcadas >= 3, f"«Seleccionar todas» marca las leídas ({marcadas})")
+    ok(pg.esperar(".varias-cuentas button.primario", "Analizar seleccionadas", 5), "aparece «Analizar seleccionadas»")
+    # cupo-aviso (02-11): con el cupo al 93 % AVISA y deja seguir, no bloquea
+    cupo_ruta = os.path.join(datos["env"]["ESTUDIO_SECRETOS"], "cupo_claude.json")
+    with open(cupo_ruta, "w", encoding="utf-8") as fh:
+        json.dump({"p": {"cuenta": "principal", "ventanas": {"five_hour": {"uso": 0.93, "reinicia": time.time() + 3600}}}}, fh)
+    try:
+        pg.dialogos.clear()
+        pg.pulsar(".varias-cuentas button.primario", "Analizar seleccionadas")
+        ok(any("cuentas" in x and "vídeos" in x for x in pg.dialogos),
+           f"antes de llamar a Claude dice cuántas cuentas y vídeos: {pg.dialogos[-1:]}")
+        ok(any("93 %" in x and "seguir igualmente" in x for x in pg.dialogos),
+           f"con el cupo al 93 %, avisa y ofrece seguir igualmente: {pg.dialogos[-1:]}")
+        ok(pg.esperar(".resultado-conjunto h4", "Fórmulas que se repiten", 30), "y al aceptar, analiza (no se para)")
+    finally:
+        os.remove(cupo_ruta)
+    ok(pg.visible(".pruebas-conjunto a.prueba"), "cada conclusión con sus vídeos de prueba, enlazados")
+    pg.captura("varias_cuentas")
+
+    # cuentas-gustan-3 (02-11): temas agrupados, ganchos, comparar y cuentas propias
+    ok(pg.visible(".resultado-conjunto h4", "Todos los temas, agrupados"), "los temas agrupados")
+    ok(pg.visible(".item-conjunto .meta", "vistas en"), "con la suma de vistas y las cuentas que los hacen")
+    ok(pg.visible(".resultado-conjunto h4", "Ganchos que mejor funcionan"), "los ganchos que mejor funcionan")
+    ok(pg.visible(".ejemplo-gancho a.prueba"), "con ejemplos enlazados")
+    ok(pg.esperar(".comparar-conjuntos .pista", "único análisis guardado", 10), "con un solo análisis, dice que aún no hay con qué comparar")
+    sel = pg.p.evaluate("() => [...seleccionCuentas()]")
+    r, t = api.post("/api/parrilla/conjuntos", {"cuentas": sel})
+    fin = time.time() + 30
+    while (t or {}).get("estado") == "trabajando" and time.time() < fin:
+        time.sleep(0.4)
+        _r, t = api.get(f"/api/parrilla/conjuntos/trabajos/{t['id']}")
+    ok((t or {}).get("estado") == "listo", "un segundo análisis de las mismas cuentas (el «del mes siguiente»)")
+    pg.js(f"PAR.conjHistorial = null; abrirConjunto('{(t or {}).get('analisis')}');")
+    ok(pg.esperar(".comparar-conjuntos button", "Comparar con el anterior", 10), "con dos, se pueden comparar")
+    pg.pulsar(".comparar-conjuntos button", "Comparar con el anterior")
+    ok(pg.esperar(".resultado-comparacion", "mismas cuentas", 10), "compara con el anterior de esas cuentas")
+    ok(pg.visible(".cambio-conjunto.sigue", "Siguen"), "y dice qué sigue, qué aparece y qué desaparece")
+    pg.p.locator(".resultado-comparacion").first.scroll_into_view_if_needed()
+    pg.captura("comparar_analisis")
+    pg.p.locator(".cuentas-propias select").first.select_option(label="@gusta_beto (tiktok)")
+    ok(pg.esperar(".cuentas-propias .pastilla", "publicaciones", 10), "marcar una cuenta tuya: lo publicado entra en el cruce")
+    _r, prop = api.get(f"/api/parrilla/proyectos/{cid}/cuentas-propias")
+    ok([c["usuario"] for c in (prop or {}).get("cuentas", [])] == ["gusta_beto"], "y se guarda en el proyecto")
+
+    pg.p.locator("[data-foco=temas-cuantos]").fill("4")
+    pg.dialogos.clear()
+    pg.pulsar(".proponer-temas button.primario", "Proponer temas")
+    ok(any("Ideas de cuentas" in x for x in pg.dialogos), "proponer temas dice para qué proyecto")
+    ok(any("de tus cuentas" in x for x in pg.dialogos), f"y cuántas publicaciones tuyas cruza: {pg.dialogos[-1:]}")
+    ok(pg.esperar(".tarjeta-tema", segundos=30), "la lista de temas para aprobar")
+    ok(pg.visible(".tarjeta-tema .pastilla", "nuevo"), "cada tema dice si es nuevo, parecido o repetido")
+    ok(pg.visible(".tarjeta-tema .pruebas-conjunto"), "con sus cuentas y vídeos de referencia")
+    pg.p.locator(".temas-propuestos").first.scroll_into_view_if_needed()
+    pg.captura("temas_propuestos")
+    pg.p.locator("[data-foco=tema-t01-gancho]").fill("Un gancho escrito por mí")
+    pg.p.locator("[data-foco=tema-t01-gancho]").press("Tab")
+    pg.p.wait_for_timeout(1500)
+    _r, temas = api.get(f"/api/parrilla/proyectos/{cid}/temas")
+    t01 = next((t for t in ((temas or {}).get("propuesta") or {}).get("temas", []) if t["id"] == "t01"), {})
+    ok(t01.get("gancho") == "Un gancho escrito por mí", f"editar el gancho se guarda ({t01.get('gancho')!r})")
+    ok(pg.p.locator(".escribir-temas button.primario").is_disabled(), "sin aprobar nada, «Escribir» no se puede pulsar")
+    for _ in range(2):
+        pg.pulsar(".tarjeta-tema.estado-pendiente .cab-tema button.primario", "Aprobar")
+        pg.p.wait_for_timeout(800)
+    ok(pg.esperar(".escribir-temas button.primario", "Escribir guiones aprobados (2)", 10), "dos aprobados")
+    pg.dialogos.clear()
+    pg.pulsar(".escribir-temas button.primario", "Escribir guiones aprobados")
+    ok(any("Parrilla de «Ideas de cuentas»" in x for x in pg.dialogos), f"confirma con el nombre del proyecto: {pg.dialogos[-1:]}")
+    fin = time.time() + 30
+    guiones = []
+    while time.time() < fin and len(guiones) < 2:
+        pg.p.wait_for_timeout(800)
+        _r, todo = api.get(f"/api/parrilla/proyectos/{cid}")
+        guiones = [g for m in (todo or {}).get("matrices", []) for g in m.get("guiones", [])]
+    ok(len(guiones) == 2, f"dos guiones en la Parrilla del proyecto ({len(guiones)})")
+    pg.p.wait_for_function("() => PAR.trabajo && PAR.trabajo.estado === 'listo' && PAR.seccion === 'parrilla'",
+                           timeout=30000)
+    ok(pg.esperar(".tarjeta-guion", segundos=10), "al acabar, la pantalla enseña la Parrilla con los guiones")
+    pg.pulsar(".pestanas-automatizar button", "Cuentas que te gustan")
+    ok(pg.esperar(".tarjeta-tema .pastilla", "guion escrito", 15), "y los temas quedan como escritos")
+    pg.pulsar(".cab-leidas button", "Quitar selección")
+    ok(pg.p.locator(".tarjeta-cuenta-sel.marcada").count() == 0, "«Quitar selección» las desmarca")
+    pg.sin_errores("cuentas que te gustan 2")
+    pg.cerrar()
+
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="movil")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}'); irASeccionParrilla('cuentas');")
+    ok(pg.esperar(".tarjeta-tema", segundos=15), "en el móvil, los temas")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
+    ok(ancho <= 391, f"y caben a lo ancho ({ancho} px)")
+    pg.captura("temas_movil")
+    pg.sin_errores("cuentas que te gustan 2 en el móvil")
+    pg.cerrar()
+
+# ======================================================================
+# REGLAS-CLARAS (28-10-2026). Tramo propio, al final.
+
+@escenario
+def reglas_claras(navegador, datos):
+    """Lo que vio el dueño el 28-10: en «📏 Reglas» las del negocio y las del
+    estilo salían seguidas y parecían duplicadas, y una de cada lista se
+    contradecían sin verse. Ahora: dos cajas con su título y su nota, el
+    contador «N reglas: X del negocio + Y de este estilo», la pista gratis y
+    «Revisar si se contradicen» (Claude simulado). Pintar y revisar no escriben
+    nada. Un proyecto y dos estilos propios, para no mover a los demás."""
+    from PIL import Image                                    # noqa: PLC0415
+    api = datos["api"]
+    _r, d = api.post("/api/clientes", {"nombre": "Reglas claras"})
+    cid = d["cliente"]["id"] if "cliente" in d else d.get("id")
+    carpeta = tempfile.mkdtemp(prefix="reglas_claras_")
+    refs = []
+    for i in range(3):            # un estilo pide al menos 3 fotogramas
+        ruta = os.path.join(carpeta, f"ref{i}.png")
+        Image.new("RGB", (400, 300), (60 * i + 40, 120, 90)).save(ruta)
+        refs.append(ruta)
+    propias = [{"texto": "La tele va siempre en su trípode negro, nunca sobre un mueble."},
+               {"texto": "Luz cálida de salón de fiestas, sin focos de estudio."}]
+    ids = {}
+    for nombre, modo in (("Fiesta foto", "foto"), ("Fiesta dibujo", None)):
+        estilo = {"referencias": refs, "reglas": propias}
+        if modo:
+            estilo["modo"] = modo
+        r, d = api.post("/api/presets-canal", {"tipo": "canal", "nombre": nombre,
+                                               "datos": {"estilo": estilo, "guion": {"instrucciones": "x"}}})
+        ok(r.status_code == 200 and "preset" in d, f"se crea el estilo «{nombre}» ({r.status_code} {d})")
+        if "preset" not in d:
+            return
+        ids[nombre] = d["preset"]["id"]
+        api.put(f"/api/clientes/estilos/{ids[nombre]}", {"cliente": cid})
+    r, _d = api.put(f"/api/clientes/{cid}/negocio", {
+        "nombre": "Alquiler de consolas",
+        "reglas": [{"texto": "Los mandos se sujetan con las dos manos.", "palabras": ["mando"]},
+                   {"texto": "Cada tele va en su trípode o sobre un mueble, nunca flotando."}]})
+    ok(r.status_code == 200, f"el proyecto de prueba tiene su ficha ({r.status_code})")
+
+    def foto_de_disco():
+        _r, lista = api.get("/api/presets-light")
+        estilos = {x["id"]: (x.get("datos") or {}).get("estilo") for x in lista.get("presets") or []
+                   if x.get("id") in ids.values()}
+        _r, negocio = api.get(f"/api/clientes/{cid}/negocio")
+        return json.dumps([estilos, negocio.get("negocio")], sort_keys=True)
+    antes = foto_de_disco()
+    pg = Pagina(navegador, datos)
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{ids['Fiesta foto']}' }});")
+    pg.p.wait_for_timeout(1500)
+    pg.pulsar("button", "📏 Reglas")
+    ok(pg.esperar(".contador-reglas", "recibe 4 reglas", 15),
+       "el contador dice cuántas reglas recibe cada imagen")
+    ok(pg.visible(".contador-reglas", "2 del negocio") and pg.visible(".contador-reglas", "2 de este estilo"),
+       "X del negocio + Y de este estilo")
+    ok(pg.visible(".caja-reglas-negocio h4", "Del negocio · todo el proyecto «Reglas claras»"),
+       "la caja del negocio lleva su título")
+    ok(pg.visible(".caja-reglas-negocio .nota-reglas", "Valen para todos los estilos de foto de este proyecto"),
+       "y su nota")
+    ok(pg.visible(".caja-reglas-negocio button", "Editar la ficha"), "con «✎ Editar la ficha»")
+    ok(pg.visible(".caja-reglas-estilo h4", "De este estilo · solo «Fiesta foto»"),
+       "la caja del estilo lleva su título")
+    ok(pg.visible(".caja-reglas-estilo .nota-reglas", "Valen solo para este estilo"), "y su nota")
+    ok(pg.esperar(".pista-reglas-parecidas", "léelas juntas", 10)
+       and pg.visible(".pista-reglas-parecidas mark", "mueble"),
+       "la pista gratis junta la tele del negocio con la del estilo")
+    pg.captura("reglas_claras_dos_cajas")
+    pg.pulsar(".revisar-choques button", "Revisar si se contradicen")
+    ok(pg.esperar(".aviso-coste-choques", "membresía de Claude", 5),
+       "antes de revisar avisa de que gasta la membresía")
+    pg.pulsar(".aviso-coste-choques button", "Sí, revisar")
+    ok(pg.esperar(".choque-de-reglas", "Se contradicen", 30),
+       "Claude (simulado) señala el par que se contradice")
+    ok(pg.visible(".revisar-choques", "No se ha cambiado nada"), "y dice que no ha cambiado nada")
+    pg.captura("reglas_claras_choques", entera=False)
+    pg.pulsar(".revisar-choques button", "Revisar otra vez")
+    ok(pg.esperar(".aviso-coste-choques", "no cambia nada", 5), "«Revisar otra vez» vuelve a avisar antes")
+    pg.pulsar(".aviso-coste-choques button", "Cancelar")
+    pg.p.wait_for_timeout(500)
+    ok(not pg.visible(".aviso-coste-choques") and pg.visible(".choque-de-reglas", "Se contradicen"),
+       "y «Cancelar» lo deja como estaba, sin llamar a Claude")
+    ok(foto_de_disco() == antes, "pintar y revisar no escriben nada (ni estilos ni ficha)")
+    pg.sin_errores("las reglas claras de un estilo de foto")
+
+    # EN UN ESTILO DE DIBUJO, las del negocio no se le aplican
+    pg.js(f"irALight('preset', {{ abierto: '{ids['Fiesta dibujo']}' }});")
+    pg.p.wait_for_timeout(1500)
+    pg.pulsar("button", "📏 Reglas")
+    ok(pg.esperar(".contador-reglas", "no se le aplican", 15),
+       "en un estilo de dibujo, el contador dice que las del negocio no se le aplican")
+    ok(pg.visible(".contador-reglas", "0 del negocio"), "y cuenta 0 del negocio")
+
+    # Y EN LA FICHA DEL NEGOCIO: que se suman, y cuántos estilos de foto la usan
+    pg.js(f"elegirCliente('{cid}'); irALight('galeria');")
+    ok(pg.esperar(".abrir-ajustes-proyecto", None, 15), "el proyecto con su «⚙ Ajustes del proyecto»")
+    pg.pulsar(".abrir-ajustes-proyecto")
+    ok(pg.esperar(".uso-ficha-negocio", "se suman", 10), "la ficha dice que sus reglas se suman a las del estilo")
+    ok(pg.visible(".uso-ficha-negocio", "La usan 1 estilo de foto de este proyecto (Fiesta foto)"),
+       "y cuántos estilos de foto la usan")
+    ok(pg.visible(".uso-ficha-negocio", "Los de dibujo (1) no la reciben"), "y que los de dibujo no")
+    pg.captura("reglas_claras_ficha", entera=False)
+    pg.js("cerrarAjustesProyecto();")
+    ok(foto_de_disco() == antes, "abrir la ficha tampoco escribe nada")
+    pg.sin_errores("la línea de la ficha del negocio")
+    pg.cerrar()
+    api._r("DELETE", f"/api/clientes/{cid}/negocio")
+    for pid in ids.values():
+        api._r("DELETE", f"/api/presets-light/{pid}")
+    api._r("DELETE", f"/api/clientes/{cid}")
 
 if __name__ == "__main__":
     sys.exit(main())

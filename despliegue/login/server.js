@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Studio Videos IA - servidor HTTP.
+ * CrearIA Studio - servidor HTTP del acceso (login).
  *
  * Escucha solo en localhost: nginx hace de proxy inverso y termina el TLS.
  */

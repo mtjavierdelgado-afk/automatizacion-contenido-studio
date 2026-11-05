@@ -10,7 +10,7 @@ Corre EN SECO por defecto. Con `--con-cli` llama al modelo de verdad con las
 frases que motivaron esto, que es lo único que comprueba que el prompt reparte
 como se le pide.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_enrutar_estilo.py
+    python pasos/prueba_enrutar_estilo.py
 """
 import inspect
 import io

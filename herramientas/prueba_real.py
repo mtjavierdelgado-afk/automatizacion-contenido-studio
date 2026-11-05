@@ -308,7 +308,11 @@ def main():
         return 2
     codigo, claves = api.post("/api/claves/probar", {"claude": True})
     for p in claves.get("pruebas") or []:
-        opcional = p.get("proveedor") in ("jamendo", "freesound") or args.sin_claves
+        # SOLO las que hacen el vídeo son obligatorias: las de leer cuentas
+        # ajenas (lectura_*) o las de música y efectos, si faltan, es un aviso
+        # (prueba del servidor, 04-11-2026: sin clave de YouTube para leer
+        # cuentas salía un fallo que no tiene nada que ver con hacer un vídeo)
+        opcional = (p.get("proveedor") not in ("openai", "cartesia", "claude")) or args.sin_claves
         informe.comprueba(p.get("estado") == "ok", f"clave de {p.get('proveedor')}",
                           f"{p.get('estado')}: {p.get('mensaje')}", solo_aviso=opcional)
     imprescindibles = {p.get("proveedor"): p.get("estado") for p in claves.get("pruebas") or []}
@@ -333,7 +337,12 @@ def main():
         nombre = "Prueba real " + datetime.datetime.now().strftime("%Y-%m-%d %H.%M")
         codigo, creado = api.post(f"/api/presets-light/{estilo['id']}/video", {
             "nombre": nombre, "duracion_objetivo_s": args.segundos, "material": MATERIAL,
-            "indicaciones": "Cercano y con humor, frases cortas."})
+            "indicaciones": "Cercano y con humor, frases cortas.",
+            # EL VÍDEO NORMAL ES NORMAL aunque el estilo traiga un tipo de
+            # relato que edita una imagen base o «Imágenes: guion»: esos piden
+            # aprobar algo antes de pagar y la prueba se paraba ahí (04-11).
+            # Eso lo prueba la parte del tipo de relato, no esta.
+            "opciones": {"tipo_relato": {"modo": "documental"}, "imagenes": "voz"}})
         pid = (creado.get("proyecto") or {}).get("id") or ""
         if not informe.comprueba(codigo == 201 and pid, f"se crea «{nombre}» con el estilo «{estilo.get('nombre')}»",
                                  f"HTTP {codigo}: {creado}"):
@@ -534,14 +543,24 @@ def main():
         try:
             veredicto = _juez(
                 f"<material>\n{MATERIAL}\n</material>\n<guion>\n{guion}\n</guion>\n"
-                "¿El guion cuenta lo que dice el material, sin inventar datos que no "
-                "están (cifras, fechas, nombres)? Devuelve SOLO "
-                '{"fiel": true | false, "inventos": ["<dato inventado>"], "por_que": "<una frase>"}', raiz)
+                "Contesta por separado. 'fiel': ¿el guion NO inventa DATOS que no están en "
+                "el material (cifras, fechas, nombres, marcas, lugares o hechos que se puedan "
+                "comprobar)? 'anadidos': las frases de estilo, ejemplos, escenas o consejos "
+                "que el guion añade sin ser datos (eso es narrar, no inventar). Devuelve SOLO "
+                '{"fiel": true | false, "inventos": ["<dato inventado>"], '
+                '"anadidos": ["<frase añadida>"], "por_que": "<una frase>"}', raiz)
         except Exception as fallo:                          # noqa: BLE001
             veredicto = {"fiel": None, "por_que": f"no se pudo preguntar a Claude: {fallo}"}
         datos["juicio_guion"] = veredicto
-        informe.comprueba((veredicto or {}).get("fiel") is True, "el guion es fiel al material",
+        # FALLO solo si inventa DATOS; lo que añade para contar (escenas,
+        # consejos, humor que piden las indicaciones) es un aviso para leer.
+        # En la prueba del 04-11 el juez tumbó un guion que, según él mismo,
+        # «no inventa cifras, fechas ni nombres»: solo narraba
+        informe.comprueba((veredicto or {}).get("fiel") is True, "el guion no inventa datos",
                           f"{(veredicto or {}).get('inventos')}: {(veredicto or {}).get('por_que')}")
+        if (veredicto or {}).get("anadidos"):
+            informe.apunta("aviso", "el guion añade frases que no están en el material (léelas)",
+                           "; ".join(str(x) for x in (veredicto or {}).get("anadidos")[:4]))
         try:
             from pasos import ortografia                    # noqa: PLC0415
             faltas = ortografia.revisar({"guion": guion}, cwd=raiz)

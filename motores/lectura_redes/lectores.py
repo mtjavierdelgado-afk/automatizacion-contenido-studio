@@ -9,7 +9,14 @@ Todas devuelven lo mismo:
 
     {"red", "usuario", "nombre", "seguidores", "fuente", "coste_usd",
      "videos": [{"id", "url", "texto", "fecha", "vistas", "me_gusta",
-                 "comentarios", "compartidos", "duracion_s", "transcripcion"}]}
+                 "comentarios", "compartidos", "duracion_s", "transcripcion",
+                 "tipo"?, "coautores"?, "media_url"?}]}
+
+`tipo` (rama cuentas-gustan-2) es la clase de publicación ya normalizada: reel,
+publicacion, carrusel, video, short, fotos (`TIPOS`). `coautores`, las cuentas
+con las que se publicó en colaboración (si la fuente lo dice). `media_url`, el
+enlace del vídeo en Instagram por la vía oficial: caduca, solo sirve para medir
+su duración con ffprobe al leerla y no se guarda.
 
 y lanzan `ErrorLectura(mensaje, motivo)`, donde `motivo` es lo que decide si se
 prueba la siguiente fuente:
@@ -90,7 +97,7 @@ def _pedir(url, metodo="GET", cuerpo=None, plazo=PLAZO_S, claves=(), bases=None,
     Las claves van en CABECERAS (`cabeceras_extra`), no en la URL: una URL
     acaba en los registros de cualquier proxy por el que pase."""
     datos = None
-    cabeceras = {"Accept": "application/json", "User-Agent": "AutomatizacionContenidoStudio/1"}
+    cabeceras = {"Accept": "application/json", "User-Agent": "CrearIAStudio/5.1"}
     cabeceras.update(cabeceras_extra or {})
     if cuerpo is not None:
         datos = json.dumps(cuerpo).encode("utf-8")
@@ -160,11 +167,47 @@ def _duracion(valor):
 
 
 def _video(id_, url, texto, fecha, vistas=None, me_gusta=None, comentarios=None,
-           compartidos=None, duracion_s=None, transcripcion=""):
-    return {"id": str(id_ or ""), "url": str(url or ""), "texto": str(texto or "")[:2200],
-            "fecha": str(fecha or ""), "vistas": _entero(vistas), "me_gusta": _entero(me_gusta),
-            "comentarios": _entero(comentarios), "compartidos": _entero(compartidos),
-            "duracion_s": duracion_s, "transcripcion": str(transcripcion or "")[:4000]}
+           compartidos=None, duracion_s=None, transcripcion="", tipo="", coautores=None):
+    v = {"id": str(id_ or ""), "url": str(url or ""), "texto": str(texto or "")[:2200],
+         "fecha": str(fecha or ""), "vistas": _entero(vistas), "me_gusta": _entero(me_gusta),
+         "comentarios": _entero(comentarios), "compartidos": _entero(compartidos),
+         "duracion_s": duracion_s, "transcripcion": str(transcripcion or "")[:4000]}
+    if tipo:
+        v["tipo"] = tipo
+    coautores = [str(c).lstrip("@")[:60] for c in (coautores or []) if str(c or "").strip()]
+    if coautores:
+        v["coautores"] = coautores[:10]
+    return v
+
+
+#: Las clases de publicación, ya normalizadas (rama cuentas-gustan-2).
+TIPOS = {"reel": "Reel", "publicacion": "Publicación", "carrusel": "Carrusel",
+         "video": "Vídeo", "short": "Short", "fotos": "Fotos"}
+
+
+def tipo_instagram(product_type="", media_type=""):
+    """REELS/FEED/STORY y VIDEO/IMAGE/CAROUSEL_ALBUM (vía oficial) o
+    clips/Video/Sidecar/Image (Apify) -> una clave de `TIPOS`."""
+    p, m = str(product_type or "").lower(), str(media_type or "").lower()
+    if p in ("reels", "clips") or m == "clips":
+        return "reel"
+    if m in ("carousel_album", "sidecar"):
+        return "carrusel"
+    if m in ("image", "graphimage"):
+        return "publicacion"
+    if m in ("video", "graphvideo"):
+        return "reel" if p != "feed" else "video"
+    return ""
+
+
+def tipo_youtube(url="", texto="", duracion_s=None):
+    """Short o vídeo. Un Short dura hasta 3 min, pero un vídeo normal también
+    puede: sin «/shorts/» ni «#shorts», solo se afirma con 60 s o menos."""
+    if "/shorts/" in str(url or "") or "#shorts" in str(texto or "").lower():
+        return "short"
+    if isinstance(duracion_s, (int, float)):
+        return "short" if duracion_s <= 60 else "video" if duracion_s > 180 else ""
+    return ""
 
 
 # ------------------------------------------------------------------ YouTube
@@ -207,10 +250,12 @@ def youtube(clave, usuario, cuantos=30, bases=None):
         for v in (datos or {}).get("items") or []:
             sn, st = v.get("snippet") or {}, v.get("statistics") or {}
             texto = (sn.get("title") or "") + ("\n" + sn["description"] if sn.get("description") else "")
-            videos.append(_video(v.get("id"), f"https://www.youtube.com/watch?v={v.get('id')}", texto,
+            duracion = _duracion_iso((v.get("contentDetails") or {}).get("duration"))
+            url_v = f"https://www.youtube.com/watch?v={v.get('id')}"
+            videos.append(_video(v.get("id"), url_v, texto,
                                  sn.get("publishedAt"), st.get("viewCount"), st.get("likeCount"),
-                                 st.get("commentCount"), None,
-                                 _duracion_iso((v.get("contentDetails") or {}).get("duration"))))
+                                 st.get("commentCount"), None, duracion,
+                                 tipo=tipo_youtube(url_v, texto, duracion)))
     sn, st = canal.get("snippet") or {}, canal.get("statistics") or {}
     return {"red": "youtube", "usuario": usuario.lstrip("@"), "nombre": sn.get("title") or usuario,
             "seguidores": _entero(st.get("subscriberCount")), "fuente": "youtube_api",
@@ -243,7 +288,7 @@ def instagram(token, ig_id, usuario, cuantos=30, version=VERSION_META, bases=Non
     cuantos = max(1, min(int(cuantos or 30), 50))
     campos = (f"business_discovery.username({usuario}){{username,name,followers_count,media_count,"
               f"media.limit({cuantos}){{id,caption,like_count,comments_count,view_count,timestamp,"
-              f"permalink,media_type,media_product_type}}}}")
+              f"permalink,media_type,media_product_type,media_url}}}}")
     url = (f"{BASE_META}/{version}/{urllib.parse.quote(str(ig_id))}?"
            + urllib.parse.urlencode({"fields": campos}))
     codigo, datos = _pedir(url, claves=(token,), bases=bases, cabeceras_extra={"Authorization": f"Bearer {token}"})
@@ -263,8 +308,10 @@ def instagram(token, ig_id, usuario, cuantos=30, version=VERSION_META, bases=Non
     videos = []
     for m in ((bd.get("media") or {}).get("data") or []):
         videos.append(_video(m.get("id"), m.get("permalink"), m.get("caption"), m.get("timestamp"),
-                             m.get("view_count"), m.get("like_count"), m.get("comments_count")))
-        videos[-1]["tipo"] = str(m.get("media_product_type") or m.get("media_type") or "")
+                             m.get("view_count"), m.get("like_count"), m.get("comments_count"),
+                             tipo=tipo_instagram(m.get("media_product_type"), m.get("media_type"))))
+        if m.get("media_url") and str(m.get("media_type") or "").upper() == "VIDEO":
+            videos[-1]["media_url"] = str(m["media_url"])
     return {"red": "instagram", "usuario": bd.get("username") or usuario, "nombre": bd.get("name") or usuario,
             "seguidores": _entero(bd.get("followers_count")), "fuente": "instagram_oficial",
             "coste_usd": 0.0, "videos": videos}
@@ -322,22 +369,28 @@ def leer_items_apify(red, usuario, items):
                                  _primero(it, "diggCount", "stats.diggCount"),
                                  _primero(it, "commentCount", "stats.commentCount"),
                                  _primero(it, "shareCount", "stats.shareCount"),
-                                 _duracion(_primero(it, "videoMeta.duration", "duration"))))
+                                 _duracion(_primero(it, "videoMeta.duration", "duration")),
+                                 tipo="fotos" if (it.get("isSlideshow") or it.get("imagePost")) else "video"))
         elif red == "instagram":
             nombre = nombre or _primero(it, "ownerFullName", "ownerUsername") or ""
             videos.append(_video(_primero(it, "id", "shortCode"), it.get("url"), it.get("caption"),
                                  it.get("timestamp"), _primero(it, "videoPlayCount", "videoViewCount", "playCount"),
                                  _primero(it, "likesCount", "likes"), _primero(it, "commentsCount", "comments"),
                                  None, _duracion(_primero(it, "videoDuration", "duration")),
-                                 _primero(it, "transcript", "transcription") or ""))
+                                 _primero(it, "transcript", "transcription") or "",
+                                 tipo=tipo_instagram(it.get("productType"), it.get("type")),
+                                 coautores=[(c or {}).get("username") if isinstance(c, dict) else c
+                                            for c in (it.get("coauthorProducers") or [])]))
         else:
             nombre = nombre or _primero(it, "channelName", "channel.name") or ""
             seguidores = seguidores or _entero(_primero(it, "numberOfSubscribers", "channel.subscribers"))
             texto = (it.get("title") or "") + ("\n" + it["text"] if it.get("text") else "")
+            duracion = _duracion(it.get("duration"))
             videos.append(_video(it.get("id"), it.get("url"), texto, _primero(it, "date", "uploadDate"),
                                  _primero(it, "viewCount", "views"), _primero(it, "likes", "likeCount"),
-                                 _primero(it, "commentsCount", "commentCount"), None,
-                                 _duracion(it.get("duration"))))
+                                 _primero(it, "commentsCount", "commentCount"), None, duracion,
+                                 tipo=("short" if str(it.get("type") or "").lower() == "shorts"
+                                       else tipo_youtube(it.get("url"), texto, duracion))))
     # un resultado sin id ni enlace es que el actor ha cambiado de nombres: no es un vídeo
     videos = [v for v in videos if v["id"] or v["url"]]
     return {"red": red, "usuario": str(usuario).lstrip("@"), "nombre": nombre or str(usuario).lstrip("@"),

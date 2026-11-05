@@ -30,7 +30,7 @@ Uso:
     Medidor(proyecto).total()            # {"total_usd": ..., "proveedores": ...}
 
 Persistencia: eventos append-only en <proyecto>/coste.jsonl y, con el proyecto
-anotado, en C:\\IA\\estudio\\coste_global.jsonl. Igual que la bitacora, se anota
+anotado, en la carpeta del Studio (coste_global.jsonl). Igual que la bitacora, se anota
 al ocurrir y nunca se reescribe: el historico sigue siendo valido aunque las
 tarifas cambien despues.
 """
@@ -712,6 +712,21 @@ def reportar_openai(usage, calidad, tamano, imagenes=1, operacion="imagen",
                    usd_estimado=True, detalle=ficha)
 
 
+#: La pausa que Cartesia entiende dentro del texto. No se lee en voz alta, y
+#: la documentacion de Cartesia dice que cada <break> cuenta como UN caracter.
+#: Antes se contaba `<break time="1200ms"/>` como 23: el gasto de voz salia
+#: unos centimos por encima en cada video. Las demas etiquetas (<speed>,
+#: <volume>, <emotion>, <spell>) se siguen contando enteras A PROPOSITO:
+#: Cartesia no dice como las cobra, y pasarse por arriba es preferible a
+#: ensenar un gasto que no es (revision del 26-10).
+_ETIQUETA_PAUSA = re.compile(r'<break\b[^<>]*>', re.I)
+
+
+def caracteres_cobrados(texto):
+    """Los caracteres de ese texto que cobra Cartesia: cada pausa, uno."""
+    return len(_ETIQUETA_PAUSA.sub("x", str(texto or "")))
+
+
 def reportar_tts(caracteres, operacion="sintesis", unidad=None, tokens=None,
                  detalle=None):
     """Anota una sintesis con los caracteres que el motor de voz envio de verdad."""
@@ -733,7 +748,11 @@ def reportar_claude(sobre, operacion="cli", unidad=None, detalle=None):
     usage = sobre.get("usage") if isinstance(sobre.get("usage"), dict) else {}
     cache = (int(usage.get("cache_creation_input_tokens") or 0)
              + int(usage.get("cache_read_input_tokens") or 0))
-    ficha = {}
+    # LAS DOS CACHÉS APARTE (medidor-claude-2): la leída cuesta ~10 % y la
+    # creada algo más que la entrada; sumadas en `tokens.cache` una llamada
+    # pequeña parecía de 40 mil. `tokens` no cambia (lo leen los históricos).
+    ficha = {"cache_creada": int(usage.get("cache_creation_input_tokens") or 0),
+             "cache_leida": int(usage.get("cache_read_input_tokens") or 0)}
     if sobre.get("model"):
         ficha["modelo"] = sobre["model"]
     if sobre.get("duration_ms") is not None:
@@ -805,8 +824,9 @@ def _medir_toma_real(original):
         # se anota DESPUES y con el texto que se envio: si la llamada revienta
         # no hay recuento fiable y preferimos un hueco a un numero inventado
         cfg = cfg if isinstance(cfg, dict) else {}
-        reportar_tts(len(texto or ""), operacion="toma",
-                     detalle={"modelo": cfg.get("modelo"),
+        reportar_tts(caracteres_cobrados(texto), operacion="toma",
+                     detalle={"enviados": len(texto or ""),
+                              "modelo": cfg.get("modelo"),
                               "voz_id": cfg.get("voz_id"),
                               "idioma": cfg.get("idioma")})
         return resultado
@@ -823,7 +843,8 @@ def _medir_toma_por_contexto(original):
     medidor. Y no chirriaba, porque un hueco en el importe del TTS es
     exactamente lo que se pinta cuando falta la tarifa por caracter.
 
-    Se cuentan los caracteres que se ENVIARON, sumando las entradas del
+    Se cuentan los caracteres que se COBRAN (`caracteres_cobrados`: cada pausa,
+    uno) sumando las entradas del
     contexto, y se anota DESPUES: si la llamada revienta sin haber devuelto
     nada no hay recuento fiable, y un hueco es mejor que un numero inventado.
 
@@ -852,8 +873,9 @@ def _medir_toma_por_contexto(original):
             raise
         cfg = cfg if isinstance(cfg, dict) else {}
         piezas = list(trozos or [])
-        reportar_tts(sum(len(str(t or "")) for t in piezas), operacion="toma",
-                     detalle={"modelo": cfg.get("modelo"),
+        reportar_tts(sum(caracteres_cobrados(t) for t in piezas), operacion="toma",
+                     detalle={"enviados": sum(len(str(t or "")) for t in piezas),
+                              "modelo": cfg.get("modelo"),
                               "voz_id": cfg.get("voz_id"),
                               "idioma": cfg.get("idioma"),
                               "secciones": len(piezas)})
@@ -951,7 +973,7 @@ def _medir_imagen(original):
         # Y EL IMPORTE DE VERDAD SE DEVUELVE, no solo se anota.
         #
         # El motor trae en `meta["coste"]` el precio de su TABLA POR IMAGEN
-        # (0,006 $ en calidad baja), que es la parte pequena: la API cobra
+        # (0,005 $ en calidad baja), que es la parte pequena: la API cobra
         # ademas los tokens de entrada, y aqui la entrada son las referencias de
         # estilo, de reparto y las dos de continuidad que lleva cada plano. Ese
         # numero es el que p6 sumaba para su resumen y el que acababa en la

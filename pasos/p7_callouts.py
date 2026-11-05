@@ -827,7 +827,7 @@ def capa_fija_de(escena, p, banda=None, salida=SALIDA, extras="", gancho=False):
         cap_linea=cap_subtitulo(tam, banda),
         cap_trozo=cap_trozo_subtitulo(cap_subtitulo(tam, banda), salida),
         texto=texto_subtitulo_de(p, f"escena:{escena.get('id')}"),
-        ancla=ancla_subtitulo_de(p, f"escena:{escena.get('id')}"))
+        ancla=ancla_subtitulo_de(p, f"escena:{escena.get('id')}", escena))
     tapa = opacidad_de_caja(p)
     # en vertical sin fundidos: cada trozo dura poco y se lee entero
     piezas = [bloque_subtitulo(x, banda, tam, paleta, diseno, tapa,
@@ -941,7 +941,7 @@ def subtitulos_redes(escena, p, salida, paleta, diseno, gancho=False):
     trozos = subtitulos.de_escena(
         escena, idioma=p.get("idioma"), cap_linea=cap, cap_trozo=cap,
         texto=texto_subtitulo_de(p, f"escena:{escena.get('id')}"),
-        ancla=ancla_subtitulo_de(p, f"escena:{escena.get('id')}"),
+        ancla=ancla_subtitulo_de(p, f"escena:{escena.get('id')}", escena),
         con_palabras=True)
     trozos = _partir_por_frases(trozos)
     fuente = (diseno or {}).get("fuente") or "Verdana"
@@ -1606,13 +1606,23 @@ def texto_subtitulo_de(p, uid):
     return " ".join(str(bloque.get("subtitulo_texto") or "").split())
 
 
-def ancla_subtitulo_de(p, uid):
-    """La narracion del plano cuando se escribio el subtitulo a mano (solo la
-    pone el corrector de ortografia; el repaso no). Ver `subtitulos.de_escena`."""
+def ancla_subtitulo_de(p, uid, escena=None):
+    """La narracion del plano cuando se escribio el subtitulo a mano. Ver
+    `subtitulos.de_escena`: si ya no es la de ahora, lo escrito no se usa.
+
+    La guardan el corrector de ortografia y, desde el 28-10, el repaso. Un
+    texto escrito antes sin ancla, en un plano cuya voz ha cambiado al quitar o
+    insertar una imagen, se compara con las dos frases (`subtitulos.ancla_implicita`):
+    si era de la de antes se deja de usar --no repite las palabras que ahora dice
+    la imagen de al lado ni pierde las que se lleva de la quitada--; si era de
+    la de ahora, se sigue usando."""
     bloque = (p.get("unidades") or {}).get(uid)
     if not isinstance(bloque, dict):
         return ""
-    return " ".join(str(bloque.get("subtitulo_ancla") or "").split())
+    ancla = " ".join(str(bloque.get("subtitulo_ancla") or "").split())
+    if ancla or not isinstance(escena, dict):
+        return ancla
+    return subtitulos.ancla_implicita(escena, " ".join(str(bloque.get("subtitulo_texto") or "").split()))
 
 
 def _sin_callout(p, uid):

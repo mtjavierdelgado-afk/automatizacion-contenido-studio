@@ -1824,6 +1824,16 @@ def prueba_emojis():
         r = P.vestir_con_emojis(raiz, INFO, "youtube", "titulo", None, P.AJUSTES_DEFECTO)
         igual(r["texto"], "Alquiler de consolas en Lima 🎮", "también con el título")
         ok("al final" in pedido["instruccion"], "y en YouTube pide el emoji al final del título")
+        ok("ENTRE palabras" in pedido["instruccion"] and "principio" in pedido["instruccion"],
+           "y los reparte: al principio y entre palabras, no solo al final (notas del dueño, 24-10)")
+        P._hablar_con_claude = falso("🎮 Fiesta en casa 🎉\n👉 Reserva ya #consolas")
+        P.vestir_con_emojis(raiz, INFO, "tiktok", "descripcion", "Fiesta en casa\nReserva ya #consolas",
+                            P.AJUSTES_DEFECTO)
+        ok("DENTRO de las frases" in pedido["instruccion"],
+           "en el texto también pide emojis dentro de las frases, no solo al final")
+        ok("ENTRE palabras" in P.bloque_emojis(P.AJUSTES_DEFECTO, ["youtube"])
+           and "DENTRO de las frases" in P.bloque_emojis(P.AJUSTES_DEFECTO, ["instagram"]),
+           "y al escribir los textos de cada red pide lo mismo")
         for red, campo, que in (("tiktok", "titulo", "TikTok no tiene título"), ("nada", "descripcion", "una red que no existe"),
                                 ("youtube", "cta", "un campo que no es título ni texto")):
             try:

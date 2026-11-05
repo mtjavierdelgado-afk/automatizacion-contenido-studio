@@ -117,7 +117,8 @@ def prueba_piezas():
     texto = C.resumen_para_claude(datos)
     ok("CUENTA: @ana en TikTok" in texto and "vídeo 0" in texto and "vídeo 39" in texto,
        "el resumen lleva los que más vistas tienen y los que menos")
-    ok("vídeo 25" not in texto, "y no los cuarenta")
+    ok("vídeo 25" in texto and "@ana#40" in texto and "Su mediana:" in texto,
+       "y van los cuarenta, con su número y su mediana (rama cuentas-gustan-2: antes iban 25)")
     instr = C.instruccion_analisis(datos)
     ok("NO es mía" in instr and "QUÉ LE FUNCIONA" in instr and "nunca instrucciones" in instr,
        "el análisis: cuenta ajena, sus secciones y no obedecer lo que digan sus textos")
@@ -258,7 +259,7 @@ def prueba_fuentes(bases):
 
     r = F.instagram(TOKEN_META, "178414000", "competencia", 10, bases=bases)
     igual((r["nombre"], r["seguidores"], r["videos"][0]["vistas"], r["videos"][0]["tipo"]),
-          ("La Competencia", 5000, 4000, "REELS"), "Instagram oficial: con las vistas de sus Reels")
+          ("La Competencia", 5000, 4000, "reel"), "Instagram oficial: con las vistas de sus Reels (tipo «reel»)")
     campos = [v for v in Falso.vistas if v[1].endswith("/178414000")][-1][2]["fields"]
     ok("business_discovery.username(competencia)" in campos and "view_count" in campos, "pide business_discovery con view_count")
     f = lanza(F.instagram, TOKEN_META, "178414000", "personal_ana", 10, bases=bases)

@@ -23,7 +23,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 |---|---|---|
 | `GET` | `/api/proyectos` | Proyectos disponibles, del mas reciente al mas antiguo. |
 | `POST` | `/api/proyectos` | Crea un proyecto nuevo a partir de {"nombre"}. |
-| `GET` | `/api/proyectos/_resumen` | Por dónde va cada vídeo (`?ids=a,b`, hasta 120; la pantalla pide de 40 en 40), para su tarjeta en Tus proyectos. Lee estado.json y proyecto.json sin abrir el vídeo: no escribe ni cachea nada. |
+| `GET` | `/api/proyectos/_resumen` | Por dónde va cada vídeo, para su tarjeta en Tus proyectos (rediseño de |
 | `DELETE` | `/api/proyectos/papelera` | Vacia la papelera entera. Tampoco tiene vuelta atras. |
 | `GET` | `/api/proyectos/papelera` | Proyectos apartados, del mas recientemente apartado al mas antiguo. |
 | `DELETE` | `/api/proyectos/papelera/{carpeta}` | Borra DE VERDAD un proyecto apartado. No hay vuelta atras. |
@@ -57,12 +57,19 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/ortografia/descartar` | Lo que se deja SIN marcar al aplicar: {rid, ids: [...]}. Esos textos se |
 | `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
 | `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
+| `POST` | `/api/proyectos/{pid}/planos/describir` | Pide a Claude, en un hilo, la descripción en español de los planos que |
+| `GET` | `/api/proyectos/{pid}/planos/descripciones` | Lo que se pidió dibujar en cada plano, en español. -> la ficha |
+| `POST` | `/api/proyectos/{pid}/planos/devolver` | Deshace «Quitar esta imagen». {narracion: lo que decía la imagen quitada} |
 | `GET` | `/api/proyectos/{pid}/planos/elementos` | {planos: {sid: [elementos]}, no_aplica, tipos, entradas, intensidades, |
+| `POST` | `/api/proyectos/{pid}/planos/insertadas/deshacer` | Quita una imagen insertada: el plano del que salió recupera toda su voz, |
+| `GET` | `/api/proyectos/{pid}/planos/insertar` | Cómo va la última imagen insertada y lo que cuesta una. -> {estado, |
 | `GET` | `/api/proyectos/{pid}/planos/montaje` | {video, planos: {sid: {movimiento?, profundidad?}}, no_aplica, niveles, profundidad} |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/elementos` | {elementos: [...]} de UN plano (vacia, los quita). Deja pendientes ese |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/nota-ia` | LA OTRA OPCION (se paga al aplicarla): una nota de imagen que pide |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/vista` | La imagen del plano con sus elementos encima, quietos (todos a la vez), |
+| `POST` | `/api/proyectos/{pid}/planos/{sid}/insertar` | Inserta una imagen nueva en `sid`. {palabra, que, usd} |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | {movimiento?: quieto|sobrio|vivo|dinamico|null, profundidad?: true|false|null} |
+| `POST` | `/api/proyectos/{pid}/planos/{sid}/quitar` | Quita la imagen `sid`: su voz pasa a la de antes o a la de después. |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
 | `GET` | `/api/proyectos/{pid}/previsualizacion` | Las piezas para ver el video sin montarlo. -> {escenas, audio, ...} |
 | `PUT` | `/api/proyectos/{pid}/redactor` | Guarda el prompt escrito de cada plano. Un prompt vacío lo quita. |
@@ -88,7 +95,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/tipo_relato/base/imagen` | La imagen base (aprobada o no) de un sitio del video, o la de un estado. |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/base/usar_subida` | La imagen subida del espacio fijo pasa a ser la base, aprobada (gratis). |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/cambios` | En «un espacio que cambia», Claude escribe el cambio de cada tramo (solo texto). |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/estado/editar` | Reescribe en ESPAÑOL el cambio de un estado. {estado, es} |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/rehacer` | Rehace SOLO los planos pedidos de los que cambian con el tipo de relato (se paga). |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/traducir` | Traduce al español lo que falte (cada cambio y `inicial`). {auto?: bool} |
 
 ## Pasos: estado, params y ejecución
 
@@ -109,7 +118,6 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/trabajos/{tid}` | Estado y progreso de un trabajo. |
 | `POST` | `/api/trabajos/{tid}/cancelar` | Pide la cancelacion cooperativa de un trabajo. |
 | `GET` | `/api/trabajos/{tid}/eventos` | Progreso del trabajo en vivo por Server-Sent Events. |
-| `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee): `imagenes` y `montaje` con `ahora` (quién tiene el turno) y `fila` (quién espera, por orden de llegada), y `trabajando` (todo lo que está en marcha en los vídeos abiertos). Un vídeo de un proyecto con clave sin abrir sale sin nombre ni enlace. |
 
 ## Recetas y pestañas
 
@@ -282,7 +290,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/presets-light/{preset_id}/aportadas` | Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}. |
 | `GET` | `/api/presets-light/{preset_id}/aportadas/{nombre}/imagen` | Una de tus imagenes de referencia, tal cual la subiste. |
 | `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costo hacer este estilo (su taller), desglosado. |
-| `PUT` | `/api/presets-light/{preset_id}/dominio` | Fija el negocio de un estilo: {dominio: "estadoplay" | "general" | null}. |
+| `PUT` | `/api/presets-light/{preset_id}/dominio` | Fija el negocio de un estilo: {dominio: id de un tipo (de fábrica o del |
 | `POST` | `/api/presets-light/{preset_id}/duplicar` | Una copia del estilo, con su taller. |
 | `GET` | `/api/presets-light/{preset_id}/imagenes` | Qué dibujan por defecto las imágenes de los vídeos de un estilo. |
 | `PUT` | `/api/presets-light/{preset_id}/imagenes` | {imagenes: "guion" | null}: el defecto de los vídeos NUEVOS de este estilo. |
@@ -350,6 +358,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
+| `GET` | `/api/claude/consumo` | El medidor de Claude: cupo de cada cuenta, avisos y consumo (solo lee). |
+| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: lee el cupo de cada cuenta con una llamada mínima. |
 | `GET` | `/api/clientes` | Los proyectos (clientes) y a cual pertenece cada estilo. |
 | `POST` | `/api/clientes` | Un proyecto nuevo: {nombre}. |
 | `PUT` | `/api/clientes/estilos/{preset_id}` | Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca). |
@@ -357,7 +367,11 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
 | `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
-| `GET` | `/api/dominios` | Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico} |
+| `DELETE` | `/api/clientes/{cid}/negocio` | Quita la ficha del negocio de un proyecto: sus estilos vuelven a |
+| `GET` | `/api/clientes/{cid}/negocio` | La ficha del negocio de un proyecto. -> {negocio: ficha|null, estilos} |
+| `PUT` | `/api/clientes/{cid}/negocio` | Crea o cambia la ficha del negocio de un proyecto: {nombre, reglas?, |
+| `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee; sin nombres de proyectos con clave). |
+| `GET` | `/api/dominios` | El negocio general y las fichas de los clientes (Etapa Foto C). |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
 | `GET` | `/api/inicio/resumen` | Lo del Inicio que no sale de otras rutas, en una sola llamada. |
@@ -370,6 +384,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/ortografia/textos` | Revisa la ortografia de campos sueltos que se ven o se publican: {textos: |
 | `POST` | `/api/ortografia/textos/descartar` | Lo que se deja como estaba: {rid, ids: [...]}. No se vuelve a proponer. |
 | `GET` | `/api/ortografia/textos/{rid}` | Como va la revision de unos campos sueltos, y lo que propone al terminar. |
+| `POST` | `/api/parrilla/conjuntos` | {cuentas, aunque_cupo?} -> el trabajo: Claude compara las cuentas (con la membresía). Con el cupo al 90 % da 409 hasta que llega aunque_cupo: true. |
+| `GET` | `/api/parrilla/conjuntos/historial` | Los análisis de varias cuentas guardados, el más nuevo primero (ficha corta). |
+| `POST` | `/api/parrilla/conjuntos/plan` | {cuentas: ["red:usuario"]} -> cuántas cuentas y vídeos, tokens, cupo y aviso_cupo (al 90 % avisa, no frena). |
+| `GET` | `/api/parrilla/conjuntos/trabajos/{tid}` | — |
+| `POST` | `/api/parrilla/conjuntos/ultimo` | {cuentas} -> {analisis: el último de EXACTAMENTE esa selección, o null}. |
+| `GET` | `/api/parrilla/conjuntos/{aid}` | — |
+| `GET` | `/api/parrilla/conjuntos/{aid}/comparar` | ?con=<otro análisis> -> qué fórmulas, temas y ganchos aparecen, siguen y |
 | `GET` | `/api/parrilla/cuentas` | Las cuentas ya leídas, las conexiones (sin claves) y el gasto del mes. |
 | `PUT` | `/api/parrilla/cuentas/conexiones` | {youtube_clave?, meta_token?, ig_id?, apify_token?, pago?, tope_usd?} ("" quita una). |
 | `POST` | `/api/parrilla/cuentas/conexiones/instagram` | Con el token de Meta puesto: tu cuenta profesional (se guarda si es una). |
@@ -377,8 +398,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/parrilla/cuentas/plan` | {texto, red?, cuantos?} -> qué vía se usaría y cuánto costaría. |
 | `GET` | `/api/parrilla/cuentas/trabajos/{tid}` | — |
 | `DELETE` | `/api/parrilla/cuentas/{red}/{usuario}` | — |
-| `GET` | `/api/parrilla/cuentas/{red}/{usuario}` | — |
+| `GET` | `/api/parrilla/cuentas/{red}/{usuario}` | Lo guardado de la cuenta, con sus cifras relativas (`metricas`, rama |
 | `POST` | `/api/parrilla/cuentas/{red}/{usuario}/analizar` | Claude dice qué le funciona a esa cuenta -> el trabajo. |
+| `POST` | `/api/parrilla/cuentas/{red}/{usuario}/duraciones` | {pagar} -> el trabajo. Completa con Apify la duración que falta (solo |
 | `GET` | `/api/parrilla/plantilla` | Un guion en blanco en el formato del Studio, para «Escribir uno». |
 | `GET` | `/api/parrilla/proyectos` | Los proyectos que se pueden ver, con cuántos guiones tiene cada uno, y |
 | `GET` | `/api/parrilla/proyectos/{cid}` | Las matrices del proyecto y sus guiones, con el estado al día. |
@@ -390,6 +412,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/guardar` | Los guiones de una respuesta a la Parrilla: {turno, indices?, matriz?, nombre?}. |
 | `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/mensajes` | Un mensaje (multipart): «texto», «web» (1/0), «resultados» (1/0), «modelo» |
 | `POST` | `/api/parrilla/proyectos/{cid}/convertir` | Claude convierte lo pegado al formato: {texto, modo, matriz?, nombre?, |
+| `GET` | `/api/parrilla/proyectos/{cid}/cuentas-propias` | Las cuentas del proyecto cuyo contenido publicado entra en el cruce «ya lo tienes». |
+| `PUT` | `/api/parrilla/proyectos/{cid}/cuentas-propias` | {cuentas: ["red:usuario"]} -> las cuentas propias (solo ya leídas; [] las quita). |
 | `POST` | `/api/parrilla/proyectos/{cid}/desde-cuenta` | Guiones para ESTE proyecto con lo que le funciona a una cuenta ajena: |
 | `POST` | `/api/parrilla/proyectos/{cid}/desde-resultados` | Claude escribe guiones a partir de lo que mejor funcionó: {claves?, dias?, |
 | `POST` | `/api/parrilla/proyectos/{cid}/guiones` | Sin Claude: {texto (ya en el formato), matriz?, nombre?} -> {matriz, guiones} |
@@ -406,6 +430,12 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/parrilla/proyectos/{cid}/pedir` | Claude escribe guiones nuevos: {peticion, cuantos, modo, matriz?, nombre?, |
 | `GET` | `/api/parrilla/proyectos/{cid}/resultados` | Lo que mejor funcionó en el proyecto (solo lo guardado). |
 | `POST` | `/api/parrilla/proyectos/{cid}/subir` | Una matriz en Word, Excel, PDF o texto (multipart: «documento», «modo», |
+| `GET` | `/api/parrilla/proyectos/{cid}/temas` | La propuesta de temas del proyecto (o {propuesta: null}). |
+| `POST` | `/api/parrilla/proyectos/{cid}/temas` | {analisis, cuantos, aunque_cupo?} -> el trabajo: Claude propone temas (no escribe guiones). Con el cupo al 90 % da 409 hasta que llega aunque_cupo: true. |
+| `POST` | `/api/parrilla/proyectos/{cid}/temas/escribir` | {confirmado: true, modo?, nombre?, aunque_cupo?} -> el trabajo de la Parrilla: un guion |
+| `POST` | `/api/parrilla/proyectos/{cid}/temas/plan` | {analisis, cuantos} -> lo que se mandará a Claude y aviso_cupo (al 90 % avisa, no frena). |
+| `PUT` | `/api/parrilla/proyectos/{cid}/temas/{tid}` | {tema?, gancho?, tipo_video?, espacio?, problema?, estado?, incluir?} -> la propuesta. |
+| `GET` | `/api/parrilla/temas/trabajos/{tid}` | — |
 | `DELETE` | `/api/parrilla/trabajos/{tid}` | Quita de la pantalla un trabajo terminado (el aviso de listo o de error). |
 | `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
 | `GET` | `/api/portadas/catalogo` | Plantillas, paletas, fuentes, elementos y formatos de las portadas. |
@@ -472,6 +502,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/youtube/probar` | Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo) |
 | `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para el generador: {texto, nombre?, palabras?}. |
 | `GET` | `/api/reglas-estilo/afinar/{rid}` | Como va «Afinar con Claude», y la propuesta al terminar. |
+| `POST` | `/api/reglas-estilo/choques` | «Revisar si se contradicen»: Claude compara las reglas del negocio que recibe un estilo de foto con las suyas: {preset}. Solo lee; de una en una (409). -> {id} |
+| `GET` | `/api/reglas-estilo/choques/{rid}` | Cómo va la revisión, y al terminar {pares: [{tipo: contradicen\|repiten, negocio, estilo, por_que, que_cambiar}], negocio, estilo}. |
 | `GET` | `/api/sistema/estilos-perdidos` | Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira. |
 | `GET` | `/api/sistema/guias` | Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA. |
 | `POST` | `/api/sistema/guias/{gid}/revisar` | Lanza la revision de un texto contra la guia de su campo. -> {id} |
@@ -492,4 +524,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**377 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**410 endpoints.** Escrito por `generar_api.py` desde `app.py`.

@@ -852,9 +852,27 @@ def _una_pasada(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tiempo_s,
     except Exception as fallo:
         if not (avance is not None and getattr(avance, "cancelado", False)):
             _anotar_salud(cuenta, fallo, para)
+            _anotar_consumo(cuenta, None, para, fallo)
         raise
     _anotar_salud(cuenta, None, para)
+    _anotar_consumo(cuenta, resultado[1] if isinstance(resultado, tuple) and len(resultado) > 1 else None, para)
     return resultado
+
+
+def _anotar_consumo(cuenta, sobre, para, fallo=None):
+    """El medidor de Claude (pasos/consumo_claude.py, rama medidor-claude):
+    cada llamada y cada cupo agotado. Nunca lanza: es un registro."""
+    try:
+        try:
+            from . import consumo_claude                  # noqa: PLC0415
+        except ImportError:                               # pasos/ suelto en sys.path
+            import consumo_claude                         # noqa: PLC0415
+        if fallo is None:
+            consumo_claude.anotar(cuenta, sobre, para)
+        else:
+            consumo_claude.anotar_fallo(cuenta, fallo, para)
+    except Exception:                                     # noqa: BLE001
+        pass
 
 
 def _soltar_avance(avance):

@@ -10,7 +10,7 @@ herramientas del asistente. Sin red y sin CLI: dobles en los tres sitios.
   - mcp_estudio: el protocolo (initialize, tools/list, tools/call) y que cada
     herramienta hable con la API por contrato.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe pasos\\prueba_salud_cli.py
+    python pasos/prueba_salud_cli.py
 """
 import json
 import os

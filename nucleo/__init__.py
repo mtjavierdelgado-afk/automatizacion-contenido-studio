@@ -3,7 +3,7 @@ Nucleo del Estudio de Video.
 
     from nucleo import Proyecto, Estado, Bitacora, GestorTrabajos, PASOS
 
-    p = Proyecto.crear(r"C:\\IA\\estudio\\proyectos", "Caso Meridiano")
+    p = Proyecto.crear(r"proyectos", "Caso Meridiano")
     e = Estado(p)
     b = Bitacora(p)
     g = GestorTrabajos(estado=e, bitacora=b)

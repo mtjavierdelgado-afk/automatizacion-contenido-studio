@@ -21,7 +21,7 @@ Tarda unos segundos y sale a la red (a la pagina de acceso de Anthropic, sin
 autenticar nada). Lo que NO hace, y no puede hacer, es completar un acceso: eso
 pide entrar con una cuenta en un navegador.
 
-    C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_login.py
+    python pasos/prueba_login.py
 """
 import json
 import os

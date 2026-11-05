@@ -1,5 +1,5 @@
 [Unit]
-Description=Automatización Contenido Studio — el acceso
+Description=CrearIA Studio — el acceso
 After=network-online.target
 Wants=network-online.target
 

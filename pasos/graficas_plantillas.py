@@ -62,7 +62,7 @@ PLANTILLAS = {
 """,
     5: """\
 <div style="position: absolute; inset: 0; background: var(--a)">
-  <div style="position: absolute; inset: var(--pad); overflow: hidden; border-radius: 2cqmin">
+  <div style="position: absolute; inset: var(--marco); overflow: hidden; border-radius: 2cqmin">
     <img src="«img»" alt="Imagen de ejemplo" style="width: 100%; height: 100%; object-fit: cover; display: block">
   </div>
   <div style="position: absolute; inset: var(--pad); display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start">

@@ -400,6 +400,8 @@ def _variables(f, colores):
         "a": a, "b": b, "d": d, "l": l, "x": x,
         "ta": _tinta_para(a, d, l), "tb": _tinta_para(b, d, l),
         "pad": f"{p_t}cqh {p_r}cqw {p_b}cqh {p_l}cqw",
+        # el marco de color va pegado al borde: lo que evita lo que tapa la red es el TEXTO
+        "marco": f"{mg}cqmin",
         "dir": "row" if horiz else "column",
         "ladoTexto": "46%" if horiz else "100%",
         "tarjetaLado": "flex-end" if horiz else "flex-start",

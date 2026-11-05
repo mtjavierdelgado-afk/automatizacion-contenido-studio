@@ -60,8 +60,7 @@ suites=(
   pasos/prueba_publicar.py pasos/prueba_parrilla.py pasos/prueba_cuentas.py pasos/prueba_cuentas_gustan.py
   pasos/prueba_espacio_fijo.py pasos/prueba_tipo_relato.py pasos/prueba_dominios.py pasos/prueba_guion_visual.py pasos/prueba_parrilla_estados.py pasos/prueba_portada_guion.py
   pasos/prueba_diagramas.py
-
-  pasos/prueba_espacio_fijo.py pasos/prueba_tipo_relato.py pasos/prueba_dominios.py pasos/prueba_guion_visual.py pasos/prueba_parrilla_estados.py pasos/prueba_diagnostico_velocidad.py
+  pasos/prueba_diagnostico_velocidad.py
   pasos/prueba_traducciones.py
   pasos/prueba_recibidos.py
   pasos/prueba_quitar_planos.py

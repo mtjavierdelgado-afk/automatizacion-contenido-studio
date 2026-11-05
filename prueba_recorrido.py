@@ -10014,5 +10014,35 @@ def portada_del_guion(navegador, datos):
             pass
         pg.cerrar()
 
+
+@escenario
+def error_del_servidor_legible(navegador, datos):
+    """Visto por el dueño el 05-11: en Publicar → Calendario salió el HTML
+    entero de un «500 Internal Server Error» de nginx (la entrada de sesión no
+    contestaba mientras se reiniciaba). Ahora se dice en una línea qué pasa y
+    qué hacer, sin HTML; y un error del Studio (JSON) se sigue diciendo igual."""
+    pg = Pagina(navegador, datos, nombre="error_servidor")
+    html = ("<html>\r\n<head><title>500 Internal Server Error</title></head>\r\n<body>\r\n"
+            "<center><h1>500 Internal Server Error</h1></center>\r\n<hr><center>nginx</center>\r\n"
+            "</body>\r\n</html>\r\n" + "<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n" * 6)
+    pg.p.route("**/api/publicar/cola*", lambda ruta: ruta.fulfill(status=500, content_type="text/html", body=html))
+    pg.js("PUB.seccion = 'cola'; irAModulo('publicar');")
+    ok(pg.esperar(".caja-error", "El servidor no ha contestado (error 500)", 20),
+       "un 500 de nginx se dice en una línea: el servidor no ha contestado")
+    texto = pg.p.locator(".caja-error").first.inner_text()
+    ok("<html" not in texto and "padding" not in texto and "vuelve a intentarlo" in texto,
+       f"sin el HTML y con qué hacer ({texto[:90]!r})")
+    pg.captura("error_servidor_legible", entera=False)
+    pg.p.unroute("**/api/publicar/cola*")
+    pg.p.route("**/api/publicar/cola*", lambda ruta: ruta.fulfill(
+        status=500, content_type="application/json", body=json.dumps({"error": "fallo propio del Studio"})))
+    pg.js("cargarPublicar();")
+    ok(pg.esperar(".caja-error", "fallo propio del Studio", 20), "un error del Studio se sigue diciendo tal cual")
+    pg.p.unroute("**/api/publicar/cola*")
+    pg.js("cargarPublicar();")
+    pg.p.wait_for_timeout(1500)
+    ok(not pg.visible(".caja-error"), "al volver a contestar, el aviso se va solo")
+    pg.cerrar()
+
 if __name__ == "__main__":
     sys.exit(main())

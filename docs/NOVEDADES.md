@@ -10,6 +10,12 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Los errores del servidor se dicen en una línea (5 de noviembre)**
+- Si el servidor no contesta un momento (por ejemplo, mientras se actualiza),
+  el aviso rojo dice «El servidor no ha contestado… vuelve a intentarlo en un
+  momento» en vez de enseñar la página de error entera. Se va solo cuando el
+  servidor vuelve a contestar.
+
 **Títulos de YouTube y Facebook que dan ganas de abrir (4 de noviembre)**
 - **«🎯 Dame 4 títulos»**, debajo del título de YouTube y de Facebook en Publicar:
   Claude propone cuatro títulos distintos para que elijas uno con «Usar este».

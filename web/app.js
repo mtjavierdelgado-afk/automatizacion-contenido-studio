@@ -559,6 +559,24 @@ function consulta(pares) {
     .join('&');
 }
 
+/* UN ERROR QUE NO ES DEL STUDIO, DICHO EN UNA LÍNEA (rama error-servidor-legible,
+   05-11). Cuando la respuesta es una página HTML (la de nginx: «500 Internal
+   Server Error», «502 Bad Gateway»…) el Studio ni la escribió ni la entiende:
+   pasa cuando el servicio está reiniciándose (`asvs actualizar`) o la entrada
+   de sesión no contesta. Antes se pegaba el HTML entero en el aviso rojo. */
+function errorDeServidorLegible(estado, crudo) {
+  const texto = String(crudo || '').slice(0, 2000);
+  if (!/<html|<!doctype|<head|<body/i.test(texto)) return '';
+  if ([502, 503, 504].includes(estado) || estado === 500) {
+    return `El servidor no ha contestado (error ${estado}). Suele pasar unos segundos mientras se `
+      + 'reinicia o se actualiza: vuelve a intentarlo en un momento.';
+  }
+  if (estado === 413) return 'Lo que intentas subir es demasiado grande para el servidor (error 413).';
+  if (estado === 404) return 'El servidor no encuentra esa dirección (error 404).';
+  const titulo = (texto.match(/<title>([^<]{1,80})<\/title>/i) || [])[1];
+  return `El servidor ha contestado con un error ${estado}${titulo ? ` («${titulo.trim()}»)` : ''}.`;
+}
+
 async function pedir(url, opciones) {
   const cfg = Object.assign({ headers: {} }, opciones || {});
   // LOS PROYECTOS CON CLAVE ABIERTOS: sin esto el servidor no lista lo suyo
@@ -589,7 +607,8 @@ async function pedir(url, opciones) {
     try { datos = JSON.parse(crudo); } catch (e) { datos = null; }
   }
   if (!respuesta.ok) {
-    const detalle = (datos && (datos.error || datos.mensaje)) || crudo.slice(0, 400)
+    const detalle = (datos && (datos.error || datos.mensaje))
+      || errorDeServidorLegible(respuesta.status, crudo) || crudo.slice(0, 400)
       || `HTTP ${respuesta.status}`;
     // con su código: quien pregunta por un trabajo distingue «no existe» (404)
     // de «el servidor no contesta»

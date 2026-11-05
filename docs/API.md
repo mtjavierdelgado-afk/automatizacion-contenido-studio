@@ -507,6 +507,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/videos/{pid}/seo/encontraron` | «Cómo te encontraron»: las búsquedas de YouTube que trajeron vistas a |
 | `POST` | `/api/publicar/videos/{pid}/seo/investigar` | Investiga las búsquedas de verdad para la palabra clave de este vídeo. |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
+| `POST` | `/api/publicar/videos/{pid}/titulos` | «Dame 4 títulos» (titulos-gancho): gancho primero, tema corto + gancho, |
+| `POST` | `/api/publicar/videos/{pid}/titulos/usar` | Pone el título elegido: {red, indice}. |
 | `POST` | `/api/publicar/youtube/oauth/desconectar` | Olvida el permiso del canal (y lo que se trajo de él). |
 | `POST` | `/api/publicar/youtube/oauth/empezar` | {redireccion} (la dirección de vuelta de ESTE Studio) -> {url} de Google |
 | `GET` | `/api/publicar/youtube/oauth/vuelta` | Adonde vuelve Google con el permiso: cambia el código por el token. |

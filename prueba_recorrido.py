@@ -7062,6 +7062,52 @@ def publicar_emojis(navegador, datos):
 
 
 # ======================================================================
+# «🎯 DAME 4 TÍTULOS» (rama `titulos-gancho`, 04-11-2026). Tramo propio al final.
+
+@escenario
+def publicar_cuatro_titulos(navegador, datos):
+    """Debajo del título de YouTube y de Facebook, «🎯 Dame 4 títulos» trae
+    cuatro opciones (A gancho, B tema corto, C número, D mezcla) sin tocar el
+    texto; «Usar este» pone la elegida y las opciones se van. TikTok no lo
+    ofrece."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["tiktok", "youtube", "facebook"], "textos": {
+        "tiktok": {"descripcion": "Fiesta en casa con consola"},
+        "youtube": {"titulo": "Alquiler de consolas en Lima", "descripcion": "Hola"},
+        "facebook": {"titulo": "Consolas para tu fiesta", "descripcion": "Hola"}}})
+    pg = Pagina(navegador, datos, nombre="cuatro titulos")
+    pg.js(f"irAModulo('publicar'); abrirPublicarVideo('{pid}');")
+    yt = ".texto-red[data-red=youtube]"
+    ok(_red_ficha(pg, "youtube"), "la pestaña de YouTube")
+    ok(pg.visible(f"{yt} .titulos-opciones button", "Dame 4 títulos"),
+       "«🎯 Dame 4 títulos» debajo del título de YouTube")
+    pg.pulsar(f"{yt} .titulos-opciones button", "Dame 4 títulos")
+    ok(pg.esperar(f"{yt} .titulo-opcion", segundos=20), "llegan las opciones")
+    pg.p.wait_for_timeout(800)
+    tipos = [t.strip() for t in pg.p.locator(f"{yt} .titulo-opcion .tipo-titulo").all_inner_texts()]
+    ok(len(tipos) == 4 and [t[:1] for t in tipos] == ["A", "B", "C", "D"],
+       f"cuatro, en orden A, B, C y D ({tipos})")
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    ok(ficha["textos"]["youtube"]["titulo"] == "Alquiler de consolas en Lima",
+       "pedirlas no cambia el título")
+    elegido = ficha["seo"]["titulos"]["youtube"][2]["titulo"]
+    pg.captura("publicar_cuatro_titulos")
+    pg.p.locator(f"{yt} .titulo-opcion button").nth(2).click()
+    pg.p.wait_for_timeout(1500)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    ok(ficha["textos"]["youtube"]["titulo"] == elegido, f"«Usar este» pone la C ({elegido!r})")
+    ok(pg.p.locator(f"{yt} input").first.input_value() == elegido, "y se ve en el campo del título")
+    ok(not pg.visible(f"{yt} .titulo-opcion"), "y las opciones se van")
+    ok(_red_ficha(pg, "facebook") and pg.visible(".texto-red[data-red=facebook] .titulos-opciones button",
+       "Dame 4 títulos"), "Facebook también lo ofrece")
+    ok(_red_ficha(pg, "tiktok") and not pg.visible(".texto-red[data-red=tiktok] .titulos-opciones"),
+       "TikTok no (no tiene título)")
+    pg.sin_errores("los cuatro títulos de Publicar")
+
+
+# ======================================================================
 # IMÁGENES: DESCARGAR Y LEER LO QUE DICE (rama `imagenes-texto`, 20-10-2026).
 # Tramo propio y al final, como los demás.
 

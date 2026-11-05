@@ -10,6 +10,22 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Títulos de YouTube y Facebook que dan ganas de abrir (4 de noviembre)**
+- **«🎯 Dame 4 títulos»**, debajo del título de YouTube y de Facebook en Publicar:
+  Claude propone cuatro títulos distintos para que elijas uno con «Usar este».
+  **A · Gancho primero** (empieza por el problema o una pregunta), **B · Tema corto +
+  gancho**, **C · Número y beneficio** y **D · Mezcla** de las tres. No cambia nada
+  hasta que pulses «Usar este», y lo puedes retocar después a mano.
+- El SEO **ya no obliga a poner la palabra clave entera al principio del título**:
+  basta con que estén sus palabras, donde suenen natural, y manda el gancho. La
+  frase entera sigue yendo en la primera línea de la descripción y en los hashtags.
+  La nota SEO cuenta el punto si el título lleva al menos dos de cada tres palabras
+  importantes de la palabra clave.
+- Los títulos que escribe «Escribir con Claude» también llevan gancho y 1 o 2
+  emojis (con «Vistoso»; uno con «Normal»; ninguno con «Sobrio» o «Ninguno»), y
+  «Optimizar SEO» arregla un título que solo describe.
+- Los textos ya escritos no cambian solos.
+
 **Probar el Studio entero con dos comandos (22 de octubre; al servidor, 4 de noviembre)**
 - **`asvs revisar`** (gratis): todas las pruebas del Studio, incluido el recorrido
   botón por botón, con motores simulados. Corre como el usuario del Studio (como

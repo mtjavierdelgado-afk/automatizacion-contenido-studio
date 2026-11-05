@@ -1234,9 +1234,10 @@ GUIAS = {
                "pasos/seo_canal.py (tu canal y Google Trends)",
         "que_hace": [
             "Es la frase por la que quieres que te ENCUENTREN. Claude la pone en la "
-            "primera línea de cada red, al principio del título de YouTube y "
-            "Facebook y otra vez en las dos primeras líneas de la descripción de "
-            "YouTube.",
+            "primera línea de cada red y otra vez en las dos primeras líneas de la "
+            "descripción de YouTube. En el título de YouTube y Facebook van sus "
+            "PALABRAS donde suenen natural, junto al gancho (no hace falta la frase "
+            "entera ni al principio).",
             "La del proyecto vale para los vídeos que TRATAN de eso: si el guion y el "
             "material de un vídeo no la dicen, en ese vídeo no se usa (ni en la nota, "
             "ni en lo que se pide a Claude, ni en las etiquetas). La de un vídeo (en "

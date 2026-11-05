@@ -26373,6 +26373,7 @@ async function cargarPublicar(silencio) {
           else toast(t === 'optimizar' ? 'Revisión SEO lista: acepta lo que te guste'
             : t === 'investigar' ? 'Búsquedas investigadas: elige la frase con «Usar»'
             : t === 'encontraron' ? 'Listo: así te encontraron en YouTube'
+            : t.startsWith('titulos_') ? 'Cuatro títulos listos: elige uno con «Usar este»'
             : 'Tres ganchos listos: elige uno');
         });
       }
@@ -28211,6 +28212,7 @@ function bloqueTextoRed(red) {
       datos: { foco: `${red}-titulo` }, oninput: ev => editarTextoPublicar(red, 'titulo', ev.target.value) }));
     const avisoTitulo = avisoEmojisPublicar(red, 'titulo');
     if (avisoTitulo) campos.appendChild(avisoTitulo);
+    if (['youtube', 'facebook'].includes(red)) campos.appendChild(opcionesTituloPublicar(red));
   }
   campos.appendChild(h('div', { clase: 'fila fila-campo-emojis' }, h('label', { clase: 'etiqueta-campo crece' },
     formato.limite && formato.limite < 1000 ? `Texto (hasta ${formato.limite} caracteres con todo)` : 'Texto'),
@@ -30498,6 +30500,48 @@ async function abrirSeoProyectoPublicar(cid, campo) {
     } else if (Date.now() < fin && PUB.seccion === 'cuentas') setTimeout(buscar, 150);
   };
   buscar();
+}
+
+/* «DAME 4 TÍTULOS» (titulos-gancho, 04-11-2026): A gancho primero, B tema
+   corto + gancho, C número y beneficio, D mezcla. Se elige con «Usar este»;
+   pedirlas no cambia nada. */
+function opcionesTituloPublicar(red) {
+  const f = PUB.ficha || {};
+  const seo = f.seo || {};
+  const caja = h('div', { clase: 'titulos-opciones' });
+  const trabajando = !!((seo.trabajando || {})[`titulos_${red}`]);
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { type: 'button', clase: 'mini', disabled: trabajando,
+      title: 'Cuatro títulos para elegir: gancho primero, tema corto con gancho, número y beneficio, y una mezcla',
+      onclick: () => pedirTitulosPublicar(red) }, trabajando ? 'Claude está pensando…' : '🎯 Dame 4 títulos')));
+  const error = (seo.errores || {})[`titulos_${red}`];
+  if (error) caja.appendChild(cajaError(error));
+  ((seo.titulos || {})[red] || []).forEach((o, i) => caja.appendChild(h('div', { clase: 'fila titulo-opcion' },
+    h('span', { clase: 'pastilla tipo-titulo' }, o.nombre || o.tipo),
+    h('span', { clase: 'crece' }, `${o.titulo} (${o.titulo.length})`),
+    h('button', { type: 'button', clase: 'mini', onclick: () => usarTituloPublicar(red, i) }, 'Usar este'))));
+  return caja;
+}
+
+async function pedirTitulosPublicar(red) {
+  try {
+    if (!(await guardarTextosPublicar())) return;
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/titulos`), { method: 'POST', cuerpo: { red } });
+    const f = PUB.ficha;
+    f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { [`titulos_${red}`]: {} }) });
+    pintarModulo();
+    cargarPublicar(true);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function usarTituloPublicar(red, indice) {
+  try {
+    if (!(await guardarTextosPublicar())) return;
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/titulos/usar`), {
+      method: 'POST', cuerpo: { red, indice } });
+    toast('Título puesto');
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
 }
 
 async function pedirGanchosPublicar(red) {

@@ -782,15 +782,16 @@ REGLAS_RED = {
                   "DM, link en bio. Hashtags: 5 a 8, mezclando amplios, de nicho y "
                   "locales si el material nombra la zona."),
     "youtube": ("YouTube: TÍTULO de 40 a 70 caracteres (nunca más de 70: se corta en "
-                "el móvil), con la palabra clave principal al principio, claro y "
-                "buscable, sin clickbait engañoso y sin «<» ni «>». DESCRIPCIÓN pensada "
+                "el móvil), con la palabra clave principal al principio, buscable Y con "
+                "gancho (lo de «EL TÍTULO ENGANCHA», abajo) y sin «<» ni «>». DESCRIPCIÓN pensada "
                 "para el buscador: las dos primeras líneas repiten la palabra clave y "
                 "resumen la promesa del vídeo (es lo que sale en los resultados); "
                 "después 1 a 3 párrafos cortos con las palabras clave secundarias "
                 "dichas con naturalidad. CTA: suscribirse o el enlace de la "
                 "descripción. Hashtags: 3 a 5 (los tres primeros salen encima del "
                 "título)."),
-    "facebook": ("Facebook: TÍTULO corto (hasta 80 caracteres) y DESCRIPCIÓN que se "
+    "facebook": ("Facebook: TÍTULO corto (hasta 80 caracteres), con la palabra clave al "
+                 "principio y con gancho (lo de «EL TÍTULO ENGANCHA», abajo), y DESCRIPCIÓN que se "
                  "entienda SIN SONIDO (mucha gente lo ve en silencio): di en el texto "
                  "lo que pasa en el vídeo. Gancho en la primera línea, párrafos cortos "
                  "y fáciles de leer, tono cercano. CTA: enviar mensaje, llamar o "
@@ -803,10 +804,37 @@ REGLAS_RED.update(RD.REGLAS)
 REGLA_YOUTUBE_SHORT = (
     "YouTube SHORT (vertical de hasta 3 minutos): TÍTULO CORTO, de 30 a 60 "
     "caracteres, que se lea de un vistazo encima del vídeo, con la palabra clave "
-    "principal al principio, sin «<» ni «>» y sin escribir «#Shorts» (lo pone el "
+    "principal al principio y con gancho (lo de «EL TÍTULO ENGANCHA», abajo), sin «<» "
+    "ni «>» y sin escribir «#Shorts» (lo pone el "
     "Studio). DESCRIPCIÓN breve: 1 a 3 líneas, la primera con la palabra clave y "
     "la promesa del vídeo; nada de capítulos ni párrafos largos. CTA corto: "
     "suscribirse o comentar. Hashtags: 3 a 5.")
+
+
+#: Notas del dueño, 04-11-2026 (la prueba completa): los títulos de YouTube y
+#: Facebook salían descriptivos y planos, «dicen de qué va pero no dan ganas de
+#: abrirlo». La palabra clave sigue al principio (la nota SEO lo mira en los
+#: primeros caracteres); lo que cambia es lo que va DETRÁS. Va aparte de
+#: REGLAS_RED para que la lean las redes con título y no las demás.
+REDES_TITULO_GANCHO = ("youtube", "facebook")
+REGLA_TITULO_GANCHO = (
+    "EL TÍTULO ENGANCHA (YouTube y Facebook): tiene que dar ganas de abrir el vídeo, "
+    "no solo decir de qué va. Empieza con la palabra clave y sigue (con «:», «—» o una "
+    "coma) con UN gancho sacado de lo que el vídeo enseña de verdad, de uno de estos tres "
+    "tipos: CURIOSIDAD (el error que casi todos cometen, lo que nadie te dice, la que "
+    "menos esperas), BENEFICIO concreto (lo que gana quien lo ve: más luz, más espacio, "
+    "menos gasto) o el PROBLEMA que resuelve (dicho como lo diría quien lo sufre). "
+    "El gancho es una idea entera de 3 a 8 palabras que provoque el clic, no una etiqueta "
+    "suelta («más luz», «3 ideas»): piensa tres y quédate con la más fuerte. Prefiere "
+    "palabras con fuerza y concretas del guion a las genéricas. MAL, porque solo "
+    "describe: «Baño pequeño: tipos de mampara y consejos». BIEN: «Baño pequeño: el error "
+    "de mampara que te roba espacio 🚿». También mal: «Guía de…», «Todo sobre…», «X: tres "
+    "opciones», «En este vídeo…». Sin clickbait que el vídeo no cumple (si no hay «error», "
+    "no digas «error»), sin MAYÚSCULAS enteras y sin más de un signo «¿?» o «¡!». Los "
+    "emojis del título (los que pida el apartado de emojis; si pide «1 a 2», pon 2 cuando "
+    "quepan en el largo), detrás de la palabra clave: uno pegado a la palabra que ilustra "
+    "y otro cerrando el gancho, nunca delante ni en medio de la palabra clave. YouTube y Facebook llevan títulos DISTINTOS (otro gancho o el "
+    "mismo dicho de otra forma).")
 
 
 # ------------------------------------------------------------------ los emojis
@@ -845,9 +873,9 @@ _TABLA_EMOJIS = {
     "google_business": ((0, 0), (0, 1), (0, 2)),
 }
 #: Lo mismo para el TÍTULO, en las redes que lo tienen. YouTube con cuidado:
-#: uno, al final, y nunca en lugar de la palabra clave.
+#: detrás de la palabra clave, nunca delante ni en lugar de ella.
 _TABLA_EMOJIS_TITULO = {
-    "youtube": ((0, 0), (0, 1), (1, 1)),
+    "youtube": ((0, 0), (1, 1), (1, 2)),       # 04-11: «1 o 2 emojis bien puestos»
     "facebook": ((0, 0), (1, 1), (1, 2)),
     "linkedin": ((0, 0), (0, 0), (0, 1)),
     "pinterest": ((0, 0), (0, 1), (1, 1)),
@@ -856,8 +884,8 @@ _TABLA_EMOJIS_TITULO = {
 EMOJIS_RED = {
     "tiktok": "uno abriendo el gancho y otro al cerrar la línea; nunca en lugar de una palabra clave",
     "instagram": "uno abriendo el gancho, uno de viñeta en cada párrafo o beneficio y otro en el CTA",
-    "youtube": ("de viñeta en cada párrafo o punto de la descripción (el del TÍTULO, al "
-                "final: nunca delante ni en lugar de la palabra clave)"),
+    "youtube": ("de viñeta en cada párrafo o punto de la descripción (los del TÍTULO, "
+                "detrás de la palabra clave: nunca delante ni en lugar de ella)"),
     "facebook": "uno abriendo el gancho y de viñeta en los párrafos",
     "linkedin": "sobrios, de viñeta en una lista de puntos; nada de caras ni fuegos",
     "x": "pegados a la idea, sin quitar sitio a las palabras (280 caracteres)",
@@ -1275,6 +1303,7 @@ CÓMO SE ESCRIBE (todas las redes)
 
 REGLAS POR RED
 {reglas}
+{titulo_gancho}
 
 {seo}
 
@@ -1328,6 +1357,8 @@ def instruccion_textos(info, redes, ajustes, seo="", datos_video=None):
                           + (REGLA_YOUTUBE_SHORT if r == "youtube" and encajes[r].get("tipo") == "Short"
                              else REGLAS_RED[r]) for r in redes),
         capitulos=capitulos,
+        titulo_gancho=(REGLA_TITULO_GANCHO if any(r in REDES_TITULO_GANCHO for r in redes)
+                       else ""),
         claves=", ".join(f'"{r}"' for r in redes),
         seo=seo or "",
         palabra_json=(',\n  "palabra_clave": "la propuesta para este vídeo"' if seo else ""),
@@ -1677,7 +1708,8 @@ def _optimizar(raiz, info, redes, ajustes, proyecto, cwd, aplicar=False):
         aprendido="\n".join(f"- {a}" for a in ((real or {}).get("ganchos") or [])[:5]) or "—",
         textos=json.dumps(textos, ensure_ascii=False, indent=1),
         nota=SR.nota_como_texto(notas),
-        reglas="\n".join(f"- {NOMBRE_RED[r]}: {REGLAS_RED[r]}" for r in textos),
+        reglas="\n".join(f"- {NOMBRE_RED[r]}: {REGLAS_RED[r]}" for r in textos)
+        + (f"\n{REGLA_TITULO_GANCHO}" if any(r in REDES_TITULO_GANCHO for r in textos) else ""),
         claves=", ".join(f'"{r}"' for r in textos))
     respuesta, _sobre = _hablar_con_claude(
         instruccion, SEO.SISTEMA_OPTIMIZAR, proyecto, cwd, "optimizar el SEO de los textos",

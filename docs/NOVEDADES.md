@@ -10,6 +10,19 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Títulos de YouTube y Facebook que dan ganas de abrir (4 de noviembre)**
+- Claude ya no escribe títulos que solo dicen de qué va el vídeo. Empiezan con la
+  palabra clave del SEO (para que te encuentren) y siguen con un **gancho** sacado
+  del vídeo: curiosidad, un beneficio concreto o el problema que resuelve. Por
+  ejemplo, «Paletas de colores para baño sin ventana: la que lo agranda 🛁» en vez
+  de «Paletas de colores para baño sin ventana 🛁».
+- Con el nivel de emojis «Vistoso», el título lleva **1 o 2 emojis**, siempre
+  detrás de la palabra clave; con «Normal», uno; con «Sobrio» o «Ninguno», sin
+  emojis, como antes.
+- «Optimizar SEO» también arregla un título que solo describe.
+- Vale para los textos que se escriban a partir de ahora: los ya escritos no
+  cambian solos. Para rehacerlos, «Escribir con Claude» en Publicar.
+
 **Probar el Studio entero con dos comandos (22 de octubre; al servidor, 4 de noviembre)**
 - **`asvs revisar`** (gratis): todas las pruebas del Studio, incluido el recorrido
   botón por botón, con motores simulados. Corre como el usuario del Studio (como

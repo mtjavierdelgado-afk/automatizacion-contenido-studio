@@ -339,7 +339,8 @@ escribe) siempre que el vídeo trate de eso. Aprende de los ganchos que mejor
 funcionaron en la cuenta (el estilo, no las palabras).
 
 Para cada red: arregla los fallos de la nota y lo que veas (palabra clave al principio
-del título y en la primera línea, primera línea que enganche, hashtags en su rango y
+del título y en la primera línea, un título que solo describe y no da ganas de abrirlo
+(dale su gancho), primera línea que enganche, hashtags en su rango y
 con uno local, un CTA claro, primer comentario que invite a contestar). No cambies lo
 que ya está bien: deja ese campo igual. Mantén el idioma, el tono y los emojis: si
 reescribes una línea que llevaba emojis, que los siga llevando (son del proyecto).

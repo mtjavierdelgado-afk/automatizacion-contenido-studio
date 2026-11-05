@@ -1735,8 +1735,8 @@ def prueba_emojis():
     ok("🎮 🕹️" in vistoso and "firma" in vistoso, "y lleva los emojis de la marca como su firma")
     ok("TEMA" in vistoso and "comodines" in vistoso, "pide emojis del tema del vídeo, no comodines")
     ok("🎮➕🎉" in vistoso, "y combinaciones de dos para contar algo (los emojis «propios»)")
-    ok("TikTok: 3 a 6" in vistoso and "LinkedIn: 2 a 4" in vistoso and "en el título 1." in vistoso,
-       "con su número por red (LinkedIn más sobrio, YouTube uno en el título)")
+    ok("TikTok: 3 a 6" in vistoso and "LinkedIn: 2 a 4" in vistoso and "en el título 1 a 2." in vistoso,
+       "con su número por red (LinkedIn más sobrio, YouTube 1 o 2 en el título)")
     ok("que aporten, no que decoren" not in vistoso, "sin la frase que le daba permiso para no poner ninguno")
     sobrio = P.instruccion_textos(INFO, ["tiktok"], dict(P.AJUSTES_DEFECTO, emojis="sobrio"))
     ok("TikTok: 1 a 2" in sobrio and "SIEMPRE con emojis" not in sobrio, "en Sobrio, pocos")
@@ -2672,6 +2672,43 @@ def prueba_portada_mandada():
        "y la ficha del envío lo enseña")
 
 
+def prueba_titulos_gancho():
+    """titulos-gancho (04-11): los títulos de YouTube y Facebook salían
+    descriptivos y planos en la prueba completa. Ahora la instrucción pide un
+    gancho DETRÁS de la palabra clave y 1 o 2 emojis; las redes sin título no
+    reciben esa regla y el nivel «ninguno» sigue sin emojis."""
+    seccion("11b] títulos con gancho (titulos-gancho)")
+    import publicar_seo as SEO                              # noqa: PLC0415
+    con = P.instruccion_textos(dict(INFO, formato="horizontal"), ["youtube", "facebook"],
+                               P.AJUSTES_DEFECTO)
+    ok("EL TÍTULO ENGANCHA" in con and "CURIOSIDAD" in con and "BENEFICIO" in con
+       and "PROBLEMA" in con, "con YouTube o Facebook, la instrucción pide gancho de curiosidad, "
+       "beneficio o problema")
+    ok("Empieza con la palabra clave" in con, "y la palabra clave sigue yendo al principio")
+    ok("solo describe" in con and "clickbait que el vídeo no cumple" in con,
+       "con el ejemplo de lo que NO vale y sin clickbait que el vídeo no cumple")
+    ok("«EL TÍTULO ENGANCHA», abajo" in P.REGLAS_RED["youtube"]
+       and "«EL TÍTULO ENGANCHA», abajo" in P.REGLAS_RED["facebook"]
+       and "«EL TÍTULO ENGANCHA», abajo" in P.REGLA_YOUTUBE_SHORT,
+       "las reglas de YouTube (vídeo y Short) y de Facebook la nombran")
+    sin = P.instruccion_textos(INFO, ["tiktok", "instagram"], P.AJUSTES_DEFECTO)
+    ok("EL TÍTULO ENGANCHA" not in sin, "TikTok e Instagram (sin título) no la reciben")
+    igual(P.rango_emojis("youtube", "vistoso", "titulo"), (1, 2), "YouTube, Vistoso: 1 o 2 en el título")
+    igual(P.rango_emojis("youtube", "normal", "titulo"), (1, 1), "YouTube, Normal: 1")
+    igual(P.rango_emojis("facebook", "vistoso", "titulo"), (1, 2), "Facebook, Vistoso: 1 o 2")
+    igual(P.rango_emojis("youtube", "ninguno", "titulo"), (0, 0), "con «Ninguno», el título sin emoji")
+    igual(P.rango_emojis("youtube", "sobrio", "titulo"), (0, 0), "con «Sobrio», el título sin emoji")
+    ok("gancho" in SEO.INSTRUCCION_OPTIMIZAR and "solo describe" in SEO.INSTRUCCION_OPTIMIZAR,
+       "«Optimizar SEO» también arregla un título que solo describe")
+    # la nota SEO no cambia: la palabra clave al principio sigue puntuando igual
+    palabra = "paletas de colores para baño sin ventana"
+    nota = SEO.nota("youtube", {"titulo": "Paletas de colores para baño sin ventana: la que "
+                                    "lo agranda 🛁", "descripcion": palabra + "\nx", "cta": "y",
+                                    "hashtags": ["a", "b", "c"]}, None, {}, {}, {}, palabra)
+    ok(any(p["id"] == "palabra_titulo" and p["ok"] for p in nota["puntos"]),
+       "un título con gancho detrás de la palabra clave sigue teniendo «palabra clave al principio»")
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
@@ -2688,6 +2725,7 @@ def main():
     prueba_seo()
     prueba_notas_19oct()
     prueba_emojis()
+    prueba_titulos_gancho()
     prueba_20oct_idioma()
     prueba_20oct_short()
     prueba_20oct_programado()

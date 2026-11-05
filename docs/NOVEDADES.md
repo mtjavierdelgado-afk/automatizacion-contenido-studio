@@ -10,6 +10,12 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**«Hacer el vídeo completo» usa la portada del guion (5 de noviembre)**
+- Si el guion de la Parrilla trae la sección **PORTADA**, la portada con IA que
+  prepara el piloto dibuja solo el fondo con esa descripción y pone su texto
+  encima, sin faltas. Esa queda puesta; la del plano sigue como alternativa.
+- Sin portada en el guion, el piloto hace sus portadas como siempre.
+
 **Títulos de YouTube y Facebook que dan ganas de abrir (4 de noviembre)**
 - **«🎯 Dame 4 títulos»**, debajo del título de YouTube y de Facebook en Publicar:
   Claude propone cuatro títulos distintos para que elijas uno con «Usar este».

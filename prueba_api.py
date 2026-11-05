@@ -9342,6 +9342,29 @@ def probar_el_piloto():
             igual(textos_pedidos, [(("tiktok", "instagram"), False)],
                   "los textos se piden para las redes del proyecto, esperando a que acaben")
             igual(P.leer(base, fa["id"])["redes"], ["tiktok", "instagram"], "y las redes quedan en la ficha")
+            # rama piloto-portada-guion (05-11): con la PORTADA del guion, la de IA
+            # dibuja SOLO el fondo con su descripción, su texto va al título y queda puesta
+            P.cambiar(base, fa["id"], portadas=[], portada_puesta="")
+            for nombre in os.listdir(P.carpeta_portadas(base, fa["id"])):
+                os.remove(os.path.join(P.carpeta_portadas(base, fa["id"]), nombre))
+            PUB.guardar_portada_guion(servidor.raiz_proyectos(), ctx.id,
+                                      {"texto": "Tu baño en 3 días", "imagen": "un baño reformado, luz cálida"})
+            ia_pedida.clear()
+            guardado.clear()
+            prompts = []
+            servidor._correr_portada_ia = lambda avisar, c, que, prompt, refs, calidad, tamano: (
+                prompts.append(prompt), ia_pedida.append((que, calidad, tamano)),
+                {"nombre": "ia_guion.png", "coste_usd": 0.05})[-1]
+            servidor._piloto_portadas(lambda *a, **k: None, ctx, base, fa["id"], aj)
+            ficha_p = P.leer(base, fa["id"])
+            igual(ia_pedida, [("fondo", "low", "vertical")], "con portada en el guion, la IA dibuja SOLO el fondo")
+            ok(prompts and prompts[0].startswith("un baño reformado, luz cálida") and "SIN texto" in prompts[0],
+               "con la descripción del guion y sin letras")
+            ia_c = next((c for c in ficha_p["portadas"] if c["id"] == "ia"), {})
+            ok(ia_c.get("del_guion") is True and ia_c["diseno"]["textos"].get("titulo") == "Tu baño en 3 días"
+               and ia_c["diseno"]["modo"] != "ia", "su texto va al título, en capas")
+            igual(ficha_p["portada_puesta"], "ia", "y queda puesta la del guion")
+            igual(guardado["diseno"]["fondo"].get("imagen"), "ia_guion.png", "como portada del vídeo")
         finally:
             for clave, valor in cambiados.items():
                 modulo, nombre = clave.split(".")

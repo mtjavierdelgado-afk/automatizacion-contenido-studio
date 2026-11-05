@@ -46,6 +46,25 @@ vídeos, estilos, claves y contraseña no se tocan.
   siempre. El texto y la descripción se pueden corregir.
 - Los vídeos sin portada en el guion, y los ya creados, no cambian.
 
+**Diagramas por contenido: los gráficos con las cifras del guion (28 de octubre)**
+- **Un ajuste nuevo, «Diagramas»**, en el estilo (pestaña «Cómo se cuenta» →
+  📊 Diagramas) y en el Encargo de cada vídeo, que manda: Ninguno · Solo si el
+  guion lo pide · Equilibrado (como mucho 1 de cada 8 planos) · Didáctico (como
+  mucho 1 de cada 4). **Sin elegir nada, los vídeos salen exactamente como
+  antes**: no se regenera ni se paga nada.
+- Con un ajuste elegido, al deducir el reparto y los sitios se marcan los
+  tramos donde la voz **explica algo** (una medida, un proceso, una
+  comparación, un porcentaje, un paso a paso). En ilustración, el plano
+  «diagrama» sale en esos tramos y **deja de salir al azar**; los demás planos
+  salen con el mismo encuadre de siempre.
+- **Gráficos con las cifras del guion** (barras, comparación, proporción y
+  antes y después), dibujados por el Studio: exactos y **gratis**, sin pagar
+  ninguna imagen. Solo salen si **cada cifra está escrita en el guion**; si una
+  no lo está, el gráfico no sale.
+- Cambiar el ajuste no dibuja nada: en la siguiente tanda Claude lee el guion
+  (con la membresía) y marca lo que se explica, **sin volver a repartir los
+  sitios**; los planos que cambien se ofrecen para rehacer con su precio. La «foto explicada» (cotas y flechas
+  dibujadas sobre una foto) llega en una segunda vuelta.
 **La Parrilla dice el estado de cada escena, y sin cámara no hay encuadre al azar (3 de noviembre)**
 - En «Un espacio que cambia» con «Imágenes: guion», el guion de la Parrilla
   puede traer **«Estado: antes»** (o `despues`…) en cada ESCENA y una sección

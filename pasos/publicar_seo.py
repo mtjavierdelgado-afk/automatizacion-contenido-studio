@@ -134,6 +134,24 @@ def lista(texto, tope=12):
     return salida[:tope]
 
 
+#: Palabras que no cuentan al buscar la palabra clave en un título.
+_VACIAS = {"para", "como", "este", "esta", "estos", "estas", "sobre", "entre", "desde",
+           "hasta", "cuando", "donde", "porque", "pero", "sino", "todo", "toda", "todos",
+           "todas", "muy", "mas", "menos", "tu", "tus", "su", "sus", "con", "sin", "los",
+           "las", "del", "una", "uno", "unos", "unas", "que", "por"}
+
+
+def palabras_en_titulo(titulo, frase):
+    """(cuántas, de cuántas) palabras con significado de la frase dice el título.
+    Sin tildes, y aceptando singular y plural (las 5 primeras letras)."""
+    t = sin_tildes(titulo)
+    hay_t = {p[:5] for p in re.findall(r"\w+", t)}
+    palabras = [p for p in re.findall(r"\w+", sin_tildes(frase))
+                if len(p) > 3 and p not in _VACIAS] or [
+        p for p in re.findall(r"\w+", sin_tildes(frase)) if len(p) > 2]
+    return sum(1 for p in palabras if p[:5] in hay_t), len(palabras)
+
+
 def contiene(texto, frase):
     """¿Dice el texto la frase? Sin tildes ni mayúsculas, y aceptando que la
     frase salga entera o con todas sus palabras de más de 3 letras juntas en
@@ -259,14 +277,17 @@ def bloque_instruccion(ajustes, palabra, redes, recientes=None, aprendido=None, 
     if not palabra and info is not None:
         lineas.append("- Este vídeo no tiene palabra clave todavía: usa la frase más concreta "
                       "que alguien escribiría en el buscador para encontrar ESTE vídeo (de lo "
-                      "que trata de verdad) y ponla en la primera línea y al principio del título.")
+                      "que trata de verdad) y ponla en la primera línea; en el título, sus "
+                      "palabras junto al gancho.")
     if busquedas:
         lineas.append("- Lo que la gente BUSCA de verdad (autocompletado de YouTube y Google, "
                       "Perú), solo frases que el vídeo trata; usa las que encajen:\n" + busquedas)
     if palabra:
         lineas.append(f"- Palabra clave de ESTE vídeo: «{palabra}». Va en la PRIMERA LÍNEA de "
-                      "cada red; al PRINCIPIO del título de YouTube y de Facebook; y en YouTube "
-                      "otra vez en las dos primeras líneas de la descripción.")
+                      "cada red y en YouTube otra vez en las dos primeras líneas de la "
+                      "descripción. En el título de YouTube y de Facebook van sus PALABRAS, "
+                      "donde suenen natural (no hace falta la frase entera ni al principio): "
+                      "manda el gancho.")
     if secundarias:
         lineas.append("- Palabras clave secundarias, repartidas donde encajen (no todas en "
                       "todas las redes): " + "; ".join(f"«{s}»" for s in secundarias) + ".")
@@ -338,8 +359,10 @@ palabra clave de arriba no es de este vídeo, no la fuerces y propón otra en
 escribe) siempre que el vídeo trate de eso. Aprende de los ganchos que mejor
 funcionaron en la cuenta (el estilo, no las palabras).
 
-Para cada red: arregla los fallos de la nota y lo que veas (palabra clave al principio
-del título y en la primera línea, primera línea que enganche, hashtags en su rango y
+Para cada red: arregla los fallos de la nota y lo que veas (las palabras de la palabra
+clave en el título, donde suenen natural y sin obligarla al principio, y la frase en la
+primera línea; un título que solo describe y no da ganas de abrirlo
+(dale su gancho), primera línea que enganche, hashtags en su rango y
 con uno local, un CTA claro, primer comentario que invite a contestar). No cambies lo
 que ya está bien: deja ese campo igual. Mantén el idioma, el tono y los emojis: si
 reescribes una línea que llevaba emojis, que los siga llevando (son del proyecto).
@@ -611,10 +634,14 @@ def nota(red, textos_red, compuesto, ajustes, datos_video, info, palabra):
         return {"nota": 0, "puntos": [{"id": "texto", "ok": False, "texto": "todavía no hay texto"}]}
     if palabra:
         if red in ("youtube", "facebook"):
-            al_principio = contiene(titulo[:len(palabra) + 25], palabra)
-            punto("palabra_titulo", al_principio, "palabra clave al principio del título" if al_principio else (
-                "la palabra clave está en el título, pero no al principio"
-                if contiene(titulo, palabra) else f"el título no lleva «{palabra}»"), 20)
+            # titulos-gancho, 04-11-2026: ya no se exige la frase al PRINCIPIO
+            # (obligarla dejaba sin sitio al gancho); basta con la mayoría de
+            # sus palabras con significado, en cualquier sitio del título
+            hay, de = palabras_en_titulo(titulo, palabra)
+            vale = bool(de) and hay * 3 >= de * 2
+            punto("palabra_titulo", vale, (f"las palabras de la palabra clave en el título ({hay} de {de})"
+                                           if vale else f"el título no lleva las palabras de «{palabra}»"
+                                           + (f" ({hay} de {de})" if de else "")), 20)
         punto("palabra_primera", contiene(primera, palabra), "palabra clave en la primera línea"
               if contiene(primera, palabra) else f"la primera línea no dice «{palabra}»", 20)
         if red == "youtube":

@@ -5617,13 +5617,20 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   .campo-piloto { max-width: none; flex: 1 1 140px; }
   .pie-cajon .boton-piloto-guion { font-size: 13px; padding-left: 10px; padding-right: 10px; }
 }
-/* a 360 px, con «🤖 Hacer el vídeo completo» y «Pasar al Encargo con «…»», los
-   dos botones se iban a tres renglones y la barra tapaba la ficha */
-@media (max-width: 380px) {
+/* en móvil, con «🤖 Hacer el vídeo completo» y «Pasar al Encargo con «…»», los
+   dos botones se iban a tres renglones y la barra tapaba la ficha (visto a 360 px
+   aquí y a 390 px en el servidor, con otras fuentes): se reparten el ancho en una
+   fila, y cada uno cabe en dos renglones */
+@media (max-width: 480px) {
   .cajon-guion .barra-accion.pie-cajon { padding-left: 8px; padding-right: 8px; }
-  .pie-cajon .boton-piloto-guion { font-size: 12px; padding-left: 7px; padding-right: 7px; }
-  .cajon-guion .pie-cajon .principal { font-size: 13px; padding-left: 10px; padding-right: 10px; }
+  .cajon-guion .pie-cajon .derecha { flex-wrap: nowrap; gap: 6px; }
+  .pie-cajon .boton-piloto-guion, .cajon-guion .pie-cajon .principal {
+    font-size: 12.5px; line-height: 1.2; padding: 6px 8px; min-height: 40px; min-width: 0; white-space: normal;
+  }
+  .pie-cajon .boton-piloto-guion { flex: 1 1 0; }
+  .cajon-guion .pie-cajon .principal { flex: 1.5 1 0; }
 }
+
 /* con los dos botones («🤖 Hacer el vídeo completo» y «Pasar al Encargo») el
    estado de la ficha se quedaba en una columna de una palabra: en pantalla
    ancha va en su renglón y los botones debajo, a la derecha */
@@ -5741,6 +5748,13 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .cuentas-propias .pastilla { text-transform: none; letter-spacing: 0; white-space: normal; overflow-wrap: anywhere;
   display: inline-flex; gap: 4px; align-items: center; }
 .cuentas-propias select { max-width: 100%; min-width: 0; }
+
+/* ---------------- PUBLICAR · «Dame 4 títulos» (titulos-gancho, 04-11) */
+.titulos-opciones { margin: 6px 0 10px; display: grid; gap: 4px; }
+.titulo-opcion { gap: 8px; align-items: center; padding: 4px 0; border-top: 1px solid var(--linea-suave); min-width: 0; }
+.titulo-opcion .crece { min-width: 0; overflow-wrap: anywhere; }
+.titulo-opcion .tipo-titulo { white-space: nowrap; text-transform: none; letter-spacing: 0; }
+@media (max-width: 600px) { .titulo-opcion { flex-wrap: wrap; } }
 
 /* ======================================================= PORTADA DEL GUION
    rama portada-en-guion (04-11-2026): la caja «Portada propuesta en el guion»

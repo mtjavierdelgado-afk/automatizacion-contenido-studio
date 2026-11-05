@@ -1735,8 +1735,8 @@ def prueba_emojis():
     ok("🎮 🕹️" in vistoso and "firma" in vistoso, "y lleva los emojis de la marca como su firma")
     ok("TEMA" in vistoso and "comodines" in vistoso, "pide emojis del tema del vídeo, no comodines")
     ok("🎮➕🎉" in vistoso, "y combinaciones de dos para contar algo (los emojis «propios»)")
-    ok("TikTok: 3 a 6" in vistoso and "LinkedIn: 2 a 4" in vistoso and "en el título 1." in vistoso,
-       "con su número por red (LinkedIn más sobrio, YouTube uno en el título)")
+    ok("TikTok: 3 a 6" in vistoso and "LinkedIn: 2 a 4" in vistoso and "en el título 1 a 2." in vistoso,
+       "con su número por red (LinkedIn más sobrio, YouTube 1 o 2 en el título)")
     ok("que aporten, no que decoren" not in vistoso, "sin la frase que le daba permiso para no poner ninguno")
     sobrio = P.instruccion_textos(INFO, ["tiktok"], dict(P.AJUSTES_DEFECTO, emojis="sobrio"))
     ok("TikTok: 1 a 2" in sobrio and "SIEMPRE con emojis" not in sobrio, "en Sobrio, pocos")
@@ -2160,7 +2160,8 @@ def prueba_seo():
     comp = P.componer("youtube", textos, ajustes, INFO, None, {})
     n = S.nota("youtube", textos, comp, ajustes, {}, INFO, "alquiler de consolas en Lima")
     puntos = {x["texto"]: x["ok"] for x in n["puntos"]}
-    ok(puntos.get("palabra clave al principio del título") and puntos.get("palabra clave en la primera línea"),
+    ok(any(v for k, v in puntos.items() if k.startswith("las palabras de la palabra clave en el título"))
+       and puntos.get("palabra clave en la primera línea"),
        f"la nota ve la palabra clave en el título y en la primera línea ({n['nota']}/100)")
     ok(any(not v and "portada" in k for k, v in puntos.items()), "y que falta la portada")
     n7 = S.nota("tiktok", dict(textos, hashtags=["a", "b", "c", "d", "e", "f", "g"]), {}, ajustes, {}, INFO, "")
@@ -2672,6 +2673,102 @@ def prueba_portada_mandada():
        "y la ficha del envío lo enseña")
 
 
+def prueba_titulos_gancho():
+    """titulos-gancho (04-11): los títulos de YouTube y Facebook salían
+    descriptivos y planos en la prueba completa. Ahora la instrucción pide un
+    gancho DETRÁS de la palabra clave y 1 o 2 emojis; las redes sin título no
+    reciben esa regla y el nivel «ninguno» sigue sin emojis."""
+    seccion("11b] títulos con gancho (titulos-gancho)")
+    import publicar_seo as SEO                              # noqa: PLC0415
+    con = P.instruccion_textos(dict(INFO, formato="horizontal"), ["youtube", "facebook"],
+                               P.AJUSTES_DEFECTO)
+    ok("EL TÍTULO ENGANCHA" in con and "CURIOSIDAD" in con and "BENEFICIO" in con
+       and "PROBLEMA" in con, "con YouTube o Facebook, la instrucción pide gancho de curiosidad, "
+       "beneficio o problema")
+    ok("no hace falta la frase entera ni al principio" in con and "Empieza con la palabra clave" not in con,
+       "la palabra clave ya NO se obliga al principio (segunda vuelta del 04-11: dejaba sin sitio al gancho)")
+    ok("al principio del título" not in P.REGLAS_RED["youtube"] + P.REGLAS_RED["facebook"]
+       + P.REGLA_YOUTUBE_SHORT and "palabra clave principal al principio" not in con,
+       "ni en las reglas de YouTube (vídeo y Short) ni en las de Facebook")
+    ok("solo describe" in con and "clickbait que el vídeo no cumple" in con,
+       "con el ejemplo de lo que NO vale y sin clickbait que el vídeo no cumple")
+    ok("«EL TÍTULO ENGANCHA», abajo" in P.REGLAS_RED["youtube"]
+       and "«EL TÍTULO ENGANCHA», abajo" in P.REGLAS_RED["facebook"]
+       and "«EL TÍTULO ENGANCHA», abajo" in P.REGLA_YOUTUBE_SHORT,
+       "las reglas de YouTube (vídeo y Short) y de Facebook la nombran")
+    sin = P.instruccion_textos(INFO, ["tiktok", "instagram"], P.AJUSTES_DEFECTO)
+    ok("EL TÍTULO ENGANCHA" not in sin, "TikTok e Instagram (sin título) no la reciben")
+    igual(P.rango_emojis("youtube", "vistoso", "titulo"), (1, 2), "YouTube, Vistoso: 1 o 2 en el título")
+    igual(P.rango_emojis("youtube", "normal", "titulo"), (1, 1), "YouTube, Normal: 1")
+    igual(P.rango_emojis("facebook", "vistoso", "titulo"), (1, 2), "Facebook, Vistoso: 1 o 2")
+    igual(P.rango_emojis("youtube", "ninguno", "titulo"), (0, 0), "con «Ninguno», el título sin emoji")
+    igual(P.rango_emojis("youtube", "sobrio", "titulo"), (0, 0), "con «Sobrio», el título sin emoji")
+    ok("gancho" in SEO.INSTRUCCION_OPTIMIZAR and "solo describe" in SEO.INSTRUCCION_OPTIMIZAR,
+       "«Optimizar SEO» también arregla un título que solo describe")
+    palabra = "paletas de colores para baño sin ventana"
+    seo = SEO.bloque_instruccion(P.AJUSTES_DEFECTO, palabra, ["youtube"])
+    ok("al PRINCIPIO del título" not in seo and "manda el gancho" in seo,
+       "el apartado SEO tampoco obliga la frase al principio del título")
+
+    def punto_titulo(titulo):
+        nota = SEO.nota("youtube", {"titulo": titulo, "descripcion": palabra + "\nx", "cta": "y",
+                                    "hashtags": ["a", "b", "c"]}, None, {}, {}, {}, palabra)
+        return next(p for p in nota["puntos"] if p["id"] == "palabra_titulo")
+    ok(punto_titulo("¿Baño sin ventana y oscuro? 💡 3 paletas de colores que lo cambian")["ok"],
+       "la nota da por buena la palabra clave con el gancho DELANTE (antes restaba 20)")
+    ok(punto_titulo("Baño sin ventana: el color que lo hace ver más grande 🤍")["ok"],
+       "y con el tema dicho corto (3 de sus 4 palabras)")
+    ok(punto_titulo("Paletas de colores para baño sin ventana: la que lo agranda 🛁")["ok"],
+       "y la de antes, con la frase entera, sigue valiendo")
+    ok(not punto_titulo("Consolas para tu fiesta 🎮")["ok"], "sin sus palabras, resta")
+    igual(SEO.palabras_en_titulo("Baño sin ventana", palabra), (2, 4),
+          "cuenta las palabras con significado («para» y «sin» no cuentan; plural y tildes da igual)")
+
+
+def prueba_cuatro_titulos():
+    """«Dame 4 títulos» (04-11, el dueño: «dame las 3 opciones y una 4.ª de
+    mezcla para escoger»). Pedirlos no cambia nada; «Usar este» solo el título."""
+    seccion("11c] «Dame 4 títulos»")
+    raiz = os.path.join(CARPETA, "cuatro_titulos")
+    os.makedirs(raiz)
+    os.environ["ESTUDIO_SIMULAR"] = "1"
+    try:
+        info = dict(INFO, pid="tit4", formato="horizontal")
+        P.guardar_ficha(raiz, "tit4", {"textos": {"youtube": {"titulo": "Plano", "descripcion": "Texto"}}})
+        antes = json.dumps(P._leer_video(raiz, "tit4")["textos"], sort_keys=True)
+        P.lanzar_titulos(raiz, info, "youtube", P.AJUSTES_DEFECTO, en_hilo=False)
+        datos = P._leer_video(raiz, "tit4")
+        ops = datos["titulos_opciones"]["youtube"]
+        igual([o["tipo"] for o in ops], ["gancho", "tema", "numero", "mezcla"],
+              "cuatro títulos: gancho primero, tema corto, número y la mezcla, en ese orden")
+        ok(all(o["nombre"].startswith(l) for o, l in zip(ops, "ABCD")), "con su letra A, B, C y D")
+        igual(json.dumps(datos["textos"], sort_keys=True), antes, "pedirlos no cambia ningún texto")
+        f = P.usar_titulo(raiz, "tit4", "youtube", 3)
+        igual(f["textos"]["youtube"]["titulo"], ops[3]["titulo"], "«Usar este» pone el título elegido")
+        igual(f["textos"]["youtube"]["descripcion"], "Texto", "y no toca el texto")
+        ok("youtube" not in (f.get("titulos_opciones") or {}), "y las opciones se recogen")
+        for malo in (("tiktok", "TikTok no tiene título"),):
+            try:
+                P.lanzar_titulos(raiz, info, malo[0], P.AJUSTES_DEFECTO, en_hilo=False)
+                ok(False, malo[1])
+            except P.ErrorPublicar:
+                ok(True, f"{malo[1]}: no se piden")
+        try:
+            P.usar_titulo(raiz, "tit4", "youtube", 0)
+            ok(False, "un título que ya no está: error claro")
+        except P.ErrorPublicar:
+            ok(True, "un título que ya no está: error claro")
+        largo = P.normalizar_titulos({"titulos": {"gancho": "x" * 200, "tema": "<b>Hola</b>",
+                                                  "numero": "", "mezcla": "<b>Hola</b>"}}, 70)
+        igual([o["titulo"] for o in largo][1:], ["bHola/b"], "sin «<>», sin vacíos ni repetidos")
+        igual(len(largo[0]["titulo"]), 70, "y cortados al largo")
+        ok("solo describe" in P.INSTRUCCION_TITULOS.format(
+            red="YouTube", formas="-", largo=70, palabra="p", emojis="-", texto="-", guion="-",
+            claves="-"), "la instrucción dice qué NO vale")
+    finally:
+        os.environ.pop("ESTUDIO_SIMULAR", None)
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
@@ -2688,6 +2785,8 @@ def main():
     prueba_seo()
     prueba_notas_19oct()
     prueba_emojis()
+    prueba_titulos_gancho()
+    prueba_cuatro_titulos()
     prueba_20oct_idioma()
     prueba_20oct_short()
     prueba_20oct_programado()

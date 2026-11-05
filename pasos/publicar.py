@@ -2186,6 +2186,37 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
 
 # ----------------------------------------------------------- textos a mano
 
+MAX_TEXTO_PORTADA_GUION = 80
+MAX_IMAGEN_PORTADA_GUION = 600
+
+
+def limpiar_portada_guion(valor):
+    """La portada propuesta en el guion de la Parrilla (rama portada-en-guion,
+    04-11): {texto, imagen} limpios, o {} si no dice qué imagen dibujar.
+
+    Vive en la ficha de Publicar del vídeo, fuera de params y firmas (regla 1):
+    la escribe la creación del vídeo y la corrige la caja de Publicar."""
+    valor = valor if isinstance(valor, dict) else {}
+    imagen = " ".join(str(valor.get("imagen") or "").split())[:MAX_IMAGEN_PORTADA_GUION]
+    if not imagen:
+        return {}
+    texto = " ".join(str(valor.get("texto") or "").split())[:MAX_TEXTO_PORTADA_GUION]
+    return {"texto": texto, "imagen": imagen}
+
+
+def guardar_portada_guion(raiz, pid, valor):
+    """La portada del guion, al crear el vídeo. Solo si el guion la trae: un
+    vídeo sin ella no gana ningún campo. -> lo guardado o {}"""
+    limpia = limpiar_portada_guion(valor)
+    if not limpia:
+        return {}
+    with _lock(pid):
+        ficha = _leer_video(raiz, pid)
+        ficha["portada_guion"] = dict(limpia, origen="parrilla")
+        _escribir(_ruta_video(raiz, pid), ficha)
+    return ficha["portada_guion"]
+
+
 def guardar_ficha(raiz, pid, cambios):
     cambios = cambios if isinstance(cambios, dict) else {}
     with _lock(pid):
@@ -2260,6 +2291,18 @@ def guardar_ficha(raiz, pid, cambios):
                 ficha.pop("youtube_formato", None)
             else:
                 ficha["youtube_formato"] = cambios["youtube_formato"]
+        if "portada_guion" in cambios:
+            # la portada propuesta en el guion (rama portada-en-guion): se
+            # corrige, no se borra; sin descripción no hay nada que dibujar
+            if not isinstance(cambios["portada_guion"], dict):
+                raise ErrorPublicar("«portada_guion» es {texto, imagen}")
+            for campo in ("texto", "imagen"):
+                if not isinstance(cambios["portada_guion"].get(campo, ""), str):
+                    raise ErrorPublicar(f"«{campo}» de la portada es un texto")
+            nueva = limpiar_portada_guion(cambios["portada_guion"])
+            if not nueva.get("imagen"):
+                raise ErrorPublicar("la portada del guion necesita la descripción de su imagen")
+            ficha["portada_guion"] = dict(ficha.get("portada_guion") or {}, **nueva)
         if "portada" in cambios:
             ficha["portada"] = _validar_portada(cambios["portada"], ficha.get("portada"))
             if cambios["portada"].get("quitar_imagen"):
@@ -2629,6 +2672,8 @@ def ficha(raiz, info, ajustes):
         "desactualizada": desactualizada, "escritos": datos.get("escritos") or "",
         "editado": bool(datos.get("editado")),
         "portada": portada_de(datos),
+        # la portada propuesta en el guion de la Parrilla ({} si no la trae)
+        "portada_guion": dict(datos.get("portada_guion") or {}),
         # ¿la cuenta de TikTok tiene «cover_image»? (portadas-2: entonces lleva tu imagen sola)
         "tiktok_portada_propia": tiktok_puede_portada(ajustes),
         # cuántos emojis lleva cada texto y si se queda corto (aviso aparte: la

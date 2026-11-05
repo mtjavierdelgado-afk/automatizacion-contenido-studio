@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Enviar al Studio</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="iconos/icono32.png" alt="" width="20" height="20">
+    <h1>Enviar al Studio</h1>
+    <button type="button" id="ajustes" class="fantasma" title="Dirección del Studio y código de envío">⚙</button>
+  </header>
+
+  <section id="config" hidden>
+    <p class="pista">Pégalo tal cual lo da el Studio en <b>Configuración → Enviar al Studio</b>.</p>
+    <label>Dirección de tu Studio
+      <input id="studio" type="url" placeholder="https://tu-studio.com/" autocomplete="off">
+    </label>
+    <label>Código de envío
+      <input id="codigo" type="password" placeholder="env_…" autocomplete="off">
+    </label>
+    <div class="fila">
+      <button type="button" id="guardar" class="primario">Guardar</button>
+      <button type="button" id="probar">Probar</button>
+    </div>
+    <p id="estadoConfig" class="estado" role="status"></p>
+  </section>
+
+  <section id="envio" hidden>
+    <div class="ficha">
+      <span id="red" class="pastilla"></span>
+      <b id="autor"></b>
+      <p id="titulo"></p>
+      <p id="cifras" class="pista"></p>
+      <p id="texto" class="texto"></p>
+    </div>
+    <label class="casilla"><input id="conCaptura" type="checkbox" checked> Incluir una captura de lo que se ve</label>
+    <label>Tu nota (opcional)
+      <textarea id="nota" rows="2" placeholder="Qué te gusta de esto o qué quieres hacer con ello"></textarea>
+    </label>
+    <button type="button" id="enviar" class="primario ancho">Enviar al Studio</button>
+    <p id="estado" class="estado" role="status"></p>
+  </section>
+  <script src="popup.js"></script>
+</body>
+</html>

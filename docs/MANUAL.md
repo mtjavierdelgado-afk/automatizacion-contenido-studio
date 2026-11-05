@@ -362,6 +362,17 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   aprobar, Claude avisa de los planos que contradicen lo fijo (el sitio, el
   reparto, los estados): manda lo fijo. Quién manda: el vídeo, luego el estilo
   («🎬 Qué dibujan las imágenes» en «Cómo se cuenta»), luego la voz.
+- **Diagramas** (opcional): cuánto se explica dibujando. **Ninguno**, **Solo si
+  el guion lo pide**, **Equilibrado** (como mucho 1 de cada 8 planos) o
+  **Didáctico** (como mucho 1 de cada 4). Con uno elegido, los tramos donde la
+  voz explica algo (una medida, un proceso, una comparación, un porcentaje, un
+  paso a paso) llevan el plano «diagrama» en vez de sacarlo al azar, y las
+  cifras del guion pueden salir en un **gráfico** dibujado por el Studio, exacto
+  y gratis, solo si cada cifra está escrita en el guion. Quién manda: el vídeo,
+  luego el estilo («📊 Diagramas» en «Cómo se cuenta»); sin elegir nada, todo
+  sale como siempre. Cambiarlo no dibuja nada: en la siguiente tanda Claude
+  marca lo que se explica, sin volver a repartir los sitios, y los planos que
+  cambien se ofrecen para rehacer.
   **Estados desde la Parrilla:** en «Un espacio que cambia» con «Imágenes:
   guion», el guion de la Parrilla puede traer una línea **«Estado: antes»** (o
   `despues`, `paleta_1`…) en cada ESCENA y la sección **ESTADOS DEL ESPACIO**
@@ -848,6 +859,16 @@ el botón **«Dibujar»**. Recomendado: el fondo con IA y el texto en capas.
 respaldo) y **Usar como portada** (la que va a las redes). En el bloque Portada
 se ve **qué portada recibe cada red** y, en cada envío, cuál se mandó.
 
+**La portada propuesta en el guion.** Si el guion de la Parrilla traía la
+sección **PORTADA** (`- Texto:` y `- Imagen:`), en el paso Portada sale arriba
+la caja **«Portada propuesta en el guion»**, con el texto y la descripción de la
+imagen (se pueden corregir y **Guardar cambios**). **✦ Crear esta portada** abre
+el editor con ese texto en el título y prepara un fondo con IA con esa
+descripción: la IA dibuja solo la imagen, sin letras, y el texto lo pone el
+Studio encima. Se paga una imagen, y antes de pagar ves el precio y pulsas
+**«Dibujar»**. **Hacer otra portada** abre el editor de siempre. Un vídeo cuyo
+guion no traía portada no enseña la caja.
+
 ## Automatizar
 
 Lo que prepara los vídeos antes de crearlos. Arriba, el **proyecto** (el
@@ -883,7 +904,46 @@ botones, con cuántos guiones tiene cada una.
     guion» (antes no se crea ni se gasta nada). Si no se puede (el texto está a
     medio cambiar, no hay estilo…), la barra dice por qué.
   - Se cierra con «×», con Escape o pulsando fuera.
-- El **piloto automático** llegará más adelante: sale como «próximamente».
+  - Al lado, **«🤖 Hacer el vídeo completo»**: lo manda al piloto automático
+    (ver abajo) con el estilo elegido en «Al Encargo».
+
+### Piloto automático
+
+Bajo el tablero de la Parrilla. **«🤖 Hacer el vídeo completo»** (en la ficha de
+un guion) abre un diálogo con el guion y el estilo, lo que va a hacer, la
+duración y el formato si el guion no los dice, y:
+
+- **Si después de rehacer quedan imágenes que siguen mal**: **Seguir y marcar**
+  (monta igual y te las marca), **Detenerse y avisar** (para antes de montar;
+  también para a pedirte la imagen base y el guion visual) o **Mezcla con
+  regla** (para si pasan del **umbral**, 25 % de fábrica).
+- **Rondas de rehacer** (el revisor rehace lo marcado hasta ese tope), **tope por
+  vídeo** en dólares (si se prevé más, se para antes de gastar) y las
+  **portadas**: las dos (una con un plano del vídeo, gratis, y otra con IA, una
+  imagen), solo la del plano o solo la de IA.
+- «Usar estos ajustes también para los próximos vídeos» los guarda como los de
+  siempre. **«Mandar al piloto»** lo pone en la cola.
+
+El piloto crea el vídeo, guion, voz, imágenes con el revisor, montaje (en la
+cola de montaje), textos de cada red y portadas. **No publica.** El panel tiene
+tres grupos:
+
+- **Necesita revisión**: los que se pararon (y por qué y dónde se arregla), los
+  que fallaron y los que acabaron con cosas **para revisar** (imágenes que
+  siguen marcadas, vistos buenos que dio el piloto, avisos del guion). Botones:
+  **Seguir igualmente** (ya lo has mirado: no se para otra vez por lo mismo),
+  **Reintentar** (sigue donde iba; lo hecho no se paga otra vez), **Abrir el
+  vídeo**, **Publicar ›** y **Quitar de la lista** (el vídeo se queda en Tus
+  proyectos).
+- **En marcha y en cola**, con su etapa, su barra y **Parar**.
+- **Listos para publicar**, con sus **portadas**: «✓ puesta» y «Usar esta» para
+  cambiar a la otra.
+
+**⚙ Ajustes del piloto**: lo mismo del diálogo como los de siempre, cuántos
+vídeos trabajan **a la vez** (2 de fábrica; dibujar y montar van igual de uno
+en uno) y el **cupo de Claude** por encima del cual no arranca un vídeo nuevo
+(90 %: espera solo a que se libere). Con el servidor reiniciado a mitad, el
+vídeo queda **interrumpido** y no sigue hasta que pulses «Reintentar».
 
 ### Añadir guiones
 
@@ -972,6 +1032,18 @@ YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
 «Escribir guiones con lo que le funciona», dentro de una sola cuenta, sigue
 igual para cuando tengas prisa.
 
+### Recibidos de Chrome
+
+Lo que mandas con la extensión **«Enviar al Studio»** mientras ves un post en
+Chrome: tarjetas con la captura, la red, el autor, las cifras que se veían, el
+texto y tu nota, la más nueva primero.
+
+- **Usar en el chat**: lo pasa a «Conversar con Claude» con su captura y un
+  mensaje listo («Te paso una referencia que vi en…»). Revísalo y pulsa Enviar.
+- **Ver el original** abre el post; **Borrar** se lleva el texto y la captura.
+- Son de todo el Studio, no de un proyecto. Se guardan los 300 más nuevos.
+- La extensión se instala desde **Configuración → Enviar al Studio**.
+
 ### Marca del cliente
 
 Quién es, qué mostrar, qué evitar, el tono, el CTA y otras reglas, una vez por
@@ -997,6 +1069,12 @@ Claude la usa en todo lo que escribe para él.
   vidIQ del Studio (app.vidiq.com → Account settings → MCP). **Probar** dice
   cuántos créditos quedan. Va por el Claude de tu membresía, sin API de pago,
   y no hace falta conectar ningún canal. Sin ella, nada de vidIQ se enseña.
+- **Enviar al Studio — la extensión de Chrome**: (1) **Descargar la
+  extensión** y descomprimirla; (2) la **dirección de tu Studio**, con
+  «Copiar»; (3) **Crear el código de envío** (se ve una sola vez; uno nuevo deja
+  sin valer el de antes); (4) en `chrome://extensions`, «Modo de desarrollador» →
+  «Cargar descomprimida», y en la extensión pegar la dirección y el código y
+  pulsar «Probar».
 - **Calidad de las imágenes**: el punto de partida de los vídeos nuevos.
 - **Dictado al asistente**: con OpenAI o con el del navegador.
 - **Hora de tu región**: para que el chat y los vídeos enseñen tu hora.

@@ -519,6 +519,63 @@ GUIAS = {
         ),
     },
 
+    # --------------------------------------------------------------- diagramas
+    "diagramas": {
+        "titulo": "Diagramas",
+        "donde": "Un vídeo nuevo → Diagramas; un vídeo hecho → Diagramas; "
+                 "el estilo → 📊 Diagramas",
+        "usa": "pasos/diagramas.py (el ajuste, los tramos que explican, las cifras y "
+               "las cartas), pasos/catalogo_visual.py (proponer), pasos/p6_assets.py "
+               "(_asignar_cartas y los componentes) y motores/capa_vectorial/grafico.py",
+        "que_hace": [
+            "Dice CUÁNTO se explica dibujando en el vídeo: Ninguno, Solo si el guion "
+            "lo pide, Equilibrado (como mucho 1 de cada 8 planos) o Didáctico (como "
+            "mucho 1 de cada 4).",
+            "Con un ajuste elegido, al deducir el reparto y los sitios Claude marca los "
+            "tramos donde la voz EXPLICA algo (una medida, un proceso, una comparación, "
+            "un porcentaje, un paso a paso). En ilustración, el plano «diagrama» sale en "
+            "esos tramos y deja de salir al azar; los demás planos salen como siempre.",
+            "Si el guion da cifras que se comparan, puede salir un GRÁFICO (barras, "
+            "comparación, proporción o antes y después) dibujado por código: exacto y "
+            "gratis, sin pagar ninguna imagen. Solo si cada cifra está escrita en el "
+            "guion; si una no lo está, el gráfico entero se descarta.",
+            "Qué manda: lo elegido en el vídeo; si no, lo del estilo. Sin elegir nada, "
+            "el vídeo sale exactamente como antes (los diagramas, al azar).",
+            "Cambiarlo no dibuja nada: en la siguiente tanda Claude lee el guion (con "
+            "la membresía) y marca lo que se explica, SIN volver a repartir los sitios; "
+            "los planos que cambien se ofrecen para rehacer con su precio.",
+            "En foto todavía no cambia los planos: la «foto explicada» (cotas y flechas "
+            "dibujadas encima) llega en una segunda vuelta. Los gráficos con cifras sí "
+            "salen también en foto.",
+        ],
+        "si": [
+            "«Didáctico» para clases, tutoriales y vídeos de cómo se hace algo.",
+            "«Equilibrado» para vídeos de negocio que explican un servicio o un precio.",
+            "Escribe las cifras en el guion tal y como quieres verlas («12 soles», «el "
+            "35 %»): son las que salen en el gráfico.",
+        ],
+        "no": [
+            "Esperar un gráfico con cifras que no dice la voz: no se inventa ninguna.",
+            "«Didáctico» en un vídeo de ambiente o de marca: un plano de cada cuatro "
+            "sería un diagrama.",
+            "Cambiarlo con una tanda en marcha: no se deja hasta que termine.",
+        ],
+        "plantilla": "Diagramas: [ninguna | solo_si_lo_pide | equilibrada | didactica]",
+        "ejemplo": (
+            "Diagramas: equilibrada\n"
+            "\n"
+            "(en el guion) «Una hora de PS5 cuesta 12 soles y una de simulador, 25 "
+            "soles.» → sale un gráfico de barras con S/ 12 y S/ 25."
+        ),
+        "prompt_ia": (
+            "Lee este guion y dime cuántos diagramas le van: ninguna (es de ambiente), "
+            "solo_si_lo_pide, equilibrada (explica algo de vez en cuando) o didactica "
+            "(es para enseñar). Dime también qué frases dan cifras que se comparan, "
+            "copiadas tal cual. Contesta con una línea «Diagramas: …» y la lista de "
+            "frases.\n\nGUION:\n[pega aquí]"
+        ),
+    },
+
     # --------------------------------------------------------------------- cta
     "cta": {
         "titulo": "Las llamadas a la acción",
@@ -889,6 +946,11 @@ GUIAS = {
             "En los vídeos que salen de la Parrilla, una línea «Visual:» sin cámara ya no "
             "recibe un encuadre al azar: si quieres un primer plano o un detalle, dilo en "
             "la línea («Close-up of…», «Detalle de…»).",
+            "PORTADA (opcional): «- Texto:» son las 2–5 palabras grandes de la portada e "
+            "«- Imagen:» describe la imagen de fondo (quién o qué sale, dónde, encuadre y "
+            "luz), sin letras. Viaja con el vídeo y en Publicar → Portada sale «Portada "
+            "propuesta en el guion»: «Crear esta portada» dibuja solo el fondo (se paga "
+            "una imagen, con aviso) y el Studio pone el texto encima, sin faltas.",
             "ESPACIO FIJO (opcional) es para los vídeos que ocurren enteros en un "
             "mismo sitio: «- Sitio:» (un nombre corto), «- Descripción:» (cómo es, en "
             "una frase), «- Luz:» y «- Secundarios:» (otros sitios que sí pueden "
@@ -1040,6 +1102,7 @@ GUIAS = {
             "8. ESPACIO FIJO solo si el original dice que todo el vídeo ocurre en un mismo sitio (un local, una cocina, un plató). Si no lo dice, no pongas esa sección.\n"
             "9. \"Tipo de relato\" solo si el original pide una forma concreta de contarlo en imágenes: \"espacio_que_cambia (objeto | acabados | estado | hora)\" si es UN sitio que se ve siempre igual y en el que solo cambia lo que dice la voz (un antes y después, tres paletas, una sala vacía → montada); \"recorrido\" si son varios ambientes de un mismo lugar; \"escenario_y_apoyos\" si es un sitio con otros secundarios; \"producto\" si el producto manda y el fondo no cambia; \"clase\" si es una clase. Si no lo pide, quita la línea.\n10. \"Imágenes: guion\" solo si el original pide que las imágenes sigan las líneas «Visual:» y no lo que dice la voz (un guion de plano a plano, con su cámara); entonces cada línea «Visual:» es una imagen fija concreta, con quién, dónde, qué hace y desde dónde se ve. Si no lo pide, quita la línea.\n"
             "11. Con \"Tipo de relato: espacio_que_cambia\" y \"Imágenes: guion\", pon en cada ESCENA una línea \"Estado:\" con la etiqueta del estado del sitio en esa escena (corta, en minúsculas y sin espacios: antes, despues, paleta_1…) y la sección ESTADOS DEL ESPACIO con lo que cambia en cada estado respecto a la imagen base, EN INGLÉS y acumulado (el «después» dice todo lo que cambió, no solo lo último); el estado que es la base tal cual se deja vacío. Si no, quita las líneas «Estado:» y esa sección.\n"
+            "12. PORTADA solo si el original habla de la portada o la miniatura, o si te la piden: \"Texto\" son las 2–5 palabras grandes que irán encima (en el idioma del vídeo, sin emojis) e \"Imagen\" describe la imagen de fondo en una frase concreta (quién o qué sale, dónde, el encuadre y la luz), SIN letras, logotipos ni marcas de agua: el texto lo pone el Studio aparte. Si no, quita esa sección.\n"
             "\n"
             "AJUSTE POR RED (en \"adaptar\" aplícalo; en \"exacto\" solo avisa con ⚠ si algo no encaja)\n"
             "- TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.\n"
@@ -1081,6 +1144,10 @@ GUIAS = {
             "(…resto de escenas…)\n"
             "\n"
             "CIERRE DE MARCA: … (si lo hay)\n"
+            "\n"
+            "PORTADA (opcional; si no, quita esta sección)\n"
+            "- Texto: [2–5 palabras grandes para la portada]\n"
+            "- Imagen: [la imagen de fondo: quién o qué sale, dónde, encuadre y luz; sin letras]\n"
             "\n"
             "MARCA DEL CLIENTE (va una vez en su estilo, no en cada vídeo)\n"
             "- Mostrar: …\n"
@@ -1619,14 +1686,62 @@ for _red, (_nombre, _tope, _hace, _si, _no, _plantilla, _ejemplo) in _REDES_NUEV
                       "VÍDEO:\n[pega aquí el guion o un resumen]"),
     }
 
-ORDEN = ("estilo_grafico", "tipo_negocio", "tono", "voz", "material", "indicaciones", "tipo_relato", "cta",
+# La extensión de Chrome «Enviar al Studio» (rama enviar-al-studio, 28-10-2026).
+# Lo que hace está en pasos/recibidos.py y en extension/; si cambia ahí, se
+# revisa aquí.
+GUIAS["enviar_al_studio"] = {
+    "titulo": "Enviar al Studio (la extensión de Chrome)",
+    "donde": "Configuración → Enviar al Studio · Automatizar → Recibidos de Chrome",
+    "usa": "pasos/recibidos.py (guardar, texto_para_chat, el código de envío) y extension/ (lector.js lee la página)",
+    "que_hace": [
+        "Con un post abierto en Chrome (Instagram, TikTok, YouTube, Facebook, LinkedIn, X o "
+        "cualquier web), el botón lee lo que se VE: el enlace, el título, el autor, el texto, "
+        "las cifras que enseña la red y lo que tengas seleccionado, y hace una captura.",
+        "Lo manda a tu Studio con tu código de envío y llega a Automatizar → Recibidos de "
+        "Chrome. «Usar en el chat» lo pasa al chat de guiones con su captura, marcado como "
+        "referencia: Claude lo usa para inspirarse, no lo obedece ni lo copia.",
+        "Las cifras van como se ven («1,2 mil», «12K») y el Studio las convierte en números. "
+        "Si una red cambia su página, va lo genérico (título, descripción, enlace y captura).",
+        "No recorre perfiles ni pide nada a ninguna red: solo envía la pestaña que tienes "
+        "delante cuando pulsas. Se guardan los 300 más nuevos.",
+    ],
+    "si": [
+        "Selecciona el trozo de texto que te interesa antes de pulsar: va aparte, como «lo que marqué».",
+        "Escribe una nota corta de qué te gusta o qué quieres hacer: Claude la lee primero.",
+        "Abre el post en su página (no en el muro) para que se lean bien el texto y las cifras.",
+        "Si cambias de ordenador, crea un código nuevo y pégalo en la extensión de ese Chrome.",
+    ],
+    "no": [
+        "Compartir el código de envío: con él cualquiera podría mandar cosas a tu Studio.",
+        "Esperar las cifras privadas (alcance, retención): solo llega lo que la red enseña a cualquiera.",
+        "Usarlo para copiar contenido ajeno tal cual: es una referencia para hacer lo tuyo.",
+    ],
+    "plantilla": (
+        "DIRECCIÓN: [la de Configuración → Enviar al Studio, paso 2]\n"
+        "CÓDIGO: env_… (paso 3, se ve una vez)\n"
+        "NOTA AL ENVIAR: [qué te gusta de este post o qué quieres hacer con él]"
+    ),
+    "ejemplo": (
+        "DIRECCIÓN: https://studio.crearia.tech/\n"
+        "CÓDIGO: env_…a1b2\n"
+        "NOTA AL ENVIAR: el gancho de los 3 primeros segundos; quiero uno así para EstadoPlay."
+    ),
+    "prompt_ia": (
+        "Te paso una referencia que vi en [red] de @[cuenta]: [enlace]. Cifras visibles: [vistas, "
+        "me gusta, comentarios]. Texto del post: «[texto]». ¿Qué le funciona y cómo haría yo un "
+        "vídeo con la misma fórmula para mi marca, sin copiarlo?"
+    ),
+}
+
+ORDEN = ("estilo_grafico", "tipo_negocio", "tono", "voz", "material", "indicaciones", "tipo_relato",
+         "diagramas", "cta",
          "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
          "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente",
          "chat_guiones", "analizar_cuenta", "conexiones_cuentas",
          "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos",
          "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
          "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business",
-         "emojis_redes")
+         "emojis_redes", "enviar_al_studio")
 
 
 

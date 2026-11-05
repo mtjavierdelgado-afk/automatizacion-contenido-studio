@@ -124,6 +124,33 @@ que acordarse de los tres sitios del punto 4.
 | `asvs` | el mando: estado, registro, actualizar, https |
 | `login/` | la aplicación del acceso (Node) |
 
+## Un repositorio privado: el token de solo lectura (`asvs token`)
+
+Con el repositorio público, el servidor baja el código de `codeload.github.com`
+sin credenciales. Con uno **privado** eso deja de funcionar y hace falta un
+token de GitHub:
+
+- **Qué token:** *fine-grained*, con acceso SOLO a ese repositorio y SOLO
+  «Contents: Read-only». Con él no se puede escribir nada en GitHub.
+- **Dónde vive:** `/root/estudio/github_token` (carpeta 700, fichero 600, de
+  root). Fuera de `datos/secretos` a propósito: el instalador hace `chown -R`
+  de `/opt/as-video-studio` al usuario del servicio, y así ni el Studio ni su
+  asistente pueden leerlo.
+- **Cómo se pone:** `asvs token poner` y se pega (no se ve al pegar). Se prueba
+  contra GitHub ANTES de guardarlo; uno que no puede leer el repo no se guarda
+  ni pisa el que había. `asvs token` dice si sigue valiendo; `asvs token
+  quitar` lo borra.
+- **Cómo se usa:** con token, `asvs actualizar`, `asvs repositorio` e
+  `instalar.sh` bajan por `api.github.com/repos/<repo>/tarball/<rama>`. El
+  token va a curl por la entrada (`-K -`), nunca en la línea de mandatos, donde
+  lo vería `ps`. Sin fichero, todo es como antes.
+- **Cuando caduca** (GitHub obliga a ponerle fecha): `asvs actualizar` falla
+  sin tocar nada y avisa; se crea uno nuevo y `asvs token poner`.
+
+El orden para pasar a privado sin quedarse sin actualizar: poner el token
+(con el repo aún público ya se puede: `asvs token` comprueba que lee) →
+`asvs actualizar` → pasar el repositorio a privado → `asvs actualizar` otra vez.
+
 ## Probar un cambio antes de publicarlo
 
 `instalar.sh` mira si está dentro del árbol (junto a `app.py`). Si lo está,

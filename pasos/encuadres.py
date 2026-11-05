@@ -422,3 +422,49 @@ def repartir(escenas, semilla=0, forzadas=None, modo="ilustracion",
         cartas[sid] = carta
         previas.append(carta["id"])
     return cartas
+
+
+def sin_arrastrar(escenas, cartas, semilla=0, quitar=(), poner=None, fijas=()):
+    """Retoca un reparto YA HECHO sin mover los demas planos (rama
+    diagramas-por-contenido). -> cartas nuevas
+
+    `repartir` decide cada plano mirando a los de delante, asi que quitar una
+    carta del sorteo y volver a repartir arrastra el cambio en cadena: en un
+    video de 86 planos, quitar cinco diagramas movia quince cartas, y con
+    cuatro puestos por contenido, treinta y cuatro. Aqui el reparto es el de
+    siempre y solo cambian:
+
+      - los planos de `poner` ({sid: id de carta}), que llevan esa carta;
+      - los que sacaron una carta de `quitar`, que llevan la siguiente de SU
+        propio orden de sorteo cuya familia no sea la de ningun vecino (dos
+        delante y dos detras) y, si se puede, que no este entre las cercanas.
+
+    `fijas` son los planos con carta forzada a mano: no se tocan nunca. Solo
+    ilustracion: la escalera de foto no tiene cartas que quitar todavia.
+    """
+    poner = poner or {}
+    salida = dict(cartas or {})
+    ids = [e.get("id") for e in escenas or [] if e.get("id") in salida]
+    for sid, carta in poner.items():
+        if sid in salida and sid not in fijas and carta in POR_ID:
+            salida[sid] = POR_ID[carta]
+    if not quitar:
+        return salida
+    fondo = _repartidas(ESCALERA)
+    for i, sid in enumerate(ids):
+        if sid in fijas or sid in poner or salida[sid]["id"] not in quitar:
+            continue
+        cerca = [salida[ids[j]] for j in range(max(0, i - VENTANA_FAMILIA),
+                                                 min(len(ids), i + VENTANA_FAMILIA + 1))
+                 if j != i]
+        vetadas = {c["familia"] for c in cerca}
+        recientes = {salida[ids[j]]["id"] for j in range(max(0, i - VENTANA_CARTA),
+                                                          min(len(ids), i + VENTANA_CARTA + 1))
+                     if j != i}
+        arranque = medios.desempatar(semilla, sid, "carta") % len(fondo)
+        orden = [fondo[(arranque + k) % len(fondo)] for k in range(len(fondo))]
+        orden = [c for c in orden if c["id"] not in quitar] or orden
+        libres = [c for c in orden if c["familia"] not in vetadas] or orden
+        frescas = [c for c in libres if c["id"] not in recientes]
+        salida[sid] = (frescas or libres)[0]
+    return salida

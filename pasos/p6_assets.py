@@ -3377,6 +3377,10 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
         # sobre la composicion» y el plano rehecho se alejaba de su estado
         if feedback:
             lineas.append(tipo_relato.nota_edicion(indice, feedback))
+            # la nota ya no es lo ULTIMO: las frases que la sitúan «al final» se corrigen
+            lineas = [x.replace("at the end of this prompt", "near the end of this prompt")
+                      .replace("reviewer's note at the end asks", "reviewer's note near the end asks")
+                      for x in lineas]
         lineas.append(tipo_relato.cierre_edicion(indice, base))
     elif feedback:
         lineas.append(_bloque_feedback(feedback, foto=True) if foto
@@ -4262,7 +4266,8 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                     # elige cuales y anade el detalle
                     motor_imagen = medios.motor("imagen_openai/imagen.py")
                     crudas = corregido["referencias"]
-                    if escena_final.get("editar_base"):
+                    base = _referencia_base(escena_final, p, dirs, dirs["cache"])
+                    if base:
                         # un plano que EDITA su estado: el sitio sale solo de la
                         # imagen 1 (rama retoque-acotado)
                         crudas = _elegidas_en_edicion(crudas, escena, dirs, p,
@@ -4284,12 +4289,6 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                     # la base que se edita, si el plano la lleva, delante de
                     # todo y en lugar de la imagen del espacio (rama
                     # tipo-de-relato); sin ella, lo de siempre
-                    base = _referencia_base(escena_final, p, dirs, dirs["cache"])
-                    if not base:
-                        # sin la base aprobada no hay imagen 1 que editar: la
-                        # rechazada vuelve a ser la de siempre
-                        elegidas = [{k: v for k, v in r.items() if k != "de_edicion"}
-                                    for r in elegidas]
                     referencias = (
                         list(base)
                         + list(_referencias_estilo(p, dirs["cache"], escena_final))

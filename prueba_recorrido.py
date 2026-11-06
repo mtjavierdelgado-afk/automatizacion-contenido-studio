@@ -4871,6 +4871,17 @@ def publicar_textos_con_el_cursor_en_un_campo(navegador, datos):
 # de Publicar. El servidor corre con ESTUDIO_SIMULAR=1: los guiones los
 # convierte y los escribe el doble de Claude (`parrilla._claude_simulado`).
 
+def _ver_matrices(pg):
+    """Las matrices de la Parrilla van en un desplegable (rama relato-sin-cortes):
+    se abre si está cerrado, para ver o pulsar una."""
+    # la Parrilla puede tardar en salir (después de «Escribir guiones», p. ej.)
+    pg.esperar(".boton-matrices", segundos=25)
+    if pg.p.locator(".desplegable-matrices.abierto").count() == 0 and \
+            pg.p.locator(".boton-matrices").count():
+        pg.pulsar(".boton-matrices")
+        pg.p.wait_for_timeout(300)
+
+
 def _docx_de_prueba(ruta, parrafos):
     import zipfile                                           # noqa: PLC0415
     w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -4922,6 +4933,7 @@ def parrilla_de_guiones(navegador, datos):
     pg.pulsar(".anadir-parrilla button.primario", "Guardar en la Parrilla")
     ok(pg.esperar(".tarjeta-guion .titulo-guion", "EP01 — Fregadero simple o doble", 10),
        "guardado en la Parrilla, en su matriz")
+    _ver_matrices(pg)
     ok(pg.visible(".chip-matriz", "Octubre"), "con el nombre de la matriz")
     ok(pg.visible(".columna-tablero[data-columna=pendiente] .tarjeta-guion", "EP01"), "pendiente")
 
@@ -4943,6 +4955,7 @@ def parrilla_de_guiones(navegador, datos):
     pg.p.wait_for_timeout(400)
     ok(pg.visible(".anadir-parrilla .meta", "matriz_parrilla.docx"), "el Word elegido se ve")
     pg.pulsar(".anadir-parrilla button.primario", "Subir y convertir")
+    _ver_matrices(pg)
     ok(pg.esperar(".chip-matriz", "matriz_parrilla", 25), "convertido, en una matriz con el nombre del fichero")
     pg.captura("parrilla_lista")
 
@@ -5432,6 +5445,7 @@ def parrilla_marca_chat_y_resultados(navegador, datos):
     ok(pg.esperar(".anadir-parrilla .caja-aviso", "Actualizar", 10) or pg.esperar(".post-parrilla", segundos=5),
        "«Desde mis resultados» enseña los vídeos o dice cómo tenerlos")
     pg.pulsar(".pestanas-automatizar button", "Parrilla")
+    _ver_matrices(pg)
     ok(pg.esperar(".chip-matriz", "Conversación", 10), "el guion del chat está en la Parrilla")
     pg.sin_errores("la marca, el chat y los resultados")
     pg.cerrar()
@@ -5489,6 +5503,7 @@ def parrilla_analizar_una_cuenta(navegador, datos):
     ok(pg.esperar(".texto-analisis", "QUÉ LE FUNCIONA", 20), "el análisis")
     pg.captura("cuenta_analizada")
     pg.pulsar(".guiones-cuenta button.primario", "Escribir guiones")
+    _ver_matrices(pg)
     ok(pg.esperar('.chip-matriz[title*="con lo que le funciona a @personal_lucia"]', segundos=25),
        "los guiones van a la Parrilla, diciendo de qué cuenta salen")
     pg.pulsar(".pestanas-automatizar button", "Cuentas que te gustan")
@@ -5568,13 +5583,14 @@ def automatizar_tablero_y_panel(navegador, datos):
     ok(pg.p.locator(".tarjeta-guion").count() == 1 and pg.visible(".columna-tablero .vacia-columna", "Ninguno con este filtro"),
        "el buscador filtra el tablero")
     pg.p.locator("[data-foco=parrilla-buscar]").fill("")
+    _ver_matrices(pg)
     pg.pulsar(".chip-matriz", "Tablero (4)")
     ok(pg.esperar(".cab-matriz h3", "Tablero", 5), "una matriz elegida enseña sus datos")
     pg.pulsar(".cab-matriz button", "Renombrar")
     ok(pg.esperar(".capa-dialogo input", segundos=5), "«Renombrar» pregunta en un panel de la casa (sin prompt)")
     pg.p.locator(".capa-dialogo input").first.fill("Tablero renombrado")
     pg.p.locator(".capa-dialogo button[type=submit]").click()
-    ok(pg.esperar(".chip-matriz", "Tablero renombrado", 10), "y la renombra")
+    ok(pg.esperar(".boton-matrices", "Tablero renombrado", 10), "y la renombra")
     pg.pulsar(".cab-matriz button", "Borrar")
     ok(pg.esperar(".capa-dialogo", "No se puede deshacer", 5), "«Borrar» la matriz pregunta antes, con su aviso")
     pg.pulsar(".capa-dialogo button", "Cancelar")
@@ -10230,6 +10246,84 @@ def error_del_servidor_legible(navegador, datos):
     pg.js("cargarPublicar();")
     pg.p.wait_for_timeout(1500)
     ok(not pg.visible(".caja-error"), "al volver a contestar, el aviso se va solo")
+    pg.cerrar()
+
+
+
+@escenario
+def relato_sin_cortes(navegador, datos):
+    """Visto por el dueño el 06-11 (rama relato-sin-cortes): la imagen base solo
+    se podía repetir con la misma descripción. Ahora la caja de la base lleva
+    «Cambiar el espacio fijo ›» (y te lleva a su bloque), una nota para la
+    próxima «Otra imagen base» que llega a la generación y se vacía al usarla,
+    y «✎ Cambiar» en lo que la base trae ya puesto. Y en la Parrilla, las
+    matrices en un desplegable."""
+    api = datos["api"]
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="relato_sin_cortes")
+    pg.sin_trabajo(300)
+    _r, ef = api.get(f"/api/proyectos/{pid}/espacio_fijo")
+    if not ((ef or {}).get("espacio_fijo") or {}).get("descripcion"):
+        api.post(f"/api/proyectos/{pid}/espacio_fijo/aplicar", {"espacio_fijo": {
+            "sitio": "Baño", "descripcion": "a narrow bathroom, toilet on the left",
+            "luz": "day", "secundarios": []}})
+    api.post(f"/api/proyectos/{pid}/tipo_relato/aplicar",
+             {"tipo_relato": {"modo": "espacio_que_cambia", "cambia": "objeto"}})
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    if not ((ficha.get("bases") or {}).get(ficha.get("sitio"))):
+        r, lanz = api.post(f"/api/proyectos/{pid}/tipo_relato/base/generar",
+                           {"usd": ficha.get("usd_base") or 0, "otra": False})
+        if r.status_code == 202:
+            api.esperar(lanz["trabajo_id"], 120)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; pintarLight();")
+    ok(pg.esperar(".imagen-base-relato", segundos=20), "la caja de la imagen base")
+    ok(pg.visible(".imagen-base-relato button", "Cambiar el espacio fijo"), "con «Cambiar el espacio fijo ›»")
+    pg.pulsar(".imagen-base-relato button", "Cambiar el espacio fijo")
+    ok(pg.esperar(".bloque-light.resaltado-espacio-fijo h3", "El espacio fijo", 5),
+       "que lleva al bloque «El espacio fijo» y lo resalta")
+    ok(pg.visible(".nota-base-relato input"), "y la nota para la próxima «Otra imagen base»")
+    pg.p.locator(".nota-base-relato input").fill("el inodoro a la derecha")
+    pg.dialogos.clear()
+    pg.pulsar(".imagen-base-relato button", "Otra imagen base")
+    ok(any("el inodoro a la derecha" in d for d in pg.dialogos), "el aviso de pago dice la nota")
+    pg.sin_trabajo(120)
+    pg.js("APP.light.video.relato = null; pintarLight();")
+    ok(pg.esperar(".nota-base-relato input", segundos=20), "la caja vuelve")
+    ok(pg.p.locator(".nota-base-relato input").input_value() == "", "y la nota se vacía: valía solo esa vez")
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    if ficha.get("inicial"):
+        ok(pg.visible(".inicial-base-relato button", "✎ Cambiar"), "«✎ Cambiar» en lo que la base trae ya puesto")
+        pg.pulsar(".inicial-base-relato button", "✎ Cambiar")
+        ok(pg.esperar(".inicial-base-relato textarea", segundos=5), "se escribe en español")
+        pg.pulsar(".inicial-base-relato button", "Cancelar")
+    pg.captura("relato_sin_cortes", entera=False)
+    pg.sin_errores("la imagen base que se corrige")
+    # ✗ Y ✓ A MANO en «Elementos de esta imagen» (06-11: el dueño no los veía
+    # en un vídeo hecho antes de «Marca:»)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+    if pg.esperar(".elementos-plano", "Elementos de esta imagen", 20):
+        opciones = pg.p.locator(".elementos-plano select").first.locator("option").all_inner_texts()
+        ok("✗ Cruz (lo que no se hace)" in opciones and "✓ Check (lo que sí)" in opciones,
+           "la lista trae «✗ Cruz» y «✓ Check»")
+        antes_n = pg.p.locator(".elemento-plano").count()
+        pg.p.locator(".elementos-plano select").first.select_option("marca_si")
+        pg.pulsar(".elementos-plano button", "Añadir")
+        ok(pg.esperar(".elemento-plano", segundos=10) and pg.p.locator(".elemento-plano").count() == antes_n + 1,
+           "«Añadir» pone el check, sin guardar todavía")
+        icono = pg.p.evaluate("() => { const s = Object.values(ELEMENTOS_PLANOS.borrador || {}); "
+                              "const l = s[s.length - 1] || []; return l[l.length - 1] || null; }")
+        ok(icono and icono.get("icono") == "check" and icono.get("color") == "bien" and icono.get("entrada") == "pop",
+           f"un icono check verde que salta ({icono})")
+    # LA PARRILLA: el desplegable de las matrices
+    pg.js("irAModulo('automatizar');")
+    if pg.esperar(".boton-matrices", segundos=15):
+        ok(pg.p.locator(".chips-matrices").count() == 0, "las matrices empiezan plegadas en su desplegable")
+        pg.pulsar(".boton-matrices")
+        ok(pg.esperar(".desplegable-matrices.abierto .chip-matriz", "Todas las matrices", 5),
+           "al pulsarlo salen todas para elegir")
+        pg.pulsar(".chip-matriz", "Todas las matrices")
+        ok(pg.p.locator(".chips-matrices").count() == 0, "y al elegir se vuelve a plegar")
+    pg.sin_errores("las matrices en un desplegable")
     pg.cerrar()
 
 if __name__ == "__main__":

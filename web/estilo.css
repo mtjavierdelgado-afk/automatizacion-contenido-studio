@@ -5823,3 +5823,15 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   .centro-grafica { order: -1; }
   .vista-graf { flex: none; height: 56vh; }
 }
+
+/* ---------------------------------------------- RELATO SIN CORTES (06-11) */
+.nota-base-relato { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.nota-base-relato input { width: 100%; }
+.inicial-base-relato { display: flex; flex-direction: column; gap: 6px; }
+.bloque-light.resaltado-espacio-fijo { outline: 2px solid var(--acento); outline-offset: 4px; border-radius: 10px; }
+.desplegable-matrices { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.boton-matrices { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desplegable-matrices .chips-matrices { display: flex; flex-wrap: wrap; gap: 6px; max-height: 40vh; overflow-y: auto; padding: 8px; background: var(--hueco); border: 1px solid var(--linea); border-radius: 10px; }
+.grupo-matriz-parrilla { display: flex; flex-direction: column; gap: 8px; }
+.grupo-matriz-parrilla > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 8px; border-radius: 8px; background: var(--hueco); font-weight: 600; font-size: 13px; }
+.grupo-matriz-parrilla[open] > summary { margin-bottom: 6px; }

@@ -9458,14 +9458,20 @@ function imagenBaseDelRelato(est, corriendo) {
       onclick: () => usarSubidaComoBase() }, 'Usar la imagen subida del espacio · gratis'));
   }
   fila.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
-    onclick: () => generarBaseDelRelato(!!base, usd) },
+    onclick: () => generarBaseDelRelato(!!base, usd, base ? est.notaBase : '') },
   `${base ? 'Otra imagen base' : 'Generar la imagen base'} · ≈ ${usdCorto(usd)}`));
+  /* CORREGIR LA BASE (rama relato-sin-cortes, 06-11): «Otra imagen base» pedía
+     la misma descripción y salía parecida. Ahora: dónde cambiar el sitio, una
+     nota solo para la próxima, y «✎ Cambiar» en lo que la base trae ya puesto. */
+  fila.appendChild(h('button', { clase: 'mini fantasma', onclick: () => irAlEspacioFijo() },
+    'Cambiar el espacio fijo ›'));
   caja.appendChild(fila);
+  if (base) caja.appendChild(notaDeLaBase(est));
   if (f.base_aprobada && (f.estados || []).length) caja.appendChild(estadosDelRelato(est, corriendo, usd));
   if (f.inicial) {
     caja.appendChild(h('div', { clase: 'meta' }, 'Lo que luego cambia sale ya en la base, así. '
       + 'Comprueba que está donde va antes de aprobarla:'));
-    caja.appendChild(textoRelatoEnEspanol(est, f.inicial_es, f.inicial, ''));
+    caja.appendChild(inicialDeLaBase(est, f, corriendo, usd));
   }
   caja.appendChild(h('div', { clase: 'pista' }, 'Qué hay en el sitio y dónde lo dice «El espacio '
     + 'fijo»; aquí se dibuja y se aprueba. La imagen base es el sitio vacío y entero, en su '
@@ -9682,8 +9688,13 @@ async function guardarEstadoRelato(est, e, usd) {
   if (!texto) { toast('escribe el cambio en español antes de guardarlo', true); return; }
   if (texto === (e.cambio_es || '').trim()) { est.editandoEstado = null; pintarLight(); return; }
   const planos = ((e.donde || {}).planos || []).length;
-  const lineas = [`Guardar el cambio del estado «${e.estado.replace(/_/g, ' ')}»`, '',
-    'Claude lo pasa al inglés (gratis, con tu membresía). Después:'];
+  const esInicial = e.estado === ESTADO_INICIAL_RELATO;
+  const lineas = [esInicial ? 'Guardar lo que trae la imagen base'
+    : `Guardar el cambio del estado «${e.estado.replace(/_/g, ' ')}»`, '',
+  'Claude lo pasa al inglés (gratis, con tu membresía). Después:'];
+  if (esInicial) {
+    lineas.push(`· la imagen base de ahora se queda; para verlo dibujado pide «Otra imagen base» (≈ ${usdCorto(usd)})`);
+  }
   if (e.imagen_url) {
     lineas.push(`· este estado pierde su aprobación y hará falta otra imagen (≈ ${usdCorto(usd)}, `
       + 'solo cuando la pidas)');
@@ -9701,7 +9712,7 @@ async function guardarEstadoRelato(est, e, usd) {
   pintarLight();
   try {
     const d = await pedir(`${API.proyecto(pid)}/tipo_relato/estado/editar`,
-      { method: 'POST', cuerpo: { estado: e.estado, es: texto } });
+      { method: 'POST', cuerpo: esInicial ? { inicial: true, es: texto } : { estado: e.estado, es: texto } });
     if (APP.light.video.relato === est) {
       est.ficha = d;
       est.pendienteEstado = { estado: e.estado, texto };
@@ -9784,7 +9795,9 @@ function terminarTraduccionRelato(est, d) {
       toast(`No se ha guardado: ${partirError(t.error).titular}`, true);
     } else if (t.tipo === 'editar') {
       est.editandoEstado = null;
-      toast('cambio guardado: falta su imagen nueva');
+      toast(t.estado_relato === ESTADO_INICIAL_RELATO
+        ? 'guardado: pide «Otra imagen base» para verlo dibujado'
+        : 'cambio guardado: falta su imagen nueva');
     }
   } else {
     est.ficha = d;
@@ -9838,10 +9851,54 @@ async function trabajoDelRelato(ruta, cuerpo) {
   }
 }
 
-function generarBaseDelRelato(otra, usd) {
+function generarBaseDelRelato(otra, usd, nota) {
+  const corrige = String(nota || '').trim();
   if (!confirm(`${otra ? 'Otra imagen base' : 'Generar la imagen base'} del sitio: ≈ ${usdCorto(usd)}.`
+    + (corrige ? `\n\nCon tu nota, solo para esta vez: «${corrige}».` : '')
     + '\n\nSe paga una imagen. Después la miras y la apruebas.')) return;
-  trabajoDelRelato('/base/generar', { otra: !!otra, usd });
+  const cuerpo = { otra: !!otra, usd };
+  if (corrige) cuerpo.nota = corrige;
+  const est = relatoDelVideoLight();
+  if (corrige) est.notaBase = '';
+  trabajoDelRelato('/base/generar', cuerpo);
+}
+
+/* La nota de la próxima «Otra imagen base»: no se guarda en ningún sitio. */
+function notaDeLaBase(est) {
+  return h('label', { clase: 'nota-base-relato' },
+    h('span', { clase: 'meta' }, 'Nota para la próxima «Otra imagen base» (opcional, solo esa vez):'),
+    h('input', { type: 'text', maxlength: 400, value: est.notaBase || '',
+      placeholder: 'p. ej.: el lavabo a la izquierda, más luz, azulejos más pequeños',
+      oninput: ev => { est.notaBase = ev.target.value; } }));
+}
+
+/* Lo que la base trae ya puesto, en español, con su «✎ Cambiar» (como un estado). */
+function inicialDeLaBase(est, f, corriendo, usd) {
+  const e = { estado: ESTADO_INICIAL_RELATO, cambio: f.inicial, cambio_es: f.inicial_es || '',
+    imagen_url: null, donde: {} };
+  const editando = est.editandoEstado && est.editandoEstado.estado === ESTADO_INICIAL_RELATO;
+  const caja = h('div', { clase: 'inicial-base-relato' },
+    editando ? editorEstadoRelato(est, e, usd) : textoRelatoEnEspanol(est, f.inicial_es, f.inicial, ESTADO_INICIAL_RELATO));
+  if (!editando) {
+    caja.appendChild(h('div', { clase: 'fila' }, h('button', { clase: 'mini fantasma',
+      disabled: est.ocupado || corriendo || traduciendoRelato(est),
+      onclick: () => { est.editandoEstado = { estado: ESTADO_INICIAL_RELATO, texto: f.inicial_es || '' }; pintarLight(); } },
+    '✎ Cambiar'), h('span', { clase: 'meta' }, 'gratis: la base no se vuelve a dibujar hasta que pidas otra')));
+  }
+  return caja;
+}
+
+const ESTADO_INICIAL_RELATO = '_inicial';
+
+/* Lleva al bloque «El espacio fijo» del Encargo: es donde se describe el sitio. */
+function irAlEspacioFijo() {
+  const titulo = Array.from(document.querySelectorAll('.bloque-light h3'))
+    .find(x => x.textContent.trim() === 'El espacio fijo');
+  if (!titulo) { toast('«El espacio fijo» está en el Encargo de este vídeo', true); return; }
+  const bloque = titulo.closest('.bloque-light');
+  bloque.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  bloque.classList.add('resaltado-espacio-fijo');
+  setTimeout(() => bloque.classList.remove('resaltado-espacio-fijo'), 2500);
 }
 
 function escribirCambiosDelRelato() {
@@ -22443,10 +22500,22 @@ function elementosDelPlano(e) {
     caja.appendChild(fila);
   });
 
+  /* ✗ Y ✓ A MANO (06-11, pedido del dueño): la cruz roja y el check verde que
+     pone «Marca:» de la Parrilla, también en un vídeo hecho: el icono, arriba
+     a la derecha, en la primera palabra, con «pop» y todo el plano. */
   const tipo = h('select', { 'aria-label': 'Elemento que se añade' },
-    ...(d.tipos || []).map(t => h('option', { value: t }, NOMBRES_ELEMENTO[t] || t)));
+    ...(d.tipos || []).map(t => h('option', { value: t }, NOMBRES_ELEMENTO[t] || t)),
+    ...((d.tipos || []).includes('icono') ? [h('option', { value: 'marca_no' }, '✗ Cruz (lo que no se hace)'),
+      h('option', { value: 'marca_si' }, '✓ Check (lo que sí)')] : []));
   caja.appendChild(h('div', { clase: 'herramientas' }, tipo,
     h('button', { clase: 'mini', disabled: ocupado || lista.length >= 6, onclick: () => {
+      if (tipo.value === 'marca_no' || tipo.value === 'marca_si') {
+        const si = tipo.value === 'marca_si';
+        const marca = { tipo: 'icono', icono: si ? 'check' : 'cruz', color: si ? 'bien' : 'alerta',
+          palabra: 0, entrada: 'pop', dura: 30, tam: 0.07 };
+        tocarElementos(sid, elementosEnEdicion(sid).concat([colocarElemento(marca, 'arriba_derecha')]), true);
+        return;
+      }
       const t = tipo.value;
       const base = { tipo: t, palabra: 0, entrada: t === 'flecha' || t === 'circulo' ? 'dibuja' : 'pop',
         color: ['texto', 'insignia', 'etiqueta', 'subrayado'].includes(t) ? 'acento' : 'alerta',
@@ -31047,12 +31116,20 @@ function seccionListaParrilla() {
   const chip = (id, texto, ayuda) => h('button', {
     type: 'button', clase: `chip-matriz${PAR.matrizFiltro === id ? ' activa' : ''}`,
     'aria-pressed': PAR.matrizFiltro === id ? 'true' : 'false', title: ayuda || null,
-    onclick: () => { PAR.matrizFiltro = id; pintarModulo(); },
+    onclick: () => { PAR.matrizFiltro = id; PAR.verMatrices = false; pintarModulo(); },
   }, texto);
+  /* LAS MATRICES, EN UN DESPLEGABLE (rama relato-sin-cortes, 06-11): con una
+     fila de botones por matriz la pantalla crecía con cada lote. El botón dice
+     cuál se ve; al pulsarlo salen todas para elegir. */
+  const etiqueta = elegida ? `${elegida.nombre} (${(elegida.guiones || []).length})` : `Todas las matrices (${total})`;
   caja.appendChild(h('div', { clase: 'fila filtros-parrilla' }, buscar,
-    h('div', { clase: 'chips-matrices', role: 'group', 'aria-label': 'Matrices' },
-      chip('todas', `Todas las matrices (${total})`),
-      matrices.map(m => chip(m.id, `${m.nombre} (${(m.guiones || []).length})`, datosMatrizParrilla(m))))));
+    h('div', { clase: `desplegable-matrices${PAR.verMatrices ? ' abierto' : ''}` },
+      h('button', { type: 'button', clase: 'boton-matrices', 'aria-expanded': PAR.verMatrices ? 'true' : 'false',
+        onclick: () => { PAR.verMatrices = !PAR.verMatrices; pintarModulo(); } },
+      h('span', { clase: 'meta' }, 'Matriz:'), ` ${etiqueta} `, h('span', { clase: 'flecha-matrices' }, PAR.verMatrices ? '▴' : '▾')),
+      PAR.verMatrices ? h('div', { clase: 'chips-matrices', role: 'group', 'aria-label': 'Matrices' },
+        chip('todas', `Todas las matrices (${total})`),
+        matrices.map(m => chip(m.id, `${m.nombre} (${(m.guiones || []).length})`, datosMatrizParrilla(m)))) : null)));
   if (elegida) {
     caja.appendChild(h('div', { clase: 'fila cab-matriz' },
       h('h3', {}, elegida.nombre), h('span', { clase: 'meta crece' }, datosMatrizParrilla(elegida)),
@@ -31086,11 +31163,40 @@ function seccionListaParrilla() {
       h('div', { clase: 'cab-columna' }, h('b', {}, nombre),
         h('span', { clase: `pastilla ${CLASE_GUION[id] || ''}`.trim() }, String(suyos.length)),
         h('span', { clase: 'meta' }, explica)),
-      suyos.length ? suyos.map(x => tarjetaGuionParrilla(x.g, x.m, !elegida))
+      suyos.length ? tarjetasPorMatrizParrilla(id, suyos, !elegida && matrices.length > 1, !elegida)
         : h('p', { clase: 'meta vacia-columna' }, texto ? 'Ninguno con este filtro.' : 'Ninguno.'));
   })));
   caja.appendChild(tarjetaPilotoParrilla());
   return caja;
+}
+
+/* LOS GUIONES DE UNA COLUMNA, AGRUPADOS POR MATRIZ Y PLEGABLES (rama
+   relato-sin-cortes): con «Todas las matrices» y más de una, cada matriz es un
+   grupo que se abre y se cierra. Una columna larga empieza con sus grupos
+   cerrados; lo que abras o cierres se recuerda mientras no recargues. Con el
+   buscador escrito, todo abierto: lo que buscas tiene que verse. */
+const GUIONES_PARA_PLEGAR = 6;
+function tarjetasPorMatrizParrilla(columna, suyos, agrupar, conMatriz) {
+  if (!agrupar) return suyos.map(x => tarjetaGuionParrilla(x.g, x.m, conMatriz));
+  const grupos = [];
+  suyos.forEach(x => {
+    let grupo = grupos.find(gr => gr.m.id === x.m.id);
+    if (!grupo) { grupo = { m: x.m, lista: [] }; grupos.push(grupo); }
+    grupo.lista.push(x);
+  });
+  PAR.gruposAbiertos = PAR.gruposAbiertos || {};
+  const buscando = !!PAR.buscar.trim();
+  return grupos.map(gr => {
+    const clave = `${columna}|${gr.m.id}`;
+    const guardado = PAR.gruposAbiertos[clave];
+    const abierto = buscando || (guardado === undefined ? suyos.length <= GUIONES_PARA_PLEGAR : guardado);
+    const det = h('details', { clase: 'grupo-matriz-parrilla', open: abierto, datos: { matriz: gr.m.id } },
+      h('summary', {}, h('span', { clase: 'crece' }, gr.m.nombre),
+        h('span', { clase: 'pastilla' }, String(gr.lista.length))),
+      gr.lista.map(x => tarjetaGuionParrilla(x.g, x.m, false)));
+    det.addEventListener('toggle', () => { if (!buscando) PAR.gruposAbiertos[clave] = det.open; });
+    return det;
+  });
 }
 
 function tarjetaGuionParrilla(g, m, conMatriz) {

@@ -336,6 +336,13 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   distancias: si la mampara choca con el inodoro, que el inodoro esté a menos
   de lo que mide la hoja.
 
+  **Si la imagen base no sale como querías:** «Otra imagen base» repite la
+  misma descripción, así que antes corrígela. «Cambiar el espacio fijo ›» te
+  lleva al bloque del sitio; «✎ Cambiar», debajo de la base, reescribe en
+  español lo que la base trae ya puesto; y la casilla de nota vale solo para
+  la próxima «Otra imagen base» («el lavabo a la izquierda», «más luz»). Cada
+  estado admite hasta 1.200 letras.
+
   **Cada estado, dibujado una vez:** en «Un espacio que cambia», cada cambio
   que pide el guion (la mampara abierta contra el inodoro, la corrediza…) se
   dibuja UNA vez editando la base aprobada, y también se aprueba (se ve su
@@ -895,7 +902,9 @@ botones, con cuántos guiones tiene cada una.
 - **Arriba, la marca del cliente**: «Marca de X: ✓ guardada» o, si falta,
   «Sin marca: Claude escribirá sin saber quién es el cliente…» con
   **«Apuntarla ›»**.
-- **Buscar por título o ID** y las **matrices como filtro**. Con una matriz
+- **Buscar por título o ID** y las **matrices como filtro**, en el
+  desplegable «Matriz: …». Con «Todas las matrices», cada columna agrupa sus
+  guiones por matriz y los grupos se abren y se cierran. Con una matriz
   elegida se ve de dónde salió y puedes **Renombrarla** o **Borrarla** (te
   pregunta antes; los vídeos ya hechos con ella no se tocan).
 - **Pulsar una tarjeta abre su ficha** en un panel a la derecha (a pantalla

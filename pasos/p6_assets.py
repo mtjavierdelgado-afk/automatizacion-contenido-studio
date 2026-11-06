@@ -5959,7 +5959,7 @@ def ambientes_del_relato(proyecto, params):
     return salida
 
 
-def prompt_y_refs_de_base(proyecto, params, cache, sitio=None):
+def prompt_y_refs_de_base(proyecto, params, cache, sitio=None, nota=""):
     """El prompt y las referencias de la imagen base del sitio. -> (sitio, prompt, refs)
 
     Es un plano mas a ojos del generador: la misma cabecera, las mismas
@@ -5992,6 +5992,9 @@ def prompt_y_refs_de_base(proyecto, params, cache, sitio=None):
     catalogo = _catalogo_de(p, proyecto) if proyecto is not None else (p.get("catalogo") or {})
     inicial = ((catalogo or {}).get("relato") or {}).get("inicial") or ""
     texto = tipo_relato.prompt_imagen_base(espacio, relato, inicial=inicial)
+    # LA NOTA DE ESTA VEZ (rama relato-sin-cortes): «Otra imagen base» con una
+    # corrección que no se guarda en ningún sitio, solo para este intento
+    texto = (texto + " " + tipo_relato.nota_base(nota)).strip() if nota else texto
     escena = {"id": "BASE", "prompt": texto, "personajes": [], "set": sitio,
               "narracion": ""}
     refs = list(_referencias_estilo(p, cache, escena))
@@ -6004,7 +6007,7 @@ def prompt_y_refs_de_base(proyecto, params, cache, sitio=None):
     return sitio, prompt, refs
 
 
-def generar_imagen_base(proyecto, params, rehacer=False, sitio=None):
+def generar_imagen_base(proyecto, params, rehacer=False, sitio=None, nota=""):
     """Genera (y paga) la imagen base del sitio del tipo de relato.
 
     -> {sitio, imagen (ruta relativa), coste, origen}. La guarda en la carpeta
@@ -6013,7 +6016,7 @@ def generar_imagen_base(proyecto, params, rehacer=False, sitio=None):
     p = _con_defectos(params)
     cache = proyecto.ruta("espacio_fijo", "_refs")
     os.makedirs(cache, exist_ok=True)
-    sitio, prompt, refs = prompt_y_refs_de_base(proyecto, params, cache, sitio=sitio)
+    sitio, prompt, refs = prompt_y_refs_de_base(proyecto, params, cache, sitio=sitio, nota=nota)
     temporal = proyecto.ruta("espacio_fijo", "_base_nueva.png")
     formato = p2_brief.comun.ficha_formato(p4_voz.formato_de_salida(proyecto))
     meta = _producir_imagen(f"base_{sitio}", prompt, [r["ruta"] for r in refs],

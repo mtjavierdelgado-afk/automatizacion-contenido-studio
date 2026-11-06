@@ -5102,7 +5102,9 @@ def _ficha_tipo_relato(ctx):
         if sitio_e else {}
     for est, cambio in pedidos.items():
         hecho = guardados.get(est) or {}
-        vigente = bool(hecho) and hecho.get("cambio") == cambio
+        # con el texto de antes de la rama relato-sin-cortes (cortado a 400) la
+        # imagen hecha sigue valiendo: subir el tope no la reescribe
+        vigente = bool(hecho) and tr.mismo_cambio(hecho.get("cambio"), cambio)
         estados.append({
             "estado": est, "cambio": cambio, "vigente": vigente,
             "aprobada": bool(vigente and hecho.get("aprobada")),
@@ -5400,6 +5402,53 @@ def traducir_tipo_relato(pid: str, cuerpo: dict = Body(default=None)):
     return _ficha_tipo_relato(ctx)
 
 
+def _editar_inicial_relato(ctx, es):
+    """Reescribe en ESPAÑOL lo que la imagen base trae ya puesto (el `inicial`
+    del catálogo: «Lo que luego cambia sale ya en la base, así»), como un
+    estado (rama relato-sin-cortes, 06-11). Claude lo pasa al inglés en un hilo
+    y se guarda en `catalogo.relato.inicial`. No se dibuja nada: la base hecha
+    sigue como está hasta que se pida «Otra imagen base». -> la ficha."""
+    tr = _tipo_relato()
+    params = ctx.estado.params("assets") or {}
+    catalogo = params.get("catalogo") if isinstance(params.get("catalogo"), dict) else {}
+    relato = catalogo.get("relato") if isinstance(catalogo.get("relato"), dict) else {}
+    anterior = str(relato.get("inicial") or "")
+    if not anterior:
+        raise ErrorApi(404, "la imagen base de este vídeo no trae nada que cambiar: "
+                            "cambia «El espacio fijo»")
+    if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+        raise ErrorApi(409, "hay algo generándose en este vídeo: cámbialo cuando termine")
+    mod = _traducciones()
+    raiz = ctx.proyecto.raiz
+
+    def correr():
+        ingles = mod.al_ingles(es, anterior=anterior, cwd=RAIZ_ESTUDIO)
+        with _cerrojo_de_cadena(ctx.id):
+            if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+                raise RuntimeError("se ha empezado a generar algo en este vídeo mientras "
+                                   "se traducía: vuelve a guardar el cambio cuando termine")
+            ahora = copy.deepcopy((ctx.estado.params("assets") or {}).get("catalogo") or {})
+            suyo = ahora.get("relato") if isinstance(ahora.get("relato"), dict) else {}
+            if str(suyo.get("inicial") or "") != anterior:
+                raise RuntimeError("lo que trae la imagen base se ha reescrito mientras se "
+                                   "traducía: vuelve a abrirlo y guárdalo otra vez")
+            nuevo = tr.inicial_de(ingles)
+            if nuevo and nuevo != anterior:
+                ahora["relato"] = dict(suyo, inicial=nuevo)
+                ctx.estado.actualizar_params("assets", {"catalogo": ahora})
+            mod.guardar(raiz, {ingles: es})
+            ctx.bitacora.anotar("tipo_relato_inicial_editado", "assets", {})
+
+    if not _lanzar_traduccion(ctx, "editar", correr, estado_relato=ESTADO_INICIAL_RELATO):
+        raise ErrorApi(409, "ya se está traduciendo algo de este vídeo: espera unos segundos")
+    return _ficha_tipo_relato(ctx)
+
+
+#: Cómo se llama lo que trae la imagen base en la traducción en curso (no es
+#: un estado: las etiquetas de estado no llevan guion bajo delante).
+ESTADO_INICIAL_RELATO = "_inicial"
+
+
 @app.post("/api/proyectos/{pid}/tipo_relato/estado/editar")
 def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
     """Reescribe en ESPAÑOL el cambio de un estado. {estado, es}
@@ -5418,6 +5467,10 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(400, "escribe el cambio en español")
     if len(es) > 1200:
         raise ErrorApi(400, "el cambio es demasiado largo: como mucho 1.200 letras")
+    if datos.get("inicial") is True:
+        # {inicial: true, es}: lo que la imagen base trae ya puesto (rama
+        # relato-sin-cortes), y no el cambio de un estado
+        return _editar_inicial_relato(ctx, es)
     params = ctx.estado.params("assets") or {}
     sitio, pedidos = p6.estados_del_relato(ctx.proyecto, params)
     if not sitio or estado not in pedidos:
@@ -5450,10 +5503,10 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
                 gv_mod = _guion_visual()
                 guardado = gv_mod.normalizar((ctx.estado.params("assets") or {}).get("guion_visual"))
                 estados_gv = dict(guardado.get("estados") or {})
-                if tr._texto(estados_gv.get(estado), 400) != tr._texto(anterior, 400):
+                if tr._texto(estados_gv.get(estado), tr.MAX_CAMBIO) != tr._texto(anterior, tr.MAX_CAMBIO):
                     raise RuntimeError("los cambios de este estado se han reescrito mientras "
                                        "se traducía: vuelve a abrirlo y guárdalo otra vez")
-                if ingles != tr._texto(anterior, 400):
+                if ingles != tr._texto(anterior, tr.MAX_CAMBIO):
                     estados_gv[estado] = ingles
                     ctx.estado.actualizar_params("assets", {"guion_visual": dict(guardado, estados=estados_gv)})
                 mod.guardar(raiz, {ingles: es})
@@ -5470,7 +5523,7 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
                 # comparado COMO LO LEE `estados_del_catalogo` (recortado a su
                 # tope): un cambio largo escrito a mano no da un falso «se ha
                 # reescrito»
-                if tr._texto(beat.get("cambio"), 400) != tr._texto(anterior, 400):
+                if tr._texto(beat.get("cambio"), tr.MAX_CAMBIO) != tr._texto(anterior, tr.MAX_CAMBIO):
                     raise RuntimeError("los cambios de este estado se han reescrito mientras "
                                        "se traducía: vuelve a abrirlo y guárdalo otra vez")
                 beat["cambio"] = ingles
@@ -5480,7 +5533,7 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
                 tocados += 1
             if not tocados:
                 raise RuntimeError(f"el estado «{estado}» ya no está en el reparto")
-            if ingles != tr._texto(anterior, 400):
+            if ingles != tr._texto(anterior, tr.MAX_CAMBIO):
                 ctx.estado.actualizar_params("assets", {"catalogo": catalogo})
         mod.guardar(raiz, {ingles: es})
         ctx.bitacora.anotar("tipo_relato_estado_editado", "assets",
@@ -5688,12 +5741,13 @@ def escribir_cambios_relato(pid: str, cuerpo: dict = Body(default=None)):
 
 @_medido_en("assets", "base")
 @_con_turno
-def _correr_base(avisar, ctx, rehacer, sitio=None):
-    """Genera (y paga) la imagen base del sitio (o la de un ambiente). No la aprueba."""
+def _correr_base(avisar, ctx, rehacer, sitio=None, nota=""):
+    """Genera (y paga) la imagen base del sitio (o la de un ambiente). No la aprueba.
+    `nota`: la corrección de esta vez (rama relato-sin-cortes); no se guarda."""
     p6 = PASOS_MODULOS.p6_assets
     avisar(0.1, "dibujando la imagen base del sitio (se paga una imagen)")
     hecho = p6.generar_imagen_base(ctx.proyecto, ctx.estado.params("assets") or {},
-                                   rehacer=rehacer, sitio=sitio)
+                                   rehacer=rehacer, sitio=sitio, nota=nota)
     tr = _tipo_relato()
     with _cerrojo_de_cadena(ctx.id):
         guardado = _tipo_relato_guardado(ctx)
@@ -5739,7 +5793,8 @@ def _correr_estado(avisar, ctx, estado, rehacer):
 @app.post("/api/proyectos/{pid}/tipo_relato/base/generar", status_code=202)
 def generar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
     """Genera la imagen base del sitio, o con {estado} la de ese estado (SE PAGA una
-    imagen). {usd: lo que se vio, estado?, otra?}"""
+    imagen). {usd: lo que se vio, estado?, otra?, nota?} — `nota`: una corrección
+    solo para esta imagen base (rama relato-sin-cortes), que no se guarda."""
     tr = _tipo_relato()
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
@@ -5754,6 +5809,12 @@ def generar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
                             "«Recorrido» y «Clase»: elige antes uno de ellos")
     if sitio and sitio not in [a["sitio"] for a in ambientes]:
         raise ErrorApi(404, f"«{sitio}» no es un ambiente de este vídeo")
+    nota = datos.get("nota")
+    if nota is not None and not isinstance(nota, str):
+        raise ErrorApi(400, "la nota tiene que ser un texto")
+    nota = " ".join(str(nota or "").split())
+    if len(nota) > tr.MAX_NOTA_BASE:
+        raise ErrorApi(400, f"la nota es demasiado larga: como mucho {tr.MAX_NOTA_BASE} letras")
     try:
         visto = float(datos.get("usd"))
     except (TypeError, ValueError):
@@ -5777,7 +5838,7 @@ def generar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
                                            bool(datos.get("otra")), paso="assets")
         else:
             trabajo_id = ctx.gestor.lanzar("tipo_relato_base", _correr_base, ctx,
-                                           bool(datos.get("otra")), sitio or None,
+                                           bool(datos.get("otra")), sitio or None, nota,
                                            paso="assets")
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),

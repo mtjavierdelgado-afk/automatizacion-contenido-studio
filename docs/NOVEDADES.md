@@ -10,6 +10,22 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Los estados se dibujan enteros y la imagen base se corrige (6 de noviembre)**
+- El cambio de cada estado del espacio («despues», «montada»…) ya no se corta
+  a 400 letras: cabe hasta 1.200 y la imagen se pide con la frase entera. Si
+  la Parrilla trae uno más largo, lo avisa. Las imágenes ya hechas y aprobadas
+  siguen valiendo: no hay que volver a pagar nada.
+- En la imagen base del tipo de relato: «✎ Cambiar» en lo que la base trae ya
+  puesto (se escribe en español), «Cambiar el espacio fijo ›» te lleva a su
+  bloque, y una nota para la próxima «Otra imagen base» (por ejemplo «el lavabo
+  a la izquierda») que vale solo esa vez.
+- En la Parrilla, las matrices van en un desplegable y, con «Todas las
+  matrices», los guiones de cada columna se agrupan por matriz y se pliegan.
+- En «✨ Elementos de esta imagen», dos opciones nuevas al final de la lista:
+  «✗ Cruz (lo que no se hace)» y «✓ Check (lo que sí)». Ponen el icono rojo o
+  verde arriba a la derecha, saltando con la primera palabra, en cualquier
+  vídeo (también en los hechos antes de «Marca:»).
+
 **Una cruz o un check en las escenas de la Parrilla (5 de noviembre)**
 - En el guion de la Parrilla, una ESCENA puede llevar **«Marca: ✗»** (lo que no
   se hace) o **«Marca: ✓»** (lo que sí), después de «ESCENA n» y antes de

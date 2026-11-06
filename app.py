@@ -22841,6 +22841,14 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj):
     # quedan (la de IA es una imagen pagada)
     hechas = {c.get("tipo"): c for c in (P.leer(raiz, vid).get("portadas") or [])
               if c.get("fichero") and os.path.isfile(os.path.join(carpeta_p, c["fichero"]))}
+    # LA PORTADA PROPUESTA EN EL GUION (rama piloto-portada-guion, 05-11): si el
+    # guion de la Parrilla la trajo, la de IA dibuja SOLO el fondo con su
+    # descripcion y su texto va en capas (opcion A del dueño), y queda puesta
+    try:
+        del_guion = _publicar().limpiar_portada_guion(
+            (_publicar()._leer_video(raiz_proyectos(), ctx.id) or {}).get("portada_guion"))
+    except Exception:                                       # noqa: BLE001
+        del_guion = {}
     candidatos = [hechas["plano"]] if "plano" in hechas else []
     if aj.get("portadas") in ("ambas", "plano") and "plano" not in hechas:
         avisar(0.1, "Claude propone la portada con un plano del vídeo", "Diseñando la portada")
@@ -22871,19 +22879,32 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj):
         diseno = PO.normalizar(candidatos[0]["diseno"] if candidatos else base)
         try:
             avisar(0.5, "dibujando la portada con IA (se paga una imagen)", "Dibujando la portada")
-            prompt = PO.prompt_final("portada", PO.prompt_portada_ia(diseno, entrada), diseno, entrada)
-            hecho = _correr_portada_ia(avisar, ctx, "portada", prompt,
+            if del_guion:
+                if del_guion.get("texto"):
+                    # el texto del guion al titulo; una plantilla sin titulo pasa a «Titular»
+                    campos = (PO.PLANTILLAS.get(diseno["plantilla"]) or ("", "", []))[2]
+                    diseno = PO.de_plantilla(diseno["plantilla"] if "titulo" in campos else "titular",
+                                             {"titulo": del_guion["texto"]}, diseno["paleta"],
+                                             diseno["fuente"], diseno["formato"], base=diseno)
+                que = "fondo"
+                prompt = PO.prompt_final("fondo", del_guion["imagen"], diseno, entrada)
+            else:
+                que = "portada"
+                prompt = PO.prompt_final("portada", PO.prompt_portada_ia(diseno, entrada), diseno, entrada)
+            hecho = _correr_portada_ia(avisar, ctx, que, prompt,
                                        _rutas_fondo_portada(ctx, info, diseno),
                                        aj.get("calidad_portada_ia") or "low",
                                        PO.TAMANO_IA[diseno["formato"]])
-            ia = PO.normalizar(dict(diseno, modo="ia",
+            ia = PO.normalizar(dict(diseno, **({} if del_guion else {"modo": "ia"}),
                                     fondo=dict(diseno.get("fondo") or {}, tipo="ia",
                                                imagen=hecho["nombre"])))
             _piloto_render_portada(ia, _rutas_fondo_portada(ctx, info, ia),
                                    os.path.join(carpeta_p, "ia.png"))
             candidatos.append({"id": "ia", "tipo": "ia", "fichero": "ia.png",
-                               "nombre": "Hecha con IA", "coste_usd": hecho.get("coste_usd"),
-                               "por_que": "", "diseno": ia})
+                               "nombre": "La del guion, con IA" if del_guion else "Hecha con IA",
+                               "coste_usd": hecho.get("coste_usd"),
+                               "por_que": "la propuesta en el guion" if del_guion else "",
+                               "del_guion": bool(del_guion), "diseno": ia})
         except _Cancelado:
             raise
         except Exception as fallo:                          # noqa: BLE001
@@ -22894,8 +22915,10 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj):
     # ya estan y la de IA (pagada) no se vuelve a dibujar
     P.cambiar(raiz, vid, portadas=candidatos)
     if candidatos:
-        _piloto_usar_portada(ctx, candidatos[0]["diseno"])
-        puesta = candidatos[0]["id"]
+        # la del guion, si la hay: es la que pidio quien escribio el guion
+        elegida = next((c for c in candidatos if c.get("del_guion")), candidatos[0])
+        _piloto_usar_portada(ctx, elegida["diseno"])
+        puesta = elegida["id"]
     else:
         P.apuntar_revision(raiz, vid, "No hay portada: hazla en Publicar", "Publicar → Portada")
     P.cambiar(raiz, vid, portadas=candidatos, portada_puesta=puesta)

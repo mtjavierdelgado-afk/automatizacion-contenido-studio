@@ -22382,6 +22382,10 @@ const NOMBRES_ELEMENTO = {
   rayo: 'Rayo (versus)', icono: 'Icono', etiqueta: 'Etiqueta / precio', banda: 'Banda',
   subrayado: 'Subrayado', estrellas: 'Estrellas', cinta: 'Cinta',
 };
+/* Los colores de un elemento, por papel: se resuelven con la paleta del vídeo. */
+const COLORES_ELEMENTO = { acento: 'Color del vídeo', alerta: 'Rojo (alerta)', bien: 'Verde (bien)', texto: 'Blanco', negro: 'Negro' };
+const COLOR_DE_ICONO = { check: 'bien', cruz: 'alerta' };
+const TAM_ELEMENTO_DEFECTO = 0.08;
 const NOMBRES_ENTRADA = { pop: 'Salta', golpe: 'Golpe', desliza: 'Desliza', aparece: 'Aparece suave', dibuja: 'Se dibuja' };
 const NOMBRES_POSICION = {
   arriba: 'Arriba', centro: 'Centro', izquierda: 'Izquierda', derecha: 'Derecha',
@@ -22479,9 +22483,43 @@ function elementosDelPlano(e) {
         datos: { foco: `elemento-${sid}-${i}` }, oninput: ev => cambiar({ texto: ev.target.value }) }));
     }
     if (el.tipo === 'icono') {
-      fila.appendChild(h('select', { 'aria-label': 'Icono', onchange: ev => { cambiar({ icono: ev.target.value }); repintarVideo(); } },
-        ...(d.iconos || []).map(n => h('option', { value: n, selected: n === el.icono }, n))));
+      // el check, verde; la cruz, roja (06-11: un check añadido a mano salía rojo)
+      fila.appendChild(h('select', { 'aria-label': 'Icono', onchange: ev => {
+        const icono = ev.target.value;
+        cambiar(Object.assign({ icono }, COLOR_DE_ICONO[icono] ? { color: COLOR_DE_ICONO[icono] } : {}));
+        repintarVideo();
+      } },
+      ...(d.iconos || []).map(n => h('option', { value: n, selected: n === el.icono }, n))));
     }
+    /* EL COLOR, EL TAMAÑO Y EL SITIO A MANO (06-11, pedido del dueño): el color
+       por papel (sigue a la paleta del vídeo), «−»/«+» para el tamaño y las
+       flechas para moverlo un poco desde su sitio. */
+    if (!['rayo'].includes(el.tipo)) {
+      fila.appendChild(h('select', { 'aria-label': 'Color', title: 'El color',
+        onchange: ev => { cambiar({ color: ev.target.value }); repintarVideo(); } },
+      ...Object.entries(COLORES_ELEMENTO).map(([v2, n]) => h('option', { value: v2,
+        selected: v2 === (el.color || 'acento') }, n))));
+    }
+    const tamDe = x => Number(x.tam) || TAM_ELEMENTO_DEFECTO;
+    const escalar = f => cambiar({ tam: Math.round(Math.max(0.01, Math.min(0.6, tamDe(elementosEnEdicion(sid)[i] || el) * f)) * 1000) / 1000 });
+    const mover = (dx, dy) => {
+      const actual = elementosEnEdicion(sid)[i] || el;
+      const cambio = { x: Math.round(Math.max(0, Math.min(1, (Number(actual.x) || 0.5) + dx)) * 100) / 100,
+        y: Math.round(Math.max(0, Math.min(1, (Number(actual.y) || 0.5) + dy)) * 100) / 100 };
+      if (actual.tipo === 'flecha' && actual.x2 !== undefined) {
+        cambio.x2 = Math.max(0, Math.min(1, Number(actual.x2) + dx));
+        cambio.y2 = Math.max(0, Math.min(1, Number(actual.y2) + dy));
+      }
+      cambiar(cambio);
+      repintarVideo();
+    };
+    fila.appendChild(h('span', { clase: 'mandos-elemento' },
+      h('button', { clase: 'mini fantasma', title: 'Más pequeño', 'aria-label': 'Más pequeño', onclick: () => { escalar(0.8); repintarVideo(); } }, '−'),
+      h('button', { clase: 'mini fantasma', title: 'Más grande', 'aria-label': 'Más grande', onclick: () => { escalar(1.25); repintarVideo(); } }, '+'),
+      h('button', { clase: 'mini fantasma', title: 'Mover a la izquierda', 'aria-label': 'Mover a la izquierda', onclick: () => mover(-0.04, 0) }, '←'),
+      h('button', { clase: 'mini fantasma', title: 'Mover arriba', 'aria-label': 'Mover arriba', onclick: () => mover(0, -0.04) }, '↑'),
+      h('button', { clase: 'mini fantasma', title: 'Mover abajo', 'aria-label': 'Mover abajo', onclick: () => mover(0, 0.04) }, '↓'),
+      h('button', { clase: 'mini fantasma', title: 'Mover a la derecha', 'aria-label': 'Mover a la derecha', onclick: () => mover(0.04, 0) }, '→')));
     fila.appendChild(h('select', { 'aria-label': 'Palabra en la que salta', title: 'La palabra en la que salta',
       onchange: ev => { cambiar({ palabra: Number(ev.target.value) }); repintarVideo(); } },
     ...palabras.map((p, k) => h('option', { value: k, selected: k === el.palabra }, `${k + 1} · ${p}`))));
@@ -30852,7 +30890,7 @@ const PESTANAS_AUTOMATIZAR = [
 ];
 const COLUMNAS_PARRILLA = [
   ['pendiente', 'Pendientes', 'nadie lo ha usado'],
-  ['usado', 'Usados', 'pasados al Encargo, en Crear'],
+  ['usado', 'Usados', 'pasados al Encargo o al piloto'],
   ['publicado', 'Publicados', 'su vídeo ya salió en Publicar'],
 ];
 
@@ -31148,7 +31186,12 @@ function seccionListaParrilla() {
       if (!texto || `${g.codigo} ${g.titulo}`.toLowerCase().includes(texto)) lista.push({ g, m });
     });
   });
-  const de = estado => lista.filter(x => (x.g.estado || 'pendiente') === estado);
+  /* UN GUION MANDADO AL PILOTO YA NO ESTÁ PENDIENTE (06-11, pedido del dueño):
+     mientras su vídeo sigue en la cola del piloto (antes de que se cree y la
+     Parrilla lo apunte como usado), sale en «Usados» con «🤖 en el piloto». */
+  const enPiloto = guionesEnPiloto();
+  const estadoDe = g => ((g.estado || 'pendiente') === 'pendiente' && enPiloto.has(g.id) ? 'usado' : (g.estado || 'pendiente'));
+  const de = estado => lista.filter(x => estadoDe(x.g) === estado);
   if (!COLUMNAS_PARRILLA.some(([id]) => id === PAR.columna)) PAR.columna = 'pendiente';
   // en el móvil: un botón por columna (con su número) y una columna a la vista
   caja.appendChild(h('div', { clase: 'selector-columnas', role: 'tablist', 'aria-label': 'Columna' },
@@ -31199,15 +31242,23 @@ function tarjetasPorMatrizParrilla(columna, suyos, agrupar, conMatriz) {
   });
 }
 
+/* Los guiones del proyecto abierto que están en la lista del piloto. */
+function guionesEnPiloto() {
+  return new Set(((PIL.datos || {}).videos || [])
+    .filter(v => v.gid && (v.cid || '') === (PAR.cid || '')).map(v => v.gid));
+}
+
 function tarjetaGuionParrilla(g, m, conMatriz) {
   const abierta = PAR.fichaAbierta && PAR.guion && PAR.guion.id === g.id;
+  const enElPiloto = (g.estado || 'pendiente') === 'pendiente' && guionesEnPiloto().has(g.id);
   return h('button', {
     type: 'button', clase: `tarjeta-guion${abierta ? ' abierta' : ''}`, title: 'Abrir la ficha de este guion',
     onclick: () => abrirGuionParrilla(g.id),
   },
   h('span', { clase: 'fila cab-tarjeta-guion' },
     h('b', { clase: 'titulo-guion' }, [g.codigo, g.titulo].filter(Boolean).join(' — ') || 'Guion sin título'),
-    g.avisos ? h('span', { clase: 'pastilla obsoleto', title: 'Avisos ⚠ del guion: míralos en la ficha' }, `⚠ ${g.avisos}`) : null),
+    g.avisos ? h('span', { clase: 'pastilla obsoleto', title: 'Avisos ⚠ del guion: míralos en la ficha' }, `⚠ ${g.avisos}`) : null,
+    enElPiloto ? h('span', { clase: 'pastilla ejecutando', title: 'Está en la lista del piloto automático' }, '🤖 en el piloto') : null),
   h('span', { clase: 'meta datos-guion' }, datosGuionCorto(g)),
   conMatriz || g.video_nombre ? h('span', { clase: 'fila pie-tarjeta-guion' },
     conMatriz ? h('span', { clase: 'chip-enlace' }, m.nombre) : null,
@@ -34873,6 +34924,23 @@ function videosPiloto(estados) {
   return ((PIL.datos || {}).videos || []).filter(v => estados.includes(v.estado));
 }
 
+/* LOS DEL PROYECTO ABIERTO, Y SIN LOS YA PUBLICADOS (06-11, pedido del dueño):
+   la lista del piloto mezclaba los vídeos de todos los proyectos y seguía
+   enseñando los que ya habían salido en Publicar. Un vídeo publicado es el de
+   un guion que la Parrilla tiene en «Publicados». La cola sigue siendo UNA
+   para todo el Studio: la cabecera cuenta todos. */
+function guionesParrillaPorId() {
+  const mapa = {};
+  ((PAR.datos || {}).matrices || []).forEach(m => (m.guiones || []).forEach(g => { mapa[g.id] = g; }));
+  return mapa;
+}
+
+function videosPilotoDelProyecto(estados) {
+  const guiones = guionesParrillaPorId();
+  return videosPiloto(estados).filter(v => (v.cid || '') === (PAR.cid || '')
+    && !(v.gid && (guiones[v.gid] || {}).estado === 'publicado'));
+}
+
 async function cargarPiloto() {
   if (PIL.cargando) return;
   PIL.cargando = true;
@@ -34881,6 +34949,19 @@ async function cargarPiloto() {
     const huella = JSON.stringify(datos, (k, v) => (k === 'segundos' ? undefined : v));
     PIL.datos = datos;
     PIL.error = '';
+    // los guiones en el piloto cambian de columna en la Parrilla: si cambian,
+    // se repinta el tablero entero (no solo el panel)
+    const enPiloto = [...guionesEnPiloto()].sort().join(',');
+    if (enPiloto !== PIL.guionesHuella) {
+      const antes = PIL.guionesHuella;
+      PIL.guionesHuella = enPiloto;
+      if ((antes || '') !== enPiloto && MODULOS.actual === 'automatizar' && PAR.seccion === 'parrilla'
+          && !campoPublicarConFoco()) {
+        PIL.huella = huella;
+        pintarModulo();
+        return;
+      }
+    }
     if (huella !== PIL.huella) {
       PIL.huella = huella;
       repintarPanelPiloto();
@@ -34947,10 +35028,15 @@ function panelPilotoParrilla() {
   }
   if (d.cupo) caja.appendChild(h('div', { clase: 'caja-aviso' }, `⏸ ${d.cupo}. Sigue solo cuando se libere.`));
   if (PIL.verAjustes) caja.appendChild(ajustesPiloto(d));
-  const revisar = videosPiloto(['revisar', 'parado', 'error', 'interrumpido']);
-  const vivos = videosPiloto(['trabajando', 'en_cola']).reverse();
-  const listos = videosPiloto(['listo']);
-  const cancelados = videosPiloto(['cancelado']);
+  const revisar = videosPilotoDelProyecto(['revisar', 'parado', 'error', 'interrumpido']);
+  const vivos = videosPilotoDelProyecto(['trabajando', 'en_cola']).reverse();
+  const listos = videosPilotoDelProyecto(['listo']);
+  const cancelados = videosPilotoDelProyecto(['cancelado']);
+  const deOtros = ((d.videos || []).filter(v => (v.cid || '') !== (PAR.cid || ''))).length;
+  if (deOtros) {
+    caja.appendChild(h('div', { clase: 'meta otros-proyectos-piloto' },
+      `Aquí salen solo los de este proyecto; hay ${deOtros} ${deOtros === 1 ? 'vídeo' : 'vídeos'} de otros proyectos en el piloto.`));
+  }
   if (!revisar.length && !vivos.length && !listos.length && !cancelados.length) {
     caja.appendChild(h('div', { clase: 'meta vacio-piloto' }, 'Todavía no has mandado ningún guion al piloto.'));
     return caja;
@@ -35046,18 +35132,35 @@ function portadasPiloto(v) {
         alt: c.nombre, loading: 'lazy' }),
       h('figcaption', {}, h('span', {}, c.nombre),
         puesta ? h('span', { clase: 'pastilla ok' }, '✓ puesta')
-          : h('button', { clase: 'mini', onclick: () => elegirPortadaPiloto(v, c) }, 'Usar esta'))));
+          : h('button', { clase: 'mini', disabled: PIL.poniendoPortada ? true : null,
+            onclick: () => elegirPortadaPiloto(v, c) },
+          PIL.poniendoPortada === `${v.id}|${c.id}` ? 'Poniéndola…' : 'Usar esta'))));
   });
   return caja;
 }
 
+/* «Usar esta» (06-11, visto por el dueño: la marca «✓ puesta» no se movía).
+   Poner la portada la vuelve a pintar y tarda unos segundos; si mientras tanto
+   la vuelta del panel estaba preguntando, `cargarPiloto` se saltaba la recarga
+   y la pantalla se quedaba con la portada de antes. Ahora se usa la ficha que
+   devuelve el servidor, en el acto, y el botón dice que está trabajando. */
 async function elegirPortadaPiloto(v, c) {
+  if (PIL.poniendoPortada) return;
+  PIL.poniendoPortada = `${v.id}|${c.id}`;
+  repintarPanelPiloto();
   try {
-    await pedir(rutaPiloto(`/videos/${encodeURIComponent(v.id)}/portada`), { method: 'POST', cuerpo: { id: c.id } });
+    const ficha = await pedir(rutaPiloto(`/videos/${encodeURIComponent(v.id)}/portada`), { method: 'POST', cuerpo: { id: c.id } });
+    const lista = (PIL.datos || {}).videos || [];
+    const i = lista.findIndex(x => x.id === v.id);
+    if (i >= 0 && ficha && ficha.id === v.id) lista[i] = Object.assign({}, lista[i], ficha);
+    PIL.huella = '';
     toast(`portada cambiada: ${c.nombre.toLowerCase()}`);
-    await cargarPiloto();
-    pintarModulo();
-  } catch (e) { toast(`no se ha podido cambiar la portada: ${e.message}`, true); }
+  } catch (e) {
+    toast(`no se ha podido cambiar la portada: ${e.message}`, true);
+  } finally {
+    PIL.poniendoPortada = '';
+    repintarPanelPiloto();
+  }
 }
 
 async function seguirPiloto(v, forzar) {

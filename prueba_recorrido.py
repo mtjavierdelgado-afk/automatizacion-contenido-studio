@@ -10314,6 +10314,24 @@ def relato_sin_cortes(navegador, datos):
                               "const l = s[s.length - 1] || []; return l[l.length - 1] || null; }")
         ok(icono and icono.get("icono") == "check" and icono.get("color") == "bien" and icono.get("entrada") == "pop",
            f"un icono check verde que salta ({icono})")
+        fila = pg.p.locator(".elemento-plano").last
+        fila.locator("select[aria-label=Icono]").select_option("cruz")
+        pg.p.wait_for_timeout(300)
+        fila = pg.p.locator(".elemento-plano").last
+        ultimo = "() => { const s = Object.values(ELEMENTOS_PLANOS.borrador || {}); const l = s[s.length - 1] || []; return l[l.length - 1] || null; }"
+        ok((pg.p.evaluate(ultimo) or {}).get("color") == "alerta", "al cambiar el icono a «cruz», se pone rojo solo")
+        fila.locator("select[aria-label=Color]").select_option("bien")
+        pg.p.wait_for_timeout(300)
+        ok((pg.p.evaluate(ultimo) or {}).get("color") == "bien", "y el color se elige a mano en su fila")
+        antes_el = pg.p.evaluate(ultimo) or {}
+        pg.p.locator(".elemento-plano").last.locator("button[aria-label='Más grande']").click()
+        pg.p.wait_for_timeout(300)
+        pg.p.locator(".elemento-plano").last.locator("button[aria-label='Mover a la izquierda']").click()
+        pg.p.wait_for_timeout(300)
+        despues_el = pg.p.evaluate(ultimo) or {}
+        ok(float(despues_el.get("tam") or 0) > float(antes_el.get("tam") or 0.08) - 1e-9
+           and float(despues_el.get("x") or 1) < float(antes_el.get("x") or 0),
+           f"«+» lo agranda y «←» lo mueve ({antes_el.get('tam')}→{despues_el.get('tam')}, {antes_el.get('x')}→{despues_el.get('x')})")
     # LA PARRILLA: el desplegable de las matrices
     pg.js("irAModulo('automatizar');")
     if pg.esperar(".boton-matrices", segundos=15):
@@ -10324,6 +10342,78 @@ def relato_sin_cortes(navegador, datos):
         pg.pulsar(".chip-matriz", "Todas las matrices")
         ok(pg.p.locator(".chips-matrices").count() == 0, "y al elegir se vuelve a plegar")
     pg.sin_errores("las matrices en un desplegable")
+    pg.cerrar()
+    _piloto_del_proyecto_y_portada(navegador, datos)
+
+
+def _piloto_del_proyecto_y_portada(navegador, datos):
+    """Vistos por el dueño el 06-11: (1) la lista del piloto mezclaba los
+    proyectos y seguía enseñando los ya publicados; (2) «Usar esta» en una
+    portada no movía el «✓ puesta». El servidor del piloto se dobla aquí (sus
+    rutas reales ya las prueba `piloto_video_completo`): lo que se mira es la
+    pantalla."""
+    cid = datos["cliente"]
+    estado = {"puesta": "a"}
+
+    def ficha(vid, cid_, gid, nombre):
+        return {"id": vid, "cid": cid_, "gid": gid, "estado": "listo", "nombre": nombre, "pid": "",
+                "portadas": [{"id": "a", "nombre": "Con un plano del vídeo"}, {"id": "b", "nombre": "Hecha con IA"}],
+                "portada_puesta": estado["puesta"], "revisar": [], "terminado": "x"}
+
+    def lista():
+        cola = dict(ficha("v4", cid, "g_cola", "PX4 — En la cola"), estado="en_cola", portadas=[])
+        return {"videos": [cola, ficha("v1", cid, "g_vivo", "PX1 — Del proyecto"),
+                           ficha("v2", "otro_proyecto", "g_otro", "PX2 — De otro proyecto"),
+                           ficha("v3", cid, "g_publicado", "PX3 — Ya publicado")],
+                "cuenta": {"listo": 3}, "a_revisar": 0, "ajustes": {}, "estados": {"listo": "Listo para publicar"},
+                "etapas": [], "modos": [], "limites": {}}
+
+    def rutas(ruta):
+        peticion = ruta.request
+        if peticion.method == "POST" and peticion.url.endswith("/portada"):
+            estado["puesta"] = json.loads(peticion.post_data or "{}").get("id") or estado["puesta"]
+            ruta.fulfill(status=200, content_type="application/json",
+                         body=json.dumps(ficha("v1", cid, "g_vivo", "PX1 — Del proyecto")))
+        elif peticion.method == "GET" and "/api/piloto/videos/" not in peticion.url:
+            ruta.fulfill(status=200, content_type="application/json", body=json.dumps(lista()))
+        else:
+            ruta.fulfill(status=404, content_type="application/json", body=json.dumps({"error": "no"}))
+    # una matriz en este proyecto, para que la Parrilla tenga tablero
+    datos["api"].post(f"/api/parrilla/proyectos/{cid}/guiones", {"nombre": "Piloto proyecto", "texto": (
+        "PX0 — Para el tablero\nUso: exacto\nFormato: vertical\nDuración: 20 s\n\nESCENA 1\n"
+        "Voz: «Hola.»\n\nPARA EL ENCARGO\n- Material: Hola.\n")})
+    pg = Pagina(navegador, datos, nombre="piloto_proyecto")
+    pg.p.route("**/api/piloto**", rutas)
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    pg.p.wait_for_function("() => PAR.datos && !PAR.cargando && (PAR.datos.matrices || []).length > 0", timeout=20000)
+    pg.p.wait_for_timeout(800)
+    # el guion de PX3 está publicado en la Parrilla de este proyecto, y el de
+    # PX4 sigue pendiente aunque está en la cola del piloto
+    pg.js("const m = (PAR.datos.matrices || [])[0]; m.guiones = (m.guiones || []).concat(["
+          "{id: 'g_publicado', codigo: 'PX3', titulo: 'Ya publicado', estado: 'publicado'}, "
+          "{id: 'g_vivo', codigo: 'PX1', titulo: 'Del proyecto', estado: 'usado'}, "
+          "{id: 'g_cola', codigo: 'PX4', titulo: 'En la cola', estado: 'pendiente'}]); "
+          "PIL.huella = ''; pintarModulo();")
+    ok(pg.esperar(".tarjeta-piloto .titulo-piloto", "PX1", 15), "el vídeo del proyecto sale en el piloto")
+    ok(not pg.visible(".tarjeta-piloto .titulo-piloto", "PX2"), "el de otro proyecto, no")
+    ok(not pg.visible(".tarjeta-piloto .titulo-piloto", "PX3"), "el ya publicado deja de salir")
+    ok(pg.visible(".otros-proyectos-piloto", "1 vídeo de otros proyectos"), "y dice que hay otros en el piloto")
+    ok(pg.visible(".columna-tablero[data-columna=usado] .tarjeta-guion", "PX4")
+       and not pg.visible(".columna-tablero[data-columna=pendiente] .tarjeta-guion", "PX4"),
+       "un guion mandado al piloto deja «Pendientes» y sale en «Usados»")
+    ok(pg.visible(".columna-tablero[data-columna=usado] .tarjeta-guion", "en el piloto"), "con «🤖 en el piloto»")
+    tarjeta = pg.p.locator(".tarjeta-piloto", has_text="PX1").first
+    ok(tarjeta.locator(".portada-piloto.puesta").count() == 1
+       and "Con un plano" in tarjeta.locator(".portada-piloto.puesta").inner_text(), "puesta la del plano")
+    tarjeta.locator(".portada-piloto button", has_text="Usar esta").first.click()
+    pg.p.wait_for_timeout(2500)
+    tarjeta = pg.p.locator(".tarjeta-piloto", has_text="PX1").first
+    puestas = tarjeta.locator(".portada-piloto.puesta")
+    ok(puestas.count() == 1 and "Hecha con IA" in puestas.inner_text(),
+       "«Usar esta» mueve el «✓ puesta» a la elegida, y solo a esa")
+    pg.captura("piloto_proyecto_portada", entera=False)
+    pg.p.unroute("**/api/piloto**")
     pg.cerrar()
 
 if __name__ == "__main__":

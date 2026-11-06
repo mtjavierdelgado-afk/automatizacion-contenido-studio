@@ -25,6 +25,17 @@ vídeos, estilos, claves y contraseña no se tocan.
   «✗ Cruz (lo que no se hace)» y «✓ Check (lo que sí)». Ponen el icono rojo o
   verde arriba a la derecha, saltando con la primera palabra, en cualquier
   vídeo (también en los hechos antes de «Marca:»).
+- En Automatizar, la lista del piloto enseña solo los vídeos del proyecto
+  abierto (y dice cuántos hay de otros) y deja de enseñar los que ya se
+  publicaron.
+- En una portada del piloto, «Usar esta» mueve el «✓ puesta» a la elegida en
+  el acto (antes podía quedarse marcada la de antes hasta recargar).
+- Un guion mandado al piloto sale de «Pendientes» y aparece en «Usados» con
+  «🤖 en el piloto», aunque su vídeo todavía esté en la cola.
+- En «✨ Elementos de esta imagen», cada elemento tiene ahora su color (el del
+  vídeo, rojo, verde, blanco o negro), «−» y «+» para el tamaño y flechas para
+  moverlo un poco. Al elegir el icono «check» se pone verde solo, y con
+  «cruz», rojo. Todo gratis: se aplica al montar.
 
 **Una cruz o un check en las escenas de la Parrilla (5 de noviembre)**
 - En el guion de la Parrilla, una ESCENA puede llevar **«Marca: ✗»** (lo que no

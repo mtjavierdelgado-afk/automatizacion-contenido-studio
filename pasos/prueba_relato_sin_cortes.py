@@ -232,6 +232,39 @@ def prueba_base():
             ok(False, "sin nada que cambiar tendría que dar 404")
         except servidor.ErrorApi as e:
             igual(e.codigo, 404, "sin nada que traiga la base: lo dice (404)")
+
+        seccion("   «✎ Cambiar» un estado cortado: su imagen deja de valer (revisión 06-11)")
+        pid2 = Proyecto.crear(base, "estado cortado").id
+        Estado(servidor.contexto(pid2).proyecto)
+        ctx2 = servidor.contexto(pid2)
+        img_base, img_estado = "espacio_fijo/" + "a" * 16 + ".png", "espacio_fijo/" + "b" * 16 + ".png"
+        ctx2.estado.set_params("assets", {
+            "imagenes": "guion",
+            "tipo_relato": {"modo": "espacio_que_cambia", "cambia": "objeto", "bases": {"bano": {
+                "imagen": img_base, "aprobada": True,
+                "estados": {"despues": {"imagen": img_estado, "aprobada": True, "cambio": LARGO[:400]}}}}},
+            "espacio_fijo": {"sitio": "bano", "descripcion": "a small bathroom"},
+            "guion_visual": {"origen": "parrilla", "planos": [], "visuales": [
+                {"voz": "Así quedó.", "visual": ["the new bathroom"], "estado": "despues"}],
+                "estados": {"despues": LARGO[:400]}}})
+        p6m = servidor.PASOS_MODULOS.p6_assets
+        sitio_e, pedidos = p6m.estados_del_relato(ctx2.proyecto, ctx2.estado.params("assets"))
+        if "despues" not in pedidos:
+            print(f"  (omitida: este vídeo de prueba no pide el estado: {sitio_e} {pedidos})")
+        else:
+            antes_ok = T.clave_estado(sitio_e, "despues") in T.bases_aprobadas(
+                ctx2.estado.params("assets"), p6m._catalogo_de(ctx2.estado.params("assets"), ctx2.proyecto))
+            ok(antes_ok, "antes: la imagen cortada está aprobada y vale")
+            mod.al_ingles = lambda es, anterior="", cwd=None: LARGO
+            servidor.editar_estado_relato(pid2, {"estado": "despues", "es": "el cambio entero en español"})
+            params2 = ctx2.estado.params("assets")
+            hecho = params2["tipo_relato"]["bases"][sitio_e]["estados"]["despues"]
+            ok(not hecho.get("aprobada") and hecho.get("imagen") == img_estado,
+               "al guardarlo entero, la imagen pierde su aprobación (la imagen se queda para verla)")
+            ok(T.clave_estado(sitio_e, "despues") not in T.bases_aprobadas(
+                params2, p6m._catalogo_de(params2, ctx2.proyecto)),
+               "y ya no se manda a los planos: hace falta otra")
+            igual(params2["guion_visual"]["estados"]["despues"], LARGO, "con el cambio entero guardado")
     finally:
         mod.al_ingles, mod.guardar, servidor._lanzar_traduccion = reales_t
 

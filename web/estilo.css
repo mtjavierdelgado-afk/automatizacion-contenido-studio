@@ -5835,3 +5835,6 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .grupo-matriz-parrilla { display: flex; flex-direction: column; gap: 8px; }
 .grupo-matriz-parrilla > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 8px; border-radius: 8px; background: var(--hueco); font-weight: 600; font-size: 13px; }
 .grupo-matriz-parrilla[open] > summary { margin-bottom: 6px; }
+.mandos-elemento { display: inline-flex; flex-wrap: wrap; gap: 2px; }
+.mandos-elemento .mini { min-width: 28px; padding-left: 6px; padding-right: 6px; }
+.otros-proyectos-piloto { margin: 4px 0 8px; }

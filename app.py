@@ -5402,6 +5402,30 @@ def traducir_tipo_relato(pid: str, cuerpo: dict = Body(default=None)):
     return _ficha_tipo_relato(ctx)
 
 
+def _soltar_imagen_de_estado(ctx, sitio, estado):
+    """El cambio de un estado se ha reescrito a mano: su imagen ya no vale.
+
+    Hace falta decirlo EXPLÍCITAMENTE desde la rama relato-sin-cortes (revisión
+    del 06-11): `tipo_relato.mismo_cambio` da por buena una imagen dibujada con
+    el texto cortado a 400 si el vigente empieza igual, y al «✎ Cambiar» un
+    estado cortado para escribirlo entero el inglés nuevo suele empezar por el
+    viejo: la imagen cortada seguía aprobada y mandándose a los planos. Se
+    quita su aprobación y su texto (la imagen se queda, para verla) y la
+    pantalla pide otra. Se llama con el cerrojo de la cadena tomado."""
+    tr = _tipo_relato()
+    guardado = _tipo_relato_guardado(ctx)
+    bases = dict(guardado.get("bases") or {})
+    ficha = dict(bases.get(sitio) or {})
+    estados = dict(ficha.get("estados") or {})
+    if estado not in estados:
+        return
+    estados[estado] = dict(estados[estado], aprobada=False, cambio="")
+    ficha["estados"] = estados
+    bases[sitio] = ficha
+    guardado["bases"] = bases
+    ctx.estado.actualizar_params("assets", {"tipo_relato": tr.normalizar(guardado)})
+
+
 def _editar_inicial_relato(ctx, es):
     """Reescribe en ESPAÑOL lo que la imagen base trae ya puesto (el `inicial`
     del catálogo: «Lo que luego cambia sale ya en la base, así»), como un
@@ -5418,13 +5442,19 @@ def _editar_inicial_relato(ctx, es):
                             "cambia «El espacio fijo»")
     if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
         raise ErrorApi(409, "hay algo generándose en este vídeo: cámbialo cuando termine")
+    with _COLA_LOCK:
+        if _cola_dibujando(ctx):
+            raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: cámbialo "
+                                "cuando terminen")
     mod = _traducciones()
     raiz = ctx.proyecto.raiz
 
     def correr():
         ingles = mod.al_ingles(es, anterior=anterior, cwd=RAIZ_ESTUDIO)
         with _cerrojo_de_cadena(ctx.id):
-            if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            with _COLA_LOCK:
+                dibujando = _cola_dibujando(ctx)
+            if dibujando or _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
                 raise RuntimeError("se ha empezado a generar algo en este vídeo mientras "
                                    "se traducía: vuelve a guardar el cambio cuando termine")
             ahora = copy.deepcopy((ctx.estado.params("assets") or {}).get("catalogo") or {})
@@ -5509,6 +5539,7 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
                 if ingles != tr._texto(anterior, tr.MAX_CAMBIO):
                     estados_gv[estado] = ingles
                     ctx.estado.actualizar_params("assets", {"guion_visual": dict(guardado, estados=estados_gv)})
+                    _soltar_imagen_de_estado(ctx, sitio, estado)
                 mod.guardar(raiz, {ingles: es})
                 ctx.bitacora.anotar("tipo_relato_estado_editado", "assets",
                                     {"estado": estado, "tramos": 0, "parrilla": True})
@@ -5535,6 +5566,7 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
                 raise RuntimeError(f"el estado «{estado}» ya no está en el reparto")
             if ingles != tr._texto(anterior, tr.MAX_CAMBIO):
                 ctx.estado.actualizar_params("assets", {"catalogo": catalogo})
+                _soltar_imagen_de_estado(ctx, sitio, estado)
         mod.guardar(raiz, {ingles: es})
         ctx.bitacora.anotar("tipo_relato_estado_editado", "assets",
                             {"estado": estado, "tramos": tocados})

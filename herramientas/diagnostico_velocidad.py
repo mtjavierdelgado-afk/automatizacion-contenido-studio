@@ -284,6 +284,10 @@ def precios_de_hoy():
                 p = ajustes.precio_por_imagen(calidad, modo=modo)
             except Exception:                                # noqa: BLE001
                 continue
+            if modo and p.get("modo") != modo:
+                # sin muestras de foto en esa calidad cae al precio general, que
+                # ya sale en la línea de arriba: no se repite
+                continue
             salida.append({"calidad": calidad, "modo": p.get("modo") or "", "usd": float(p["usd"]),
                            "fuente": p.get("fuente") or ""})
     return salida

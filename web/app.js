@@ -573,8 +573,8 @@ function errorDeServidorLegible(estado, crudo) {
   }
   if (estado === 413) return 'Lo que intentas subir es demasiado grande para el servidor (error 413).';
   if (estado === 404) return 'El servidor no encuentra esa dirección (error 404).';
-  const titulo = (texto.match(/<title>([^<]{1,80})<\/title>/i) || [])[1];
-  return `El servidor ha contestado con un error ${estado}${titulo ? ` («${titulo.trim()}»)` : ''}.`;
+  const rotulo = (texto.match(/<title>([^<]{1,80})<\/title>/i) || [])[1];
+  return `El servidor ha contestado con un error ${estado}${rotulo ? ` («${rotulo.trim()}»)` : ''}.`;
 }
 
 async function pedir(url, opciones) {

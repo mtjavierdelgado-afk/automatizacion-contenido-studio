@@ -18268,6 +18268,11 @@ def _planos_cortando_la_voz(ctx):
     por duracion de siempre.
     """
     try:
+        # SOLO CON LA VOZ AL DIA (revision del 05-11): si la voz se va a rehacer
+        # (guion cambiado), sus planos son los de la toma vieja y el precio
+        # podria prometer de menos. Entonces, la cuenta por duracion de siempre.
+        if not ctx.estado.al_dia("voz"):
+            return None
         p6 = PASOS_MODULOS.p6_assets
         assets = ctx.estado.params("assets") or {}
         meta = assets.get("audio_meta") or PASOS_MODULOS.medios.salida_de(
@@ -18275,7 +18280,14 @@ def _planos_cortando_la_voz(ctx):
             patrones=(r"audio_meta\.json", r".*_meta\.json"))
         if not meta or not os.path.exists(meta):
             return None
+        # la clave cambia con la toma, con el guion (sus cartelas deciden que
+        # planos llevan imagen), con los params de las imagenes y con los planos
+        # insertados o quitados a mano
+        sueltos = [os.path.join(str(ctx.proyecto.raiz), n)
+                   for n in ("planos_insertados.json", "planos_quitados.json")]
         clave = (str(ctx.proyecto.raiz), meta, os.path.getmtime(meta),
+                 ctx.estado.firma("guion"), ctx.estado.firma("voz"),
+                 tuple(os.path.getmtime(r) if os.path.exists(r) else 0 for r in sueltos),
                  json.dumps(assets, sort_keys=True, ensure_ascii=False, default=str))
         if clave not in _CORTES_DE_PRUEBA:
             plan = p6.planificar(ctx.proyecto, assets) or {}

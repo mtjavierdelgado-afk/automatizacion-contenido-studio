@@ -1763,6 +1763,17 @@ def probar_fotogramas_jpeg(proyecto, estado, params):
                                for f in en_png["unidades"].values())
         ok(transiciones_jpeg > 0 and transiciones_jpeg == transiciones_png,
            f"las transiciones se cuecen igual ({transiciones_jpeg} fotogramas frente a {transiciones_png})")
+        # y sin marca de color distinta: un clip de JPEG marcado «BT.601» y uno
+        # de PNG sin marca, unidos, dejaban el video entero con la del primero
+        def _marca(ruta):
+            return subprocess.run(
+                [medios.ffprobe(), "-v", "error", "-select_streams", "v",
+                 "-show_entries", "stream=color_range,color_space,color_primaries,color_transfer",
+                 "-of", "compact", ruta], capture_output=True, text=True, timeout=60,
+                **medios.SIN_VENTANA).stdout.strip()
+        sid0 = sorted(en_jpeg["salidas"]["clips"])[0]
+        igual(_marca(os.path.join(trabajo, en_jpeg["salidas"]["clips"][sid0])), _marca(clips_png[sid0]),
+              "el clip de JPEG lleva la misma marca de color que el de PNG")
         estado.completar("render", en_jpeg["salidas"], en_jpeg["unidades"])
 
         # el camino raro: un PNG que se capturo para una transicion que no se hizo

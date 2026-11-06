@@ -717,16 +717,27 @@ def _pagina_de(escena, mov, capa_svg, hyper, p, destino, capa_fija="", fps=30):
 
 # ------------------------------------------------------------------ ffmpeg
 
-def _codificar(dir_frames, destino, fps, calidad, avisar=None):
+def _codificar(dir_frames, destino, fps, calidad, avisar=None, ext="png"):
+    """Los fotogramas `f%05d.<ext>` de la carpeta, en un clip H.264.
+
+    `ext` lo dice quien capturo (`renderizar_plano`), no lo que haya en la
+    carpeta: en Windows un fichero de una pasada anterior puede seguir ahi.
+    """
     ajustes = CALIDADES.get(calidad) or CALIDADES["media"]
+    # LOS JPEG NO PUEDEN DEJAR MARCA DE COLOR (revision del 05-11-2026): ffmpeg
+    # etiqueta «BT.601, rango tv» el clip que sale de JPEG y no etiqueta el que
+    # sale de PNG, y al unir los clips sin recodificar el video entero hereda la
+    # marca del PRIMERO. Los pixeles son los mismos; la marca haria que un
+    # reproductor pintara el video con otro color. Se quita para que salga como
+    # siempre.
+    sin_marca = (["-color_primaries", "2", "-color_trc", "2", "-colorspace", "2",
+                  "-color_range", "0"] if ext == "jpg" else [])
     # el clip puede ser el MISMO fichero que el de la version anterior
     medios.romper_enlace(destino)
     orden = [medios.ffmpeg(), "-y", "-loglevel", "error",
-             "-framerate", str(fps), "-i", os.path.join(
-                 dir_frames, "f%05d.jpg" if os.path.exists(os.path.join(dir_frames, "f00001.jpg"))
-                 else "f%05d.png"),
+             "-framerate", str(fps), "-i", os.path.join(dir_frames, f"f%05d.{ext}"),
              "-c:v", "libx264", "-preset", ajustes["preset"], "-crf", ajustes["crf"],
-             "-pix_fmt", "yuv420p", "-r", str(fps), destino]
+             "-pix_fmt", "yuv420p", *sin_marca, "-r", str(fps), destino]
     proceso = medios.correr(orden, avisar)
     if proceso.returncode != 0 or not os.path.exists(destino):
         raise RuntimeError(f"ffmpeg fallo con {destino}: {proceso.stderr[-400:]}")
@@ -1244,9 +1255,9 @@ def renderizar_plano(tarea, navegador=None, avisar=None):
     # El ultimo fotograma se guarda ANTES de la transicion: es el que mira el
     # plano siguiente, y lo que tiene que mirar es este plano limpio, no este
     # plano mezclado con el anterior.
-    limpio = os.path.join(carpeta, f"f{total:05d}.png")
-    if not os.path.exists(limpio):
-        limpio = os.path.join(carpeta, "ultimo_limpio.png")
+    limpio = (os.path.join(carpeta, f"f{total:05d}.png")
+              if ext == "png" or total <= en_png
+              else os.path.join(carpeta, "ultimo_limpio.png"))
     _guardar_ultimo(limpio, tarea["ultimo"])
     tiempos["pintar_y_capturar"] = time.time() - reloj
     reloj = time.time()
@@ -1281,7 +1292,7 @@ def renderizar_plano(tarea, navegador=None, avisar=None):
                       os.path.join(carpeta, f"f{numero:05d}.jpg"), avisar)
     tiempos["transicion"] = time.time() - reloj
     reloj = time.time()
-    _codificar(carpeta, tarea["clip"], fps, tarea["calidad"], avisar)
+    _codificar(carpeta, tarea["clip"], fps, tarea["calidad"], avisar, ext=ext)
     tiempos["codificar"] = time.time() - reloj
     medios.borrar(pagina)
     if not tarea.get("conservar_frames"):

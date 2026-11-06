@@ -31215,10 +31215,9 @@ function seccionListaParrilla() {
 
 /* LOS GUIONES DE UNA COLUMNA, AGRUPADOS POR MATRIZ Y PLEGABLES (rama
    relato-sin-cortes): con «Todas las matrices» y más de una, cada matriz es un
-   grupo que se abre y se cierra. Una columna larga empieza con sus grupos
-   cerrados; lo que abras o cierres se recuerda mientras no recargues. Con el
+   grupo que se abre y se cierra. Empiezan abiertos (nada se esconde sin que
+   lo pidas); lo que cierres se recuerda mientras no recargues. Con el
    buscador escrito, todo abierto: lo que buscas tiene que verse. */
-const GUIONES_PARA_PLEGAR = 6;
 function tarjetasPorMatrizParrilla(columna, suyos, agrupar, conMatriz) {
   if (!agrupar) return suyos.map(x => tarjetaGuionParrilla(x.g, x.m, conMatriz));
   const grupos = [];
@@ -31232,7 +31231,7 @@ function tarjetasPorMatrizParrilla(columna, suyos, agrupar, conMatriz) {
   return grupos.map(gr => {
     const clave = `${columna}|${gr.m.id}`;
     const guardado = PAR.gruposAbiertos[clave];
-    const abierto = buscando || (guardado === undefined ? suyos.length <= GUIONES_PARA_PLEGAR : guardado);
+    const abierto = buscando || guardado !== false;
     const det = h('details', { clase: 'grupo-matriz-parrilla', open: abierto, datos: { matriz: gr.m.id } },
       h('summary', {}, h('span', { clase: 'crece' }, gr.m.nombre),
         h('span', { clase: 'pastilla' }, String(gr.lista.length))),

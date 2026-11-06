@@ -503,7 +503,9 @@ def componer(navegador, desde, hasta, progreso, frag, destino):
         "componer(%s,%s,%s,%s)" % (json.dumps(_url(desde)), json.dumps(_url(hasta)),
                                    repr(round(float(progreso), 6)), json.dumps(frag)),
         esperar=True)
-    temporal = destino + ".tmp.png"
+    # el temporal lleva la extension del destino: es la que dice a `capturar`
+    # en que formato sacarlo (PNG o, con montaje-rapido, JPEG)
+    temporal = destino + ".tmp" + (os.path.splitext(destino)[1] or ".png")
     navegador.capturar(temporal)
     medios.reemplazar(temporal, destino)
     return destino

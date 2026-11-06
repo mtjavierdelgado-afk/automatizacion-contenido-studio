@@ -10,6 +10,14 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**El montaje, unas dos o tres veces más rápido, con la misma calidad (5 de noviembre)**
+- Cada fotograma del vídeo se guarda en JPEG de calidad máxima en vez de PNG. Era
+  lo que más tardaba (el 81 % del montaje). Medido con imágenes de low, medium y
+  high: el vídeo final sale igual que antes.
+- No cambia ningún vídeo ya montado ni obliga a regenerar nada.
+- El precio antes de generar las imágenes, con la voz ya hecha, cuenta los planos
+  que de verdad van a salir (antes los estimaba por la duración y se pasaba).
+
 **Los errores del servidor se dicen en una línea (5 de noviembre)**
 - Si el servidor no contesta un momento (por ejemplo, mientras se actualiza),
   el aviso rojo dice «El servidor no ha contestado… vuelve a intentarlo en un

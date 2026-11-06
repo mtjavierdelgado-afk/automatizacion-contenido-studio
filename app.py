@@ -18233,6 +18233,13 @@ def _planos_previstos(ctx):
                       and not e.get("sigue_a")]
         return {"total": len(escenas), "con_imagen": len(con_imagen),
                 "origen": "el plan de este video"}
+    # CON LA VOZ YA HECHA SE CORTA DE VERDAD (rama montaje-rapido, 05-11-2026).
+    # Cortar no cuesta nada (`p6_assets.cortar`: ni modelo ni imagen) y da los
+    # planos que van a salir. La cuenta por duracion y ritmo prometio 15
+    # imagenes en la prueba completa del 04-11 y se hicieron 12: un 25 % de mas.
+    cortado = _planos_cortando_la_voz(ctx)
+    if cortado:
+        return cortado
     brief = PASOS_MODULOS.comun.leer_salida(ctx.proyecto, "brief", "brief.json",
                                             obligatorio=False) or {}
     segundos = float(brief.get("duracion_objetivo_s")
@@ -18244,6 +18251,47 @@ def _planos_previstos(ctx):
     total = max(1, int(round(segundos / media))) if segundos else 0
     return {"total": total, "con_imagen": total,
             "origen": "estimado por la duración y el ritmo"}
+
+
+#: Cortes de prueba ya hechos, por video: la clave cambia si cambia la toma de
+#: voz o los params de las imagenes. Cortar un video largo tarda un poco y el
+#: precio se pide en cada repintado de la pantalla.
+_CORTES_DE_PRUEBA = {}
+
+
+def _planos_cortando_la_voz(ctx):
+    """Los planos que saldrian cortando la voz que ya existe, sin escribir nada.
+
+    -> {"total", "con_imagen", "origen"} o None si no hay voz o no se puede.
+    Solo lee: `p6_assets.planificar` no llama a ningun modelo ni escribe el plan
+    (eso es `cortar`). Nunca tumba nada: si algo falla, se vuelve a la cuenta
+    por duracion de siempre.
+    """
+    try:
+        p6 = PASOS_MODULOS.p6_assets
+        assets = ctx.estado.params("assets") or {}
+        meta = assets.get("audio_meta") or PASOS_MODULOS.medios.salida_de(
+            ctx.proyecto, "voz", claves=("meta", "audio_meta", "marcas"),
+            patrones=(r"audio_meta\.json", r".*_meta\.json"))
+        if not meta or not os.path.exists(meta):
+            return None
+        clave = (str(ctx.proyecto.raiz), meta, os.path.getmtime(meta),
+                 json.dumps(assets, sort_keys=True, ensure_ascii=False, default=str))
+        if clave not in _CORTES_DE_PRUEBA:
+            plan = p6.planificar(ctx.proyecto, assets) or {}
+            escenas = plan.get("escenas") or []
+            if not escenas:
+                return None
+            cartelas = PASOS_MODULOS.cartelas
+            con_imagen = [e for e in escenas
+                          if not cartelas.sin_imagen(e) and not e.get("sigue_a")]
+            if len(_CORTES_DE_PRUEBA) > 64:
+                _CORTES_DE_PRUEBA.clear()
+            _CORTES_DE_PRUEBA[clave] = {"total": len(escenas), "con_imagen": len(con_imagen),
+                                        "origen": "cortando la voz de este video"}
+        return dict(_CORTES_DE_PRUEBA[clave])
+    except Exception:                                        # noqa: BLE001
+        return None
 
 
 def _carpetas_de_assets(ctx):

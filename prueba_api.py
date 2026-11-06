@@ -765,6 +765,22 @@ def probar_regrabar_y_estructura(cliente, carpeta):
           "y en 'todo' se promete ENTERO: «Regenerar Audio» ya no enseña 0 $")
     igual(coste.get("modo"), "todo", "el coste dice con qué modo se ha contado")
 
+    # montaje-rapido (05-11-2026): CON LA VOZ HECHA, EL PRECIO CORTA DE VERDAD.
+    # La prueba completa del 04-11 prometió 15 imágenes por duración y ritmo y
+    # se hicieron 12. Cortar no cuesta nada, así que se cuenta lo que saldrá.
+    import app as servidor                                    # noqa: PLC0415
+    _r, plan = cliente.get(f"/api/proyectos/{pid}/generar?tanda=video")
+    planos = ((plan or {}).get("coste") or {}).get("planos") or {}
+    igual(planos.get("origen"), "cortando la voz de este video",
+          "con la voz hecha y sin plan, los planos se cuentan cortando la voz")
+    ctx_corte = servidor.Contexto(raiz)
+    cortado = servidor.PASOS_MODULOS.p6_assets.planificar(
+        ctx_corte.proyecto, ctx_corte.estado.params("assets") or {})
+    igual(planos.get("total"), len(cortado.get("escenas") or []),
+          "y salen los mismos planos que cortará la tanda")
+    ok(not os.path.exists(os.path.join(raiz, "pasos", "assets", "trabajo", "plan.json")),
+       "contar no escribe el plan (solo lo calcula)")
+
     # DOS SECCIONES: la toma simulada sale de una sola, y lo que se prueba
     # es justo lo que pasa entre secciones. Se parte su meta en el disco.
     meta, ruta_meta = _meta_activa(carpeta, pid, cliente)

@@ -10,6 +10,15 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Una cruz o un check en las escenas de la Parrilla (5 de noviembre)**
+- En el guion de la Parrilla, una ESCENA puede llevar **«Marca: ✗»** (lo que no
+  se hace) o **«Marca: ✓»** (lo que sí), después de «ESCENA n» y antes de
+  «Visual». Al crear el vídeo, sus planos llevan una cruz roja o un check verde
+  arriba en una esquina, que salta con la primera palabra.
+- Se mueve, se cambia de tamaño o se quita en «✨ Elementos de esta imagen». Es
+  gratis: no cambia ninguna imagen. Sale cuando las imágenes siguen el guion
+  («Imágenes: guion»). Sin «Marca:», todo sale como siempre.
+
 **Los errores del servidor se dicen en una línea (5 de noviembre)**
 - Si el servidor no contesta un momento (por ejemplo, mientras se actualiza),
   el aviso rojo dice «El servidor no ha contestado… vuelve a intentarlo en un

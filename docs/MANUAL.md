@@ -381,6 +381,12 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   estado. Y en los vídeos creados desde la Parrilla, una línea «Visual:» **sin
   cámara** ya no recibe un encuadre al azar (un retrato, unas manos): la línea
   dice el plano.
+  **Cruz o check desde la Parrilla:** con «Imágenes: guion», una ESCENA puede
+  traer **«Marca: ✗»** (lo que no se hace) o **«Marca: ✓»** (lo que sí), tras
+  «ESCENA n» y antes de «Visual». Sus planos llevan una cruz roja o un check
+  verde arriba a la derecha, que salta con la primera palabra; en «✨ Elementos
+  de esta imagen» se mueve, se cambia de tamaño o se quita (y quitada no
+  vuelve). No toca ninguna imagen.
 - **El reparto y los sitios** (en un vídeo hecho): «Pedido para el reparto de
   sitios» es una frase para Claude al repartir; «Volver a repartir con este
   pedido» no paga imágenes.

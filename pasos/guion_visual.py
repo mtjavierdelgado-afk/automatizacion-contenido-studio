@@ -117,6 +117,8 @@ def _plano(crudo, bloques_validos=None):
     estado = _etiqueta(crudo.get("estado"))
     if estado:
         salida["estado"] = estado
+    if _marca(crudo.get("marca")):
+        salida["marca"] = _marca(crudo.get("marca"))   # la cruz o el check (parrilla-marca)
     gente = crudo.get("personajes")
     if isinstance(gente, list):
         gente = [_texto(x, 60) for x in gente if _texto(x, 60)][:8]
@@ -197,6 +199,16 @@ def normalizar_estados(crudo):
     return salida
 
 
+#: «Marca:» de una escena de la Parrilla (rama parrilla-marca, 05-11): "no" (✗,
+#: lo que no se hace) o "si" (✓). Viaja con sus lineas «Visual:» y la lee el
+#: montaje (`elementos_video.de_marca`); NUNCA entra en el prompt de una imagen.
+MARCAS = ("no", "si")
+
+
+def _marca(valor):
+    return valor if valor in MARCAS else ""
+
+
 def normalizar_visuales(crudo):
     """Las escenas de la Parrilla: [{voz, visual: [lineas]}]."""
     if not isinstance(crudo, list):
@@ -212,13 +224,16 @@ def normalizar_visuales(crudo):
             estado = _etiqueta(escena.get("estado"))
             if estado:
                 limpia["estado"] = estado          # «Estado:» de la escena (parrilla-estados)
+            if _marca(escena.get("marca")):
+                limpia["marca"] = _marca(escena.get("marca"))   # «Marca:» (parrilla-marca)
             salida.append(limpia)
     return salida
 
 
 def visuales_de_parrilla(escenas):
     """Las escenas de un guion de la Parrilla que traen «Visual:». -> [{voz, visual}]"""
-    return normalizar_visuales([{"voz": e.get("voz"), "visual": e.get("visual"), "estado": e.get("estado")}
+    return normalizar_visuales([{"voz": e.get("voz"), "visual": e.get("visual"), "estado": e.get("estado"),
+                                 "marca": e.get("marca")}
                                 for e in (escenas or []) if isinstance(e, dict)])
 
 
@@ -301,10 +316,13 @@ def casar(visuales, bloques):
                           f"va con {elegido}; revísalo")
         ultimo = elegido
         estado = _etiqueta(escena.get("estado"))
+        marca = _marca(escena.get("marca"))
         for linea in escena.get("visual") or []:
             plano = {"bloque": elegido, "visual": linea}
             if estado:
                 plano["estado"] = estado           # el estado de su escena (parrilla-estados)
+            if marca:
+                plano["marca"] = marca             # la cruz o el check de su escena (parrilla-marca)
             planos.append(plano)
     return planos, avisos
 

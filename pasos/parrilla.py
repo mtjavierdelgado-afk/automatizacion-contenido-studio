@@ -167,7 +167,8 @@ _REGLAS = """REGLAS GENERALES
 9. "Tipo de relato" solo si el original pide una forma concreta de contarlo en imágenes: "espacio_que_cambia (objeto | acabados | estado | hora)" si es UN sitio que se ve siempre igual y en el que solo cambia lo que dice la voz (un antes y después, tres paletas, una sala vacía → montada); "recorrido" si son varios ambientes de un mismo lugar; "escenario_y_apoyos" si es un sitio con otros secundarios; "producto" si el producto manda y el fondo no cambia; "clase" si es una clase. Si no lo pide, quita la línea.
 10. "Imágenes: guion" solo si el original pide que las imágenes sigan las líneas «Visual:» y no lo que dice la voz (un guion de plano a plano, con su cámara); entonces cada línea «Visual:» es una imagen fija concreta, con quién, dónde, qué hace y desde dónde se ve. Si no lo pide, quita la línea.
 11. Con "Tipo de relato: espacio_que_cambia" y "Imágenes: guion", pon en cada ESCENA una línea "Estado:" con la etiqueta del estado del sitio en esa escena (corta, en minúsculas y sin espacios: antes, despues, paleta_1…) y la sección ESTADOS DEL ESPACIO con lo que cambia en cada estado respecto a la imagen base, EN INGLÉS y acumulado (el «después» dice todo lo que cambió, no solo lo último); el estado que es la base tal cual se deja vacío. Si no, quita las líneas «Estado:» y esa sección.
-12. PORTADA solo si el original habla de la portada o la miniatura, o si te la piden: "Texto" son las 2–5 palabras grandes que irán encima (en el idioma del vídeo, sin emojis) e "Imagen" describe la imagen de fondo en una frase concreta (quién o qué sale, dónde, el encuadre y la luz), SIN letras, logotipos ni marcas de agua: el texto lo pone el Studio aparte. Si no, quita esa sección."""
+12. PORTADA solo si el original habla de la portada o la miniatura, o si te la piden: "Texto" son las 2–5 palabras grandes que irán encima (en el idioma del vídeo, sin emojis) e "Imagen" describe la imagen de fondo en una frase concreta (quién o qué sale, dónde, el encuadre y la luz), SIN letras, logotipos ni marcas de agua: el texto lo pone el Studio aparte. Si no, quita esa sección.
+13. "Marca" solo si el original enseña en una escena lo que NO se debe hacer o lo que SÍ (un error y su solución, un antes y después, lo correcto frente a lo incorrecto): pon en esa ESCENA, después de «ESCENA n» y antes de «Visual», la línea "Marca: ✗" (lo que no se hace) o "Marca: ✓" (lo que sí). El Studio pone en sus planos una cruz roja o un check verde. Si no, quita la línea."""
 
 _AJUSTE_RED = """AJUSTE POR RED (en "adaptar" aplícalo; en "exacto" solo avisa con ⚠ si algo no encaja)
 - TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.
@@ -202,6 +203,7 @@ ESTADOS DEL ESPACIO (solo con espacio_que_cambia e «Imágenes: guion»; si no, 
 
 ESCENA 1 (tiempo, si lo hay)
 Estado: … (solo con ESTADOS DEL ESPACIO; si no, quita la línea)
+Marca: ✗ o ✓ (solo si la escena enseña lo que no se hace o lo que sí; si no, quita la línea)
 Visual: …
 Voz: «…»
 Texto en pantalla: …
@@ -537,7 +539,7 @@ def _uno_de(texto, opciones):
 
 
 def _nueva_escena(n, tiempo=""):
-    return {"n": n, "tiempo": tiempo, "visual": [], "voz": "", "texto_pantalla": "", "estado": ""}
+    return {"n": n, "tiempo": tiempo, "visual": [], "voz": "", "texto_pantalla": "", "estado": "", "marca": ""}
 
 
 _RE_ESCENA = re.compile(r"^ESCENA\s+(\d+)\s*(?:\((.*)\))?\s*[:.]?\s*(.*)$", re.I)
@@ -642,13 +644,21 @@ def leer_guion(texto):
                 g[clave] = valor
             continue
         if seccion == "escena":
-            m = re.match(r"^(Visual|Voz|Texto en pantalla|Estado)\s*:\s*(.*)$", linea, re.I)
+            m = re.match(r"^(Visual|Voz|Texto en pantalla|Estado|Marca)\s*:\s*(.*)$", linea, re.I)
+            if m and m.group(1).lower() == "marca" and marca_de_escena(m.group(2)) is None:
+                # «Marca: no mostrar el logo»: no es la cruz ni el check, es
+                # texto (la marca comercial, o la voz que sigue): como siempre
+                m = None
             if m:
                 clave_escena = m.group(1).lower()
                 valor = m.group(2).strip()
                 if clave_escena == "estado":
                     # rama parrilla-estados: el estado del sitio en esta escena
                     escena["estado"] = _etiqueta_estado(valor)
+                    clave_escena = ""
+                elif clave_escena == "marca":
+                    # rama parrilla-marca (05-11): ✗ lo que no se hace, ✓ lo que sí
+                    escena["marca"] = marca_de_escena(valor)
                     clave_escena = ""
                 elif clave_escena == "visual":
                     escena["visual"].append(valor)
@@ -776,6 +786,36 @@ def _cambio_de_estado(valor):
     """El cambio de un estado tal cual, sin corchetes. Qué es «la base tal cual»
     lo decide `guion_visual.sin_cambio`, el mismo para todos (revisión 03-11)."""
     return _sin_relleno(re.sub(r"^\[|\]$", "", str(valor or "").strip()).strip())
+
+
+#: «Marca:» de una escena (rama parrilla-marca, 05-11): ✗ = lo que NO se hace,
+#: ✓ = lo que sí. Las palabras valen también, por si la IA no escribe el signo.
+_MARCA_NO = ("✗", "✘", "❌", "✖", "×", "❎")
+_MARCA_SI = ("✓", "✔", "✅", "☑", "☑️")
+_PALABRAS_NO = ("x", "no", "mal", "incorrecto", "incorrecta", "error")
+_PALABRAS_SI = ("si", "sí", "bien", "correcto", "correcta", "ok", "v")
+
+
+def marca_de_escena(valor):
+    """«✗», «❌ mal», «✓ (bien)», «no» -> "no" | "si"; lo dudoso -> "".
+
+    -> None si la línea NO es una marca: «Marca: no mostrar el logo» habla de
+    la marca comercial (o sigue la voz), y no debe pintar una cruz. Con signo
+    siempre es una marca; sin signo, solo si la palabra va SOLA. El hueco de la
+    plantilla («✗ o ✓») y las dos a la vez no son ninguna."""
+    t = re.sub(r"\(.*?\)", " ", str(valor or "")).strip()
+    no = any(c in t for c in _MARCA_NO)
+    si = any(c in t for c in _MARCA_SI)
+    if not (no or si):
+        palabras = re.findall(r"[a-záéíóúñ]+", t.lower())
+        if len(palabras) != 1 or re.sub(r"[a-záéíóúñ\s.!¡]", "", t.lower()):
+            return None if t.strip(" .…") else ""
+        no, si = palabras[0] in _PALABRAS_NO, palabras[0] in _PALABRAS_SI
+        if not (no or si):
+            return None
+    if no == si:
+        return ""
+    return "no" if no else "si"
 
 
 def _etiqueta_estado(valor):
@@ -1002,7 +1042,9 @@ def encargo_de(guion, indice=0):
     if g.get("imagenes_aviso"):
         avisos.append(g["imagenes_aviso"])
     visuales = [dict({"voz": _sin_comillas(e.get("voz")), "visual": list(e.get("visual") or [])},
-                     **({"estado": e["estado"]} if e.get("estado") else {}))
+                     **({"estado": e["estado"]} if e.get("estado") else {}),
+                     # la cruz o el check de la escena (rama parrilla-marca)
+                     **({"marca": e["marca"]} if e.get("marca") in ("si", "no") else {}))
                 for e in g.get("escenas") or [] if e.get("visual")]
     # LOS ESTADOS DEL ESPACIO (rama parrilla-estados, 03-11): viajan con las
     # lineas «Visual:» y, en un espacio que cambia, mandan sobre los que deduce
@@ -1028,6 +1070,12 @@ def encargo_de(guion, indice=0):
         extra["portada"] = portada
     elif portada.get("texto"):
         avisos.append("la sección PORTADA trae texto pero no dice qué imagen: no se propone portada")
+    if any(e.get("marca") for e in g.get("escenas") or []) and g.get("imagenes") != "guion":
+        # la marca va en las lineas «Visual:», que solo mandan en «Imágenes: guion»
+        avisos.append("el guion trae «Marca: ✗/✓», pero la cruz y el check solo salen si las "
+                      "imágenes siguen el guion (elige «Lo que dice el guion» en el Encargo)")
+    if any(e.get("marca") and not e.get("visual") for e in g.get("escenas") or []):
+        avisos.append("una escena trae «Marca:» sin líneas «Visual:»: esa marca no sale")
     if visuales:
         extra["visuales"] = visuales
         if g.get("imagenes") != "guion":
@@ -1294,6 +1342,9 @@ def leer(raiz, cid, gid):
     datos = _leer(raiz, cid)
     m, g = _guion(datos, gid)
     leido = g.get("leido") or leer_guion(g.get("texto"))
+    if any("marca" not in e for e in leido.get("escenas") or []):
+        # leído antes de la rama parrilla-marca: una «Marca:» se habría perdido
+        leido = leer_guion(g.get("texto"))
     encargos = [encargo_de(leido, i) for i in range(max(1, len(leido.get("encargos") or [])))]
     return dict(_resumen(g), matriz=m["id"], matriz_nombre=m.get("nombre") or "",
                 texto=g.get("texto") or "", leido=leido, encargo=encargos,
@@ -1460,7 +1511,8 @@ def pasar_al_encargo(raiz, cid, gid, indice=0, estilo=""):
         datos = _leer(raiz, cid)
         _m, g = _guion(datos, gid)
         leido = g.get("leido") or leer_guion(g.get("texto"))
-        if "espacio_fijo" not in leido or "estados" not in leido or "portada" not in leido:
+        if "espacio_fijo" not in leido or "estados" not in leido or "portada" not in leido \
+                or any("marca" not in e for e in leido.get("escenas") or []):
             # leído antes de que existiera ESPACIO FIJO: se lee otra vez
             leido = leer_guion(g.get("texto"))
         n = len(leido.get("encargos") or [])

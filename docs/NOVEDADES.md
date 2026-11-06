@@ -14,7 +14,8 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 - En **⚙ Ajustes del proyecto** hay una sección nueva, **Kit de marca**: 5 colores, la letra de títulos y de texto, el logo para fondo oscuro, el estilo de imagen y las reglas de uso. Es de cada proyecto, así que sirve para cualquier cliente. Los vídeos no cambian.
 - En cada proyecto hay un botón **+ Nueva gráfica**: 14 diseños que se adaptan a 8 tamaños (Instagram, Facebook, LinkedIn, X, Threads, TikTok, Pinterest, historias). Escribes el texto, subes una imagen o usas una de un vídeo, eliges el diseño y lo descargas en PNG o JPG.
-- En cada pieza puedes cambiar los colores y la letra sin tocar el kit.
+- En cada pieza puedes cambiar los colores y la letra sin tocar el kit, y cada texto: arrastrarlo sobre la vista, su tamaño, negrita, cursiva, subrayado, color, fondo u ocultarlo. También eliges qué parte de la foto se ve y cuánto se acerca.
+- La vista se repinta con **Aplicar cambios**, no con cada letra; **Ver lo que tapa la red** enseña las zonas que tapa o recorta cada red.
 - El texto queda fuera de lo que tapa o recorta cada red; si no cabe, la letra baja sola y, si aun así no cabe, te avisa. El Studio no gasta nada: no se usa ninguna IA.
 **Títulos de YouTube y Facebook que dan ganas de abrir (4 de noviembre)**
 - **«🎯 Dame 4 títulos»**, debajo del título de YouTube y de Facebook en Publicar:

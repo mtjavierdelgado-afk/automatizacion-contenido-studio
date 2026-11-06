@@ -5792,7 +5792,28 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .cuerpo-grafica { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr) minmax(190px, 300px); gap: 14px; }
 .form-graf, .lado-grafica { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
 .centro-grafica { min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; }
-.vista-graf { flex: 1 1 0; min-height: 0; max-width: 100%; object-fit: contain; background: var(--lienzo); border-radius: 8px; }
+.barra-vista { flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
+.marco-graf { position: relative; flex: 1 1 0; min-height: 0; max-width: 100%; background: var(--lienzo); border-radius: 8px; overflow: hidden; }
+.marco-graf.ancho { flex: 0 0 auto; width: 100%; }
+.vista-graf { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.cajas-graf, .zonas-graf { position: absolute; inset: 0; }
+.zonas-graf { pointer-events: none; }
+.zona-graf { position: absolute; background: repeating-linear-gradient(45deg, rgba(255, 40, 70, .5) 0 6px, rgba(255, 40, 70, .2) 6px 12px); }
+.zona-graf.top { top: 0; left: 0; right: 0; }
+.zona-graf.bottom { bottom: 0; left: 0; right: 0; }
+.zona-graf.left { top: 0; bottom: 0; left: 0; }
+.zona-graf.right { top: 0; bottom: 0; right: 0; }
+.caja-graf { position: absolute; min-width: 12px; min-height: 12px; padding: 0; background: transparent; border: 1px dashed transparent; border-radius: 2px; cursor: move; touch-action: none; }
+.caja-graf:hover { border-color: var(--blanco); }
+.caja-graf.activa { border: 2px solid var(--acento); }
+.estilo-graf, .encuadre-graf { display: flex; flex-direction: column; gap: 8px; }
+.estilo-graf:empty, .encuadre-graf:empty { display: none; }
+.titulo-graf { font-size: 13px; font-weight: 600; }
+.botones-estilo { flex-wrap: wrap; gap: 4px; }
+.botones-estilo .activo { border-color: var(--acento); color: var(--acento); }
+.lienzo-encuadre { position: relative; line-height: 0; touch-action: none; cursor: move; overflow: hidden; border-radius: 4px; }
+.lienzo-encuadre img { width: 100%; display: block; opacity: .55; pointer-events: none; }
+.ventana-graf { position: absolute; border: 2px solid var(--blanco); box-shadow: 0 0 0 1px var(--negro); background: rgba(255, 255, 255, .18); pointer-events: none; }
 .aviso-graf { color: var(--aviso); font-size: 13px; }
 .rejilla-disenos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .elige-diseno { display: flex; flex-direction: column; gap: 4px; padding: 4px; background: var(--hueco); border: 2px solid transparent; border-radius: 8px; font-size: 12px; color: var(--texto); text-align: left; }
@@ -5807,5 +5828,6 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   .cuerpo-grafica { display: flex; flex-direction: column; flex: 0 0 auto; }
   .form-graf, .lado-grafica { overflow: visible; }
   .centro-grafica { order: -1; }
-  .vista-graf { flex: none; height: 56vh; }
+  .marco-graf { flex: none; height: 56vh; }
+  .marco-graf.ancho { height: auto; }
 }

@@ -1035,7 +1035,7 @@ Claude la usa en todo lo que escribe para él.
 2. En el proyecto, pulsa **+ Nueva gráfica**.
 3. Elige **Red y tamaño**, escribe los textos y añade una imagen: subida o de un vídeo de ese proyecto.
 4. A la derecha elige uno de los 14 diseños. La vista se actualiza sola.
-5. Si quieres, cambia los colores o la letra solo de esa pieza.
+5. Si quieres, ajusta esa pieza: arrastra los textos sobre la vista, cambia su estilo en **Estilo del texto**, elige la parte de la foto en **Qué parte de la foto se ve**, y cambia colores o letra. Pulsa **Aplicar cambios** para verlo. Lo arrastrado vale para ese diseño y tamaño: al cambiarlos, cada texto vuelve a su sitio.
 6. Pulsa **Guardar** y descárgala en PNG o JPG. Para TikTok, usa el JPG.
 
 Las piezas quedan en la sección **Gráficas** del proyecto, donde se pueden abrir, duplicar o borrar.

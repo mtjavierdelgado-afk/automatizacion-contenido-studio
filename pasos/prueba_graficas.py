@@ -117,6 +117,33 @@ def en_el_navegador(imagen):
 
 
 def las_piezas(raiz):
+    print("retoques del texto y de la foto")
+    pieza = G.limpiar_pieza({"plantilla": 2, "capas": {"titulo": {"x": 500, "escala": 99, "negrita": True, "color": "#ff0000"}, "raro": {"x": 1}},
+                             "encuadre": {"x": 900, "zoom": 2}})
+    ok(pieza["capas"]["titulo"]["x"] == 100 and pieza["capas"]["titulo"]["escala"] == 3 and "raro" not in pieza["capas"], "los retoques se acotan")
+    ok(pieza["encuadre"] == {"x": 100, "y": 50, "zoom": 2}, "el encuadre se acota")
+    ok(falla(G.limpiar_pieza, {"capas": {"titulo": {"color": "red;background:url(x)"}}}), "un color raro en el texto se rechaza")
+    doc, *_ = G.html_de({"plantilla": 2, "textos": TEXTOS, "capas": {"titulo": {"x": 5, "y": -4, "escala": 1.5, "negrita": True, "subrayado": True, "fondo": "#112233", "color": "#FFFFFF"}}, "encuadre": {"x": 20, "y": 80, "zoom": 2}})
+    ok("translate:5.0cqw -4.0cqh" in doc and "background:#112233" in doc and "underline" in doc and "*1.5)" in doc, "los retoques llegan a la página")
+    ok("object-view-box:inset(40.000% 40.000% 10.000% 10.000%)" in doc, "el encuadre recorta la parte pedida")
+    pincel = G.Pincel()
+    try:
+        base, _, _ = G.pintar(pincel, {"plantilla": 2, "textos": TEXTOS, "capas": {"titulo": {"x": 0}}}, None, G.ruta_imagen(raiz, "cli", G.guardar_imagen(raiz, "cli", imagen_de_prueba())))
+        pincel.evaluar(G._CAJAS)
+        _, _, _ = G.pintar(pincel, {"plantilla": 2, "textos": TEXTOS}, None, None)
+        antes = pincel.evaluar(G._CAJAS)["cajas"]["titulo"]
+        _, avisos, _ = G.pintar(pincel, {"plantilla": 2, "textos": TEXTOS, "capas": {"titulo": {"x": 10, "y": 500}}}, None, None)
+        despues = pincel.evaluar(G._CAJAS)["cajas"]["titulo"]
+        ok(abs(despues["x"] - antes["x"] - 10) < 0.5, "arrastrar mueve el texto en la pieza")
+        ok(any("tapa la red" in a for a in avisos), "y si cae fuera de lo seguro, avisa")
+        _, _, _ = G.pintar(pincel, {"plantilla": 2, "textos": TEXTOS, "capas": {"titulo": {"oculto": True}}}, None, None)
+        ok("titulo" not in pincel.evaluar(G._CAJAS)["cajas"], "ocultar lo quita")
+        _, _, _ = G.pintar(pincel, {"plantilla": 1, "textos": TEXTOS, "capas": {"titulo": {"escala": 1.5}}}, None, None)
+        grande = pincel.evaluar(G._CAJAS)["cajas"]["titulo"]
+        _, _, _ = G.pintar(pincel, {"plantilla": 1, "textos": TEXTOS}, None, None)
+        ok(grande["h"] > pincel.evaluar(G._CAJAS)["cajas"]["titulo"]["h"], "el tamaño cambia de verdad")
+    finally:
+        pincel.cerrar()
     print("imágenes y piezas")
     ok(falla(G.guardar_imagen, raiz, "cli", b"esto no es una imagen"), "un fichero que no es imagen se rechaza")
     nombre = G.guardar_imagen(raiz, "cli", imagen_de_prueba("RGBA"))

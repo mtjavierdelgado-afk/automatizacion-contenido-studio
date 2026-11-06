@@ -93,7 +93,10 @@ def prueba_parrilla():
                             ("no", "no"), ("✓", "si"), ("✔️", "si"), ("✅ (bien)", "si"), ("sí", "si"),
                             ("bien", "si"), ("✗ o ✓ (solo si la escena enseña lo que no se hace o lo que sí; "
                                              "si no, quita la línea)", ""),
-                            ("✗ | ✓", ""), ("…", ""), ("", ""), ("quizá", ""), ("xbox", "")):
+                            ("✗ | ✓", ""), ("…", ""), ("", ""), ("Sí.", "si"),
+                            # lo que NO es una marca (revisión del 05-11): la marca comercial
+                            ("quizá", None), ("xbox", None), ("no mostrar el logo", None),
+                            ("sí, el logo arriba", None), ("logo de SUYU", None)):
         igual(P.marca_de_escena(valor), esperado, f"«{valor[:30]}» -> «{esperado}»")
     g = P.leer_guion(GUION)
     igual([e.get("marca") for e in g["escenas"]], ["no", "si", ""], "cada escena con su marca")
@@ -101,6 +104,14 @@ def prueba_parrilla():
     igual(g["escenas"][0]["voz"], "«Así no se cuelga un cuadro.»", "y la voz, igual")
     ok(g["marca"] == {"mostrar": "", "evitar": "", "otras": ""} or not any(g["marca"].values()),
        "«Marca:» de una escena no se confunde con MARCA DEL CLIENTE")
+    seccion("   lo que encontró la revisión del 05-11")
+    sigue = P.leer_guion(GUION.replace("Voz: «Así no se cuelga un cuadro.»",
+                                       "Voz: «Así no se cuelga un cuadro,\nMarca: no te olvides del taco.»"))
+    igual((sigue["escenas"][0]["marca"], sigue["escenas"][0]["voz"]),
+          ("no", "«Así no se cuelga un cuadro, Marca: no te olvides del taco.»"),
+          "una línea de la voz que empieza por «Marca:» sigue en la voz y no cambia la marca")
+    comercial = P.leer_guion(GUION.replace("Marca: ✗", "Marca: no mostrar el logo"))
+    igual(comercial["escenas"][0]["marca"], "", "«Marca: no mostrar el logo» no pinta una cruz")
     con_estado = P.leer_guion(GUION.replace("ESCENA 1\nMarca: ✗", "ESCENA 1\nEstado: antes\nMarca: ✗"))
     igual((con_estado["escenas"][0]["estado"], con_estado["escenas"][0]["marca"]), ("antes", "no"),
           "con «Estado:» y «Marca:» a la vez, las dos")

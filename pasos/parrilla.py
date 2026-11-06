@@ -645,6 +645,10 @@ def leer_guion(texto):
             continue
         if seccion == "escena":
             m = re.match(r"^(Visual|Voz|Texto en pantalla|Estado|Marca)\s*:\s*(.*)$", linea, re.I)
+            if m and m.group(1).lower() == "marca" and marca_de_escena(m.group(2)) is None:
+                # «Marca: no mostrar el logo»: no es la cruz ni el check, es
+                # texto (la marca comercial, o la voz que sigue): como siempre
+                m = None
             if m:
                 clave_escena = m.group(1).lower()
                 valor = m.group(2).strip()
@@ -793,14 +797,22 @@ _PALABRAS_SI = ("si", "sí", "bien", "correcto", "correcta", "ok", "v")
 
 
 def marca_de_escena(valor):
-    """«✗», «❌ mal», «✓ (bien)» -> "no" | "si" | "". Lo dudoso (el hueco de la
-    plantilla «✗ o ✓», las dos a la vez, otra cosa) no es marca."""
+    """«✗», «❌ mal», «✓ (bien)», «no» -> "no" | "si"; lo dudoso -> "".
+
+    -> None si la línea NO es una marca: «Marca: no mostrar el logo» habla de
+    la marca comercial (o sigue la voz), y no debe pintar una cruz. Con signo
+    siempre es una marca; sin signo, solo si la palabra va SOLA. El hueco de la
+    plantilla («✗ o ✓») y las dos a la vez no son ninguna."""
     t = re.sub(r"\(.*?\)", " ", str(valor or "")).strip()
     no = any(c in t for c in _MARCA_NO)
     si = any(c in t for c in _MARCA_SI)
     if not (no or si):
-        primera = (re.findall(r"[a-záéíóúñ]+", t.lower()) or [""])[0]
-        no, si = primera in _PALABRAS_NO, primera in _PALABRAS_SI
+        palabras = re.findall(r"[a-záéíóúñ]+", t.lower())
+        if len(palabras) != 1 or re.sub(r"[a-záéíóúñ\s.!¡]", "", t.lower()):
+            return None if t.strip(" .…") else ""
+        no, si = palabras[0] in _PALABRAS_NO, palabras[0] in _PALABRAS_SI
+        if not (no or si):
+            return None
     if no == si:
         return ""
     return "no" if no else "si"

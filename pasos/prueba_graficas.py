@@ -136,6 +136,16 @@ def las_piezas(raiz):
         despues = pincel.evaluar(G._CAJAS)["cajas"]["titulo"]
         ok(abs(despues["x"] - antes["x"] - 10) < 0.5, "arrastrar mueve el texto en la pieza")
         ok(any("tapa la red" in a for a in avisos), "y si cae fuera de lo seguro, avisa")
+        largo = dict(TEXTOS, titulo="palabra " * 11)
+        _, _, _ = G.pintar(pincel, {"plantilla": 1, "formato": "c11", "textos": largo}, None, None)
+        reducida = pincel.evaluar("getComputedStyle(document.documentElement).getPropertyValue('--esc')")
+        _, _, _ = G.pintar(pincel, {"plantilla": 1, "formato": "c11", "textos": largo, "capas": {"marca": {"x": 2}}}, None, None)
+        ok(reducida == pincel.evaluar("getComputedStyle(document.documentElement).getPropertyValue('--esc')") and float(reducida) < 1,
+           "mover otro texto no le quita el ajuste al titular")
+        _, _, _ = G.pintar(pincel, {"plantilla": 7, "textos": TEXTOS, "capas": {"oferta_txt": {"escala": 1.6}}}, None, None)
+        ok("1.6" in pincel.evaluar("document.querySelector('[data-e=oferta_txt]').getAttribute('style')"), "el texto de la oferta también cambia de tamaño")
+        ok(G.limpiar_pieza({"capas": {"sello": {"x": 3}}})["capas"]["sello"]["x"] == 3, "el sello entero se puede mover")
+        ok(G.limpiar_pieza({"capas": {"titulo": {"x": 10 ** 400}}})["capas"].get("titulo", {}).get("x", 0) == 0, "un número enorme no rompe nada")
         _, _, _ = G.pintar(pincel, {"plantilla": 2, "textos": TEXTOS, "capas": {"titulo": {"oculto": True}}}, None, None)
         ok("titulo" not in pincel.evaluar(G._CAJAS)["cajas"], "ocultar lo quita")
         _, _, _ = G.pintar(pincel, {"plantilla": 1, "textos": TEXTOS, "capas": {"titulo": {"escala": 1.5}}}, None, None)

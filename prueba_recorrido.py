@@ -10073,6 +10073,8 @@ def graficas(navegador, datos):
     ok(pg.esperar(".elige-diseno.activo", "2 · Foto a sangre", 5), "con el diseño marcado")
     pg.p.locator(".elige-diseno", has_text="7 · Oferta con sello").click()
     ok(pg.esperar("[data-campo-graf=oferta]", segundos=5), "cambiar de diseño pide sus campos")
+    medida = pg.p.locator(".marco-graf").bounding_box()
+    ok(abs(medida["width"] / medida["height"] - 1080 / 1350) < 0.02, f"la vista no se deforma ({medida['width']}x{medida['height']})")
     ok(pg.p.input_value("[data-campo-graf=titulo]") == "Sabor que te hace volver", "y conserva el texto")
     png_foto = _png_dibujada(os.path.join(datos["base"], "foto_grafica.png"), (40, 120, 200))
     pg.p.set_input_files("#imagen-grafica", png_foto)

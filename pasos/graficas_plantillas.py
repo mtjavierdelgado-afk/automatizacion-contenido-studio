@@ -96,8 +96,8 @@ PLANTILLAS = {
     </div>
     <div class="t" data-e="cta" style="background: var(--d); color: var(--l); padding: 1.8cqmin 3.4cqmin; font-weight: 800; font-size: calc(var(--s-c)*var(--esc)); border-radius: 1cqmin">«cta»</div>
   </div>
-  <div class="t" data-e="oferta" style="position: absolute; right: var(--dR); top: var(--dT); width: 34cqmin; height: 34cqmin; border-radius: 50%; background: var(--a); color: var(--ta); display: flex; flex-direction: column; align-items: center; justify-content: center; transform: rotate(8deg); text-align: center">
-    <div style="font-family: var(--ft, 'Anton'), sans-serif; font-size: 10cqmin; line-height: 1">«oferta»</div>
+  <div class="t" data-e="sello" style="position: absolute; right: var(--dR); top: var(--dT); width: 34cqmin; height: 34cqmin; border-radius: 50%; background: var(--a); color: var(--ta); display: flex; flex-direction: column; align-items: center; justify-content: center; transform: rotate(8deg); text-align: center">
+    <div data-e="oferta" style="font-family: var(--ft, 'Anton'), sans-serif; font-size: 10cqmin; line-height: 1">«oferta»</div>
     <div data-e="oferta_txt" style="font-weight: 700; font-size: 2.8cqmin; margin-top: 1cqmin">«ofertaTxt»</div>
   </div>
 </div>

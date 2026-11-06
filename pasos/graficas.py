@@ -114,6 +114,8 @@ CAMPOS = {
     "i1": ("Paso 1", 50), "i2": ("Paso 2", 50), "i3": ("Paso 3", 50),
     "cita": ("Testimonio", 180), "autor": ("Quién lo dice", 50),
 }
+#: Lo que se mueve y se retoca sin ser un campo de texto: el sello de la oferta.
+CAPAS_EXTRA = {"sello": "Sello entero"}
 #: Los colores de partida cuando el cliente aun no tiene kit.
 COLORES_DEFECTO = {"principal": "#5B2EFF", "secundario": "#FFD60A", "acento": "#FF2E7E",
                    "oscuro": "#120A33", "claro": "#F6F3FF"}
@@ -462,7 +464,7 @@ def limpiar_pieza(datos):
 def _numero(valor, minimo, maximo, defecto):
     try:
         numero = float(valor)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return defecto
     if numero != numero:                                    # NaN
         return defecto
@@ -478,7 +480,7 @@ def _limpiar_capas(valor):
         raise ErrorGraficas("los retoques del texto no tienen la forma esperada")
     salida = {}
     for campo, capa in valor.items():
-        if campo not in CAMPOS or not isinstance(capa, dict):
+        if (campo not in CAMPOS and campo not in CAPAS_EXTRA) or not isinstance(capa, dict):
             continue
         limpia = {}
         for eje in ("x", "y"):
@@ -556,7 +558,7 @@ def _aplicar_tamanos(cuerpo, capas):
             if "font-size:" in etiqueta:
                 return re.sub(r"font-size: ([^;\"]+(?:\([^\"]*?\))?)", lambda f: f"font-size: calc(({f.group(1)})*{esc})", etiqueta, count=1)
             return etiqueta.replace('style="', f'style="zoom: {esc}; ', 1)
-        cuerpo = re.sub(rf'<div class="t" data-e="{campo}" style="[^"]*">', retocar, cuerpo)
+        cuerpo = re.sub(rf'<div (?:class="t" )?data-e="{campo}" style="[^"]*">', retocar, cuerpo)
     return cuerpo
 
 
@@ -721,9 +723,9 @@ class Pincel:
 
 
 _MEDIR = """(() => {
-  const W = innerWidth, H = innerHeight, m = %s;
+  const W = innerWidth, H = innerHeight, m = %s, ignorar = %s;
   const seg = {l: m[3] / 100 * W - 1, r: W - m[1] / 100 * W + 1, t: m[0] / 100 * H - 1, b: H - m[2] / 100 * H + 1};
-  const cajas = [...document.querySelectorAll('.t')].filter(e => (e.textContent || e.querySelector('img')) && e.getClientRects().length);
+  const cajas = [...document.querySelectorAll('.t')].filter(e => (e.textContent || e.querySelector('img')) && e.getClientRects().length && !ignorar.includes(e.dataset.e));
   const fuera = [], choca = [], rect = [];
   for (const e of cajas) {
     const r = document.createRange(); r.selectNodeContents(e);
@@ -758,20 +760,23 @@ _CAJAS = """(() => {
 })()"""
 
 
-def _ajustar(pincel, margenes, retocada=False):
+def _ajustar(pincel, margenes, retocados=()):
     """Baja la letra hasta que el texto cabe y queda fuera de lo que tapa la red.
-    Con textos retocados a mano solo mide: manda lo que la persona ha decidido."""
-    expresion = _MEDIR % json.dumps(list(margenes))
-    if retocada:
-        return 1.0, pincel.evaluar(expresion) or {"fuera": [], "choca": []}
+    Lo que se ha movido o cambiado de tamano a mano no cuenta para bajarla: manda
+    lo que la persona ha decidido. La medida final, con todo, es la que avisa."""
+    margen = json.dumps(list(margenes))
+    expresion = _MEDIR % (margen, json.dumps(list(retocados)))
     escala = 1.0
     while True:
         medida = pincel.evaluar(expresion) or {"fuera": [], "choca": []}
         if (not medida["fuera"] and not medida["choca"]) or escala <= ESCALA_MINIMA:
-            return escala, medida
+            break
         escala = round(escala - 0.05, 2)
         pincel.evaluar(f"document.documentElement.style.setProperty('--esc','{escala}');"
                        "document.fonts.ready.then(()=>true)")
+    if retocados:
+        medida = pincel.evaluar(_MEDIR % (margen, "[]")) or medida
+    return escala, medida
 
 
 def _avisos(medida, escala, faltan, retocada=False):
@@ -791,9 +796,9 @@ def pintar(pincel, pieza, kit=None, imagen=None, logo=None, logo_oscuro=None):
     """-> (png en bytes, avisos, medida)."""
     documento, f, margenes, faltan = html_de(pieza, kit, imagen, logo, logo_oscuro)
     pincel.abrir(documento, f["W"], f["H"])
-    retocada = any(k in c for c in limpiar_pieza(pieza)["capas"].values() for k in ("x", "y", "escala"))
-    escala, medida = _ajustar(pincel, margenes, retocada)
-    return pincel.capturar(), _avisos(medida, escala, faltan, retocada), medida
+    retocados = [campo for campo, c in limpiar_pieza(pieza)["capas"].items() if any(k in c for k in ("x", "y", "escala"))]
+    escala, medida = _ajustar(pincel, margenes, retocados)
+    return pincel.capturar(), _avisos(medida, escala, faltan, bool(retocados)), medida
 
 
 def a_jpg(png, ancho=None, calidad=92):
@@ -830,9 +835,9 @@ def vistas(raiz, cid, pieza, plantillas, logo=None, logo_oscuro=None):
         salida = []
         grande = None
         for n in plantillas:
-            # lo arrastrado es de ESTE diseno: en los otros, cada texto en su sitio
+            # lo arrastrado y el tamano son de ESTE diseno: en los otros, cada texto como viene
             otra = pieza if n == pieza["plantilla"] else dict(
-                pieza, plantilla=n, capas={c: {k: v for k, v in d.items() if k not in ("x", "y")}
+                pieza, plantilla=n, capas={c: {k: v for k, v in d.items() if k not in ("x", "y", "escala")}
                                            for c, d in pieza["capas"].items()})
             png, avisos, _ = pintar(pincel, otra, kit, imagen, logo, logo_oscuro)
             if n == pieza["plantilla"]:
@@ -918,9 +923,10 @@ def borrar_pieza(raiz, cid, pieza_id):
 
 def catalogo():
     return {
-        "plantillas": [{"n": n, "nombre": nombre, "uso": uso, "campos": list(campos)} for n, nombre, uso, campos in CATALOGO],
+        "plantillas": [{"n": n, "nombre": nombre, "uso": uso, "campos": list(campos), "extras": ["sello"] if n == 7 else []} for n, nombre, uso, campos in CATALOGO],
         "formatos": FORMATOS, "formato_defecto": FORMATO_DEFECTO,
         "campos": {k: {"etiqueta": v[0], "largo": v[1]} for k, v in CAMPOS.items()},
+        "capas_extra": CAPAS_EXTRA,
         "fuentes": [{"id": k, "nombre": v[0]} for k, v in sorted(FUENTES.items(), key=lambda x: x[1][0])],
         "colores_defecto": COLORES_DEFECTO, "roles": list(ROLES),
     }

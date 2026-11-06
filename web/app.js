@@ -35128,6 +35128,7 @@ async function abrirEditorGrafica(cid, pieza) {
   const capaCajas = h('div', { clase: 'cajas-graf' });
   const capaZonas = h('div', { clase: 'zonas-graf oculto' });
   const marco = h('div', { clase: 'marco-graf' }, grande, capaZonas, capaCajas);
+  const area = h('div', { clase: 'area-graf' }, marco);
   const estado = h('div', { clase: 'meta estado-graf' }, 'pintando…');
   const avisos = h('div', { clase: 'avisos-graf' });
   const notaFormato = h('div', { clase: 'pista' });
@@ -35136,10 +35137,22 @@ async function abrirEditorGrafica(cid, pieza) {
   const miniaturas = {};
   const formatoActual = () => cat.formatos.find(x => x.id === p.formato) || cat.formatos[0];
 
+  /* EL MARCO, A SU MEDIDA EXACTA en píxeles: las cajas de los textos van en % sobre
+     él, así que tiene que tener la proporción de la pieza, quepa como quepa. */
+  const ajustarMarco = () => {
+    const f = formatoActual();
+    const r = area.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const k = Math.min(r.width / f.W, r.height / f.H);
+    marco.style.width = `${Math.floor(f.W * k)}px`;
+    marco.style.height = `${Math.floor(f.H * k)}px`;
+  };
+  const vigia = new ResizeObserver(ajustarMarco);
+  vigia.observe(area);
+
   const pintarZonas = () => {
     const f = formatoActual();
-    marco.style.aspectRatio = `${f.W} / ${f.H}`;
-    marco.classList.toggle('ancho', f.W > f.H);
+    ajustarMarco();
     capaZonas.classList.toggle('oculto', !verZonas);
     botonZonas.textContent = verZonas ? 'Ocultar lo que tapa la red' : 'Ver lo que tapa la red';
     capaZonas.textContent = '';
@@ -35155,14 +35168,17 @@ async function abrirEditorGrafica(cid, pieza) {
     sinAplicar = true;
     cambiada = true;
     ediciones += 1;
+    // lo que venía en camino ya no vale: pintaría encima de lo que se acaba de tocar
+    turno += 1;
+    pendiente = false;
     botonAplicar.disabled = false;
     estado.textContent = 'Hay cambios sin aplicar';
   };
 
-  /* LO QUE SE ARRASTRA ES DE ESTE DISEÑO Y ESTE TAMAÑO: al cambiarlos, cada texto
-     vuelve a su sitio (el mismo punto no vale en otro lienzo). */
+  /* LO QUE SE ARRASTRA Y EL TAMAÑO SON DE ESTE DISEÑO Y ESTE LIENZO: al cambiarlos,
+     cada texto vuelve a como viene (el mismo punto no vale en otro lienzo). */
   const soltarPosiciones = () => {
-    Object.values(p.capas).forEach(c => { delete c.x; delete c.y; });
+    Object.values(p.capas).forEach(c => { delete c.x; delete c.y; delete c.escala; });
   };
 
   const pintarRejilla = () => {
@@ -35175,6 +35191,7 @@ async function abrirEditorGrafica(cid, pieza) {
           p.plantilla = d.n;
           soltarPosiciones();
           cambiada = true;
+          ediciones += 1;
           pintarForm();
           pintarRejilla();
           pedirVistas();
@@ -35184,7 +35201,16 @@ async function abrirEditorGrafica(cid, pieza) {
   };
 
   const capa = campo => p.capas[campo] || (p.capas[campo] = {});
-  const nombreCampo = campo => (cat.campos[campo] || {}).etiqueta || campo;
+  const nombreCampo = campo => (cat.campos[campo] || {}).etiqueta || (cat.capas_extra || {})[campo] || campo;
+
+  /* AL EMPEZAR A ARRASTRAR, lo que venía en camino no repinta debajo del dedo (se
+     llevaría la caja). Si al final no se movió nada, se vuelve a pedir. */
+  let vistaParada = false;
+  const pararVista = () => {
+    vistaParada = !sinAplicar && (enCurso || pendiente);
+    turno += 1;
+    pendiente = false;
+  };
 
   const pintarCajas = () => {
     capaCajas.textContent = '';
@@ -35198,6 +35224,7 @@ async function abrirEditorGrafica(cid, pieza) {
       let desde = null;
       caja.addEventListener('pointerdown', ev => {
         desde = { x: ev.clientX, y: ev.clientY, cx: c.x, cy: c.y };
+        pararVista();
         caja.setPointerCapture(ev.pointerId);
         ev.preventDefault();
       });
@@ -35215,15 +35242,24 @@ async function abrirEditorGrafica(cid, pieza) {
         desde = null;
         if (Math.abs(dx) > 0.3 || Math.abs(dy) > 0.3) {
           const k = capa(campo);
-          k.x = (k.x || 0) + dx;
-          k.y = (k.y || 0) + dy;
-          c.x += dx;
-          c.y += dy;
+          const x = Math.max(-100, Math.min(100, (k.x || 0) + dx));
+          const y = Math.max(-100, Math.min(100, (k.y || 0) + dy));
+          c.x += x - (k.x || 0);
+          c.y += y - (k.y || 0);
+          k.x = x;
+          k.y = y;
           hayCambios();
+        } else if (vistaParada) {
+          pedirVistas();
         }
         elegido = campo;
         pintarCajas();
         pintarEstilo();
+      });
+      caja.addEventListener('pointercancel', () => {
+        desde = null;
+        pintarCajas();
+        if (vistaParada) pedirVistas();
       });
       capaCajas.appendChild(caja);
     });
@@ -35234,6 +35270,7 @@ async function abrirEditorGrafica(cid, pieza) {
   const lanzarVista = async () => {
     enCurso = true;
     pendiente = false;
+    vistaParada = false;
     const mio = turno;
     try {
       const r = await pedir(apiGraficas(cid, '/vista'), { method: 'POST', cuerpo: { pieza: p } });
@@ -35276,6 +35313,7 @@ async function abrirEditorGrafica(cid, pieza) {
       p.imagen = (await pedir(apiGraficas(cid, '/imagen'), { method: 'POST', cuerpo })).nombre;
       p.encuadre = {};
       cambiada = true;
+      ediciones += 1;
       pintarForm();
       pedirVistas();
     } catch (e) { toast(e.message, true); }
@@ -35316,7 +35354,7 @@ async function abrirEditorGrafica(cid, pieza) {
       e.y = al < 1 ? Math.max(0, Math.min(100, y / (1 - al) * 100)) : 50;
       situar();
     };
-    lienzo.addEventListener('pointerdown', ev => { desde = true; lienzo.setPointerCapture(ev.pointerId); mover(ev); ev.preventDefault(); });
+    lienzo.addEventListener('pointerdown', ev => { desde = true; pararVista(); lienzo.setPointerCapture(ev.pointerId); mover(ev); ev.preventDefault(); });
     lienzo.addEventListener('pointermove', ev => { if (desde) mover(ev); });
     lienzo.addEventListener('pointerup', () => {
       if (!desde) return;
@@ -35324,6 +35362,7 @@ async function abrirEditorGrafica(cid, pieza) {
       p.encuadre = { ...e };
       hayCambios();
     });
+    lienzo.addEventListener('pointercancel', () => { desde = false; pintarEncuadre(); if (vistaParada) pedirVistas(); });
     const zoom = h('input', { type: 'range', min: '1', max: '4', step: '0.1', 'aria-label': 'Acercar la foto', value: String(e.zoom),
       oninput: ev => { e.zoom = Number(ev.target.value); p.encuadre = { ...e }; situar(); hayCambios(); } });
     cajaEncuadre.append(h('span', { clase: 'titulo-graf' }, 'Qué parte de la foto se ve'),
@@ -35336,12 +35375,13 @@ async function abrirEditorGrafica(cid, pieza) {
   const pintarEstilo = () => {
     cajaEstilo.textContent = '';
     const diseno = cat.plantillas.find(x => x.n === p.plantilla) || cat.plantillas[0];
-    if (!diseno.campos.includes(elegido)) elegido = diseno.campos.includes('titulo') ? 'titulo' : diseno.campos[0];
+    const camposDeEstilo = diseno.campos.concat(diseno.extras || []);
+    if (!camposDeEstilo.includes(elegido)) elegido = diseno.campos.includes('titulo') ? 'titulo' : diseno.campos[0];
     const c = p.capas[elegido] || {};
     const alternar = (clave, texto, etiqueta) => h('button', { clase: 'mini' + (c[clave] ? ' activo' : ''), title: etiqueta, 'aria-label': etiqueta,
       'aria-pressed': c[clave] ? 'true' : 'false', onclick: () => { capa(elegido)[clave] = !c[clave]; hayCambios(); pintarEstilo(); } }, texto);
     const selector = h('select', { 'aria-label': 'Texto que se cambia', onchange: ev => { elegido = ev.target.value; pintarCajas(); pintarEstilo(); } },
-      ...diseno.campos.map(k => h('option', { value: k }, nombreCampo(k))));
+      ...camposDeEstilo.map(k => h('option', { value: k }, nombreCampo(k))));
     selector.value = elegido;
     const tamano = h('input', { type: 'range', min: '0.4', max: '3', step: '0.05', 'aria-label': 'Tamaño del texto', value: String(c.escala || 1),
       oninput: ev => { capa(elegido).escala = Number(ev.target.value); hayCambios(); } });
@@ -35356,7 +35396,7 @@ async function abrirEditorGrafica(cid, pieza) {
       h('label', { clase: 'campo-graf' }, h('span', {}, 'Tamaño'), tamano),
       h('div', { clase: 'fila botones-estilo' }, alternar('negrita', 'N', 'Negrita'), alternar('cursiva', 'I', 'Cursiva'), alternar('subrayado', 'S', 'Subrayado'), alternar('oculto', 'Ocultar', 'Ocultar este texto')),
       h('div', { clase: 'colores-graf' }, tinte('color', 'Color'), tinte('fondo', 'Fondo')),
-      h('button', { clase: 'mini fantasma', onclick: () => { delete p.capas[elegido]; hayCambios(); pintarEstilo(); } }, 'Volver a como venía'));
+      h('button', { clase: 'mini fantasma', onclick: () => { delete p.capas[elegido]; cambiada = true; ediciones += 1; pintarEstilo(); pedirVistas(); } }, 'Volver a como venía'));
   };
 
   const bloquePlanos = h('div', { clase: 'planos-graf' });
@@ -35379,6 +35419,7 @@ async function abrirEditorGrafica(cid, pieza) {
             p.imagen = (await pedir(apiGraficas(cid, '/imagen/de-plano'), { method: 'POST', cuerpo: { pid, sid: pl.sid } })).nombre;
             p.encuadre = {};
             cambiada = true;
+            ediciones += 1;
             pintarForm();
             pedirVistas();
           } catch (e) { toast(e.message, true); }
@@ -35397,6 +35438,7 @@ async function abrirEditorGrafica(cid, pieza) {
       p.formato = ev.target.value;
       soltarPosiciones();
       cambiada = true;
+      ediciones += 1;
       pintarForm();
       pedirVistas();
     } }, ...cat.formatos.map(x => h('option', { value: x.id }, `${x.nombre} · ${x.W}×${x.H}`)));
@@ -35427,7 +35469,7 @@ async function abrirEditorGrafica(cid, pieza) {
     cuerpoForm.appendChild(h('div', { clase: 'campo-graf' }, h('span', {}, 'Imagen'),
       h('div', { clase: 'fila' }, fichero,
         h('label', { clase: 'boton mini', for: 'imagen-grafica' }, p.imagen ? 'Cambiar imagen' : 'Subir imagen'),
-        p.imagen ? h('button', { clase: 'mini fantasma', onclick: () => { p.imagen = ''; p.encuadre = {}; cambiada = true; pintarForm(); pedirVistas(); } }, 'Quitar imagen') : null),
+        p.imagen ? h('button', { clase: 'mini fantasma', onclick: () => { p.imagen = ''; p.encuadre = {}; cambiada = true; ediciones += 1; pintarForm(); pedirVistas(); } }, 'Quitar imagen') : null),
       videos.length ? elegirVideo : null, bloquePlanos));
     pintarEncuadre();
     cuerpoForm.appendChild(cajaEncuadre);
@@ -35486,6 +35528,7 @@ async function abrirEditorGrafica(cid, pieza) {
     if (cambiada && (p.textos.titulo || p.textos.cita || p.imagen || piezaId)
         && !window.confirm('Hay cambios sin guardar. ¿Cerrar y perderlos?')) return;
     turno += 1;
+    vigia.disconnect();
     capaDialogo.remove();
     document.removeEventListener('keydown', teclas);
     pintarLight();
@@ -35502,7 +35545,7 @@ async function abrirEditorGrafica(cid, pieza) {
         cuerpoForm,
         h('div', { clase: 'centro-grafica' },
           h('div', { clase: 'fila barra-vista' }, botonAplicar, botonZonas, estado),
-          marco, avisos),
+          area, avisos),
         h('div', { clase: 'lado-grafica' }, h('b', {}, 'Diseños'), rejilla))));
   document.addEventListener('keydown', teclas);
   document.body.appendChild(capaDialogo);

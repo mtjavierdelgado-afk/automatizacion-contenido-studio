@@ -97,6 +97,45 @@ def de_plano(params, uid):
     return limpiar(bloque.get(CLAVE)) if isinstance(bloque, dict) else []
 
 
+# ------------------------------------------------------------ la marca ✗ / ✓
+
+#: LA «MARCA:» DE LA PARRILLA (rama parrilla-marca, 05-11): una escena que
+#: ensena lo que NO se hace (✗) o lo que SI (✓) lleva en sus planos una cruz
+#: roja o un check verde. NO se guarda como param al crear el video (regla 1):
+#: viaja en la linea del guion visual (`escena["linea_gv"]["marca"]`) y el
+#: montaje la pone mientras el plano no tenga elementos guardados. En cuanto
+#: alguien toca los elementos de ese plano (moverla, cambiarle el tamano o
+#: quitarla), lo guardado manda, aunque sea una lista vacia.
+MARCA_ICONO = {"no": ("cruz", "alerta"), "si": ("check", "bien")}
+
+#: Donde sale: arriba, en una esquina, sin tapar el centro del plano.
+MARCA_SITIO = "arriba_derecha"
+
+#: Cuanto se queda: el plano entero (`momento` la corta al final del plano).
+MARCA_DURA = 30.0
+
+
+def de_marca(escena, vertical=False):
+    """[el elemento de la «Marca:» de su escena], o [] si no la trae."""
+    marca = ((escena or {}).get("linea_gv") or {}).get("marca")
+    if marca not in MARCA_ICONO:
+        return []
+    icono, color = MARCA_ICONO[marca]
+    el = colocar({"tipo": "icono", "icono": icono, "color": color, "palabra": 0,
+                  "entrada": "pop", "dura": MARCA_DURA}, MARCA_SITIO, vertical)
+    return limpiar([el])
+
+
+def de_plano_o_marca(params, uid, escena, vertical=False):
+    """Los elementos que salen en ESE plano: los guardados si el plano tiene la
+    clave (aunque este vacia: alguien quito la marca), y si no, los de su
+    «Marca:» de la Parrilla."""
+    bloque = ((params or {}).get("unidades") or {}).get(uid)
+    if isinstance(bloque, dict) and CLAVE in bloque:
+        return limpiar(bloque.get(CLAVE))
+    return de_marca(escena, vertical)
+
+
 def momento(el, escena, duracion):
     """(desde, hasta) en segundos dentro del plano."""
     t_in = float(escena.get("t_in") or 0.0)

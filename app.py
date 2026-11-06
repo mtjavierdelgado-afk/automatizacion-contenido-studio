@@ -11265,12 +11265,18 @@ def _es_vertical(ctx, plan):
         return str(plan.get("formato") or "") == "vertical"
 
 
-def _guardar_elementos(ctx, cambios):
+def _guardar_elementos(ctx, cambios, con_marca=()):
     """{sid: [elementos]} -> los planos que cambiaron. Una lista vacia QUITA la
     clave; un bloque que ya existia (aunque quede vacio) se queda, por lo mismo
     que en el montaje por plano: quitarlo moveria la firma sin que nadie lo
-    pidiera."""
+    pidiera.
+
+    `con_marca`: {sid: [la cruz o el check]} de los planos con «Marca:» de la
+    Parrilla (rama parrilla-marca). En ellos la lista vacia SE GUARDA vacia:
+    sin la clave, el montaje volveria a poner lo que alguien acaba de quitar.
+    Y mandar la marca tal cual sale no guarda nada (la firma no se mueve)."""
     EV = _elementos_video()
+    con_marca = {str(k): v for k, v in dict(con_marca or {}).items()}
     cambiados = []
     with ctx.estado._lock:
         params = copy.deepcopy(ctx.estado.params("callouts") or {})
@@ -11281,9 +11287,14 @@ def _guardar_elementos(ctx, cambios):
             bloque = dict(unidades.get(uid)) if isinstance(unidades.get(uid), dict) else {}
             existia = isinstance(unidades.get(uid), dict) and EV.CLAVE not in unidades[uid]
             antes = EV.limpiar(bloque.get(EV.CLAVE))
-            if antes == limpios and (bool(limpios) == (EV.CLAVE in bloque)):
+            if str(sid) in con_marca:
+                if (EV.CLAVE in bloque and antes == limpios) or \
+                        (EV.CLAVE not in bloque and limpios == con_marca[str(sid)]):
+                    continue
+                bloque[EV.CLAVE] = limpios
+            elif antes == limpios and (bool(limpios) == (EV.CLAVE in bloque)):
                 continue
-            if limpios:
+            elif limpios:
                 bloque[EV.CLAVE] = limpios
             else:
                 bloque.pop(EV.CLAVE, None)
@@ -11299,6 +11310,19 @@ def _guardar_elementos(ctx, cambios):
                 params.pop("unidades", None)
             ctx.estado.set_params("callouts", params)
     return cambiados
+
+
+def _planos_con_marca(ctx, plan, escenas):
+    """{sid: [la cruz o el check]} de los planos cuya escena de la Parrilla trae
+    «Marca:» (rama parrilla-marca)."""
+    EV = _elementos_video()
+    vertical = _es_vertical(ctx, plan)
+    salida = {}
+    for e in escenas:
+        de_marca = EV.de_marca(e, vertical)
+        if de_marca:
+            salida[str(e["id"])] = de_marca
+    return salida
 
 
 def _comprobar_planos(ctx, sids):
@@ -11325,6 +11349,16 @@ def leer_elementos_de_planos(pid: str):
         if str(uid).startswith("escena:") and isinstance(bloque, dict) and bloque.get(EV.CLAVE):
             planos[str(uid)[len("escena:"):]] = EV.limpiar(bloque.get(EV.CLAVE))
     plan, escenas = _escenas_del_video(ctx)
+    # la cruz o el check de la «Marca:» de la Parrilla (rama parrilla-marca):
+    # salen como uno mas mientras nadie haya guardado los elementos del plano
+    vertical = _es_vertical(ctx, plan)
+    no_aplica = set(_planos_sin_montaje_propio(plan))
+    for e in escenas:
+        sid = str(e["id"])
+        if sid not in planos and sid not in no_aplica:
+            de_marca = EV.de_plano_o_marca(callouts, f"escena:{sid}", e, vertical)
+            if de_marca:
+                planos[sid] = de_marca
     return {"planos": planos, "no_aplica": _planos_sin_montaje_propio(plan),
             "vertical": _es_vertical(ctx, plan),
             "tipos": list(EV.TIPOS), "entradas": list(EV.ENTRADAS),
@@ -11347,7 +11381,7 @@ def cambiar_elementos_de_plano(pid: str, sid: str, cuerpo: dict = Body(default=N
         raise ErrorApi(400, "este plano es una cartela o una cabecera: ya lleva su texto encima")
     if _trabajo_que_toca(ctx, ("callouts", "render")):
         raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
-    cambiados = _guardar_elementos(ctx, {sid: lista})
+    cambiados = _guardar_elementos(ctx, {sid: lista}, con_marca=_planos_con_marca(ctx, _plan, _escenas))
     if cambiados:
         ctx.bitacora.anotar("elementos_de_plano", "callouts", {"plano": sid, "n": len(lista)})
     return dict(leer_elementos_de_planos(pid), cambiado=bool(cambiados),
@@ -11424,20 +11458,23 @@ def aplicar_elementos(pid: str, cuerpo: dict = Body(default=None)):
     if _trabajo_que_toca(ctx, ("callouts", "render")):
         raise ErrorApi(409, "el vídeo se está montando ahora: aplícalo cuando termine")
     EV = _elementos_video()
-    previos = ((ctx.estado.params("callouts") or {}).get("unidades") or {})
+    callouts = ctx.estado.params("callouts") or {}
+    por_id = {str(e["id"]): e for e in _escenas}
+    vertical = _es_vertical(ctx, _plan)
     cambios, recortados = {}, []
     for sid, lista in planos.items():
         sid = str(sid)
         if sid in no or not isinstance(lista, list):
             continue
-        ya = [] if datos.get("reemplazar") else EV.limpiar(((previos.get(f"escena:{sid}") or {})
-                                                            if isinstance(previos.get(f"escena:{sid}"), dict)
-                                                            else {}).get(EV.CLAVE))
+        # sumar es sumar a lo que SE VE: la cruz o el check de la Parrilla
+        # tambien (rama parrilla-marca), o se perderian al aplicar
+        ya = [] if datos.get("reemplazar") else EV.de_plano_o_marca(
+            callouts, f"escena:{sid}", por_id.get(sid), vertical)
         juntos = ya + EV.limpiar(lista)
         if len(juntos) > EV.MAX_POR_PLANO:
             recortados.append(sid)
         cambios[sid] = juntos[:EV.MAX_POR_PLANO]
-    cambiados = _guardar_elementos(ctx, cambios)
+    cambiados = _guardar_elementos(ctx, cambios, con_marca=_planos_con_marca(ctx, _plan, _escenas))
     if cambiados:
         ctx.bitacora.anotar("elementos_aplicados", "callouts", {"planos": cambiados})
     # los que no cabian (mas de MAX_POR_PLANO) se dicen, no se tiran callando
@@ -11455,7 +11492,9 @@ def vista_elementos_de_plano(pid: str, sid: str, cuerpo: dict = Body(default=Non
     EV = _elementos_video()
     lista = _cuerpo(cuerpo).get("elementos")
     if not isinstance(lista, list):
-        lista = EV.de_plano(ctx.estado.params("callouts") or {}, f"escena:{sid}")
+        escena = next((e for e in escenas if str(e["id"]) == sid), None)
+        lista = EV.de_plano_o_marca(ctx.estado.params("callouts") or {}, f"escena:{sid}",
+                                    escena, _es_vertical(ctx, plan))
     ruta = _imagenes_de_planos(ctx, plan).get(sid)
     if not ruta or not os.path.isfile(ruta):
         raise ErrorApi(404, "este plano todavía no tiene imagen")

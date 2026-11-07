@@ -174,6 +174,8 @@ _RE_SIN_CAMBIO = re.compile(
     r"none|nothing|empty|n/?a|no changes?|unchanged|same|same as (?:the )?base(?: image)?|"
     r"(?:the )?base image|as is)\s*(?:[:—–-].*)?$")
 MAX_ESTADOS = 12
+#: Lo que cabe en el cambio de un estado (el mismo tope que `tipo_relato.MAX_CAMBIO`).
+MAX_CAMBIO = 1200
 
 
 def sin_cambio(texto):
@@ -194,7 +196,9 @@ def normalizar_estados(crudo):
         etiqueta = _etiqueta(clave)
         if not etiqueta:
             continue
-        cambio = "" if sin_cambio(valor) else _texto(valor, 400)
+        # 1.200 como `tipo_relato.MAX_CAMBIO` (rama relato-sin-cortes): con 400
+        # el «despues» de un guion largo llegaba a la imagen cortado a media palabra
+        cambio = "" if sin_cambio(valor) else _texto(valor, MAX_CAMBIO)
         salida[etiqueta] = cambio
     return salida
 

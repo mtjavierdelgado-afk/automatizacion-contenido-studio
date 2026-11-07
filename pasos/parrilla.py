@@ -796,6 +796,10 @@ _PALABRAS_NO = ("x", "no", "mal", "incorrecto", "incorrecta", "error")
 _PALABRAS_SI = ("si", "sí", "bien", "correcto", "correcta", "ok", "v")
 
 
+#: Lo que cabe en el cambio de un estado del espacio (`tipo_relato.MAX_CAMBIO`).
+MAX_CAMBIO_ESTADO = 1200
+
+
 def marca_de_escena(valor):
     """«✗», «❌ mal», «✓ (bien)», «no» -> "no" | "si"; lo dudoso -> "".
 
@@ -1056,6 +1060,11 @@ def encargo_de(guion, indice=0):
         if modo_relato != "espacio_que_cambia" or g.get("imagenes") != "guion":
             avisos.append("el guion trae ESTADOS DEL ESPACIO, pero solo se usan con «Tipo de relato: "
                           "espacio_que_cambia» e «Imágenes: guion»")
+        # rama relato-sin-cortes (06-11): un estado que no cabe se dice, no se corta callando
+        largos = sorted(k for k, v in estados.items() if len(" ".join(str(v or "").split())) > MAX_CAMBIO_ESTADO)
+        if largos:
+            avisos.append(f"el cambio de {', '.join(largos)} pasa de {MAX_CAMBIO_ESTADO} letras: se dibujará "
+                          f"solo hasta ahí; acórtalo en ESTADOS DEL ESPACIO")
         sueltos = sorted({e["estado"] for e in visuales if e.get("estado") and e["estado"] not in estados})
         if sueltos:
             avisos.append(f"las escenas nombran estados que no están en ESTADOS DEL ESPACIO "

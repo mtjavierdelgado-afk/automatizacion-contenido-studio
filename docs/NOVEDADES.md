@@ -10,6 +10,13 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Menos vídeos «a revisar» por una descripción de plano un poco larga (8 de noviembre)**
+- Cuando Claude escribe lo que se ve en cada plano y se pasa unas pocas palabras
+  del tope de 60 (hasta 75), la descripción ya no se recorta ni sale como aviso:
+  antes se perdía justo el final de la frase. Solo se recorta una descripción
+  desbocada, como siempre.
+- No cambia ninguna imagen ya hecha ni obliga a regenerar nada.
+
 **El piloto pasa los estados del espacio y la portada del guion (7 de noviembre)**
 - «🤖 Hacer el vídeo completo» ya manda los ESTADOS DEL ESPACIO del guion de la
   Parrilla, igual que «Pasar al Encargo». Antes no los pasaba y cada escena con

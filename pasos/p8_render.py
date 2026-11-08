@@ -205,6 +205,16 @@ def _ext_fotogramas():
     return "png" if formato_fotogramas() == "png" else "jpg"
 
 
+#: LO QUE SE MIDIO PARA IR MAS DEPRISA Y NO SE HIZO (rama pulido-montaje,
+#: 08-11), para no volver a medirlo. Con los fotogramas JPEG 100 del montaje, a
+#: crf 16 y contra los fotogramas sin comprimir:
+#: - «alta» con `medium` en vez de `slow`: low 50,26 -> 50,18 dB, medium 47,71 ->
+#:   47,67, high 43,16 -> 43,11, y un 30-40 % menos de codificar (un 4-5 % del
+#:   montaje). NO se cambio: un remontaje reutiliza los clips ya hechos y los
+#:   une con `-c:v copy`, asi que un video mezclaria clips de dos presets con
+#:   cabeceras H.264 distintas (referencias, etc.) bajo la cabecera del primero.
+#: - pasar a JPEG los fotogramas que relee una transicion: comprimirlos dos
+#:   veces bajaba high de 43,2 a 41,7 dB (low -0,2, medium -0,6). Siguen en PNG.
 CALIDADES = {
     "alta": {"crf": "16", "preset": "slow"},
     "media": {"crf": "20", "preset": "medium"},

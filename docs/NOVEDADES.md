@@ -10,6 +10,16 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**El piloto pasa los estados del espacio y la portada del guion (7 de noviembre)**
+- «🤖 Hacer el vídeo completo» ya manda los ESTADOS DEL ESPACIO del guion de la
+  Parrilla, igual que «Pasar al Encargo». Antes no los pasaba y cada escena con
+  «Estado:» se dibujaba como la imagen base: por eso salían dos tomas con la
+  misma imagen. También manda la PORTADA propuesta en el guion, que la portada
+  con IA del piloto usa como fondo.
+- Los vídeos que ya hizo el piloto no cambian solos. Si alguno salió con la
+  misma imagen en varias tomas, hay que hacerlo otra vez desde su guion (con
+  el piloto o con «Pasar al Encargo»), y eso vuelve a pagar sus imágenes.
+
 **Los estados se dibujan enteros y la imagen base se corrige (6 de noviembre)**
 - El cambio de cada estado del espacio («despues», «montada»…) ya no se corta
   a 400 letras: cabe hasta 1.200 y la imagen se pide con la frase entera. Si

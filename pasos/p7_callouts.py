@@ -2013,7 +2013,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
             # el movimiento SI se calcula: el plano sigue teniendo su zoom y su
             # transicion, lo unico que se va es el texto. Los ELEMENTOS que
             # alguien puso a mano en este plano si se quedan (se pidieron).
-            propios = elementos_video.de_plano(p, uid)
+            propios = elementos_video.de_plano_o_marca(p, uid, escena, es_vertical(salida))
             svg, fija, fichas = capa_vacia(lienzo), fija_vacia(escena), []
             if propios:
                 piezas = extras_de(escena, [], propios)
@@ -2021,7 +2021,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
                 fichas = elementos_video.fichas(escena, propios,
                                                 float(escena["t_out"]) - float(escena["t_in"]))
         else:
-            propios = elementos_video.de_plano(p, uid)
+            propios = elementos_video.de_plano_o_marca(p, uid, escena, es_vertical(salida))
             svg, fija, fichas = capa_de_escena(
                 escena, p, entrada, banda, aspecto, lienzo, salida,
                 extras=extras_de(escena, cifras, propios),

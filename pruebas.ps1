@@ -1,4 +1,4 @@
-﻿# Las suites en seco, con una linea por suite.
+# Las suites en seco, con una linea por suite.
 #
 #     powershell -NoProfile -File pruebas.ps1
 #     powershell -NoProfile -File pruebas.ps1 -Python C:\ruta\a\python.exe
@@ -88,11 +88,15 @@ $suites = @(
   'pasos\prueba_guion_visual.py',
   'pasos\prueba_diagramas.py',
   'pasos\prueba_parrilla_estados.py',
+  'pasos\prueba_parrilla_marca.py',
+  'pasos\prueba_relato_sin_cortes.py',
   'pasos\prueba_portada_guion.py',
+  'pasos\prueba_diagnostico_velocidad.py',
   'pasos\prueba_consumo_claude.py',
   'pasos\prueba_piloto.py',
   'pasos\prueba_graficas.py',
   'pasos\prueba_choques_reglas.py',
+  'pasos\prueba_vidiq.py',
   'prueba_recorrido.py'
 )
 

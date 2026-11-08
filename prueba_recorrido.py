@@ -1732,7 +1732,7 @@ def tus_proyectos_rediseno(navegador, datos):
        f"con Nombre, Logo, Visibilidad, Clave, Publicar y la zona de peligro abajo ({titulos})")
     ok(pg.p.evaluate("() => SECCIONES_AJUSTES_PROYECTO.map(s => s.id).join(',')")
        == "nombre,logo,ficha-negocio,kit-marca,visibilidad,clave,publicar,peligro",
-       "hechas con SECCIONES_AJUSTES_PROYECTO (con la Ficha del negocio, unida el 28-10)")
+       "hechas con SECCIONES_AJUSTES_PROYECTO (con la Ficha del negocio, unida el 28-10, y el Kit de marca de graficas-1)")
     ok(pg.visible(".cajon-proyecto .zona-peligro", "quedan en «Sin proyecto»"),
        "«Borrar el proyecto» lleva su explicación delante")
     caja = pg.p.locator(".cajon-proyecto .nombre-proyecto input")
@@ -4871,6 +4871,17 @@ def publicar_textos_con_el_cursor_en_un_campo(navegador, datos):
 # de Publicar. El servidor corre con ESTUDIO_SIMULAR=1: los guiones los
 # convierte y los escribe el doble de Claude (`parrilla._claude_simulado`).
 
+def _ver_matrices(pg):
+    """Las matrices de la Parrilla van en un desplegable (rama relato-sin-cortes):
+    se abre si está cerrado, para ver o pulsar una."""
+    # la Parrilla puede tardar en salir (después de «Escribir guiones», p. ej.)
+    pg.esperar(".boton-matrices", segundos=25)
+    if pg.p.locator(".desplegable-matrices.abierto").count() == 0 and \
+            pg.p.locator(".boton-matrices").count():
+        pg.pulsar(".boton-matrices")
+        pg.p.wait_for_timeout(300)
+
+
 def _docx_de_prueba(ruta, parrafos):
     import zipfile                                           # noqa: PLC0415
     w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -4922,6 +4933,7 @@ def parrilla_de_guiones(navegador, datos):
     pg.pulsar(".anadir-parrilla button.primario", "Guardar en la Parrilla")
     ok(pg.esperar(".tarjeta-guion .titulo-guion", "EP01 — Fregadero simple o doble", 10),
        "guardado en la Parrilla, en su matriz")
+    _ver_matrices(pg)
     ok(pg.visible(".chip-matriz", "Octubre"), "con el nombre de la matriz")
     ok(pg.visible(".columna-tablero[data-columna=pendiente] .tarjeta-guion", "EP01"), "pendiente")
 
@@ -4943,6 +4955,7 @@ def parrilla_de_guiones(navegador, datos):
     pg.p.wait_for_timeout(400)
     ok(pg.visible(".anadir-parrilla .meta", "matriz_parrilla.docx"), "el Word elegido se ve")
     pg.pulsar(".anadir-parrilla button.primario", "Subir y convertir")
+    _ver_matrices(pg)
     ok(pg.esperar(".chip-matriz", "matriz_parrilla", 25), "convertido, en una matriz con el nombre del fichero")
     pg.captura("parrilla_lista")
 
@@ -5432,6 +5445,7 @@ def parrilla_marca_chat_y_resultados(navegador, datos):
     ok(pg.esperar(".anadir-parrilla .caja-aviso", "Actualizar", 10) or pg.esperar(".post-parrilla", segundos=5),
        "«Desde mis resultados» enseña los vídeos o dice cómo tenerlos")
     pg.pulsar(".pestanas-automatizar button", "Parrilla")
+    _ver_matrices(pg)
     ok(pg.esperar(".chip-matriz", "Conversación", 10), "el guion del chat está en la Parrilla")
     pg.sin_errores("la marca, el chat y los resultados")
     pg.cerrar()
@@ -5489,6 +5503,7 @@ def parrilla_analizar_una_cuenta(navegador, datos):
     ok(pg.esperar(".texto-analisis", "QUÉ LE FUNCIONA", 20), "el análisis")
     pg.captura("cuenta_analizada")
     pg.pulsar(".guiones-cuenta button.primario", "Escribir guiones")
+    _ver_matrices(pg)
     ok(pg.esperar('.chip-matriz[title*="con lo que le funciona a @personal_lucia"]', segundos=25),
        "los guiones van a la Parrilla, diciendo de qué cuenta salen")
     pg.pulsar(".pestanas-automatizar button", "Cuentas que te gustan")
@@ -5568,13 +5583,14 @@ def automatizar_tablero_y_panel(navegador, datos):
     ok(pg.p.locator(".tarjeta-guion").count() == 1 and pg.visible(".columna-tablero .vacia-columna", "Ninguno con este filtro"),
        "el buscador filtra el tablero")
     pg.p.locator("[data-foco=parrilla-buscar]").fill("")
+    _ver_matrices(pg)
     pg.pulsar(".chip-matriz", "Tablero (4)")
     ok(pg.esperar(".cab-matriz h3", "Tablero", 5), "una matriz elegida enseña sus datos")
     pg.pulsar(".cab-matriz button", "Renombrar")
     ok(pg.esperar(".capa-dialogo input", segundos=5), "«Renombrar» pregunta en un panel de la casa (sin prompt)")
     pg.p.locator(".capa-dialogo input").first.fill("Tablero renombrado")
     pg.p.locator(".capa-dialogo button[type=submit]").click()
-    ok(pg.esperar(".chip-matriz", "Tablero renombrado", 10), "y la renombra")
+    ok(pg.esperar(".boton-matrices", "Tablero renombrado", 10), "y la renombra")
     pg.pulsar(".cab-matriz button", "Borrar")
     ok(pg.esperar(".capa-dialogo", "No se puede deshacer", 5), "«Borrar» la matriz pregunta antes, con su aviso")
     pg.pulsar(".capa-dialogo button", "Cancelar")
@@ -9037,6 +9053,116 @@ def encargo_limpio_suelta_el_video(navegador, datos):
     pg.cerrar()
 
 
+# ===================================================================== VIDIQ
+# vidiq-1 (25-10-2026): sin clave no se ve nada de vidIQ; con ella,
+# Configuración (guardar y «Probar»), «Mejorar con vidIQ» en el paso SEO de la
+# ficha (pregunta antes, no cambia nada hasta «Usar») y «Ideas con vidIQ» en el
+# chat de la Parrilla. El servidor corre con ESTUDIO_SIMULAR: no se llama a
+# vidIQ ni al CLI, y no se gasta nada.
+@escenario
+def vidiq_en_la_pantalla(navegador, datos):
+    pid = datos["video"]
+    api = datos["api"]
+    cid = datos["cliente"]
+    clave = "vq_recorrido_123456789"
+    api.libre(pid)
+    api.put("/api/claves", {"vidiq": {"clave": ""}})
+    _r, antes = api.get(f"/api/publicar/videos/{pid}")
+    titulo_antes = (((antes or {}).get("textos") or {}).get("youtube") or {}).get("titulo") or ""
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["youtube"], "palabra_clave": "consolas para fiestas",
+                                            "textos": {"youtube": {"titulo": "Cumple con consolas",
+                                                                   "descripcion": "Un vídeo para probar vidIQ"}}})
+    try:
+        # 1. sin clave, nada
+        pg = Pagina(navegador, datos)
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        _paso_ficha(pg, "seo")
+        ok(pg.esperar(".seo-video", segundos=15), "el paso SEO de la ficha")
+        pg.p.wait_for_timeout(1200)
+        ok(not pg.visible(".vidiq-seo"), "sin clave de vidIQ, el SEO no enseña nada de vidIQ")
+        pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+        pg.js(f"elegirProyectoParrilla('{cid}'); PAR.form.origen = 'chat'; irASeccionParrilla('anadir');")
+        ok(pg.esperar(".chat-parrilla", segundos=10), "el chat de la Parrilla")
+        pg.p.wait_for_timeout(800)
+        ok(not pg.visible(".interruptor-chat", "Ideas con vidIQ"), "ni la Parrilla ofrece «Ideas con vidIQ»")
+        pg.sin_errores("sin clave de vidIQ")
+        pg.cerrar()
+
+        # 2. Configuración: guardar y probar
+        pg = Pagina(navegador, datos)
+        pg.js("conmutarConfig(true);")
+        ok(pg.esperar("#cuerpo-config .bloque-vidiq h3", "vidIQ", 10), "Configuración tiene la casilla de vidIQ")
+        ok(pg.visible("#cuerpo-config .bloque-vidiq .pista", "sin API de pago"), "y dice que va por la membresía")
+        pg.p.locator(".bloque-vidiq input[type=password]").first.fill(clave)
+        pg.pulsar(".bloque-vidiq button", "Guardar")
+        ok(pg.esperar('.bloque-vidiq button[data-accion="probar-vidiq"]', segundos=8), "guardada: sale «Probar»")
+        _r, claves = api.get("/api/claves")
+        ok(clave not in json.dumps(claves), "la clave no baja a la pantalla")
+        pg.pulsar('.bloque-vidiq button[data-accion="probar-vidiq"]')
+        ok(pg.esperar(".bloque-vidiq .resultado-vidiq", "créditos", 10), "«Probar» dice los créditos que quedan")
+        pg.captura("vidiq_configuracion")
+        pg.sin_errores("vidIQ en Configuración")
+        pg.cerrar()
+
+        # 3. Publicar → SEO → «Mejorar con vidIQ»
+        pg = Pagina(navegador, datos)
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        _paso_ficha(pg, "seo")
+        ok(pg.esperar(".vidiq-seo button[data-accion=mejorar-vidiq]", "Mejorar con vidIQ", 15),
+           "con clave, «Mejorar con vidIQ» en el paso SEO")
+        ok(pg.visible(".vidiq-seo .meta", "créditos"), "y dice lo que gasta antes de pulsar")
+        pg.pulsar(".vidiq-seo button[data-accion=mejorar-vidiq]")
+        texto = _panel_casa(pg)
+        ok("créditos" in texto, f"pregunta antes, con lo que gasta: {texto[:90]!r}")
+        ok(pg.esperar(".vidiq-seo .titulo-vidiq", segundos=20), "salen los títulos propuestos")
+        ok(pg.visible(".vidiq-seo .frase-vidiq", "consolas para fiestas"), "y la palabra clave con sus cifras")
+        ok(pg.visible(".vidiq-seo", "Cumple con consolas"), "y la nota del título actual")
+        _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+        ok(ficha["textos"]["youtube"]["titulo"] == "Cumple con consolas", "consultar no cambia el título")
+        pg.pulsar(".vidiq-seo .titulo-vidiq button", "Usar en YouTube")
+        pg.p.wait_for_timeout(1500)
+        _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+        nuevo = ficha["textos"]["youtube"]["titulo"]
+        ok(nuevo != "Cumple con consolas" and "consolas" in nuevo.lower(), f"«Usar en YouTube» lo pone: {nuevo!r}")
+        pg.captura("vidiq_seo")
+        pg.sin_errores("Mejorar con vidIQ")
+        pg.cerrar()
+
+        # 4. la Parrilla con «Ideas con vidIQ»
+        pg = Pagina(navegador, datos)
+        pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+        pg.js(f"elegirProyectoParrilla('{cid}'); PAR.form.origen = 'chat'; irASeccionParrilla('anadir');")
+        ok(pg.esperar(".interruptor-chat", "Ideas con vidIQ", 10), "con clave, la Parrilla ofrece «Ideas con vidIQ»")
+        pg.p.locator("[data-foco=parrilla-chat]").fill("Dame ideas de vídeos para este nicho")
+        pg.p.locator(".interruptor-chat", has_text="Ideas con vidIQ").locator("input").check()
+        pg.pulsar(".mandos-chat button.primario", "Enviar")
+        ok(pg.esperar(".chat-turno.tuyo .quien-chat", "con vidIQ", 20), "el mensaje dice que fue con vidIQ")
+        ok(pg.esperar(".chat-turno.de-claude .texto-chat", "vidIQ: sí", 20),
+           "y Claude (el doble) lo recibió con vidIQ cargado")
+        pg.captura("vidiq_parrilla")
+        pg.sin_errores("Ideas con vidIQ")
+        pg.cerrar()
+
+        # 5. en el móvil, sin salirse
+        for tema in ("oscuro", "claro"):
+            pg = Pagina(navegador, datos, ancho=390, alto=844, nombre=f"vidiq móvil {tema}")
+            pg.js(f"document.documentElement.dataset.tema = '{tema}'; abrirPublicarVideo('{pid}');")
+            pg.p.wait_for_timeout(2000)
+            _paso_ficha(pg, "seo")
+            ok(pg.esperar(".vidiq-seo .titulo-vidiq", segundos=10), f"lo de vidIQ en el móvil ({tema})")
+            ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+            ok(ancho <= 2, f"cabe en un móvil, tema {tema} ({ancho}px)")
+            texto = pg.p.evaluate("() => document.querySelector('#modulo').innerText")
+            malos = sorted(set(x.group(0) for x in TEXTOS_MALOS.finditer(texto)))
+            ok(not malos, f"sin «undefined», «NaN» ni «null» ({malos})")
+            pg.captura(f"vidiq_movil_{tema}", entera=False)
+            pg.sin_errores(f"vidIQ en el móvil ({tema})")
+            pg.cerrar()
+    finally:
+        api.put("/api/claves", {"vidiq": {"clave": ""}})
+        api.put(f"/api/publicar/videos/{pid}", {"palabra_clave": "",
+                                                "textos": {"youtube": {"titulo": titulo_antes}}})
+
 @escenario
 def cola_del_studio(navegador, datos):
     """Rama cola-montaje (25-10): el botón «Cola» de la barra de módulos abre
@@ -10128,6 +10254,203 @@ def graficas(navegador, datos):
     pg.sin_errores("gráficas en el móvil")
     pg.cerrar()
 
+
+@escenario
+def error_del_servidor_legible(navegador, datos):
+    """Visto por el dueño el 05-11: en Publicar → Calendario salió el HTML
+    entero de un «500 Internal Server Error» de nginx (la entrada de sesión no
+    contestaba mientras se reiniciaba). Ahora se dice en una línea qué pasa y
+    qué hacer, sin HTML; y un error del Studio (JSON) se sigue diciendo igual."""
+    pg = Pagina(navegador, datos, nombre="error_servidor")
+    html = ("<html>\r\n<head><title>500 Internal Server Error</title></head>\r\n<body>\r\n"
+            "<center><h1>500 Internal Server Error</h1></center>\r\n<hr><center>nginx</center>\r\n"
+            "</body>\r\n</html>\r\n" + "<!-- a padding to disable MSIE and Chrome friendly error page -->\r\n" * 6)
+    pg.p.route("**/api/publicar/cola*", lambda ruta: ruta.fulfill(status=500, content_type="text/html", body=html))
+    pg.js("PUB.seccion = 'cola'; irAModulo('publicar');")
+    ok(pg.esperar(".caja-error", "El servidor no ha contestado (error 500)", 20),
+       "un 500 de nginx se dice en una línea: el servidor no ha contestado")
+    texto = pg.p.locator(".caja-error").first.inner_text()
+    ok("<html" not in texto and "padding" not in texto and "vuelve a intentarlo" in texto,
+       f"sin el HTML y con qué hacer ({texto[:90]!r})")
+    pg.captura("error_servidor_legible", entera=False)
+    pg.p.unroute("**/api/publicar/cola*")
+    pg.p.route("**/api/publicar/cola*", lambda ruta: ruta.fulfill(
+        status=500, content_type="application/json", body=json.dumps({"error": "fallo propio del Studio"})))
+    pg.js("cargarPublicar();")
+    ok(pg.esperar(".caja-error", "fallo propio del Studio", 20), "un error del Studio se sigue diciendo tal cual")
+    pg.p.unroute("**/api/publicar/cola*")
+    pg.js("cargarPublicar();")
+    pg.p.wait_for_timeout(1500)
+    ok(not pg.visible(".caja-error"), "al volver a contestar, el aviso se va solo")
+    pg.cerrar()
+
+
+
+@escenario
+def relato_sin_cortes(navegador, datos):
+    """Visto por el dueño el 06-11 (rama relato-sin-cortes): la imagen base solo
+    se podía repetir con la misma descripción. Ahora la caja de la base lleva
+    «Cambiar el espacio fijo ›» (y te lleva a su bloque), una nota para la
+    próxima «Otra imagen base» que llega a la generación y se vacía al usarla,
+    y «✎ Cambiar» en lo que la base trae ya puesto. Y en la Parrilla, las
+    matrices en un desplegable."""
+    api = datos["api"]
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="relato_sin_cortes")
+    pg.sin_trabajo(300)
+    _r, ef = api.get(f"/api/proyectos/{pid}/espacio_fijo")
+    if not ((ef or {}).get("espacio_fijo") or {}).get("descripcion"):
+        api.post(f"/api/proyectos/{pid}/espacio_fijo/aplicar", {"espacio_fijo": {
+            "sitio": "Baño", "descripcion": "a narrow bathroom, toilet on the left",
+            "luz": "day", "secundarios": []}})
+    api.post(f"/api/proyectos/{pid}/tipo_relato/aplicar",
+             {"tipo_relato": {"modo": "espacio_que_cambia", "cambia": "objeto"}})
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    if not ((ficha.get("bases") or {}).get(ficha.get("sitio"))):
+        r, lanz = api.post(f"/api/proyectos/{pid}/tipo_relato/base/generar",
+                           {"usd": ficha.get("usd_base") or 0, "otra": False})
+        if r.status_code == 202:
+            api.esperar(lanz["trabajo_id"], 120)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; pintarLight();")
+    ok(pg.esperar(".imagen-base-relato", segundos=20), "la caja de la imagen base")
+    ok(pg.visible(".imagen-base-relato button", "Cambiar el espacio fijo"), "con «Cambiar el espacio fijo ›»")
+    pg.pulsar(".imagen-base-relato button", "Cambiar el espacio fijo")
+    ok(pg.esperar(".bloque-light.resaltado-espacio-fijo h3", "El espacio fijo", 5),
+       "que lleva al bloque «El espacio fijo» y lo resalta")
+    ok(pg.visible(".nota-base-relato input"), "y la nota para la próxima «Otra imagen base»")
+    pg.p.locator(".nota-base-relato input").fill("el inodoro a la derecha")
+    pg.dialogos.clear()
+    pg.pulsar(".imagen-base-relato button", "Otra imagen base")
+    ok(any("el inodoro a la derecha" in d for d in pg.dialogos), "el aviso de pago dice la nota")
+    pg.sin_trabajo(120)
+    pg.js("APP.light.video.relato = null; pintarLight();")
+    ok(pg.esperar(".nota-base-relato input", segundos=20), "la caja vuelve")
+    ok(pg.p.locator(".nota-base-relato input").input_value() == "", "y la nota se vacía: valía solo esa vez")
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    if ficha.get("inicial"):
+        ok(pg.visible(".inicial-base-relato button", "✎ Cambiar"), "«✎ Cambiar» en lo que la base trae ya puesto")
+        pg.pulsar(".inicial-base-relato button", "✎ Cambiar")
+        ok(pg.esperar(".inicial-base-relato textarea", segundos=5), "se escribe en español")
+        pg.pulsar(".inicial-base-relato button", "Cancelar")
+    pg.captura("relato_sin_cortes", entera=False)
+    pg.sin_errores("la imagen base que se corrige")
+    # ✗ Y ✓ A MANO en «Elementos de esta imagen» (06-11: el dueño no los veía
+    # en un vídeo hecho antes de «Marca:»)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+    if pg.esperar(".elementos-plano", "Elementos de esta imagen", 20):
+        opciones = pg.p.locator(".elementos-plano select").first.locator("option").all_inner_texts()
+        ok("✗ Cruz (lo que no se hace)" in opciones and "✓ Check (lo que sí)" in opciones,
+           "la lista trae «✗ Cruz» y «✓ Check»")
+        antes_n = pg.p.locator(".elemento-plano").count()
+        pg.p.locator(".elementos-plano select").first.select_option("marca_si")
+        pg.pulsar(".elementos-plano button", "Añadir")
+        ok(pg.esperar(".elemento-plano", segundos=10) and pg.p.locator(".elemento-plano").count() == antes_n + 1,
+           "«Añadir» pone el check, sin guardar todavía")
+        icono = pg.p.evaluate("() => { const s = Object.values(ELEMENTOS_PLANOS.borrador || {}); "
+                              "const l = s[s.length - 1] || []; return l[l.length - 1] || null; }")
+        ok(icono and icono.get("icono") == "check" and icono.get("color") == "bien" and icono.get("entrada") == "pop",
+           f"un icono check verde que salta ({icono})")
+        fila = pg.p.locator(".elemento-plano").last
+        fila.locator("select[aria-label=Icono]").select_option("cruz")
+        pg.p.wait_for_timeout(300)
+        fila = pg.p.locator(".elemento-plano").last
+        ultimo = "() => { const s = Object.values(ELEMENTOS_PLANOS.borrador || {}); const l = s[s.length - 1] || []; return l[l.length - 1] || null; }"
+        ok((pg.p.evaluate(ultimo) or {}).get("color") == "alerta", "al cambiar el icono a «cruz», se pone rojo solo")
+        fila.locator("select[aria-label=Color]").select_option("bien")
+        pg.p.wait_for_timeout(300)
+        ok((pg.p.evaluate(ultimo) or {}).get("color") == "bien", "y el color se elige a mano en su fila")
+        antes_el = pg.p.evaluate(ultimo) or {}
+        pg.p.locator(".elemento-plano").last.locator("button[aria-label='Más grande']").click()
+        pg.p.wait_for_timeout(300)
+        pg.p.locator(".elemento-plano").last.locator("button[aria-label='Mover a la izquierda']").click()
+        pg.p.wait_for_timeout(300)
+        despues_el = pg.p.evaluate(ultimo) or {}
+        ok(float(despues_el.get("tam") or 0) > float(antes_el.get("tam") or 0.08) - 1e-9
+           and float(despues_el.get("x") or 1) < float(antes_el.get("x") or 0),
+           f"«+» lo agranda y «←» lo mueve ({antes_el.get('tam')}→{despues_el.get('tam')}, {antes_el.get('x')}→{despues_el.get('x')})")
+    # LA PARRILLA: el desplegable de las matrices
+    pg.js("irAModulo('automatizar');")
+    if pg.esperar(".boton-matrices", segundos=15):
+        ok(pg.p.locator(".chips-matrices").count() == 0, "las matrices empiezan plegadas en su desplegable")
+        pg.pulsar(".boton-matrices")
+        ok(pg.esperar(".desplegable-matrices.abierto .chip-matriz", "Todas las matrices", 5),
+           "al pulsarlo salen todas para elegir")
+        pg.pulsar(".chip-matriz", "Todas las matrices")
+        ok(pg.p.locator(".chips-matrices").count() == 0, "y al elegir se vuelve a plegar")
+    pg.sin_errores("las matrices en un desplegable")
+    pg.cerrar()
+    _piloto_del_proyecto_y_portada(navegador, datos)
+
+
+def _piloto_del_proyecto_y_portada(navegador, datos):
+    """Vistos por el dueño el 06-11: (1) la lista del piloto mezclaba los
+    proyectos y seguía enseñando los ya publicados; (2) «Usar esta» en una
+    portada no movía el «✓ puesta». El servidor del piloto se dobla aquí (sus
+    rutas reales ya las prueba `piloto_video_completo`): lo que se mira es la
+    pantalla."""
+    cid = datos["cliente"]
+    estado = {"puesta": "a"}
+
+    def ficha(vid, cid_, gid, nombre):
+        return {"id": vid, "cid": cid_, "gid": gid, "estado": "listo", "nombre": nombre, "pid": "",
+                "portadas": [{"id": "a", "nombre": "Con un plano del vídeo"}, {"id": "b", "nombre": "Hecha con IA"}],
+                "portada_puesta": estado["puesta"], "revisar": [], "terminado": "x"}
+
+    def lista():
+        cola = dict(ficha("v4", cid, "g_cola", "PX4 — En la cola"), estado="en_cola", portadas=[])
+        return {"videos": [cola, ficha("v1", cid, "g_vivo", "PX1 — Del proyecto"),
+                           ficha("v2", "otro_proyecto", "g_otro", "PX2 — De otro proyecto"),
+                           ficha("v3", cid, "g_publicado", "PX3 — Ya publicado")],
+                "cuenta": {"listo": 3}, "a_revisar": 0, "ajustes": {}, "estados": {"listo": "Listo para publicar"},
+                "etapas": [], "modos": [], "limites": {}}
+
+    def rutas(ruta):
+        peticion = ruta.request
+        if peticion.method == "POST" and peticion.url.endswith("/portada"):
+            estado["puesta"] = json.loads(peticion.post_data or "{}").get("id") or estado["puesta"]
+            ruta.fulfill(status=200, content_type="application/json",
+                         body=json.dumps(ficha("v1", cid, "g_vivo", "PX1 — Del proyecto")))
+        elif peticion.method == "GET" and "/api/piloto/videos/" not in peticion.url:
+            ruta.fulfill(status=200, content_type="application/json", body=json.dumps(lista()))
+        else:
+            ruta.fulfill(status=404, content_type="application/json", body=json.dumps({"error": "no"}))
+    # una matriz en este proyecto, para que la Parrilla tenga tablero
+    datos["api"].post(f"/api/parrilla/proyectos/{cid}/guiones", {"nombre": "Piloto proyecto", "texto": (
+        "PX0 — Para el tablero\nUso: exacto\nFormato: vertical\nDuración: 20 s\n\nESCENA 1\n"
+        "Voz: «Hola.»\n\nPARA EL ENCARGO\n- Material: Hola.\n")})
+    pg = Pagina(navegador, datos, nombre="piloto_proyecto")
+    pg.p.route("**/api/piloto**", rutas)
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    pg.p.wait_for_function("() => PAR.datos && !PAR.cargando && (PAR.datos.matrices || []).length > 0", timeout=20000)
+    pg.p.wait_for_timeout(800)
+    # el guion de PX3 está publicado en la Parrilla de este proyecto, y el de
+    # PX4 sigue pendiente aunque está en la cola del piloto
+    pg.js("const m = (PAR.datos.matrices || [])[0]; m.guiones = (m.guiones || []).concat(["
+          "{id: 'g_publicado', codigo: 'PX3', titulo: 'Ya publicado', estado: 'publicado'}, "
+          "{id: 'g_vivo', codigo: 'PX1', titulo: 'Del proyecto', estado: 'usado'}, "
+          "{id: 'g_cola', codigo: 'PX4', titulo: 'En la cola', estado: 'pendiente'}]); "
+          "PIL.huella = ''; pintarModulo();")
+    ok(pg.esperar(".tarjeta-piloto .titulo-piloto", "PX1", 15), "el vídeo del proyecto sale en el piloto")
+    ok(not pg.visible(".tarjeta-piloto .titulo-piloto", "PX2"), "el de otro proyecto, no")
+    ok(not pg.visible(".tarjeta-piloto .titulo-piloto", "PX3"), "el ya publicado deja de salir")
+    ok(pg.visible(".otros-proyectos-piloto", "1 vídeo de otros proyectos"), "y dice que hay otros en el piloto")
+    ok(pg.visible(".columna-tablero[data-columna=usado] .tarjeta-guion", "PX4")
+       and not pg.visible(".columna-tablero[data-columna=pendiente] .tarjeta-guion", "PX4"),
+       "un guion mandado al piloto deja «Pendientes» y sale en «Usados»")
+    ok(pg.visible(".columna-tablero[data-columna=usado] .tarjeta-guion", "en el piloto"), "con «🤖 en el piloto»")
+    tarjeta = pg.p.locator(".tarjeta-piloto", has_text="PX1").first
+    ok(tarjeta.locator(".portada-piloto.puesta").count() == 1
+       and "Con un plano" in tarjeta.locator(".portada-piloto.puesta").inner_text(), "puesta la del plano")
+    tarjeta.locator(".portada-piloto button", has_text="Usar esta").first.click()
+    pg.p.wait_for_timeout(2500)
+    tarjeta = pg.p.locator(".tarjeta-piloto", has_text="PX1").first
+    puestas = tarjeta.locator(".portada-piloto.puesta")
+    ok(puestas.count() == 1 and "Hecha con IA" in puestas.inner_text(),
+       "«Usar esta» mueve el «✓ puesta» a la elegida, y solo a esa")
+    pg.captura("piloto_proyecto_portada", entera=False)
+    pg.p.unroute("**/api/piloto**")
+    pg.cerrar()
 
 if __name__ == "__main__":
     sys.exit(main())

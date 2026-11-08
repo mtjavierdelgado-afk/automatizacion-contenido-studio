@@ -943,6 +943,11 @@ GUIAS = {
             "cual se deja vacío), y cada ESCENA lleva «Estado: antes» o el que toque. Cada "
             "plano edita la imagen de SU estado, y esos estados mandan sobre los que "
             "deduce el Studio. Una escena sin «Estado:» es la base.",
+            "«Marca: ✗» o «Marca: ✓» (opcional, en una ESCENA, después de «ESCENA n» y "
+            "antes de «Visual»): la escena enseña lo que NO se hace (✗) o lo que SÍ (✓). "
+            "Al crear el vídeo, sus planos llevan una cruz roja o un check verde arriba en "
+            "una esquina, que salta con la primera palabra; se mueve, se cambia de tamaño o "
+            "se quita en «✨ Elementos de esta imagen». No cambia ninguna imagen.",
             "En los vídeos que salen de la Parrilla, una línea «Visual:» sin cámara ya no "
             "recibe un encuadre al azar: si quieres un primer plano o un detalle, dilo en "
             "la línea («Close-up of…», «Detalle de…»).",
@@ -1103,6 +1108,7 @@ GUIAS = {
             "9. \"Tipo de relato\" solo si el original pide una forma concreta de contarlo en imágenes: \"espacio_que_cambia (objeto | acabados | estado | hora)\" si es UN sitio que se ve siempre igual y en el que solo cambia lo que dice la voz (un antes y después, tres paletas, una sala vacía → montada); \"recorrido\" si son varios ambientes de un mismo lugar; \"escenario_y_apoyos\" si es un sitio con otros secundarios; \"producto\" si el producto manda y el fondo no cambia; \"clase\" si es una clase. Si no lo pide, quita la línea.\n10. \"Imágenes: guion\" solo si el original pide que las imágenes sigan las líneas «Visual:» y no lo que dice la voz (un guion de plano a plano, con su cámara); entonces cada línea «Visual:» es una imagen fija concreta, con quién, dónde, qué hace y desde dónde se ve. Si no lo pide, quita la línea.\n"
             "11. Con \"Tipo de relato: espacio_que_cambia\" y \"Imágenes: guion\", pon en cada ESCENA una línea \"Estado:\" con la etiqueta del estado del sitio en esa escena (corta, en minúsculas y sin espacios: antes, despues, paleta_1…) y la sección ESTADOS DEL ESPACIO con lo que cambia en cada estado respecto a la imagen base, EN INGLÉS y acumulado (el «después» dice todo lo que cambió, no solo lo último); el estado que es la base tal cual se deja vacío. Si no, quita las líneas «Estado:» y esa sección.\n"
             "12. PORTADA solo si el original habla de la portada o la miniatura, o si te la piden: \"Texto\" son las 2–5 palabras grandes que irán encima (en el idioma del vídeo, sin emojis) e \"Imagen\" describe la imagen de fondo en una frase concreta (quién o qué sale, dónde, el encuadre y la luz), SIN letras, logotipos ni marcas de agua: el texto lo pone el Studio aparte. Si no, quita esa sección.\n"
+            "13. \"Marca\" solo si el original enseña en una escena lo que NO se debe hacer o lo que SÍ (un error y su solución, un antes y después, lo correcto frente a lo incorrecto): pon en esa ESCENA, después de «ESCENA n» y antes de «Visual», la línea \"Marca: ✗\" (lo que no se hace) o \"Marca: ✓\" (lo que sí). El Studio pone en sus planos una cruz roja o un check verde. Si no, quita la línea.\n"
             "\n"
             "AJUSTE POR RED (en \"adaptar\" aplícalo; en \"exacto\" solo avisa con ⚠ si algo no encaja)\n"
             "- TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.\n"
@@ -1137,6 +1143,7 @@ GUIAS = {
             "\n"
             "ESCENA 1 (tiempo, si lo hay)\n"
             "Estado: … (solo con ESTADOS DEL ESPACIO; si no, quita la línea)\n"
+            "Marca: ✗ o ✓ (solo si la escena enseña lo que no se hace o lo que sí; si no, quita la línea)\n"
             "Visual: …\n"
             "Voz: «…»\n"
             "Texto en pantalla: …\n"

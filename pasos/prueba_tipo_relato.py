@@ -557,6 +557,54 @@ def prueba_revision_03_11():
           "SITIO: a bathroom (luz: day)", "con un solo sitio, igual que antes")
 
 
+def prueba_retoque_acotado():
+    seccion("16] rehacer con nota un plano que edita su estado (rama retoque-acotado)")
+    import shutil                                            # noqa: PLC0415
+    P6, carpeta, dirs, estilo, base = _p6_y_dirs()
+    beat = {"cambio": "the walls are painted in palette 2", "estado": "paleta_2"}
+    p = {"estilo": {"referencias": [estilo], "modo": "foto"}, "espacio_fijo": dict(ESPACIO),
+         "tipo_relato": {"modo": "espacio_que_cambia", "cambia": "acabados", "bases": {"bano_mampara": {
+             "imagen": "espacio_fijo/a1b2c3d4e5f60718.png", "aprobada": True,
+             "estados": {"paleta_2": {"imagen": "espacio_fijo/b2c3d4e5f6071829.png",
+                                      "aprobada": True, "cambio": beat["cambio"]}}}}},
+         "unidades": {"escena:S002": {"feedback": "the towel rail is missing", "alcance": "retoque"}}}
+    relato = T.resolver(p)
+    dirs = dict(dirs, bases={"bano_mampara": base, "bano_mampara#paleta_2": base})
+    escena = {"id": "S002", "set": "bano_mampara", "personajes": [], "narracion": "paleta 2",
+              "carta": "general", "encuadre": "a wide establishing shot", "prompt": "the bathroom"}
+    P6._marcar_edicion(escena, beat, relato, "bano_mampara", "foto",   # noqa: SLF001
+                       T.bases_aprobadas(p, {"beats": [dict(beat, set="bano_mampara")]}))
+    shutil.copy(os.path.join(dirs["escenas"], "S001.png"), os.path.join(dirs["escenas"], "S002.png"))
+    plan = {"escenas": [escena], "assets": {}}
+    refs = P6._referencias_escena(escena, plan, dirs, p, dirs["cache"], {}, anteriores=[])  # noqa: SLF001
+    igual([r["papel"] for r in refs], ["base", "estilo", "rechazada"],
+          "la imagen del estado primero y la rechazada al final")
+    igual(refs[-1].get("de_edicion"), 1, "la rechazada sabe que se edita la imagen 1")
+    texto = P6._prompt_completo(escena, refs, p["estilo"], feedback="the towel rail is missing")  # noqa: SLF001
+    ok("PREVIOUS ATTEMPT" in texto and "Recreate it as it is" not in texto,
+       "la rechazada es el intento anterior: de ella solo la gente, nunca el sitio")
+    ok("OVERRIDES anything above" not in texto and "INSIDE the edit of reference image 1" in texto,
+       "la nota se aplica DENTRO de la edición, sin mandar sobre la composición")
+    ok(texto.index("the towel rail is missing") < texto.index("FINAL CHECK")
+       and texto.rstrip().endswith("No watermarks."),
+       "y el FINAL CHECK va detrás de la nota (lo que más pesa)")
+    sin_editar = {"id": "S009", "set": "otro", "personajes": [], "narracion": "x", "prompt": "a street"}
+    refs_sin = P6._referencias_escena(sin_editar, {"escenas": [sin_editar], "assets": {}},  # noqa: SLF001
+                                      dirs, {"estilo": p["estilo"], "unidades": {}}, dirs["cache"], {},
+                                      anteriores=[])
+    texto_sin = P6._prompt_completo(sin_editar, refs_sin, p["estilo"], feedback="fix the hands")  # noqa: SLF001
+    ok("HIGHEST PRIORITY" in texto_sin and "INSIDE the edit" not in texto_sin,
+       "un plano que no edita, con la nota de siempre (byte a byte como hoy)")
+    elegidas = [{"papel": "continuidad", "ruta": "/x/S001.png"},
+                {"papel": "rechazada", "ruta": os.path.join(dirs["escenas"], "S002.png")},
+                {"papel": "reparto", "nombre": "ana", "ruta": "/x/ana.png"},
+                {"papel": "adjunta", "ruta": "/x/v3/escenas/S002.png"}]
+    filtradas = P6._elegidas_en_edicion(elegidas, escena, dirs, p)  # noqa: SLF001
+    igual([r["papel"] for r in filtradas], ["rechazada", "reparto"],
+          "del corrector se quedan la rechazada y el reparto; fuera vecinos y versiones viejas")
+    igual(filtradas[0].get("de_edicion"), 1, "y la rechazada, como intento anterior")
+
+
 def main():
     print("PRUEBA DEL TIPO DE RELATO")
     prueba_modos_y_lineas()
@@ -569,6 +617,7 @@ def main():
     prueba_presets()
     prueba_imagen_base()
     prueba_ambientes_y_camara()
+    prueba_retoque_acotado()
     prueba_revision_03_11()
     import shutil                                            # noqa: PLC0415
     shutil.rmtree(_TEMPORAL, ignore_errors=True)

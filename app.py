@@ -22716,6 +22716,18 @@ def _piloto_opciones(encargo):
         salida["imagenes"] = encargo["imagenes"]
     if isinstance(encargo.get("visuales"), list) and encargo["visuales"]:
         salida["visuales"] = encargo["visuales"][:400]
+        # LOS ESTADOS DEL ESPACIO (rama piloto-estados, 07-11): viajan con las
+        # lineas, igual que en «Pasar al Encargo» (`imagenesParaCrear`). Sin
+        # ellos cada escena con «Estado:» se dibujaba como la base: Y05 salio
+        # con la misma imagen en dos tomas
+        if isinstance(encargo.get("estados"), dict) and encargo["estados"]:
+            salida["estados"] = dict(encargo["estados"])
+    # LA PORTADA PROPUESTA EN EL GUION: tampoco viajaba, y sin ella en la ficha
+    # de Publicar la portada con IA del piloto no podia usar la del guion
+    portada = encargo.get("portada") if isinstance(encargo.get("portada"), dict) else {}
+    if str(portada.get("imagen") or "").strip():
+        salida["portada"] = {"texto": str(portada.get("texto") or ""),
+                             "imagen": str(portada["imagen"])}
     return salida
 
 

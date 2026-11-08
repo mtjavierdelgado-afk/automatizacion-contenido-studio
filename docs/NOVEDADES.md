@@ -10,6 +10,10 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**La prueba del tipo de relato hace también el recorrido y el primer plano (8 de noviembre)**
+
+`asvs probar relato` hace ahora, sin que toques nada, cuatro vídeos: b (el baño con 3 paletas, que comprueba también que rehacer una imagen no cambia de más), c (la sala de EstadoPlay), d (un recorrido por tres ambientes de una casa: se dibuja y se aprueba la imagen de cada ambiente, y un juez mira que cada plano sale en su ambiente) y e (una cocina que se ordena, en modo guion, con un primer plano que tiene que ser la misma cocina de cerca). La mampara batiente (a) ya no se hace sola: solo con `--solo a`.
+
 **El piloto pasa los estados del espacio y la portada del guion (7 de noviembre)**
 - «🤖 Hacer el vídeo completo» ya manda los ESTADOS DEL ESPACIO del guion de la
   Parrilla, igual que «Pasar al Encargo». Antes no los pasaba y cada escena con

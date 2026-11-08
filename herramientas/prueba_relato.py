@@ -1,16 +1,27 @@
 #!/usr/bin/env python3
-"""LA PRUEBA REAL DEL TIPO DE RELATO (rama tipo-de-relato): tres vídeos de verdad.
+"""LA PRUEBA REAL DEL TIPO DE RELATO (rama tipo-de-relato): hasta cinco vídeos de verdad.
 
     asvs probar relato              (en la consola del VPS, como root)
     asvs probar relato --estilo ID  con ese estilo (si no, uno de foto)
     asvs probar relato --tope 5     tope de gasto en dólares (5 por defecto)
 
-Hace, con TUS claves y sin que tengas que tocar nada, las tres pruebas de
-aceptación de la rama:
+Hace, con TUS claves y sin que tengas que tocar nada, las pruebas de
+aceptación del tipo de relato. Sin --solo hace b, c, d y e; la «a» (la mampara
+batiente) solo con --solo a: el dueño decidió el 04-11 no hacer más guiones con
+puertas batientes, que el generador no dibuja bien.
 
   a) D01-1 «Mampara que choca con el inodoro» — Un espacio que cambia (objeto)
   b) D01-2 «3 paletas para un baño sin ventana» — Un espacio que cambia (acabados)
   c) EstadoPlay: sala vacía → montada → torneo — Un espacio que cambia (estado)
+  d) Recorrido por tres ambientes de una casa — Recorrido (una imagen por ambiente)
+  e) Cocina que se ordena, en modo guion con un PRIMER PLANO — Un espacio que
+     cambia (estado): el plano cercano lleva la base de referencia, no la edita
+
+Para d y e (rama prueba-relato-de, 08-11-2026): en d Claude declara los
+ambientes, se dibuja y se aprueba la imagen de cada uno y el juez mira cada
+plano contra la de su ambiente; en e Claude escribe el guion visual, una de sus
+líneas pasa a primer plano y el juez mira que ese plano es la misma cocina de
+cerca, no otro cuarto.
 
 Por cada una: crea el vídeo con su espacio fijo y su tipo de relato, escribe el
 guion y la voz, reparte los sitios (Claude), GENERA la imagen base (se paga una),
@@ -124,7 +135,61 @@ ESCENARIOS = [
         "que_cambia": "only the stage of the set-up: empty room, then screens and consoles "
                       "set up, then a tournament with people playing",
     },
+    # d y e (rama prueba-relato-de, 08-11-2026): lo que trajo tipo-de-relato-2,
+    # que hasta hoy solo se podia probar a mano
+    {
+        "clave": "d", "titulo": "Recorrido por tres ambientes de una casa",
+        "relato": {"modo": "recorrido"},
+        # SIN espacio fijo: Claude declara los ambientes del lugar (2 a 6) con la
+        # misma luz, que es el camino nuevo; el material nombra tres
+        "espacio": None,
+        "ambientes": True,
+        "material": (
+            "Un depa de dos dormitorios en Miraflores, en tonos tierra. Entramos por la sala: "
+            "sofá de lino, mesa de centro de madera y una lámpara de pie. Al fondo, la cocina "
+            "abierta con su isla de cuarzo blanco y tres banquitos. Y el dormitorio principal, "
+            "con la cama de madera clara y una ventana grande al parque. El mismo piso de roble "
+            "y la misma luz de tarde en toda la casa. ¿Cuál es tu ambiente favorito?"),
+        "indicaciones": ("Un recorrido por los tres ambientes de la misma casa: sala, cocina y "
+                         "dormitorio. Cada ambiente sale siempre igual cuando se vuelve a él, y "
+                         "los tres comparten el piso, los materiales y la luz."),
+        "que_cambia": "nothing inside a room: each room stays the same every time it is shown; "
+                      "the three rooms share floor, materials and light",
+    },
+    {
+        "clave": "e", "titulo": "Cocina que se ordena, con un primer plano (modo guion)",
+        "relato": {"modo": "espacio_que_cambia", "cambia": "estado"},
+        "espacio": {
+            "sitio": "cocina_pequena",
+            "descripcion": (
+                "small galley kitchen in a Lima apartment, 1.8 m wide x 3 m long, seen from the "
+                "door at the near end; LEFT wall: a white quartz countertop with an undermount "
+                "steel sink and a black tap under a small window, sage green flat-front lower "
+                "cabinets, open oak shelves above; RIGHT wall: a tall white fridge and a "
+                "four-burner hob with a steel hood; terracotta hexagonal floor tiles; same "
+                "layout, same camera height and same proportions in every shot"),
+            "luz": "morning, soft daylight from the small window plus a warm ceiling light",
+            "secundarios": []},
+        # «Qué dibujan las imágenes: lo que dice el guion» y una de sus lineas con
+        # camara de PRIMER PLANO: no edita la base, la lleva de referencia
+        "opciones": {"imagenes": "guion"},
+        "primer_plano": "close-up of the countertop next to the sink",
+        "material": (
+            "Así estaba la cocina: platos en el lavadero, frascos por toda la encimera y nada "
+            "a mano. Con tres organizadores y una tarde, todo cambió. Los frascos, alineados "
+            "en la repisa. La encimera, libre para cocinar. ¿Te animas a ordenar la tuya? "
+            "Guárdalo para el fin de semana."),
+        "indicaciones": ("La misma cocina en todas las imágenes, con la misma cámara: primero "
+                         "desordenada, al final ordenada. Un primer plano de la encimera junto "
+                         "al lavadero."),
+        "que_cambia": "only the clutter: dishes and jars everywhere at first, everything put "
+                      "away and lined up at the end",
+    },
 ]
+
+
+#: lo que se hace sin --solo: todo menos la mampara batiente (decisión del 04-11)
+POR_DEFECTO = "bcde"
 
 
 def _cerrar(informe, proyectos, inicio, datos):
@@ -177,15 +242,16 @@ def main():
     ap.add_argument("--estilo", default="")
     ap.add_argument("--tope", type=float, default=5.0)
     ap.add_argument("--seguir", action="store_true")
-    ap.add_argument("--solo", default="", help="a, b, c o varias: «ab»")
+    ap.add_argument("--solo", default="", help="a, b, c, d, e o varias: «bcde» (sin nada, bcde)")
     ap.add_argument("--video", default="", help="con --solo de UNA letra: sigue ese vídeo de prueba ya "
                     "hecho (guion, voz y sitios) desde su imagen base; si la aprobaste tú, no paga otra")
     # PARA PROBAR ESTA PRUEBA en local, con motores simulados
     ap.add_argument("--sin-claves", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--sin-opcionales", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    args.solo = args.solo.strip() or POR_DEFECTO
     if args.video and len(args.solo.strip()) != 1:
-        ap.error("--video va con --solo de una sola letra (a, b o c)")
+        ap.error("--video va con --solo de una sola letra (a, b, c, d o e)")
     api = PR.Api(args.api)
     proyectos = os.environ.get("ESTUDIO_PROYECTOS") or os.path.join(RAIZ, "proyectos")
     os.makedirs(PR._carpeta_informes(proyectos), exist_ok=True)   # noqa: SLF001
@@ -295,7 +361,8 @@ def main():
             informe.lineas = [l for l in informe.lineas if l.get("parte") != informe.parte]
             return f"{k}:{nombre}" not in est["hechas"]
 
-        PR.seccion(f"{k}) {esc['titulo']} — {esc['relato']['modo']} ({esc['relato']['cambia']})")
+        PR.seccion(f"{k}) {esc['titulo']} — {esc['relato']['modo']}"
+                   + (f" ({esc['relato']['cambia']})" if esc["relato"].get("cambia") else ""))
         # --video: un video de prueba ya hecho, desde su imagen base (la que
         # apruebe una persona en la pantalla manda sobre el juez)
         if args.video and parte("crear"):
@@ -311,7 +378,9 @@ def main():
                 "nombre": nombre, "duracion_objetivo_s": 30, "formato": "vertical",
                 "material": esc["material"], "guion_propio": True,
                 "indicaciones": esc["indicaciones"],
-                "opciones": {"espacio_fijo": esc["espacio"], "tipo_relato": esc["relato"]}})
+                "opciones": dict({"tipo_relato": esc["relato"]},
+                                 **({"espacio_fijo": esc["espacio"]} if esc.get("espacio") else {}),
+                                 **(esc.get("opciones") or {}))})
             pid = ((creado or {}).get("proyecto") or {}).get("id") or ""
             if not informe.comprueba(codigo == 201 and pid, f"se crea «{nombre}»",
                                      f"HTTP {codigo}: {str(creado)[:200]}"):
@@ -322,9 +391,14 @@ def main():
         pid = v["pid"]
         raiz = os.path.join(proyectos, pid)
         _c, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
-        informe.comprueba((ficha.get("resuelto") or {}).get("modo") == esc["relato"]["modo"]
-                          and (ficha.get("resuelto") or {}).get("cambia") == esc["relato"]["cambia"],
+        informe.comprueba(all((ficha.get("resuelto") or {}).get(x) == esc["relato"][x]
+                              for x in esc["relato"]),
                           "el vídeo nace con su tipo de relato", str(ficha.get("resuelto")))
+        if esc.get("opciones", {}).get("imagenes"):
+            _c, gvf = api.get(f"/api/proyectos/{pid}/guion_visual")
+            informe.comprueba((gvf or {}).get("modo") == esc["opciones"]["imagenes"],
+                              f"y con «Qué dibujan las imágenes: {esc['opciones']['imagenes']}»",
+                              str((gvf or {}).get("modo")))
 
         # guion y voz
         for tanda, limite in (("guion", 900), ("voz", 900)):
@@ -374,13 +448,126 @@ def main():
         _c, pa = api.get(f"/api/proyectos/{pid}/pasos/assets")
         catalogo = ((pa or {}).get("params") or {}).get("catalogo") or {}
         sets = list((catalogo.get("sets") or {}).keys())
-        informe.comprueba(len(sets) == 1, f"un solo sitio en el catálogo ({sets})", "más de uno o ninguno")
-        cambios = [b.get("cambio") for b in catalogo.get("beats") or []]
-        informe.comprueba(any(cambios), f"los tramos dicen qué cambia ({sum(1 for c in cambios if c)} de {len(cambios)})",
-                          "ningún tramo trae cambio")
+        if esc.get("ambientes"):
+            # RECORRIDO: Claude declara entre 2 y 6 ambientes del mismo lugar; el
+            # material nombra tres
+            informe.comprueba(2 <= len(sets) <= 6, f"Claude declara los ambientes del lugar ({sets})",
+                              f"{len(sets)} ambientes: tienen que ser de 2 a 6")
+            informe.comprueba(len(sets) == 3, "y son los tres que nombra el material",
+                              f"son {len(sets)}", solo_aviso=True)
+        else:
+            informe.comprueba(len(sets) == 1, f"un solo sitio en el catálogo ({sets})", "más de uno o ninguno")
+            cambios = [b.get("cambio") for b in catalogo.get("beats") or []]
+            # EN MODO GUION (e) los estados los pueden traer las lineas del guion
+            # visual, que se escribe despues: aqui solo es un aviso
+            informe.comprueba(any(cambios),
+                              f"los tramos dicen qué cambia ({sum(1 for c in cambios if c)} de {len(cambios)})",
+                              "ningún tramo trae cambio", solo_aviso=bool(esc.get("primer_plano")))
+
+        # MODO GUION (e): Claude escribe el guion visual, UNA linea pasa a primer
+        # plano y se aprueba. Va despues de los sitios: los estados que puede
+        # pedir cada linea salen del reparto
+        if esc.get("primer_plano") and parte("guion_visual"):
+            api.libre(pid)
+            tid = v.get("tid_gv")
+            if not tid:
+                codigo, lanz = api.post(f"/api/proyectos/{pid}/guion_visual/proponer", {})
+                tid = (lanz or {}).get("trabajo_id")
+                if not informe.comprueba(codigo == 202 and tid, "Claude escribe el guion visual",
+                                         f"HTTP {codigo}: {lanz}"):
+                    return cerrar()
+                v["tid_gv"] = tid
+                guardar()
+            ok, fin = esperar(tid, 900, "guion visual")
+            if not informe.comprueba(ok, "el guion visual sale", f"{fin.get('estado')}: {fin.get('error')}"):
+                return cerrar()
+            _c, gvf = api.get(f"/api/proyectos/{pid}/guion_visual")
+            planos_gv = [dict(p) for p in (((gvf or {}).get("guion_visual") or {}).get("planos") or [])]
+            if not informe.comprueba(len(planos_gv) >= 3, f"con {len(planos_gv)} líneas", "menos de tres"):
+                return cerrar()
+            # la linea del medio: ni el arranque (el «antes») ni el cierre
+            medio = len(planos_gv) // 2
+            planos_gv[medio]["camara"] = esc["primer_plano"]
+            v["primer_plano_bloque"] = planos_gv[medio]["bloque"]
+            v["primer_plano_visual"] = planos_gv[medio]["visual"]
+            codigo, gvf = api.put(f"/api/proyectos/{pid}/guion_visual", {"planos": planos_gv})
+            if not informe.comprueba(codigo == 200, f"la línea {medio + 1} pasa a «{esc['primer_plano']}»",
+                                     f"HTTP {codigo}: {str(gvf)[:200]}"):
+                return cerrar()
+            codigo, gvf = api.post(f"/api/proyectos/{pid}/guion_visual/aprobar", {"aprobado": True})
+            if not informe.comprueba(codigo == 200 and (gvf or {}).get("aprobado"),
+                                     "el guion visual queda aprobado", f"HTTP {codigo}"):
+                return cerrar()
+            if (gvf or {}).get("trabajo_id"):
+                esperar(gvf["trabajo_id"], 900, "comprobar el guion visual")
+            hecha(f"{k}:guion_visual")
+
+        # RECORRIDO (d): la imagen de CADA ambiente, juzgada y aprobada (el
+        # principal primero: los demas la llevan de referencia «casa»)
+        if esc.get("ambientes") and parte("ambientes"):
+            api.libre(pid)
+            _c, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+            for amb in (ficha or {}).get("ambientes") or []:
+                if amb.get("aprobada"):
+                    continue
+                vale = False
+                for intento in range(2):
+                    usd = float((ficha or {}).get("usd_base") or 0.1)
+                    if not cabe(usd, f"la imagen del ambiente «{amb['nombre']}» de {k}"):
+                        return cerrar()
+                    clave_tid = f"tid_amb_{amb['sitio']}_{intento}"
+                    tid = v.get(clave_tid)
+                    if not tid:
+                        codigo, lanz = api.post(f"/api/proyectos/{pid}/tipo_relato/base/generar",
+                                                {"usd": usd, "sitio": amb["sitio"], "otra": intento > 0})
+                        tid = (lanz or {}).get("trabajo_id")
+                        if not informe.comprueba(codigo == 202 and tid,
+                                                 f"se dibuja el ambiente «{amb['nombre']}» (≈ {usd:.3f} $)",
+                                                 f"HTTP {codigo}: {lanz}"):
+                            return cerrar()
+                        v[clave_tid] = tid
+                        guardar()
+                    ok, fin = esperar(tid, 900, f"ambiente {amb['nombre']}")
+                    if not informe.comprueba(ok, f"el ambiente «{amb['nombre']}» sale",
+                                             f"{fin.get('estado')}: {fin.get('error')}"):
+                        return cerrar()
+                    rel = (((_leer_tr(raiz)) or {}).get("bases") or {}).get(amb["sitio"]) or {}
+                    ruta = os.path.join(raiz, *str(rel.get("imagen") or "").split("/"))
+                    descripcion = ((catalogo.get("sets") or {}).get(amb["sitio"]) or {}).get("descripcion") or ""
+                    try:
+                        juicio = PR._juez(                             # noqa: SLF001
+                            f"Lee esta imagen con Read: {ruta}\nTiene que ser la imagen de referencia de "
+                            f"un AMBIENTE de una casa: «{amb['nombre']}: {descripcion}». Entero, sin "
+                            "gente y sin texto. Contesta 'vale' (es ese ambiente, con sus muebles "
+                            "fijos; los detalles de decoración NO cuentan). Devuelve SOLO "
+                            '{"vale": "si" | "no", "por_que": "<una frase>"}', raiz)
+                    except Exception as fallo:                          # noqa: BLE001
+                        juicio = {"vale": "?", "por_que": f"no se pudo preguntar a Claude: {fallo}"}
+                    est.setdefault("juicios", {}).setdefault(k, {})[f"amb_{amb['sitio']}_{intento}"] = juicio
+                    vale = juicio.get("vale") in ("si", "sí")
+                    informe.comprueba(vale, f"Claude da por bueno el ambiente «{amb['nombre']}»",
+                                      str(juicio.get("por_que")), solo_aviso=intento == 0)
+                    if vale:
+                        codigo, ficha = api.post(f"/api/proyectos/{pid}/tipo_relato/base/aprobar",
+                                                 {"sitio": amb["sitio"], "aprobada": True})
+                        informe.comprueba(codigo == 200, f"el ambiente «{amb['nombre']}» queda aprobado",
+                                          f"HTTP {codigo}")
+                        break
+                    _c, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+                if not vale:
+                    informe.apunta("fallo", f"ninguna imagen del ambiente «{amb['nombre']}» vale: no se "
+                                   "dibujan los planos (míralas en su «El tipo de relato»)")
+                    break
+            hecha(f"{k}:ambientes")
+        if esc.get("ambientes"):
+            _c, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+            ambs = (ficha or {}).get("ambientes") or []
+            if not (ambs and all(a.get("aprobada") for a in ambs)):
+                informe.apunta("aviso", f"{k}: faltan ambientes aprobados, se pasa al siguiente vídeo")
+                continue
 
         # imagen base: generar, juzgar, aprobar
-        if parte("base"):
+        if not esc.get("ambientes") and parte("base"):
             api.libre(pid)
             _c, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
             for intento in range(2):
@@ -459,13 +646,13 @@ def main():
             hecha(f"{k}:base")
 
         _c, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
-        if not (ficha or {}).get("base_aprobada"):
+        if not esc.get("ambientes") and not (ficha or {}).get("base_aprobada"):
             informe.apunta("aviso", f"{k}: sin imagen base aprobada, se pasa al siguiente vídeo")
             continue
 
         # UN ESTADO, UNA IMAGEN (21-10): cada cambio se dibuja una vez sobre la
         # base, lo juzga Claude y se aprueba; hasta dos intentos por estado
-        if parte("estados"):
+        if not esc.get("ambientes") and parte("estados"):
             api.libre(pid)
             sitio = (ficha or {}).get("sitio")
             ruta_base = os.path.join(raiz, *str(((((_leer_tr(raiz)) or {}).get("bases") or {})
@@ -528,7 +715,7 @@ def main():
                     break
             hecha(f"{k}:estados")
             _c, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
-        if not (ficha or {}).get("listo", (ficha or {}).get("base_aprobada")):
+        if not esc.get("ambientes") and not (ficha or {}).get("listo", (ficha or {}).get("base_aprobada")):
             informe.apunta("aviso", f"{k}: faltan imágenes de estado aprobadas, se pasa al siguiente vídeo")
             continue
         # las imagenes y el montaje
@@ -645,8 +832,9 @@ def main():
             return cerrar()
         plan, carpeta = _plan_de(raiz)
         editados = [e for e in plan.get("escenas") or [] if e.get("editar_base")]
-        informe.comprueba(bool(editados), f"{len(editados)} planos se generaron editando la base",
-                          "ningún plano editado desde la base")
+        if not esc.get("ambientes"):
+            informe.comprueba(bool(editados), f"{len(editados)} planos se generaron editando la base",
+                              "ningún plano editado desde la base")
         try:
             with open(os.path.join(raiz, "revisor.json"), encoding="utf-8") as fh:
                 revisadas = (json.load(fh) or {}).get("revisadas") or {}
@@ -700,6 +888,87 @@ def main():
             informe.comprueba(planos and not de_mas, "y solo cambia lo pedido", f"cambia de más en {de_mas}",
                               solo_aviso=True)
             hecha(f"{k}:juez")
+
+        def _de_disco(rel):
+            return os.path.join(raiz, *str(rel or "").split("/"))
+
+        # e) EL PRIMER PLANO: no edita la base (la lleva de referencia, o la de
+        # su estado) y es la MISMA cocina de cerca, no otro cuarto
+        if esc.get("primer_plano") and parte("juez_primer_plano"):
+            cercanos = [e for e in plan.get("escenas") or []
+                        if ((e.get("linea_gv") or {}).get("camara") or "") == esc["primer_plano"]]
+            if informe.comprueba(bool(cercanos), f"la línea de primer plano es un plano ({[e['id'] for e in cercanos]})",
+                                 "ningún plano lleva la cámara de primer plano"):
+                informe.comprueba(not any(e.get("editar_base") for e in cercanos),
+                                  "y no edita la base: la lleva de referencia",
+                                  f"edita la base: {[e['id'] for e in cercanos if e.get('editar_base')]}")
+                bases_tr = ((_leer_tr(raiz)) or {}).get("bases") or {}
+                sitio_e = (ficha or {}).get("sitio")
+                lista = []
+                for e in cercanos:
+                    estado_ref = str(e.get("ref_clave") or "").split("#", 1)[-1] if "#" in str(e.get("ref_clave") or "") else ""
+                    ref = (((bases_tr.get(sitio_e) or {}).get("estados") or {}).get(estado_ref) or {}).get("imagen") \
+                        if estado_ref else (bases_tr.get(sitio_e) or {}).get("imagen")
+                    lista.append(f"- {e['id']}: {os.path.join(carpeta, 'escenas', e['id'] + '.png')} · su "
+                                 f"referencia del sitio: {_de_disco(ref)}")
+                try:
+                    juicio = PR._juez(                             # noqa: SLF001
+                        "Cada uno de estos planos es un PRIMER PLANO de un sitio y lleva de referencia la "
+                        f"imagen entera de ese sitio. Lee con Read las dos de cada uno:\n{chr(10).join(lista)}\n"
+                        f"El sitio: «{esc['espacio']['descripcion']}». Para cada plano: 'de_cerca' (es un "
+                        "plano cercano, no la habitación entera) y 'mismo_sitio' (lo que se ve de cerca "
+                        "es de ESE sitio: los mismos materiales, colores y muebles fijos que su referencia; "
+                        "no otro cuarto ni otra cocina). Devuelve SOLO "
+                        '{"planos": [{"id": "S001", "de_cerca": "si"|"no", "mismo_sitio": "si"|"no", '
+                        '"por_que": "<una frase>"}]}', raiz)
+                except Exception as fallo:                          # noqa: BLE001
+                    juicio = {"planos": [], "error": str(fallo)}
+                est.setdefault("juicios", {}).setdefault(k, {})["primer_plano"] = juicio
+                pls = (juicio or {}).get("planos") or []
+                lejos = [p.get("id") for p in pls if p.get("de_cerca") not in ("si", "sí")]
+                otro = [p.get("id") for p in pls if p.get("mismo_sitio") not in ("si", "sí")]
+                informe.comprueba(pls and not otro, "Claude ve la MISMA cocina en el primer plano",
+                                  f"otro sitio en {otro}: " + "; ".join(
+                                      str(p.get("por_que")) for p in pls if p.get("id") in otro)[:300]
+                                  + (juicio.get("error") or ""))
+                informe.comprueba(pls and not lejos, "y el plano es de cerca", f"no es cercano: {lejos}",
+                                  solo_aviso=True)
+            hecha(f"{k}:juez_primer_plano")
+
+        # d) EL RECORRIDO: cada plano contra la imagen de SU ambiente, y los
+        # ambientes entre si como una misma casa
+        if esc.get("ambientes") and parte("juez_ambientes"):
+            bases_tr = ((_leer_tr(raiz)) or {}).get("bases") or {}
+            imagenes = {s: _de_disco((b or {}).get("imagen")) for s, b in bases_tr.items() if (b or {}).get("imagen")}
+            de_ambiente = [e for e in plan.get("escenas") or [] if e.get("set") in imagenes]
+            informe.comprueba(len({e["set"] for e in de_ambiente}) >= 2,
+                              f"los planos pasan por {len({e['set'] for e in de_ambiente})} ambientes",
+                              "todos los planos en un solo ambiente")
+            lista = "\n".join(f"- {e['id']}: {os.path.join(carpeta, 'escenas', e['id'] + '.png')} · su "
+                              f"ambiente: {e['set']}" for e in de_ambiente)
+            refs = "\n".join(f"- {s}: {ruta}" for s, ruta in imagenes.items())
+            try:
+                juicio = PR._juez(                                 # noqa: SLF001
+                    f"Lee con Read la imagen de referencia de cada AMBIENTE de una casa:\n{refs}\ny cada "
+                    f"uno de estos planos:\n{lista}\nPara cada plano: 'mismo_ambiente' (es SU ambiente: "
+                    "los mismos muebles fijos, paredes, ventanas y suelo que su referencia; la cámara "
+                    "puede ser otra y la gente o los objetos sueltos no cuentan). Y una vez: "
+                    "'misma_casa' (los ambientes comparten suelo, materiales y luz). Devuelve SOLO "
+                    '{"planos": [{"id": "S001", "mismo_ambiente": "si"|"no", "por_que": "<una frase>"}], '
+                    '"misma_casa": "si"|"no", "por_que_casa": "<una frase>"}', raiz)
+            except Exception as fallo:                              # noqa: BLE001
+                juicio = {"planos": [], "error": str(fallo)}
+            est.setdefault("juicios", {}).setdefault(k, {})["ambientes"] = juicio
+            pls = (juicio or {}).get("planos") or []
+            otro = [p.get("id") for p in pls if p.get("mismo_ambiente") not in ("si", "sí")]
+            informe.comprueba(pls and not otro, f"Claude ve cada plano en SU ambiente ({len(pls)} planos)",
+                              f"distinto en {otro}: " + "; ".join(
+                                  str(p.get("por_que")) for p in pls if p.get("id") in otro)[:300]
+                              + (juicio.get("error") or ""))
+            informe.comprueba((juicio or {}).get("misma_casa") in ("si", "sí"),
+                              "y los ambientes son la misma casa", str((juicio or {}).get("por_que_casa")))
+            hecha(f"{k}:juez_ambientes")
+
         mp4 = os.path.join(raiz, "pasos", "render", f"v{PR._activa(raiz, 'render')}", "video.mp4")  # noqa: SLF001
         duracion, pistas = PR._ffprobe(mp4)                       # noqa: SLF001
         informe.comprueba(os.path.isfile(mp4) and "video" in pistas, f"el MP4 está montado ({duracion:.1f} s)",

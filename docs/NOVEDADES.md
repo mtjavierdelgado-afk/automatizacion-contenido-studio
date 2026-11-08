@@ -10,6 +10,33 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Los estados se dibujan enteros y la imagen base se corrige (6 de noviembre)**
+- El cambio de cada estado del espacio («despues», «montada»…) ya no se corta
+  a 400 letras: cabe hasta 1.200 y la imagen se pide con la frase entera. Si
+  la Parrilla trae uno más largo, lo avisa. Las imágenes ya hechas y aprobadas
+  siguen valiendo: no hay que volver a pagar nada.
+- En la imagen base del tipo de relato: «✎ Cambiar» en lo que la base trae ya
+  puesto (se escribe en español), «Cambiar el espacio fijo ›» te lleva a su
+  bloque, y una nota para la próxima «Otra imagen base» (por ejemplo «el lavabo
+  a la izquierda») que vale solo esa vez.
+- En la Parrilla, las matrices van en un desplegable y, con «Todas las
+  matrices», los guiones de cada columna se agrupan por matriz y se pliegan.
+- En «✨ Elementos de esta imagen», dos opciones nuevas al final de la lista:
+  «✗ Cruz (lo que no se hace)» y «✓ Check (lo que sí)». Ponen el icono rojo o
+  verde arriba a la derecha, saltando con la primera palabra, en cualquier
+  vídeo (también en los hechos antes de «Marca:»).
+- En Automatizar, la lista del piloto enseña solo los vídeos del proyecto
+  abierto (y dice cuántos hay de otros) y deja de enseñar los que ya se
+  publicaron.
+- En una portada del piloto, «Usar esta» mueve el «✓ puesta» a la elegida en
+  el acto (antes podía quedarse marcada la de antes hasta recargar).
+- Un guion mandado al piloto sale de «Pendientes» y aparece en «Usados» con
+  «🤖 en el piloto», aunque su vídeo todavía esté en la cola.
+- En «✨ Elementos de esta imagen», cada elemento tiene ahora su color (el del
+  vídeo, rojo, verde, blanco o negro), «−» y «+» para el tamaño y flechas para
+  moverlo un poco. Al elegir el icono «check» se pone verde solo, y con
+  «cruz», rojo. Todo gratis: se aplica al montar.
+
 **El montaje, unas dos o tres veces más rápido, con la misma calidad (5 de noviembre)**
 - Cada fotograma del vídeo se guarda en JPEG de calidad máxima en vez de PNG. Era
   lo que más tardaba (el 81 % del montaje). Medido con imágenes de low, medium y
@@ -17,6 +44,15 @@ vídeos, estilos, claves y contraseña no se tocan.
 - No cambia ningún vídeo ya montado ni obliga a regenerar nada.
 - El precio antes de generar las imágenes, con la voz ya hecha, cuenta los planos
   que de verdad van a salir (antes los estimaba por la duración y se pasaba).
+
+**Una cruz o un check en las escenas de la Parrilla (5 de noviembre)**
+- En el guion de la Parrilla, una ESCENA puede llevar **«Marca: ✗»** (lo que no
+  se hace) o **«Marca: ✓»** (lo que sí), después de «ESCENA n» y antes de
+  «Visual». Al crear el vídeo, sus planos llevan una cruz roja o un check verde
+  arriba en una esquina, que salta con la primera palabra.
+- Se mueve, se cambia de tamaño o se quita en «✨ Elementos de esta imagen». Es
+  gratis: no cambia ninguna imagen. Sale cuando las imágenes siguen el guion
+  («Imágenes: guion»). Sin «Marca:», todo sale como siempre.
 
 **Los errores del servidor se dicen en una línea (5 de noviembre)**
 - Si el servidor no contesta un momento (por ejemplo, mientras se actualiza),

@@ -18135,10 +18135,13 @@ function editorGuionVisual() {
         onclick: () => aprobarGuionVisual() }, 'Aprobar el guion visual'));
   }
   caja.appendChild(fila);
-  caja.appendChild(h('div', { clase: 'meta' }, f.aprobado
-    ? (f.aprobado_solo && !est.copia.length ? '✓ Las líneas de la Parrilla valen: cada plano se dibuja desde su línea.'
-      : '✓ Aprobado: cada plano se dibuja desde su línea.')
-    : (est.tocado ? 'Hay cambios sin guardar.' : 'Sin aprobar: los planos no se dibujan hasta que lo apruebes.')));
+  // Lo escrito sin guardar manda sobre el «✓ Aprobado» de la ficha: tras un
+  // refresco (gv-refresco) la ficha puede llegar aprobada con la copia tocada.
+  caja.appendChild(h('div', { clase: 'meta' }, est.tocado ? 'Hay cambios sin guardar.'
+    : f.aprobado
+      ? (f.aprobado_solo && !est.copia.length ? '✓ Las líneas de la Parrilla valen: cada plano se dibuja desde su línea.'
+        : '✓ Aprobado: cada plano se dibuja desde su línea.')
+      : 'Sin aprobar: los planos no se dibujan hasta que lo apruebes.'));
   if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
   return caja;
 }

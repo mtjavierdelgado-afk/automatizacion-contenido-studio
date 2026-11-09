@@ -17,12 +17,29 @@ vídeos, estilos, claves y contraseña no se tocan.
   la Parrilla y los bloques sin pulsar F5.
 - Si estabas escribiendo en él sin guardar, lo escrito se queda.
 
+**Gráficas: mueve y retoca cada texto, y elige qué parte de la foto se ve (9 de noviembre)**
+- En **+ Nueva gráfica**, cada texto se arrastra sobre la vista a donde quieras.
+- En **Estilo del texto** eliges un texto y cambias su tamaño, negrita, cursiva,
+  subrayado, color y fondo, o lo ocultas. **Volver a como venía** lo deja como al
+  principio.
+- En **Qué parte de la foto se ve** arrastras la foto y la acercas con la barra,
+  sin que se deforme.
+- La vista grande se repinta al pulsar **Aplicar cambios**, no con cada letra, y
+  **Ver lo que tapa la red** enseña las zonas que tapa o recorta cada red. Si un
+  texto movido queda en una de ellas o choca con otro, te avisa.
+- Lo movido y el tamaño valen para ese diseño y ese tamaño de pieza: al cambiar
+  cualquiera de los dos, los textos vuelven a como vienen. Sigue sin gastar nada.
+
 **Menos vídeos «a revisar» por una descripción de plano un poco larga (8 de noviembre)**
 - Cuando Claude escribe lo que se ve en cada plano y se pasa unas pocas palabras
   del tope de 60 (hasta 75), la descripción ya no se recorta ni sale como aviso:
   antes se perdía justo el final de la frase. Solo se recorta una descripción
   desbocada, como siempre.
 - No cambia ninguna imagen ya hecha ni obliga a regenerar nada.
+
+**La prueba del tipo de relato hace también el recorrido y el primer plano (8 de noviembre)**
+
+`asvs probar relato` hace ahora, sin que toques nada, cuatro vídeos: b (el baño con 3 paletas, que comprueba también que rehacer una imagen no cambia de más), c (la sala de EstadoPlay), d (un recorrido por tres ambientes de una casa: se dibuja y se aprueba la imagen de cada ambiente, y un juez mira que cada plano sale en su ambiente) y e (una cocina que se ordena, en modo guion, con un primer plano que tiene que ser la misma cocina de cerca). La mampara batiente (a) ya no se hace sola: solo con `--solo a`.
 
 **El piloto pasa los estados del espacio y la portada del guion (7 de noviembre)**
 - «🤖 Hacer el vídeo completo» ya manda los ESTADOS DEL ESPACIO del guion de la

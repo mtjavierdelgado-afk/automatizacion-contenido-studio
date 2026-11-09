@@ -10,6 +10,19 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Gráficas: mueve y retoca cada texto, y elige qué parte de la foto se ve (9 de noviembre)**
+- En **+ Nueva gráfica**, cada texto se arrastra sobre la vista a donde quieras.
+- En **Estilo del texto** eliges un texto y cambias su tamaño, negrita, cursiva,
+  subrayado, color y fondo, o lo ocultas. **Volver a como venía** lo deja como al
+  principio.
+- En **Qué parte de la foto se ve** arrastras la foto y la acercas con la barra,
+  sin que se deforme.
+- La vista grande se repinta al pulsar **Aplicar cambios**, no con cada letra, y
+  **Ver lo que tapa la red** enseña las zonas que tapa o recorta cada red. Si un
+  texto movido queda en una de ellas o choca con otro, te avisa.
+- Lo movido y el tamaño valen para ese diseño y ese tamaño de pieza: al cambiar
+  cualquiera de los dos, los textos vuelven a como vienen. Sigue sin gastar nada.
+
 **Menos vídeos «a revisar» por una descripción de plano un poco larga (8 de noviembre)**
 - Cuando Claude escribe lo que se ve en cada plano y se pasa unas pocas palabras
   del tope de 60 (hasta 75), la descripción ya no se recorta ni sale como aviso:

@@ -107,13 +107,15 @@ CATALOGO = [
 ]
 #: campo -> (etiqueta, largo maximo)
 CAMPOS = {
-    "marca": ("Marca", 40), "tipo": ("Tipo de negocio", 40), "kicker": ("Antetítulo", 40),
+    "marca": ("Nombre o logo", 40), "tipo": ("Tipo de negocio", 40), "kicker": ("Antetítulo", 40),
     "titulo": ("Titular", 90), "apoyo": ("Texto de apoyo", 140), "cta": ("Llamada a la acción", 40),
     "oferta": ("Oferta (corta)", 8), "oferta_txt": ("Texto de la oferta", 40),
     "dia": ("Día", 6), "mes": ("Mes", 20), "lugar": ("Lugar", 50),
     "i1": ("Paso 1", 50), "i2": ("Paso 2", 50), "i3": ("Paso 3", 50),
     "cita": ("Testimonio", 180), "autor": ("Quién lo dice", 50),
 }
+#: Lo que se mueve y se retoca sin ser un campo de texto: el sello de la oferta.
+CAPAS_EXTRA = {"sello": "Sello entero"}
 #: Los colores de partida cuando el cliente aun no tiene kit.
 COLORES_DEFECTO = {"principal": "#5B2EFF", "secundario": "#FFD60A", "acento": "#FF2E7E",
                    "oscuro": "#120A33", "claro": "#F6F3FF"}
@@ -449,11 +451,115 @@ def limpiar_pieza(datos):
     imagen = str(datos.get("imagen") or "")
     if imagen and not _RE_IMAGEN.match(imagen):
         raise ErrorGraficas("esa imagen no está")
+    capas = _limpiar_capas(datos.get("capas"))
+    encuadre = _limpiar_encuadre(datos.get("encuadre"))
     return {"plantilla": n, "formato": datos.get("formato") or FORMATO_DEFECTO, "textos": textos,
-            "imagen": imagen, "colores": _limpiar_colores(datos.get("colores")),
+            "imagen": imagen, "capas": capas, "encuadre": encuadre,
+            "colores": _limpiar_colores(datos.get("colores")),
             "fuente_titulos": _limpiar_fuente(datos.get("fuente_titulos"), "títulos"),
             "fuente_texto": _limpiar_fuente(datos.get("fuente_texto"), "texto"),
             "nombre": str(datos.get("nombre") or "").strip()[:80]}
+
+
+def _numero(valor, minimo, maximo, defecto):
+    try:
+        numero = float(valor)
+    except (TypeError, ValueError, OverflowError):
+        return defecto
+    if numero != numero:                                    # NaN
+        return defecto
+    return max(minimo, min(maximo, numero))
+
+
+def _limpiar_capas(valor):
+    """Los retoques de cada texto: `{campo: {x, y, escala, negrita, cursiva,
+    subrayado, color, fondo, oculto}}`. x e y, en % del lienzo."""
+    if valor is None:
+        return {}
+    if not isinstance(valor, dict):
+        raise ErrorGraficas("los retoques del texto no tienen la forma esperada")
+    salida = {}
+    for campo, capa in valor.items():
+        if (campo not in CAMPOS and campo not in CAPAS_EXTRA) or not isinstance(capa, dict):
+            continue
+        limpia = {}
+        for eje in ("x", "y"):
+            if capa.get(eje):
+                limpia[eje] = round(_numero(capa[eje], -100, 100, 0), 2)
+        if capa.get("escala") not in (None, 1, 1.0):
+            limpia["escala"] = round(_numero(capa["escala"], 0.4, 3, 1), 2)
+        for marca in ("negrita", "cursiva", "subrayado", "oculto"):
+            if isinstance(capa.get(marca), bool):
+                limpia[marca] = capa[marca]
+        for tinte in ("color", "fondo"):
+            if capa.get(tinte):
+                if not _RE_COLOR.match(str(capa[tinte])):
+                    raise ErrorGraficas("un color del texto tiene que ser como #FF5A00")
+                limpia[tinte] = str(capa[tinte]).upper()
+        if limpia:
+            salida[campo] = limpia
+    return salida
+
+
+def _limpiar_encuadre(valor):
+    """Qué parte de la foto se ve: x e y de 0 a 100 y zoom de 1 a 4."""
+    if not isinstance(valor, dict):
+        return {}
+    encuadre = {"x": round(_numero(valor.get("x"), 0, 100, 50), 2),
+                "y": round(_numero(valor.get("y"), 0, 100, 50), 2),
+                "zoom": round(_numero(valor.get("zoom"), 1, 4, 1), 2)}
+    return {} if encuadre == {"x": 50, "y": 50, "zoom": 1} else encuadre
+
+
+def _css_encuadre(encuadre):
+    """`object-view-box` recorta la foto ANTES de encajarla: asi el zoom nunca se
+    sale de su hueco, sea cual sea el diseno."""
+    if not encuadre:
+        return ""
+    x, y, zoom = encuadre["x"], encuadre["y"], encuadre["zoom"]
+    lado = 100 / zoom
+    izq, arr = (100 - lado) * x / 100, (100 - lado) * y / 100
+    return (f".lienzo img:not(.logo){{object-position:{x}% {y}%;"
+            f"object-view-box:inset({arr:.3f}% {100 - lado - izq:.3f}% {100 - lado - arr:.3f}% {izq:.3f}%)}}")
+
+
+def _css_capas(capas):
+    partes = []
+    for campo, capa in capas.items():
+        reglas = []
+        if capa.get("x") or capa.get("y"):
+            reglas.append(f"translate:{capa.get('x', 0)}cqw {capa.get('y', 0)}cqh")
+        if "negrita" in capa:
+            reglas.append(f"font-weight:{800 if capa['negrita'] else 400}!important")
+        if "cursiva" in capa:
+            reglas.append(f"font-style:{'italic' if capa['cursiva'] else 'normal'}!important")
+        if "subrayado" in capa:
+            reglas.append(f"text-decoration:{'underline' if capa['subrayado'] else 'none'}!important")
+        if capa.get("color"):
+            reglas.append(f"color:{capa['color']}!important")
+        if capa.get("fondo"):
+            reglas.append(f"background:{capa['fondo']}!important;padding:.12em .3em")
+        if capa.get("oculto"):
+            reglas.append("display:none!important")
+        if reglas:
+            partes.append(f'[data-e="{campo}"]{{{";".join(reglas)}}}')
+    return "".join(partes)
+
+
+def _aplicar_tamanos(cuerpo, capas):
+    """El tamano de cada texto, multiplicando el suyo en SU etiqueta."""
+    for campo, capa in capas.items():
+        escala = capa.get("escala")
+        if not escala:
+            continue
+
+        def retocar(m, esc=escala):
+            etiqueta = m.group(0)
+            if "font-size:" in etiqueta:
+                return re.sub(r"font-size: ([^;\"]+(?:\([^\"]*?\))?)", lambda f: f"font-size: calc(({f.group(1)})*{esc})", etiqueta, count=1)
+            return etiqueta.replace('style="', f'style="zoom: {esc}; ', 1)
+        cuerpo = re.sub(rf'<div (?:class="t" )?data-e="{campo}" style="[^"]*">', retocar, cuerpo)
+    return cuerpo
 
 
 def _sustituir_imagen(cuerpo, uri):
@@ -474,6 +580,7 @@ def html_de(pieza, kit=None, imagen=None, logo=None, logo_oscuro=None):
     variables, margenes = _variables(f, colores)
     cuerpo = _PL.PLANTILLAS[pieza["plantilla"]]
     cuerpo = _sustituir_imagen(cuerpo, _data_uri(imagen) if imagen else "")
+    cuerpo = _aplicar_tamanos(cuerpo, pieza["capas"])
     # el logo: el normal, o el de fondo oscuro si la caja cae sobre color oscuro
     fondo_marca = {1: "a", 2: "d", 5: "d", 6: "l", 7: "b", 8: "l", 9: "d", 10: "d", 13: "a", 14: "l"}.get(pieza["plantilla"], "l")
     logo_ruta = logo
@@ -511,6 +618,7 @@ def html_de(pieza, kit=None, imagen=None, logo=None, logo_oscuro=None):
         f".lienzo{{position:relative;overflow:hidden;width:100vw;height:100vh;container-type:size;"
         f"font-family:{familia_texto},sans-serif;background:var(--d)}}"
         ".t:empty{display:none}.logo{display:block;max-height:9cqmin;max-width:34cqmin;object-fit:contain}"
+        f"{_css_encuadre(pieza['encuadre'])}{_css_capas(pieza['capas'])}"
         f"</style></head><body><div class=\"lienzo\">{cuerpo}</div></body></html>")
     return documento, f, margenes, faltan
 
@@ -615,9 +723,9 @@ class Pincel:
 
 
 _MEDIR = """(() => {
-  const W = innerWidth, H = innerHeight, m = %s;
+  const W = innerWidth, H = innerHeight, m = %s, ignorar = %s;
   const seg = {l: m[3] / 100 * W - 1, r: W - m[1] / 100 * W + 1, t: m[0] / 100 * H - 1, b: H - m[2] / 100 * H + 1};
-  const cajas = [...document.querySelectorAll('.t')].filter(e => (e.textContent || e.querySelector('img')));
+  const cajas = [...document.querySelectorAll('.t')].filter(e => (e.textContent || e.querySelector('img')) && e.getClientRects().length && !ignorar.includes(e.dataset.e));
   const fuera = [], choca = [], rect = [];
   for (const e of cajas) {
     const r = document.createRange(); r.selectNodeContents(e);
@@ -639,22 +747,43 @@ _MEDIR = """(() => {
 })()"""
 
 
-def _ajustar(pincel, margenes):
-    """Baja la letra hasta que el texto cabe y queda fuera de lo que tapa la red."""
-    expresion = _MEDIR % json.dumps(list(margenes))
+_CAJAS = """(() => {
+  const W = innerWidth, H = innerHeight, salida = {};
+  for (const e of document.querySelectorAll('[data-e]')) {
+    if (!e.getClientRects().length || !(e.textContent || e.querySelector('img'))) continue;
+    const c = e.getBoundingClientRect();
+    salida[e.dataset.e] = {x: c.left / W * 100, y: c.top / H * 100, w: c.width / W * 100, h: c.height / H * 100};
+  }
+  const f = [...document.images].filter(i => !i.classList.contains('logo'))
+    .map(i => i.getBoundingClientRect()).sort((a, b) => b.width * b.height - a.width * a.height)[0];
+  return {cajas: salida, hueco: f && f.height ? f.width / f.height : null};
+})()"""
+
+
+def _ajustar(pincel, margenes, retocados=()):
+    """Baja la letra hasta que el texto cabe y queda fuera de lo que tapa la red.
+    Lo que se ha movido o cambiado de tamano a mano no cuenta para bajarla: manda
+    lo que la persona ha decidido. La medida final, con todo, es la que avisa."""
+    margen = json.dumps(list(margenes))
+    expresion = _MEDIR % (margen, json.dumps(list(retocados)))
     escala = 1.0
     while True:
         medida = pincel.evaluar(expresion) or {"fuera": [], "choca": []}
         if (not medida["fuera"] and not medida["choca"]) or escala <= ESCALA_MINIMA:
-            return escala, medida
+            break
         escala = round(escala - 0.05, 2)
         pincel.evaluar(f"document.documentElement.style.setProperty('--esc','{escala}');"
                        "document.fonts.ready.then(()=>true)")
+    if retocados:
+        medida = pincel.evaluar(_MEDIR % (margen, "[]")) or medida
+    return escala, medida
 
 
-def _avisos(medida, escala, faltan):
+def _avisos(medida, escala, faltan, retocada=False):
     avisos = []
-    if medida["fuera"] or medida["choca"]:
+    if (medida["fuera"] or medida["choca"]) and retocada:
+        avisos.append("Un texto queda en lo que tapa la red o pisa a otro: revísalo con «Ver lo que tapa la red».")
+    elif medida["fuera"] or medida["choca"]:
         avisos.append("El texto no cabe bien en este diseño y tamaño: acórtalo o elige otro.")
     elif escala < 1:
         avisos.append(f"Letra reducida al {round(escala * 100)} % para que quepa el texto.")
@@ -667,8 +796,9 @@ def pintar(pincel, pieza, kit=None, imagen=None, logo=None, logo_oscuro=None):
     """-> (png en bytes, avisos, medida)."""
     documento, f, margenes, faltan = html_de(pieza, kit, imagen, logo, logo_oscuro)
     pincel.abrir(documento, f["W"], f["H"])
-    escala, medida = _ajustar(pincel, margenes)
-    return pincel.capturar(), _avisos(medida, escala, faltan), medida
+    retocados = [campo for campo, c in limpiar_pieza(pieza)["capas"].items() if any(k in c for k in ("x", "y", "escala"))]
+    escala, medida = _ajustar(pincel, margenes, retocados)
+    return pincel.capturar(), _avisos(medida, escala, faltan, bool(retocados)), medida
 
 
 def a_jpg(png, ancho=None, calidad=92):
@@ -705,9 +835,13 @@ def vistas(raiz, cid, pieza, plantillas, logo=None, logo_oscuro=None):
         salida = []
         grande = None
         for n in plantillas:
-            png, avisos, _ = pintar(pincel, dict(pieza, plantilla=n), kit, imagen, logo, logo_oscuro)
+            # lo arrastrado y el tamano son de ESTE diseno: en los otros, cada texto como viene
+            otra = pieza if n == pieza["plantilla"] else dict(
+                pieza, plantilla=n, capas={c: {k: v for k, v in d.items() if k not in ("x", "y", "escala")}
+                                           for c, d in pieza["capas"].items()})
+            png, avisos, _ = pintar(pincel, otra, kit, imagen, logo, logo_oscuro)
             if n == pieza["plantilla"]:
-                grande = {"img": _uri_jpg(a_jpg(png, 1080, 88)), "avisos": avisos}
+                grande = dict(pincel.evaluar(_CAJAS) or {}, img=_uri_jpg(a_jpg(png, 1080, 88)), avisos=avisos)
             salida.append({"n": n, "img": _uri_jpg(a_jpg(png, 420, 80)), "avisos": avisos})
         return {"vistas": salida, "grande": grande}
     return _con_turno(trabajar)
@@ -789,9 +923,10 @@ def borrar_pieza(raiz, cid, pieza_id):
 
 def catalogo():
     return {
-        "plantillas": [{"n": n, "nombre": nombre, "uso": uso, "campos": list(campos)} for n, nombre, uso, campos in CATALOGO],
+        "plantillas": [{"n": n, "nombre": nombre, "uso": uso, "campos": list(campos), "extras": ["sello"] if n == 7 else []} for n, nombre, uso, campos in CATALOGO],
         "formatos": FORMATOS, "formato_defecto": FORMATO_DEFECTO,
         "campos": {k: {"etiqueta": v[0], "largo": v[1]} for k, v in CAMPOS.items()},
+        "capas_extra": CAPAS_EXTRA,
         "fuentes": [{"id": k, "nombre": v[0]} for k, v in sorted(FUENTES.items(), key=lambda x: x[1][0])],
         "colores_defecto": COLORES_DEFECTO, "roles": list(ROLES),
     }

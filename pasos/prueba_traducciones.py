@@ -159,10 +159,10 @@ def prueba_al_ingles():
     salida, doble = _con_doble([], lambda: T.al_ingles("   "))
     ok(isinstance(salida, T.ErrorTraduccion) and not doble.vistas,
        "sin español no se llama a Claude")
-    largo = "x" * 900
+    largo = "x" * (T.MAX_INGLES + 1)
     salida, _d = _con_doble([json.dumps({"ingles": largo})], lambda: T.al_ingles("algo"))
     ok(isinstance(salida, T.ErrorTraduccion),
-       "un inglés más largo que el tope de un cambio (400) se rechaza, no se recorta")
+       f"un inglés más largo que el tope de un cambio ({T.MAX_INGLES}) se rechaza, no se recorta")
 
 
 def prueba_describir():

@@ -303,6 +303,26 @@ def prueba_al_crear():
               "editar en español el estado de la Parrilla lo cambia en el guion visual")
         ok(not ((ctx.estado.params("assets") or {}).get("catalogo") or {}).get("beats"),
            "sin tocar ningún tramo del reparto")
+        # rama piloto-estados (07-11): «Hacer el vídeo completo» pasa los
+        # estados (y la portada) igual que «Pasar al Encargo»
+        enc = P.encargo_de(P.leer_guion(GUION.replace(
+            "AVISOS", "PORTADA\n- Texto: ¿Baño pequeño?\n- Imagen: a round mirror glowing\n\nAVISOS")))
+        op = servidor._piloto_opciones(enc)
+        igual(sorted((op.get("estados") or {})), ["antes", "despues"],
+              "el piloto manda los ESTADOS DEL ESPACIO del guion")
+        ok((op.get("portada") or {}).get("imagen") == "a round mirror glowing",
+           f"y la portada propuesta ({op.get('portada')})")
+        pid = Proyecto.crear(base, "del piloto").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        servidor._opciones_al_crear(ctx, "", op)
+        gv = (ctx.estado.params("assets") or {}).get("guion_visual") or {}
+        igual(sorted(gv.get("estados") or {}), ["antes", "despues"],
+              "el vídeo creado por el piloto guarda los estados, como el del Encargo")
+        sin = servidor._piloto_opciones(P.encargo_de(P.leer_guion(
+            GUION.split("ESTADOS DEL ESPACIO")[0] + "ESCENA 1\nVisual: algo\nVoz: «hola»\n")))
+        ok("estados" not in sin and "portada" not in sin,
+           "un guion sin estados ni portada: el piloto no manda nada de más (regla 1)")
     finally:
         servidor._bloques_del_guion = real
 

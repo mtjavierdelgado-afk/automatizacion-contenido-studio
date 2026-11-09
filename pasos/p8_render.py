@@ -180,6 +180,41 @@ def poner_logo(destino, ruta_logo, ficha, calidad="media", avisar=None):
 ENLAZAR_TRABAJO = os.name != "nt"
 
 
+#: EN QUE FORMATO SE CAPTURA CADA FOTOGRAMA (rama montaje-rapido, 05-11-2026).
+#: Medido con `diagnostico_velocidad` en el VPS: un video de 24 s tardo 585 s y
+#: el 81 % era pintar y capturar, porque Edge comprime un PNG de 1080x1920 por
+#: fotograma (~0,9-1,1 s con su pintado). En JPEG calidad 100 son 0,26-0,50 s, y
+#: la calidad del video final medida contra los fotogramas sin comprimir (PSNR y
+#: SSIM, con el mismo libx264 de `_codificar`) sale igual que con PNG en
+#: imagenes de low, medium y high: lo que pierde el JPEG 100 queda por debajo de
+#: lo que ya pierde el H.264. El JPEG 95 SI perdia en las de mucho detalle.
+#: Los fotogramas que una transicion vuelve a leer como textura y el ultimo de
+#: cada plano (el que mira el siguiente) siguen en PNG: asi nada se comprime
+#: dos veces. `ESTUDIO_FOTOGRAMAS=png` vuelve exactamente a lo de antes.
+#: No es un param a proposito: no entra en ninguna firma (regla 1).
+CALIDAD_JPEG = 100
+
+
+def formato_fotogramas():
+    """'jpeg' (por defecto) o 'png', segun `ESTUDIO_FOTOGRAMAS`. -> str"""
+    valor = (os.environ.get("ESTUDIO_FOTOGRAMAS") or "").strip().lower()
+    return "png" if valor == "png" else "jpeg"
+
+
+def _ext_fotogramas():
+    return "png" if formato_fotogramas() == "png" else "jpg"
+
+
+#: LO QUE SE MIDIO PARA IR MAS DEPRISA Y NO SE HIZO (rama pulido-montaje,
+#: 08-11), para no volver a medirlo. Con los fotogramas JPEG 100 del montaje, a
+#: crf 16 y contra los fotogramas sin comprimir:
+#: - «alta» con `medium` en vez de `slow`: low 50,26 -> 50,18 dB, medium 47,71 ->
+#:   47,67, high 43,16 -> 43,11, y un 30-40 % menos de codificar (un 4-5 % del
+#:   montaje). NO se cambio: un remontaje reutiliza los clips ya hechos y los
+#:   une con `-c:v copy`, asi que un video mezclaria clips de dos presets con
+#:   cabeceras H.264 distintas (referencias, etc.) bajo la cabecera del primero.
+#: - pasar a JPEG los fotogramas que relee una transicion: comprimirlos dos
+#:   veces bajaba high de 43,2 a 41,7 dB (low -0,2, medium -0,6). Siguen en PNG.
 CALIDADES = {
     "alta": {"crf": "16", "preset": "slow"},
     "media": {"crf": "20", "preset": "medium"},
@@ -354,8 +389,13 @@ class Navegador:
             self.rAF = False
 
     def capturar(self, destino):
-        datos = self.llamar("Page.captureScreenshot", format="png",
-                            captureBeyondViewport=False)
+        """El fotograma en `destino`: JPEG si acaba en .jpg/.jpeg, si no PNG."""
+        if destino.lower().endswith((".jpg", ".jpeg")):
+            datos = self.llamar("Page.captureScreenshot", format="jpeg",
+                                quality=CALIDAD_JPEG, captureBeyondViewport=False)
+        else:
+            datos = self.llamar("Page.captureScreenshot", format="png",
+                                captureBeyondViewport=False)
         medios.romper_enlace(destino)
         with open(destino, "wb") as fh:
             fh.write(base64.b64decode(datos["data"]))
@@ -687,14 +727,27 @@ def _pagina_de(escena, mov, capa_svg, hyper, p, destino, capa_fija="", fps=30):
 
 # ------------------------------------------------------------------ ffmpeg
 
-def _codificar(dir_frames, destino, fps, calidad, avisar=None):
+def _codificar(dir_frames, destino, fps, calidad, avisar=None, ext="png"):
+    """Los fotogramas `f%05d.<ext>` de la carpeta, en un clip H.264.
+
+    `ext` lo dice quien capturo (`renderizar_plano`), no lo que haya en la
+    carpeta: en Windows un fichero de una pasada anterior puede seguir ahi.
+    """
     ajustes = CALIDADES.get(calidad) or CALIDADES["media"]
+    # LOS JPEG NO PUEDEN DEJAR MARCA DE COLOR (revision del 05-11-2026): ffmpeg
+    # etiqueta «BT.601, rango tv» el clip que sale de JPEG y no etiqueta el que
+    # sale de PNG, y al unir los clips sin recodificar el video entero hereda la
+    # marca del PRIMERO. Los pixeles son los mismos; la marca haria que un
+    # reproductor pintara el video con otro color. Se quita para que salga como
+    # siempre.
+    sin_marca = (["-color_primaries", "2", "-color_trc", "2", "-colorspace", "2",
+                  "-color_range", "0"] if ext == "jpg" else [])
     # el clip puede ser el MISMO fichero que el de la version anterior
     medios.romper_enlace(destino)
     orden = [medios.ffmpeg(), "-y", "-loglevel", "error",
-             "-framerate", str(fps), "-i", os.path.join(dir_frames, "f%05d.png"),
+             "-framerate", str(fps), "-i", os.path.join(dir_frames, f"f%05d.{ext}"),
              "-c:v", "libx264", "-preset", ajustes["preset"], "-crf", ajustes["crf"],
-             "-pix_fmt", "yuv420p", "-r", str(fps), destino]
+             "-pix_fmt", "yuv420p", *sin_marca, "-r", str(fps), destino]
     proceso = medios.correr(orden, avisar)
     if proceso.returncode != 0 or not os.path.exists(destino):
         raise RuntimeError(f"ffmpeg fallo con {destino}: {proceso.stderr[-400:]}")
@@ -938,15 +991,40 @@ def _cocer_transicion(navegador, pagina_trans, anterior, carpeta, total, fps,
     plano que entra no existe, y en un plano de un segundo con un `light-leak`
     de 0,6 s el calculo daba mas fotogramas de los que hay.
     """
-    cuantos = min(total, int(round(fps * float(corte.get("duracion") or 0))))
+    cuantos = _frames_de_transicion(total, fps, corte)
     if cuantos <= 0:
         return 0
+    ext = _ext_fotogramas()
     navegador.abrir(pagina_trans)
     for indice, progreso in enumerate(transiciones.progresos(cuantos)):
+        # el fotograma limpio se capturo en PNG (ver `renderizar_plano`): se lee
+        # como textura sin perdida y el resultado sale en el formato del clip
         marco = os.path.join(carpeta, f"f{indice + 1:05d}.png")
+        destino = os.path.join(carpeta, f"f{indice + 1:05d}.{ext}")
         transiciones.componer(navegador, anterior, marco, progreso,
-                              corte["shader"], marco)
+                              corte["shader"], destino)
+        if destino != marco:
+            medios.borrar(marco)
     return cuantos
+
+
+def _frames_de_transicion(total, fps, corte):
+    """Cuantos fotogramas del principio del plano rehace su transicion. -> int"""
+    return min(total, int(round(fps * float((corte or {}).get("duracion") or 0))))
+
+
+def _pasar_a_jpeg(origen, destino, avisar=None):
+    """Un PNG que se capturo para una transicion que al final no se hizo.
+
+    Es el camino raro (el plano anterior no dejo su ultimo fotograma a tiempo):
+    el clip va en JPEG y la secuencia no puede tener huecos ni mezclar formatos.
+    """
+    medios.romper_enlace(destino)
+    proceso = medios.correr([medios.ffmpeg(), "-y", "-loglevel", "error", "-i", origen,
+                             "-q:v", "1", "-qmin", "1", destino], avisar)
+    if proceso.returncode != 0 or not os.path.exists(destino):
+        raise RuntimeError(f"ffmpeg no pudo pasar {origen} a JPEG: {proceso.stderr[-300:]}")
+    medios.borrar(origen)
 
 
 # ------------------------------------------------- los planos, en paralelo
@@ -987,7 +1065,8 @@ def _cocer_transicion(navegador, pagina_trans, anterior, carpeta, total, fps,
 # `_repartir_lotes`.
 #
 # Lo que NO cambia: el mismo Edge, la misma pagina, el mismo codigo y los
-# mismos PNG. La imagen es identica byte a byte -- solo cambia quien la pide.
+# mismos fotogramas (JPEG o PNG, ver `formato_fotogramas`). La imagen es
+# identica byte a byte -- solo cambia quien la pide.
 
 #: Cuantos lotes de planos a la vez. 0 = automatico, 1 = en fila (que es como
 #: iba hasta el 21-08-2026 y lo que sigue haciendo cuando solo hay un plano que
@@ -1158,6 +1237,14 @@ def renderizar_plano(tarea, navegador=None, avisar=None):
     navegador.abrir(pagina)
     tiempos["abrir"] = time.time() - reloj
     reloj = time.time()
+    # QUE FOTOGRAMAS VAN EN PNG con el JPEG puesto: los que la transicion vuelve
+    # a leer como textura y el ultimo (el que mira el plano siguiente). Se
+    # decide antes de pintar con lo mismo que decide si habra transicion.
+    ext = _ext_fotogramas()
+    corte_previsto = tarea.get("corte") or {}
+    en_png = 0
+    if ext != "png" and tarea.get("anterior") and transiciones.cuece_el_anterior(corte_previsto):
+        en_png = _frames_de_transicion(total, fps, corte_previsto)
     for numero in range(total):
         navegador.pintar(numero / float(fps))
         if numero == 0 and (tarea["mov"].get("profundidad") or {}).get("mapa"):
@@ -1168,11 +1255,20 @@ def renderizar_plano(tarea, navegador=None, avisar=None):
             if fallo:
                 print(f"[render] {sid}: la profundidad 2.5D no se ha podido pintar "
                       f"({fallo}); el plano va con el movimiento de siempre", flush=True)
-        navegador.capturar(os.path.join(carpeta, f"f{numero + 1:05d}.png"))
+        if ext == "png" or numero < en_png:
+            navegador.capturar(os.path.join(carpeta, f"f{numero + 1:05d}.png"))
+        else:
+            navegador.capturar(os.path.join(carpeta, f"f{numero + 1:05d}.jpg"))
+            if numero == total - 1:
+                # el ultimo, ademas, sin perdida: es la textura del siguiente
+                navegador.capturar(os.path.join(carpeta, "ultimo_limpio.png"))
     # El ultimo fotograma se guarda ANTES de la transicion: es el que mira el
     # plano siguiente, y lo que tiene que mirar es este plano limpio, no este
     # plano mezclado con el anterior.
-    _guardar_ultimo(os.path.join(carpeta, f"f{total:05d}.png"), tarea["ultimo"])
+    limpio = (os.path.join(carpeta, f"f{total:05d}.png")
+              if ext == "png" or total <= en_png
+              else os.path.join(carpeta, "ultimo_limpio.png"))
+    _guardar_ultimo(limpio, tarea["ultimo"])
     tiempos["pintar_y_capturar"] = time.time() - reloj
     reloj = time.time()
 
@@ -1199,9 +1295,14 @@ def renderizar_plano(tarea, navegador=None, avisar=None):
             pintados = _cocer_transicion(navegador, tarea["pagina_trans"],
                                          anterior, carpeta, total, fps, corte)
 
+    # los PNG que la transicion no llego a rehacer pasan a JPEG: el clip es
+    # UNA secuencia en UN formato
+    for numero in range(pintados + 1, en_png + 1):
+        _pasar_a_jpeg(os.path.join(carpeta, f"f{numero:05d}.png"),
+                      os.path.join(carpeta, f"f{numero:05d}.jpg"), avisar)
     tiempos["transicion"] = time.time() - reloj
     reloj = time.time()
-    _codificar(carpeta, tarea["clip"], fps, tarea["calidad"], avisar)
+    _codificar(carpeta, tarea["clip"], fps, tarea["calidad"], avisar, ext=ext)
     tiempos["codificar"] = time.time() - reloj
     medios.borrar(pagina)
     if not tarea.get("conservar_frames"):

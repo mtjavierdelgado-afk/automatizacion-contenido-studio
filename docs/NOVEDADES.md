@@ -10,6 +10,23 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Menos vídeos «a revisar» por una descripción de plano un poco larga (8 de noviembre)**
+- Cuando Claude escribe lo que se ve en cada plano y se pasa unas pocas palabras
+  del tope de 60 (hasta 75), la descripción ya no se recorta ni sale como aviso:
+  antes se perdía justo el final de la frase. Solo se recorta una descripción
+  desbocada, como siempre.
+- No cambia ninguna imagen ya hecha ni obliga a regenerar nada.
+
+**El piloto pasa los estados del espacio y la portada del guion (7 de noviembre)**
+- «🤖 Hacer el vídeo completo» ya manda los ESTADOS DEL ESPACIO del guion de la
+  Parrilla, igual que «Pasar al Encargo». Antes no los pasaba y cada escena con
+  «Estado:» se dibujaba como la imagen base: por eso salían dos tomas con la
+  misma imagen. También manda la PORTADA propuesta en el guion, que la portada
+  con IA del piloto usa como fondo.
+- Los vídeos que ya hizo el piloto no cambian solos. Si alguno salió con la
+  misma imagen en varias tomas, hay que hacerlo otra vez desde su guion (con
+  el piloto o con «Pasar al Encargo»), y eso vuelve a pagar sus imágenes.
+
 **Los estados se dibujan enteros y la imagen base se corrige (6 de noviembre)**
 - El cambio de cada estado del espacio («despues», «montada»…) ya no se corta
   a 400 letras: cabe hasta 1.200 y la imagen se pide con la frase entera. Si
@@ -36,6 +53,14 @@ vídeos, estilos, claves y contraseña no se tocan.
   vídeo, rojo, verde, blanco o negro), «−» y «+» para el tamaño y flechas para
   moverlo un poco. Al elegir el icono «check» se pone verde solo, y con
   «cruz», rojo. Todo gratis: se aplica al montar.
+
+**El montaje, unas dos o tres veces más rápido, con la misma calidad (5 de noviembre)**
+- Cada fotograma del vídeo se guarda en JPEG de calidad máxima en vez de PNG. Era
+  lo que más tardaba (el 81 % del montaje). Medido con imágenes de low, medium y
+  high: el vídeo final sale igual que antes.
+- No cambia ningún vídeo ya montado ni obliga a regenerar nada.
+- El precio antes de generar las imágenes, con la voz ya hecha, cuenta los planos
+  que de verdad van a salir (antes los estimaba por la duración y se pasaba).
 
 **Una cruz o un check en las escenas de la Parrilla (5 de noviembre)**
 - En el guion de la Parrilla, una ESCENA puede llevar **«Marca: ✗»** (lo que no

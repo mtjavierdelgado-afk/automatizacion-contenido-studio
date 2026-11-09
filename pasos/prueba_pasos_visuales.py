@@ -1708,6 +1708,95 @@ def probar_transicion_no_coge_la_vieja(proyecto):
         shutil.rmtree(carpeta, ignore_errors=True)
 
 
+def _psnr(a, b):
+    """PSNR medio (dB) entre dos videos del mismo tamaño. -> float|None"""
+    salida = subprocess.run(
+        [medios.ffmpeg(), "-i", a, "-i", b, "-lavfi", "psnr", "-f", "null", "-"],
+        capture_output=True, text=True, timeout=300, **medios.SIN_VENTANA)
+    hallado = re.search(r"average:([\d.]+|inf)", salida.stderr or "")
+    if not hallado:
+        return None
+    return 99.0 if hallado.group(1) == "inf" else float(hallado.group(1))
+
+
+def probar_fotogramas_jpeg(proyecto, estado, params):
+    """montaje-rapido (05-11-2026): los fotogramas en JPEG 100 dan el MISMO video.
+
+    Se monta el video dos veces, en fila: con `ESTUDIO_FOTOGRAMAS=png` (lo de
+    antes) y con lo de fabrica (JPEG). Cada clip tiene que parecerse al de PNG
+    tanto como para no distinguirlos, las transiciones tienen que seguir
+    cociendose, y el camino raro (un PNG que la transicion no llego a rehacer)
+    tiene que pasar a JPEG sin dejar un hueco en la secuencia.
+    """
+    print("\n  [fotogramas en JPEG: el mismo video, mas deprisa]")
+    igual(p8_render.formato_fotogramas(), "jpeg", "de fabrica los fotogramas van en JPEG")
+    copia = tempfile.mkdtemp(prefix="clips_png_")
+    antes = os.environ.get("ESTUDIO_FOTOGRAMAS")
+    try:
+        os.environ["ESTUDIO_FOTOGRAMAS"] = "png"
+        igual(p8_render.formato_fotogramas(), "png", "ESTUDIO_FOTOGRAMAS=png vuelve a lo de antes")
+        en_png = p8_render.ejecutar(proyecto, dict(params, lotes=1), avisador("p8"))
+        trabajo = proyecto.ruta_trabajo("render", crear=False)
+        clips_png = {}
+        for sid, ruta in en_png["salidas"]["clips"].items():
+            clips_png[sid] = os.path.join(copia, f"{sid}.mp4")
+            shutil.copy2(os.path.join(trabajo, ruta), clips_png[sid])
+        if antes is None:
+            os.environ.pop("ESTUDIO_FOTOGRAMAS", None)
+        else:
+            os.environ["ESTUDIO_FOTOGRAMAS"] = antes
+        reloj = time.time()
+        en_jpeg = p8_render.ejecutar(proyecto, dict(params, lotes=1), avisador("p8"))
+        trabajo = proyecto.ruta_trabajo("render", crear=False)
+        print(f"      montado en JPEG en {time.time() - reloj:.1f} s")
+        notas = {sid: _psnr(os.path.join(trabajo, ruta), clips_png[sid])
+                 for sid, ruta in en_jpeg["salidas"]["clips"].items()}
+        peores = sorted((n if n is not None else -1, sid) for sid, n in notas.items())[:3]
+        ok(notas and all(n is not None and n >= 40 for n in notas.values()),
+           f"cada clip en JPEG se parece al de PNG tanto como para no distinguirlos "
+           f"(PSNR >= 40 dB; los peores: {peores})")
+        igual(sorted(en_jpeg["salidas"]["clips"]), sorted(en_png["salidas"]["clips"]),
+              "salen los mismos clips")
+        transiciones_jpeg = sum(int(f.get("frames_transicion") or 0)
+                                for f in en_jpeg["unidades"].values())
+        transiciones_png = sum(int(f.get("frames_transicion") or 0)
+                               for f in en_png["unidades"].values())
+        ok(transiciones_jpeg > 0 and transiciones_jpeg == transiciones_png,
+           f"las transiciones se cuecen igual ({transiciones_jpeg} fotogramas frente a {transiciones_png})")
+        # y sin marca de color distinta: un clip de JPEG marcado «BT.601» y uno
+        # de PNG sin marca, unidos, dejaban el video entero con la del primero
+        def _marca(ruta):
+            return subprocess.run(
+                [medios.ffprobe(), "-v", "error", "-select_streams", "v",
+                 "-show_entries", "stream=color_range,color_space,color_primaries,color_transfer",
+                 "-of", "compact", ruta], capture_output=True, text=True, timeout=60,
+                **medios.SIN_VENTANA).stdout.strip()
+        sid0 = sorted(en_jpeg["salidas"]["clips"])[0]
+        igual(_marca(os.path.join(trabajo, en_jpeg["salidas"]["clips"][sid0])), _marca(clips_png[sid0]),
+              "el clip de JPEG lleva la misma marca de color que el de PNG")
+        estado.completar("render", en_jpeg["salidas"], en_jpeg["unidades"])
+
+        # el camino raro: un PNG que se capturo para una transicion que no se hizo
+        carpeta = tempfile.mkdtemp(prefix="pasar_a_jpeg_")
+        try:
+            origen = os.path.join(carpeta, "f00001.png")
+            subprocess.run([medios.ffmpeg(), "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                            "testsrc=size=320x180:rate=1", "-frames:v", "1", origen],
+                           check=True, **medios.SIN_VENTANA)
+            destino = os.path.join(carpeta, "f00001.jpg")
+            p8_render._pasar_a_jpeg(origen, destino)
+            ok(os.path.exists(destino) and not os.path.exists(origen),
+               "un PNG sin transicion pasa a JPEG y no deja el PNG detras")
+        finally:
+            shutil.rmtree(carpeta, ignore_errors=True)
+    finally:
+        if antes is None:
+            os.environ.pop("ESTUDIO_FOTOGRAMAS", None)
+        else:
+            os.environ["ESTUDIO_FOTOGRAMAS"] = antes
+        shutil.rmtree(copia, ignore_errors=True)
+
+
 # ------------------------------------------------------------------- main
 
 def probar_previa_clara():
@@ -1797,6 +1886,7 @@ def main():
     params_render = {"fps": 12, "resolucion": [640, 360], "calidad_video": "baja"}
     estado.set_params("render", params_render)
     probar_render(proyecto, estado, params_render)
+    probar_fotogramas_jpeg(proyecto, estado, params_render)
     probar_previa_clara()
 
     # el gestor de trabajos es como lo llamara el estudio: en un hilo, con

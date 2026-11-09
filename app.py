@@ -18365,6 +18365,13 @@ def _planos_previstos(ctx):
                       and not e.get("sigue_a")]
         return {"total": len(escenas), "con_imagen": len(con_imagen),
                 "origen": "el plan de este video"}
+    # CON LA VOZ YA HECHA SE CORTA DE VERDAD (rama montaje-rapido, 05-11-2026).
+    # Cortar no cuesta nada (`p6_assets.cortar`: ni modelo ni imagen) y da los
+    # planos que van a salir. La cuenta por duracion y ritmo prometio 15
+    # imagenes en la prueba completa del 04-11 y se hicieron 12: un 25 % de mas.
+    cortado = _planos_cortando_la_voz(ctx)
+    if cortado:
+        return cortado
     brief = PASOS_MODULOS.comun.leer_salida(ctx.proyecto, "brief", "brief.json",
                                             obligatorio=False) or {}
     segundos = float(brief.get("duracion_objetivo_s")
@@ -18376,6 +18383,59 @@ def _planos_previstos(ctx):
     total = max(1, int(round(segundos / media))) if segundos else 0
     return {"total": total, "con_imagen": total,
             "origen": "estimado por la duración y el ritmo"}
+
+
+#: Cortes de prueba ya hechos, por video: la clave cambia si cambia la toma de
+#: voz o los params de las imagenes. Cortar un video largo tarda un poco y el
+#: precio se pide en cada repintado de la pantalla.
+_CORTES_DE_PRUEBA = {}
+
+
+def _planos_cortando_la_voz(ctx):
+    """Los planos que saldrian cortando la voz que ya existe, sin escribir nada.
+
+    -> {"total", "con_imagen", "origen"} o None si no hay voz o no se puede.
+    Solo lee: `p6_assets.planificar` no llama a ningun modelo ni escribe el plan
+    (eso es `cortar`). Nunca tumba nada: si algo falla, se vuelve a la cuenta
+    por duracion de siempre.
+    """
+    try:
+        # SOLO CON LA VOZ AL DIA (revision del 05-11): si la voz se va a rehacer
+        # (guion cambiado), sus planos son los de la toma vieja y el precio
+        # podria prometer de menos. Entonces, la cuenta por duracion de siempre.
+        if not ctx.estado.al_dia("voz"):
+            return None
+        p6 = PASOS_MODULOS.p6_assets
+        assets = ctx.estado.params("assets") or {}
+        meta = assets.get("audio_meta") or PASOS_MODULOS.medios.salida_de(
+            ctx.proyecto, "voz", claves=("meta", "audio_meta", "marcas"),
+            patrones=(r"audio_meta\.json", r".*_meta\.json"))
+        if not meta or not os.path.exists(meta):
+            return None
+        # la clave cambia con la toma, con el guion (sus cartelas deciden que
+        # planos llevan imagen), con los params de las imagenes y con los planos
+        # insertados o quitados a mano
+        sueltos = [os.path.join(str(ctx.proyecto.raiz), n)
+                   for n in ("planos_insertados.json", "planos_quitados.json")]
+        clave = (str(ctx.proyecto.raiz), meta, os.path.getmtime(meta),
+                 ctx.estado.firma("guion"), ctx.estado.firma("voz"),
+                 tuple(os.path.getmtime(r) if os.path.exists(r) else 0 for r in sueltos),
+                 json.dumps(assets, sort_keys=True, ensure_ascii=False, default=str))
+        if clave not in _CORTES_DE_PRUEBA:
+            plan = p6.planificar(ctx.proyecto, assets) or {}
+            escenas = plan.get("escenas") or []
+            if not escenas:
+                return None
+            cartelas = PASOS_MODULOS.cartelas
+            con_imagen = [e for e in escenas
+                          if not cartelas.sin_imagen(e) and not e.get("sigue_a")]
+            if len(_CORTES_DE_PRUEBA) > 64:
+                _CORTES_DE_PRUEBA.clear()
+            _CORTES_DE_PRUEBA[clave] = {"total": len(escenas), "con_imagen": len(con_imagen),
+                                        "origen": "cortando la voz de este video"}
+        return dict(_CORTES_DE_PRUEBA[clave])
+    except Exception:                                        # noqa: BLE001
+        return None
 
 
 def _carpetas_de_assets(ctx):
@@ -22716,6 +22776,18 @@ def _piloto_opciones(encargo):
         salida["imagenes"] = encargo["imagenes"]
     if isinstance(encargo.get("visuales"), list) and encargo["visuales"]:
         salida["visuales"] = encargo["visuales"][:400]
+        # LOS ESTADOS DEL ESPACIO (rama piloto-estados, 07-11): viajan con las
+        # lineas, igual que en «Pasar al Encargo» (`imagenesParaCrear`). Sin
+        # ellos cada escena con «Estado:» se dibujaba como la base: Y05 salio
+        # con la misma imagen en dos tomas
+        if isinstance(encargo.get("estados"), dict) and encargo["estados"]:
+            salida["estados"] = dict(encargo["estados"])
+    # LA PORTADA PROPUESTA EN EL GUION: tampoco viajaba, y sin ella en la ficha
+    # de Publicar la portada con IA del piloto no podia usar la del guion
+    portada = encargo.get("portada") if isinstance(encargo.get("portada"), dict) else {}
+    if str(portada.get("imagen") or "").strip():
+        salida["portada"] = {"texto": str(portada.get("texto") or ""),
+                             "imagen": str(portada["imagen"])}
     return salida
 
 

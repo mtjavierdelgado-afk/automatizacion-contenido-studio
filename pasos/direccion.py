@@ -96,6 +96,14 @@ PASO = "direccion"
 #: si contradice. Se avisa y se recorta por PALABRAS enteras, nunca a media.
 PALABRAS_MAXIMAS = 60
 PALABRAS_MINIMAS = 5
+#: EL MARGEN, y no es subir el tope (rama pulido-montaje, 08-11). Al agente se
+#: le sigue pidiendo PALABRAS_MAXIMAS; lo que cambia es que pasarse por poco ya
+#: no se castiga. En el piloto del 05 al 08-11, varios de 25 videos salian «a
+#: revisar» por una linea de 61 a 66 palabras recortada a 60, y el recorte se
+#: comia justo el final de la frase (lo que se ve en primer termino, el ultimo
+#: objeto). El tope existe para la linea desbocada de doscientas palabras que
+#: vuelve a describir el sitio: esa sigue recortandose, y a PALABRAS_MAXIMAS.
+PALABRAS_TOLERADAS = 75
 
 MODELO_POR_DEFECTO = cli_claude.por_defecto_de(PASO)["modelo"]
 ESFUERZO_POR_DEFECTO = cli_claude.por_defecto_de(PASO)["esfuerzo"]
@@ -537,7 +545,7 @@ def limpiar_linea(texto):
     if len(palabras) < PALABRAS_MINIMAS:
         return None, f"solo {len(palabras)} palabra(s): no dice nada que dibujar"
     aviso = ""
-    if len(palabras) > PALABRAS_MAXIMAS:
+    if len(palabras) > PALABRAS_TOLERADAS:
         crudo = " ".join(palabras[:PALABRAS_MAXIMAS]).rstrip(",;:")
         aviso = (f"{len(palabras)} palabras, se recorta a {PALABRAS_MAXIMAS}: "
                  f"a partir de ahi vuelve a describir el sitio")

@@ -17962,7 +17962,9 @@ function gvDelVideoLight() {
   const v = APP.light.video;
   const huella = huellaGvLight(v);
   const est = v.gv && v.gv.pid === v.pid ? v.gv : null;
-  if (est && (est.huella === huella || est.ocupado || est.pidiendo)) return est;
+  /* con un texto de bloque a medio guardar (`guardarBloqueLight` espera 700 ms)
+     la huella ya ha cambiado pero el servidor no: se pide cuando se guarde */
+  if (est && (est.huella === huella || est.ocupado || est.pidiendo || _bloquesPorGuardarLight)) return est;
   const pid = v.pid;
   if (!est) v.gv = { pid, cargado: false, ficha: null, copia: [], tocado: false, ocupado: false, error: '' };
   const ahora = v.gv;
@@ -18107,6 +18109,10 @@ function editorGuionVisual() {
         val => { p.estado = val; tocarGv(est); }));
     }
     if (p.id && avisoDe[p.id]) fila.appendChild(h('div', { clase: 'caja-aviso' }, `Contradice lo fijo: ${avisoDe[p.id]}`));
+    /* el guion cambió mientras escribías: el bloque de este plano ya no está */
+    if (p.bloque && bloques.length && !(p.bloque in textoDe)) {
+      fila.appendChild(h('div', { clase: 'caja-aviso' }, `El bloque ${p.bloque} ya no está en el guion: elige otro.`));
+    }
     fila.appendChild(h('div', { clase: 'fila' }, h('button', { clase: 'mini fantasma', disabled: est.ocupado,
       onclick: () => { est.copia.splice(i, 1); tocarGv(est); } }, 'Quitar')));
     caja.appendChild(fila);

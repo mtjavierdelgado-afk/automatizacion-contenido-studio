@@ -10427,6 +10427,8 @@ def _piloto_del_proyecto_y_portada(navegador, datos):
 # las siguientes van al servidor de verdad. Después pasa algo real (regrabar la
 # voz, simulada y gratis) y, SIN recargar ni vaciar la caché a mano, tienen que
 # salir los bloques. Y una regrabación no pisa lo escrito sin guardar.
+# OJO: regraba la voz del vídeo de prueba (deja obsoleto lo de abajo); por eso va
+# el ÚLTIMO. Un escenario nuevo que espere el vídeo al día va delante de este.
 @escenario
 def gv_refresco(navegador, datos):
     api = datos["api"]

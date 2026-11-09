@@ -35600,7 +35600,7 @@ async function abrirEditorGrafica(cid, pieza) {
   const rejilla = h('div', { clase: 'rejilla-disenos' });
   const grande = h('img', { clase: 'vista-graf', alt: 'Vista de la pieza' });
   const capaCajas = h('div', { clase: 'cajas-graf' });
-  const capaZonas = h('div', { clase: 'zonas-graf oculto' });
+  const capaZonas = h('div', { clase: 'zonas-graf', hidden: true });
   const marco = h('div', { clase: 'marco-graf' }, grande, capaZonas, capaCajas);
   const area = h('div', { clase: 'area-graf' }, marco);
   const estado = h('div', { clase: 'meta estado-graf' }, 'pintando…');
@@ -35627,7 +35627,7 @@ async function abrirEditorGrafica(cid, pieza) {
   const pintarZonas = () => {
     const f = formatoActual();
     ajustarMarco();
-    capaZonas.classList.toggle('oculto', !verZonas);
+    capaZonas.hidden = !verZonas;
     botonZonas.textContent = verZonas ? 'Ocultar lo que tapa la red' : 'Ver lo que tapa la red';
     capaZonas.textContent = '';
     [['top', 'zT'], ['bottom', 'zB'], ['left', 'zL'], ['right', 'zR']].forEach(([lado, clave]) => {

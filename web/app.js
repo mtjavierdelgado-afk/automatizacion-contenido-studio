@@ -17937,31 +17937,65 @@ function imagenesParaCrear(e) {
   return Object.keys(salida).length ? salida : null;
 }
 
-/* En un vídeo HECHO: la ficha del servidor y una copia del guion visual. */
-function gvDelVideoLight() {
-  const v = APP.light.video;
-  if (v.gv && v.gv.pid === v.pid) return v.gv;
-  const pid = v.pid;
-  v.gv = { pid, cargado: false, ficha: null, copia: [], tocado: false, ocupado: false, error: '' };
-  pedir(`${API.proyecto(pid)}/guion_visual`).then(d => {
-    const est = APP.light.video.gv;
-    if (!est || est.pid !== pid) return;
-    leerGvDelServidor(est, d);
-    pintarLight();
-  }).catch(err => {
-    const est = APP.light.video.gv;
-    if (!est || est.pid !== pid) return;
-    est.cargado = true;
-    est.error = err.message;
-    pintarLight();
-  });
-  return v.gv;
+/* En un vídeo HECHO: la ficha del servidor y una copia del guion visual.
+
+   SE VUELVE A PEDIR CUANDO CAMBIA LO QUE LA FORMA (rama gv-refresco, 09-11):
+   la ficha ata las líneas «Visual:» a los bloques del guion, así que pedida
+   antes de que hubiera guion llegaba vacía (sin bloques ni propuesta) y se
+   quedaba así hasta un F5 (ZV01). La huella son las fichas de guion, voz y
+   assets que ya trae `cargarVideoLight` tras cada trabajo: cuando cambian, se
+   pide otra vez; si no, ninguna petición por repintar. Nada de esto escribe
+   params (regla 1). */
+function huellaGvLight(v) {
+  const f = v.fichas || {};
+  const de = id => {
+    const x = f[id] || {};
+    return [x.estado || '', versionDe(x) || 0, x.firma || ''];
+  };
+  const pa = (f.assets || {}).params || {};
+  const pg = (f.guion || {}).params || {};
+  return JSON.stringify([de('guion'), de('voz'), pg.bloques || null,
+    pa.imagenes || null, pa.guion_visual || null]);
 }
 
-function leerGvDelServidor(est, d) {
+function gvDelVideoLight() {
+  const v = APP.light.video;
+  const huella = huellaGvLight(v);
+  const est = v.gv && v.gv.pid === v.pid ? v.gv : null;
+  if (est && (est.huella === huella || est.ocupado || est.pidiendo)) return est;
+  const pid = v.pid;
+  if (!est) v.gv = { pid, cargado: false, ficha: null, copia: [], tocado: false, ocupado: false, error: '' };
+  const ahora = v.gv;
+  ahora.huella = huella;
+  ahora.pidiendo = true;
+  /* lo que conteste un guardar mientras tanto es más nuevo que esta lectura */
+  const lectura = ahora.lectura || 0;
+  pedir(`${API.proyecto(pid)}/guion_visual`).then(d => {
+    const actual = APP.light.video.gv;
+    if (actual !== ahora || actual.pid !== pid) return;
+    actual.pidiendo = false;
+    if ((actual.lectura || 0) !== lectura) return;
+    leerGvDelServidor(actual, d, true);
+    pintarLight();
+  }).catch(err => {
+    const actual = APP.light.video.gv;
+    if (actual !== ahora || actual.pid !== pid) return;
+    actual.pidiendo = false;
+    actual.cargado = true;
+    actual.error = err.message;
+    pintarLight();
+  });
+  return ahora;
+}
+
+/* `refresco`: una lectura que llega sola (cambió el guion o la voz). Si hay
+   cambios sin guardar en el editor no se pisan: solo se renueva la ficha
+   (bloques, propuesta, avisos) y la copia se queda como está. */
+function leerGvDelServidor(est, d, refresco) {
   est.cargado = true;
   est.error = '';
   est.ficha = d || {};
+  if (refresco && est.tocado) return;
   const planos = ((d || {}).guion_visual || {}).planos || [];
   est.copia = planos.map(p => Object.assign({}, p));
   est.tocado = false;
@@ -17973,6 +18007,7 @@ async function pedirGv(ruta, metodo, cuerpo, mensaje) {
   pintarLight();
   try {
     const d = await pedir(`${API.proyecto(est.pid)}/guion_visual${ruta}`, { method: metodo, cuerpo: cuerpo || {} });
+    est.lectura = (est.lectura || 0) + 1;
     leerGvDelServidor(est, d);
     if (mensaje) toast(mensaje);
     if (d && d.trabajo_id) seguirTrabajoGv(d.trabajo_id, est.pid);

@@ -10416,5 +10416,90 @@ def _piloto_del_proyecto_y_portada(navegador, datos):
     pg.p.unroute("**/api/piloto**")
     pg.cerrar()
 
+
+
+# ============================================================== GV REFRESCO
+# gv-refresco (09-11-2026): visto en ZV01. El bloque «Guion visual» se pedía al
+# servidor UNA vez por vídeo; si se pedía antes de que hubiera guion llegaba sin
+# bloques ni propuesta y se quedaba así hasta un F5. El CLI falso no escribe
+# guiones, así que «antes del guion» se simula: la PRIMERA lectura del guion
+# visual contesta lo que el servidor da sin guion (sin bloques ni propuesta) y
+# las siguientes van al servidor de verdad. Después pasa algo real (regrabar la
+# voz, simulada y gratis) y, SIN recargar ni vaciar la caché a mano, tienen que
+# salir los bloques. Y una regrabación no pisa lo escrito sin guardar.
+@escenario
+def gv_refresco(navegador, datos):
+    api = datos["api"]
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="gv refresco")
+    primera = {"hecha": False}
+
+    def sin_guion_la_primera(ruta):
+        if not primera["hecha"] and ruta.request.method == "GET":
+            primera["hecha"] = True
+            ruta.fulfill(status=200, content_type="application/json", body=json.dumps({
+                "modo": "guion", "del_video": "guion", "bloques": [], "propuesta": [], "avisos": [],
+                "estados": [], "aprobado": False, "guion_visual": {"planos": []}}))
+            return
+        ruta.continue_()
+    try:
+        pg.sin_trabajo(300)
+        r, _d = api.put(f"/api/proyectos/{pid}/guion_visual/modo", {"imagenes": "guion"})
+        ok(getattr(r, "status_code", 0) == 200, "(0) el vídeo pasa a «Lo que dice el guion»")
+        pg.p.route("**/guion_visual", sin_guion_la_primera)
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; "
+              "APP.light.video.gv = null; pintarLight();")
+        ok(pg.esperar(".editor-gv", segundos=20), "(1) el bloque «Guion visual» sale en Imágenes")
+        ok(primera["hecha"], "(1) leído cuando el vídeo «aún no tenía guion»")
+        ok(pg.p.locator(".editor-gv button", has_text="+ Añadir plano").first.is_disabled(),
+           "(1) sin bloques: «+ Añadir plano» apagado — lo que vio el dueño en ZV01")
+        pg.js("lanzarTandaLight('voz', 'todo');")
+        pg.p.wait_for_timeout(1500)
+        pg.sin_trabajo(300)
+        pg.js("APP.light.video.vista = 'previa'; pintarLight();")
+        fin = time.time() + 20
+        encendido = False
+        while time.time() < fin and not encendido:
+            pg.p.wait_for_timeout(500)
+            boton = pg.p.locator(".editor-gv button", has_text="+ Añadir plano")
+            encendido = boton.count() > 0 and not boton.first.is_disabled()
+        ok(encendido, "(2) sin recargar, al terminar la voz llegan los bloques («+ Añadir plano» encendido)")
+        if encendido:
+            pg.pulsar(".editor-gv button", "+ Añadir plano")
+            ok(pg.esperar(".plano-gv", segundos=10), "(2) se añade un plano")
+            opciones = pg.p.locator(".plano-gv select").first.locator("option").count()
+            ok(opciones >= 2, f"(2) y su desplegable «Bloque de la voz» trae los bloques ({opciones})")
+            pg.captura("gv_refresco_bloques", entera=False)
+            # (3) lo escrito sin guardar sobrevive a otra regrabación
+            pg.p.locator(".plano-gv textarea").first.fill("MI CAMBIO SIN GUARDAR")
+            huella = pg.p.evaluate("() => APP.light.video.gv.huella")
+            pg.js("lanzarTandaLight('voz', 'todo');")
+            pg.p.wait_for_timeout(1500)
+            pg.sin_trabajo(300)
+            pg.js("APP.light.video.vista = 'previa'; pintarLight();")
+            fin = time.time() + 20
+            while time.time() < fin and pg.p.evaluate("() => APP.light.video.gv.huella") == huella:
+                pg.p.wait_for_timeout(300)
+            pg.p.wait_for_timeout(1500)
+            ok(pg.p.evaluate("() => APP.light.video.gv.huella") != huella,
+               "(3) tras regrabar la voz el guion visual se vuelve a pedir")
+            cajas = pg.p.locator(".plano-gv textarea")
+            valor = cajas.first.input_value() if cajas.count() else ""
+            ok(valor == "MI CAMBIO SIN GUARDAR", f"(3) y lo escrito sin guardar sigue ahí ({valor[:30]!r})")
+            ok(pg.visible(".editor-gv .meta", "Hay cambios sin guardar"), "(3) con su «Hay cambios sin guardar»")
+        pedidas = pg.p.evaluate("""async () => { let n = 0; const orig = window.fetch;
+            window.fetch = (...a) => { if (String(a[0]).includes('/guion_visual')) n++; return orig(...a); };
+            for (let i = 0; i < 5; i++) pintarLight();
+            await new Promise(r => setTimeout(r, 800)); window.fetch = orig; return n; }""")
+        ok(pedidas == 0, f"(4) repintar sin cambios no vuelve a pedir el guion visual ({pedidas})")
+        pg.sin_errores("gv refresco")
+    finally:
+        pg.p.unroute("**/guion_visual")
+        pg.sin_trabajo(300)
+        r, _d = api.put(f"/api/proyectos/{pid}/guion_visual/modo", {"imagenes": None})
+        ok(getattr(r, "status_code", 0) == 200, "(5) y el vídeo vuelve a lo que diga el estilo")
+        pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

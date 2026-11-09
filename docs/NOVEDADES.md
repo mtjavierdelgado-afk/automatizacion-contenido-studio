@@ -10,6 +10,13 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**El guion visual se pone al día solo (9 de noviembre)**
+- El bloque «Guion visual» (paso Voz o Imágenes) ya no se queda vacío si lo
+  abriste antes de tener el guion: cuando terminan el guion, la voz, una
+  regrabación o cambias «Qué dibujan las imágenes», vuelve a leer las líneas de
+  la Parrilla y los bloques sin pulsar F5.
+- Si estabas escribiendo en él sin guardar, lo escrito se queda.
+
 **Menos vídeos «a revisar» por una descripción de plano un poco larga (8 de noviembre)**
 - Cuando Claude escribe lo que se ve en cada plano y se pasa unas pocas palabras
   del tope de 60 (hasta 75), la descripción ya no se recorta ni sale como aviso:

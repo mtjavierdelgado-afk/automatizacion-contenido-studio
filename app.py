@@ -23996,7 +23996,7 @@ def _por_capas(fn, *args, **kwargs):
     except GRAFICAS_CAPAS.ErrorConflicto as fallo:
         raise ErrorApi(409, str(fallo))
     except G.ErrorGraficas as fallo:
-        raise ErrorApi(404 if str(fallo) == "esa pieza no está" else 400, str(fallo))
+        raise ErrorApi(404 if isinstance(fallo, G.ErrorNoEsta) else 400, str(fallo))
 
 
 def _contexto_capas(cid, peticion):

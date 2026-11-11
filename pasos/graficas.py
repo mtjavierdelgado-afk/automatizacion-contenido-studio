@@ -139,6 +139,10 @@ class ErrorGraficas(Exception):
 
 # ------------------------------------------------------------------ rutas
 
+
+class ErrorNoEsta(ErrorGraficas):
+    """La pieza pedida no está (las rutas de capas lo dan como 404)."""
+
 def carpeta(raiz):
     return os.path.join(raiz, "_sistema", "graficas")
 
@@ -934,12 +938,15 @@ def listar_piezas(raiz, cid):
 def leer_pieza(raiz, cid, pieza_id):
     ficha = _ficha(raiz, cid, pieza_id)
     if not ficha:
-        raise ErrorGraficas("esa pieza no está")
+        raise ErrorNoEsta("esa pieza no está")
     return ficha
 
 
 def guardar_pieza(raiz, cid, datos, pieza_id=None, logo=None, logo_oscuro=None):
     """Guarda los datos y pinta el PNG y el JPG finales."""
+    if isinstance(datos, dict) and datos.get("nacida_en_capas"):
+        # «Duplicar» una pieza nacida en capas con este editor daría una plantilla vacía
+        raise ErrorGraficas("esta pieza se hizo en capas: ábrela con el editor de capas")
     pieza = limpiar_pieza(datos)
     if pieza_id:
         if leer_pieza(raiz, cid, pieza_id).get("nacida_en_capas"):
@@ -982,8 +989,9 @@ def ruta_final(raiz, cid, pieza_id, extension):
 
 
 def borrar_pieza(raiz, cid, pieza_id):
-    leer_pieza(raiz, cid, pieza_id)
-    shutil.rmtree(_carpeta_pieza(raiz, cid, pieza_id), ignore_errors=True)
+    with cerrojo_pieza(cid, pieza_id):       # no se borra a medias de un guardado
+        leer_pieza(raiz, cid, pieza_id)
+        shutil.rmtree(_carpeta_pieza(raiz, cid, pieza_id), ignore_errors=True)
 
 
 def catalogo():

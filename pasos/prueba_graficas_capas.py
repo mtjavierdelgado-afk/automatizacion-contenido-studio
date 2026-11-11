@@ -435,7 +435,17 @@ def guardar_y_leer(carpeta, foto):
     ok(lista["en_capas"] and lista["nombre"] == "Versión en capas" and lista["cambiada"] == guardado["cambiada"],
        "la lista dice que está en capas, con su nombre y su fecha")
     ok(G.ruta_final(raiz, "cli", pid, "png").endswith("capas.png"), "y se descarga la versión en capas (la última)")
-    ok(C.guardar(raiz, "cli", leido, pid)["id"] == pid, "lo leído se puede volver a guardar (mismo sello)")
+    otra_vez = C.guardar(raiz, "cli", leido, pid)
+    ok(otra_vez["id"] == pid, "lo leído se puede volver a guardar")
+    # visto en la 2.ª revisión del 11-11: dos pestañas con la pieza abierta se pisaban sin aviso
+    try:
+        C.guardar(raiz, "cli", leido, pid)
+        ok(False, "guardar otra vez lo abierto ANTES del último guardado en capas tendría que avisar")
+    except C.ErrorConflicto:
+        ok(True, "la otra pestaña, con lo abierto antes del último guardado en capas, recibe el aviso")
+    ok(C.guardar(raiz, "cli", otra_vez["doc"], pid)["id"] == pid,
+       "lo que devuelve un guardado sirve para el siguiente (lleva el número nuevo)")
+    _f, leido = C.leer(raiz, "cli", pid)
 
     print("si la pieza se vuelve a guardar con el editor de antes, manda la más nueva")
     G.guardar_pieza(raiz, "cli", dict(ficha, textos=dict(TEXTOS, titulo="Cambiado con el editor de antes")), pid)
@@ -491,7 +501,9 @@ def guardar_y_leer(carpeta, foto):
         h.start()
     for h in hilos:
         h.join()
-    ok(not errores, f"cuatro guardados a la vez terminan sin errores ({errores[:1]})")
+    conflictos = [e for e in errores if e.startswith("ErrorConflicto")]
+    ok(len(conflictos) == 3 and len(errores) == 3,
+       f"cuatro pestañas guardan lo mismo a la vez: una entra y las otras tres reciben el aviso ({errores})")
     ok(not [n for n in os.listdir(carpeta_pieza) if n.endswith(".tmp")], "sin temporales olvidados")
     _f, final = C.leer(raiz, "cli", pid)
     meta = G.meta_capas(raiz, "cli", pid)
@@ -519,10 +531,17 @@ def guardar_y_leer(carpeta, foto):
        "volver a guardarla pone al día pieza.png (lo que ve y descarga main)")
     ok(ficha_nueva2["nombre"] == "Mi pieza cambiada" and ficha_nueva2["cambiada"] > ficha_nueva["cambiada"],
        "y su ficha: nombre y fecha")
-    ok(ficha_nueva2["sello"] == ficha_nueva["sello"], "con el mismo sello: lo abierto sigue valiendo")
+    ok(ficha_nueva2["sello"] != ficha_nueva["sello"], "con sello nuevo (la miniatura de la lista se renueva)")
+    try:
+        C.guardar(raiz, "cli", abierta, nid)
+        ok(False, "guardar otra vez lo abierto antes tendría que avisar también en una nacida")
+    except C.ErrorConflicto:
+        ok(True, "en una nacida, lo abierto antes del último guardado también recibe el aviso")
     ok(G.listar_piezas(raiz, "cli")[0]["id"] == nid, "la última guardada sale la primera en la lista")
     ok(falla(G.guardar_pieza, raiz, "cli", ficha_nueva2, nid),
        "el editor de antes no puede guardar encima de una pieza nacida en capas (borraría el diseño)")
+    ok(falla(G.guardar_pieza, raiz, "cli", ficha_nueva2),
+       "ni «Duplicar» con el editor de antes una nacida (saldría una plantilla vacía)")
 
     print("si algo falla a medias, no queda nada a medio escribir")
 
@@ -543,7 +562,23 @@ def guardar_y_leer(carpeta, foto):
     ok(falla(C.guardar, raiz, "cli", doc_de([capa_texto()]), "../../x"), "y en una ruta rara también")
     ok(falla(C.guardar, raiz, "cli", {"version": 2}), "un documento sin láminas no se guarda")
 
+    print("una tipografía quitada de la lista no deja la pieza sin abrir")
+    meta_ruta = os.path.join(carpeta_nueva, "capas.json")
+    datos = json.load(open(meta_ruta, encoding="utf-8"))
+    datos["fuente_titulos"] = "ya-no-existe"
+    json.dump(datos, open(meta_ruta, "w", encoding="utf-8"))
+    _f, con_rara = C.leer(raiz, "cli", nid)
+    ok(con_rara and con_rara["fuente_titulos"] == "", "se abre, y la tipografía vuelve a la del Kit")
+
     print("una ficha estropeada no rompe la descarga")
+    sello_ruta = os.path.join(carpeta_nueva, "capas.sello.json")
+    bueno = open(sello_ruta, "rb").read()
+    with open(sello_ruta, "w", encoding="utf-8") as fh:
+        fh.write("{roto")
+    ok(falla(C.leer, raiz, "cli", nid),
+       "una nacida con su ficha pequeña rota da error: nunca se abre convertida en una plantilla vacía")
+    with open(sello_ruta, "wb") as fh:
+        fh.write(bueno)
     with open(os.path.join(carpeta_nueva, "capas.json"), "w", encoding="utf-8") as fh:
         fh.write('{"version": 2, "laminas": "roto"}')
     ok(falla(C.leer, raiz, "cli", nid), "una versión en capas que vale pero no se lee es un error (no una conversión vacía)")
@@ -554,8 +589,17 @@ def guardar_y_leer(carpeta, foto):
         ok(ruta.endswith("pieza.png"), "con pieza.json ilegible se descarga la pieza de siempre")
     except Exception as fallo:                              # noqa: BLE001
         ok(False, f"con pieza.json ilegible la descarga falla: {fallo}")
-    G.borrar_pieza(raiz, "cli", nid)
-    ok(not os.path.exists(carpeta_nueva), "borrar la pieza se lleva también sus capas")
+    print("borrar espera a que termine un guardado")
+    import threading
+    cerrojo = G.cerrojo_pieza("cli", nid)
+    cerrojo.acquire()
+    hilo = threading.Thread(target=G.borrar_pieza, args=(raiz, "cli", nid))
+    hilo.start()
+    time.sleep(0.3)
+    ok(os.path.exists(carpeta_nueva), "mientras alguien guarda, la pieza no se borra")
+    cerrojo.release()
+    hilo.join(10)
+    ok(not os.path.exists(carpeta_nueva), "y al terminar se borra, con sus capas")
 
 
 class _Peticion:
@@ -618,6 +662,14 @@ def las_rutas(carpeta, foto):
                 ok(False, f"{que} tendría que dar error")
             except servidor.ErrorApi as fallo:
                 ok(fallo.codigo in (400, 404), f"{que} da {fallo.codigo}")
+        real = servidor.GRAFICAS_CAPAS
+        servidor.GRAFICAS_CAPAS = None
+        try:
+            ok(codigo(servidor.graficas_leer_capas, cid, pid, _Peticion()) == 503,
+               "si las capas no cargan, sus rutas dan 503…")
+            ok(isinstance(servidor.graficas_piezas(cid, _Peticion()), dict), "…y el resto de Gráficas sigue funcionando")
+        finally:
+            servidor.GRAFICAS_CAPAS = real
         clientes.cambiar(raiz, cid, clave="1234")
         try:
             servidor.graficas_leer_capas(cid, pid, _Peticion())

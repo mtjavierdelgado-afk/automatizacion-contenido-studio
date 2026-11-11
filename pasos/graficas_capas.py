@@ -289,10 +289,13 @@ def limpiar_doc(datos):
         "version": VERSION, "formato": datos.get("formato") or G.FORMATO_DEFECTO,
         "nombre": " ".join(str(datos.get("nombre") or "")[:400].split())[:80],
         "colores": G._limpiar_colores(datos.get("colores")),
-        "fuente_titulos": G._limpiar_fuente(datos.get("fuente_titulos"), "títulos"),
-        "fuente_texto": G._limpiar_fuente(datos.get("fuente_texto"), "texto"),
+        # una tipografía que ya no está en la lista vuelve a la del Kit: la pieza
+        # se sigue abriendo (como las de cada capa)
+        "fuente_titulos": datos.get("fuente_titulos") if datos.get("fuente_titulos") in G.FUENTES else "",
+        "fuente_texto": datos.get("fuente_texto") if datos.get("fuente_texto") in G.FUENTES else "",
         "origen": {"plantilla": plantilla if type(plantilla) is int and plantilla in G._PL.PLANTILLAS else None,
-                   "sello": re.sub(r"[^0-9a-f]", "", str(origen.get("sello") or ""))[:16],
+                   "sello": re.sub(r"[^0-9a-f]", "", str(origen.get("sello") or "")[:64])[:16],
+                   "guardado": re.sub(r"[^0-9a-f]", "", str(origen.get("guardado") or "")[:64])[:16],
                    "nacida": _bool(origen.get("nacida"))},
         "laminas": limpias,
     }
@@ -1139,14 +1142,24 @@ def leer(raiz, cid, pieza_id):
     de la pieza de la que salió (hay que devolverlo al guardar). Si vale pero
     no se puede leer, es un error: convertir de nuevo una pieza nacida en capas
     daría una plantilla vacía, y guardarla borraría el diseño. No escribe."""
+    with G.cerrojo_pieza(cid, pieza_id):     # nunca a mitad de un guardado
+        return _leer(raiz, cid, pieza_id)
+
+
+def _leer(raiz, cid, pieza_id):
     ficha = G.leer_pieza(raiz, cid, pieza_id)
     if not G.capas_vigentes(raiz, cid, pieza_id, ficha):
+        if ficha.get("nacida_en_capas"):
+            # su ficha es mínima: convertirla daría una plantilla vacía, y
+            # guardarla borraría el diseño (visto en la revisión del 11-11)
+            raise ErrorGraficas("la versión en capas de esta pieza no se puede leer")
         return ficha, None
     try:
         doc = limpiar_doc(G._leer_json(_rutas(raiz, cid, pieza_id)["json"]))
     except ErrorGraficas as fallo:
         raise ErrorGraficas("la versión en capas de esta pieza no se puede leer") from fallo
     doc["origen"]["sello"] = ficha["sello"]
+    doc["origen"]["guardado"] = (G.meta_capas(raiz, cid, pieza_id) or {}).get("guardado") or ""
     return ficha, doc
 
 
@@ -1163,10 +1176,12 @@ def guardar(raiz, cid, doc, pieza_id=None, logo=None, logo_oscuro=None):
     mínima y una copia en pieza.png/jpg para que la lista y la descarga de
     siempre (y `main`) la vean.
 
-    El doc trae el sello de la pieza que se abrió (`origen.sello`, lo dan
-    `leer` y `convertir`): si la pieza cambió desde entonces (otro guardado,
-    con este editor o con el de antes), no se guarda y se avisa
-    (`ErrorConflicto`, un 409), en vez de pisar lo más nuevo en silencio.
+    El doc trae lo que se abrió: el sello de la pieza (`origen.sello`) y el
+    número del último guardado en capas (`origen.guardado`; vacío si se abrió
+    convertida). Lo dan `leer`, `convertir` y el propio `guardar`. Si la pieza
+    cambió desde entonces —otro guardado con el editor de antes, o en capas
+    desde otra pestaña—, no se guarda y se avisa (`ErrorConflicto`, un 409), en
+    vez de pisar lo más nuevo en silencio. Cada guardado estrena número.
 
     Orden: pintar fuera del cerrojo (puede esperar su turno); con el cerrojo
     de la pieza, se vuelve a mirar el sello y se escriben PNG, JPG, el JSON y,
@@ -1174,10 +1189,12 @@ def guardar(raiz, cid, doc, pieza_id=None, logo=None, logo_oscuro=None):
     doc = limpiar_doc(doc)
     kit = G.leer_kit(raiz, cid)
     nueva = pieza_id is None
-    sello_doc = doc["origen"]["sello"]
+    sello_doc, guardado_doc = doc["origen"]["sello"], doc["origen"]["guardado"]
 
     def comprobar(ficha_actual):
-        if ficha_actual.get("sello") != sello_doc:
+        vigente = G.capas_vigentes(raiz, cid, pieza_id, ficha_actual)
+        ultimo = ((G.meta_capas(raiz, cid, pieza_id) or {}).get("guardado") or "") if vigente else ""
+        if ficha_actual.get("sello") != sello_doc or ultimo != guardado_doc:
             raise ErrorConflicto("esta pieza ha cambiado desde que la abriste: vuelve a abrirla y repite el cambio")
 
     if nueva:
@@ -1207,18 +1224,21 @@ def guardar(raiz, cid, doc, pieza_id=None, logo=None, logo_oscuro=None):
                          fuente_texto=doc["fuente_texto"], nombre=doc["nombre"] or "Pieza en capas",
                          id=pieza_id, cid=cid, avisos=avisos, medida=f"{f['W']}×{f['H']}", cambiada=ahora,
                          nacida_en_capas=True)
-            ficha.setdefault("sello", secrets.token_hex(4))
+            # sello nuevo en cada guardado: la miniatura de la lista se renueva
+            ficha["sello"] = secrets.token_hex(4)
         os.makedirs(destino, exist_ok=True)
         if nacida:
             _escribir_bytes(os.path.join(destino, "pieza.png"), png)
             _escribir_bytes(os.path.join(destino, "pieza.jpg"), jpg)
         _escribir_bytes(rutas["png"], png)
         _escribir_bytes(rutas["jpg"], jpg)
-        doc["origen"].update(sello=ficha["sello"], nacida=nacida)
+        doc["origen"].update(sello=ficha["sello"], nacida=nacida, guardado=secrets.token_hex(8))
         G._escribir_json(rutas["json"], dict(doc, avisos=avisos, cambiada=ahora, medida=f"{f['W']}×{f['H']}"))
-        G._escribir_json(rutas["meta"], {"sello": ficha["sello"], "cambiada": ahora,
-                                         "nombre": doc["nombre"] or ficha.get("nombre") or ""})
+        meta = {"sello": ficha["sello"], "guardado": doc["origen"]["guardado"], "cambiada": ahora,
+                "nombre": doc["nombre"] or ficha.get("nombre") or ""}
         if nacida:
-            # la ficha de la pieza va la última: hasta aquí, una nueva no sale en la lista
+            # en una nacida el sello cambia: primero la ficha (con el sello nuevo) y
+            # luego la ficha pequeña; una nueva no sale en la lista hasta su ficha
             G._escribir_json(os.path.join(destino, "pieza.json"), ficha)
+        G._escribir_json(rutas["meta"], meta)
     return {"id": pieza_id, "doc": doc, "avisos": avisos, "cambiada": ahora}

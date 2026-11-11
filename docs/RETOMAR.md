@@ -542,3 +542,25 @@ láminas, y en cada una capas sueltas de texto, foto, logo o forma. Lo hace
 - **La foto se pinta con `object-fit` y `object-view-box`**, como las
   plantillas; `encaje()` hace la misma cuenta con posición y tamaño para la
   pantalla del editor (que puede no ser Chromium).
+
+### Lo que cazaron las dos revisiones independientes (11-11)
+
+- **Guardar sin pisar lo más nuevo.** Un doc en capas lleva `origen.sello`
+  (el de `pieza.json`) y `origen.guardado` (el número del último guardado en
+  capas, en `capas.sello.json`). `guardar` los compara bajo
+  `graficas.cerrojo_pieza` justo antes de escribir y, si no cuadran, lanza
+  `ErrorConflicto` (409): lo cazaba un guardado con el editor de antes, otra
+  pestaña en capas o un guardado que llega mientras se pinta. Cada guardado
+  estrena número; en una nacida, también sello (renueva la miniatura).
+- **Una pieza nacida en capas** tiene una ficha mínima (plantilla 2 vacía). Si
+  su versión en capas no se puede leer, `leer` da error: convertirla daría una
+  plantilla vacía y guardarla borraría el diseño. El editor de antes no puede
+  guardarla ni duplicarla. **Pero el `main` de antes de esta rama no sabe
+  nada de esto**: si se vuelve a `main` y alguien abre una nacida con su editor
+  y guarda, la deja vacía (el diseño queda solo en `capas.json`). No se vuelve
+  a `main` con piezas nacidas en capas en uso.
+- **La comparación también mira los textos** (cuáles hay y qué dicen): sin una
+  marca de 4 letras la diferencia en píxeles no llegaba al tope.
+- **Lo oculto con el editor de antes** se rescata con todo lo que cuelga de
+  ello (los textos del sello) y en su sitio: las dos pasadas se casan por el
+  índice del elemento, que no cambia al ocultar.

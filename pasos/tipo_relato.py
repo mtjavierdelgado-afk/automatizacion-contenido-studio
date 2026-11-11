@@ -212,6 +212,33 @@ def normalizar(crudo):
 #: Estados distintos por sitio, como mucho (un video de 30 s trae 2-4).
 MAX_ESTADOS = 12
 
+#: LO QUE CABE EN EL CAMBIO DE UN ESTADO (rama relato-sin-cortes, 06-11). Eran
+#: 400 letras y se cortaban en silencio: en «X01» la imagen del «despues» se
+#: pedia con la frase partida («…su barra se reem») y «✎ Cambiar» rechazaba uno
+#: mas largo. Ahora 1.200 donde el estado se GUARDA, se LEE y se DIBUJA.
+MAX_CAMBIO = 1200
+
+#: El tope de antes. Se queda en dos sitios, a proposito: en los prompts de
+#: los PLANOS (`frase_edicion`, `cierre_edicion`), para que ningun plano hecho
+#: con un cambio largo cambie de prompt y quede obsoleto, y en la etiqueta que
+#: se saca de un cambio sin nombre (`estado_de`), que es la clave de su imagen.
+#: Y `mismo_cambio` lo usa para reconocer una imagen de estado hecha con el
+#: texto cortado de antes.
+CAMBIO_ANTERIOR = 400
+
+
+def mismo_cambio(guardado, vigente):
+    """¿La imagen de un estado, dibujada con `guardado`, sigue valiendo para el
+    cambio `vigente`? Igual, o `guardado` es `vigente` cortado como se cortaba
+    antes de la rama relato-sin-cortes: esa imagen se pago y aprobo, y subir el
+    tope no la reescribe."""
+    guardado = _texto(guardado, MAX_CAMBIO)
+    vigente = _texto(vigente, MAX_CAMBIO)
+    if not guardado or not vigente:
+        return False
+    return guardado == vigente or (len(vigente) > CAMBIO_ANTERIOR
+                                   and guardado == vigente[:CAMBIO_ANTERIOR])
+
 
 def _normalizar_estados(crudo, sid):
     """Las imagenes de cada estado de un sitio. -> {estado: {imagen, aprobada, cambio}}"""
@@ -231,7 +258,7 @@ def _normalizar_estados(crudo, sid):
             raise ValueError(f"tipo_relato.bases.{sid}.estados.{clave}.imagen no es una "
                              f"imagen guardada del espacio")
         salida[clave] = {"imagen": imagen, "aprobada": bool(ficha.get("aprobada")),
-                         "cambio": _texto(ficha.get("cambio"), 400)}
+                         "cambio": _texto(ficha.get("cambio"), MAX_CAMBIO)}
     return salida
 
 
@@ -245,7 +272,9 @@ def estado_de(beat):
 
     Un tramo con cambio y sin etiqueta recibe una sacada del propio cambio,
     para que dos tramos con el mismo cambio compartan imagen."""
-    cambio = _texto((beat or {}).get("cambio"), 400)
+    # A 400 A PROPOSITO (`CAMBIO_ANTERIOR`): la etiqueta es la clave de la
+    # imagen del estado, y con otro tope cambiaria y la imagen se perderia
+    cambio = _texto((beat or {}).get("cambio"), CAMBIO_ANTERIOR)
     if not cambio:
         return ""
     return _etiqueta((beat or {}).get("estado")) or "c" + hashlib.sha1(
@@ -275,7 +304,7 @@ def estados_del_catalogo(catalogo, sitio=None):
             continue
         estado = estado_de(beat)
         if estado and estado not in salida:
-            salida[estado] = _texto(beat.get("cambio"), 400)
+            salida[estado] = _texto(beat.get("cambio"), MAX_CAMBIO)
     return salida
 
 
@@ -284,7 +313,7 @@ def estados_fijos(catalogo):
     crudo = (catalogo or {}).get("estados_fijos") if isinstance(catalogo, dict) else None
     if not isinstance(crudo, dict):
         return {}
-    return {str(k): _texto(v, 400) for k, v in crudo.items() if str(k).strip()}
+    return {str(k): _texto(v, MAX_CAMBIO) for k, v in crudo.items() if str(k).strip()}
 
 
 def normalizar_de_estilo(crudo):
@@ -364,7 +393,7 @@ def bases_aprobadas(params, catalogo=None):
         vigentes = estados_del_catalogo(catalogo, sid) if catalogo is not None else {}
         for estado, otra in (ficha.get("estados") or {}).items():
             if otra.get("aprobada") and otra.get("cambio") and \
-                    vigentes.get(estado) == otra.get("cambio"):
+                    mismo_cambio(otra.get("cambio"), vigentes.get(estado)):
                 salida[clave_estado(sid, estado)] = otra["imagen"]
     return salida
 
@@ -568,7 +597,7 @@ def anotar_cambios(crudos, beats):
         cambio, estado = "", ""
         if elegido is not None:
             usados.add(elegido)
-            cambio = _texto(libres[elegido].get("cambio"), 400)
+            cambio = _texto(libres[elegido].get("cambio"), MAX_CAMBIO)
             estado = _etiqueta(libres[elegido].get("estado"))
         if estado and estado in por_estado:
             cambio = por_estado[estado]
@@ -615,9 +644,11 @@ SIN_CAMBIO = ("nothing in the room itself: only what the scene description below
 def frase_edicion(indice, ref, modo_imagen="ilustracion"):
     """La frase del prompt que presenta la imagen base como la que se edita."""
     cambia = ref.get("cambia") or ""
-    cambio = _texto(ref.get("cambio"), 400) or SIN_CAMBIO
+    # a 400 (`CAMBIO_ANTERIOR`): es el prompt de un PLANO; con otro tope los
+    # planos hechos con un cambio largo cambiarian de prompt y quedarian obsoletos
+    cambio = _texto(ref.get("cambio"), CAMBIO_ANTERIOR) or SIN_CAMBIO
     if ref.get("modo") == "producto":
-        cambio = (_texto(ref.get("cambio"), 400)
+        cambio = (_texto(ref.get("cambio"), CAMBIO_ANTERIOR)
                   or "only the product and what the scene description below shows "
                      "of it; the background, surface and light stay exactly the same")
     return FRASE_EDICION.format(
@@ -642,9 +673,40 @@ CIERRE_EDICION = (
     "moves, appears or disappears.")
 
 
+#: LA NOTA DEL REVISOR EN UN PLANO EDITADO (rama retoque-acotado, prueba
+#: completa del 04-11). La nota de siempre (`p6_assets._bloque_feedback`) dice
+#: que MANDA sobre la composicion y el tipo de plano, y era lo ultimo del
+#: prompt: al rehacer, el plano se redibujaba entero y se alejaba de la imagen
+#: de su estado («cambia de mas» en S002, S003 y S008). Aqui la nota se aplica
+#: DENTRO de la edicion, y el FINAL CHECK va detras.
+NOTA_EDICION = (
+    "The reviewer looked at the previous attempt at this shot and asked for ONE fix. "
+    "Apply only that fix, and apply it INSIDE the edit of reference image {indice}: it "
+    "never moves the camera, never reframes and never redraws the room. If the note is "
+    "about the room itself (something missing, misplaced, of the wrong size, shape, "
+    "colour or finish), the fix is to make that part exactly as it is in reference image "
+    "{indice}. Everything the note does not mention stays exactly as in reference image "
+    "{indice}. The reviewer's note is: {nota}.")
+
+#: La imagen rechazada de un plano editado: de ella, solo lo que no es el sitio.
+RECHAZADA_EDICION = (
+    "Reference image {indice} is the PREVIOUS ATTEMPT at this shot, which the reviewer "
+    "rejected. Take from it ONLY the people, their poses and the small loose objects, "
+    "where they were. Never take the room from it: the camera, framing, walls, floor, "
+    "fixed furniture, fittings and finishes come from reference image {base} only.")
+
+
+def nota_edicion(indice, nota):
+    return NOTA_EDICION.format(indice=indice, nota=nota)
+
+
+def rechazada_edicion(indice, base):
+    return RECHAZADA_EDICION.format(indice=indice, base=base)
+
+
 def cierre_edicion(indice, ref):
     cambia = ref.get("cambia") or ""
-    cambio = _texto(ref.get("cambio"), 400) or SIN_CAMBIO
+    cambio = _texto(ref.get("cambio"), CAMBIO_ANTERIOR) or SIN_CAMBIO   # ver `frase_edicion`
     return CIERRE_EDICION.format(indice=indice, cambio=cambio,
                                  acabados="" if cambia == "acabados" else " and finishes")
 
@@ -683,7 +745,7 @@ INICIAL = ("The element that changes later in the film MUST already be in this p
 
 def inicial_de(valor):
     """El «inicial» que escribe Claude, limpio (o "")."""
-    return _texto(valor if isinstance(valor, str) else "", 500)
+    return _texto(valor if isinstance(valor, str) else "", MAX_CAMBIO)
 
 
 #: La imagen de un estado: la base, ya cambiada, vacia. Se pinta UNA vez y la
@@ -697,7 +759,21 @@ PROMPT_ESTADO = (
 
 
 def prompt_imagen_estado(cambio):
-    return PROMPT_ESTADO.format(cambio=_texto(cambio, 400) or "nothing")
+    return PROMPT_ESTADO.format(cambio=_texto(cambio, MAX_CAMBIO) or "nothing")
+
+
+#: La nota de UNA «Otra imagen base» (rama relato-sin-cortes, 06-11): lo que
+#: el dueño pide corregir esta vez. No se guarda: la siguiente vuelve a salir
+#: de la descripción, a menos que la cambie.
+MAX_NOTA_BASE = 400
+NOTA_BASE = ("CORRECTION FOR THIS ATTEMPT, requested by the person who rejected the previous "
+             "one; where it disagrees with the description above, the correction wins "
+             "(it may be written in Spanish): {nota}")
+
+
+def nota_base(nota):
+    nota = _texto(nota, MAX_NOTA_BASE)
+    return NOTA_BASE.format(nota=nota) if nota else ""
 
 
 def prompt_imagen_base(espacio, relato, cabecera="", inicial=""):

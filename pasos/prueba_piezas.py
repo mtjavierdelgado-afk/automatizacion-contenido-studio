@@ -3227,6 +3227,17 @@ def prueba_direccion():
        "y por PALABRAS enteras: una frase cortada a media palabra llega al "
        "modelo de imagen como una instruccion rota")
     ok("se recorta" in aviso, f"y se dice: {aviso}")
+    # pulido-montaje (08-11): pasarse por poco no se castiga. Lo del piloto
+    # eran lineas de 61 a 66 palabras, y el recorte se comia el final
+    for cuantas in (direccion.PALABRAS_MAXIMAS + 1, 66, direccion.PALABRAS_TOLERADAS):
+        linea = " ".join(f"w{i}" for i in range(cuantas))
+        igual(direccion.limpiar_linea(linea), (linea, ""),
+              f"una de {cuantas} palabras pasa entera y sin aviso")
+    pasada = " ".join(f"w{i}" for i in range(direccion.PALABRAS_TOLERADAS + 1))
+    recortada, aviso = direccion.limpiar_linea(pasada)
+    igual(len(recortada.split()), direccion.PALABRAS_MAXIMAS,
+          "una que pasa el margen se recorta al tope de siempre, no al margen")
+    ok("se recorta" in aviso, "y se sigue diciendo")
 
     titulo("direccion: solo se dirige lo que GENERA imagen")
     ok(direccion.dirigible({"id": "S001"}), "un plano normal se dirige")

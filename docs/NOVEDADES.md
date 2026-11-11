@@ -10,6 +10,103 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**El guion visual se pone al día solo (9 de noviembre)**
+- El bloque «Guion visual» (paso Voz o Imágenes) ya no se queda vacío si lo
+  abriste antes de tener el guion: cuando terminan el guion, la voz, una
+  regrabación o cambias «Qué dibujan las imágenes», vuelve a leer las líneas de
+  la Parrilla y los bloques sin pulsar F5.
+- Si estabas escribiendo en él sin guardar, lo escrito se queda.
+
+**Gráficas: mueve y retoca cada texto, y elige qué parte de la foto se ve (9 de noviembre)**
+- En **+ Nueva gráfica**, cada texto se arrastra sobre la vista a donde quieras.
+- En **Estilo del texto** eliges un texto y cambias su tamaño, negrita, cursiva,
+  subrayado, color y fondo, o lo ocultas. **Volver a como venía** lo deja como al
+  principio.
+- En **Qué parte de la foto se ve** arrastras la foto y la acercas con la barra,
+  sin que se deforme.
+- La vista grande se repinta al pulsar **Aplicar cambios**, no con cada letra, y
+  **Ver lo que tapa la red** enseña las zonas que tapa o recorta cada red. Si un
+  texto movido queda en una de ellas o choca con otro, te avisa.
+- Lo movido y el tamaño valen para ese diseño y ese tamaño de pieza: al cambiar
+  cualquiera de los dos, los textos vuelven a como vienen. Sigue sin gastar nada.
+
+**Menos vídeos «a revisar» por una descripción de plano un poco larga (8 de noviembre)**
+- Cuando Claude escribe lo que se ve en cada plano y se pasa unas pocas palabras
+  del tope de 60 (hasta 75), la descripción ya no se recorta ni sale como aviso:
+  antes se perdía justo el final de la frase. Solo se recorta una descripción
+  desbocada, como siempre.
+- No cambia ninguna imagen ya hecha ni obliga a regenerar nada.
+
+**La prueba del tipo de relato hace también el recorrido y el primer plano (8 de noviembre)**
+
+`asvs probar relato` hace ahora, sin que toques nada, cuatro vídeos: b (el baño con 3 paletas, que comprueba también que rehacer una imagen no cambia de más), c (la sala de EstadoPlay), d (un recorrido por tres ambientes de una casa: se dibuja y se aprueba la imagen de cada ambiente, y un juez mira que cada plano sale en su ambiente) y e (una cocina que se ordena, en modo guion, con un primer plano que tiene que ser la misma cocina de cerca). La mampara batiente (a) ya no se hace sola: solo con `--solo a`.
+
+**El piloto pasa los estados del espacio y la portada del guion (7 de noviembre)**
+- «🤖 Hacer el vídeo completo» ya manda los ESTADOS DEL ESPACIO del guion de la
+  Parrilla, igual que «Pasar al Encargo». Antes no los pasaba y cada escena con
+  «Estado:» se dibujaba como la imagen base: por eso salían dos tomas con la
+  misma imagen. También manda la PORTADA propuesta en el guion, que la portada
+  con IA del piloto usa como fondo.
+- Los vídeos que ya hizo el piloto no cambian solos. Si alguno salió con la
+  misma imagen en varias tomas, hay que hacerlo otra vez desde su guion (con
+  el piloto o con «Pasar al Encargo»), y eso vuelve a pagar sus imágenes.
+
+**Los estados se dibujan enteros y la imagen base se corrige (6 de noviembre)**
+- El cambio de cada estado del espacio («despues», «montada»…) ya no se corta
+  a 400 letras: cabe hasta 1.200 y la imagen se pide con la frase entera. Si
+  la Parrilla trae uno más largo, lo avisa. Las imágenes ya hechas y aprobadas
+  siguen valiendo: no hay que volver a pagar nada.
+- En la imagen base del tipo de relato: «✎ Cambiar» en lo que la base trae ya
+  puesto (se escribe en español), «Cambiar el espacio fijo ›» te lleva a su
+  bloque, y una nota para la próxima «Otra imagen base» (por ejemplo «el lavabo
+  a la izquierda») que vale solo esa vez.
+- En la Parrilla, las matrices van en un desplegable y, con «Todas las
+  matrices», los guiones de cada columna se agrupan por matriz y se pliegan.
+- En «✨ Elementos de esta imagen», dos opciones nuevas al final de la lista:
+  «✗ Cruz (lo que no se hace)» y «✓ Check (lo que sí)». Ponen el icono rojo o
+  verde arriba a la derecha, saltando con la primera palabra, en cualquier
+  vídeo (también en los hechos antes de «Marca:»).
+- En Automatizar, la lista del piloto enseña solo los vídeos del proyecto
+  abierto (y dice cuántos hay de otros) y deja de enseñar los que ya se
+  publicaron.
+- En una portada del piloto, «Usar esta» mueve el «✓ puesta» a la elegida en
+  el acto (antes podía quedarse marcada la de antes hasta recargar).
+- Un guion mandado al piloto sale de «Pendientes» y aparece en «Usados» con
+  «🤖 en el piloto», aunque su vídeo todavía esté en la cola.
+- En «✨ Elementos de esta imagen», cada elemento tiene ahora su color (el del
+  vídeo, rojo, verde, blanco o negro), «−» y «+» para el tamaño y flechas para
+  moverlo un poco. Al elegir el icono «check» se pone verde solo, y con
+  «cruz», rojo. Todo gratis: se aplica al montar.
+
+**El montaje, unas dos o tres veces más rápido, con la misma calidad (5 de noviembre)**
+- Cada fotograma del vídeo se guarda en JPEG de calidad máxima en vez de PNG. Era
+  lo que más tardaba (el 81 % del montaje). Medido con imágenes de low, medium y
+  high: el vídeo final sale igual que antes.
+- No cambia ningún vídeo ya montado ni obliga a regenerar nada.
+- El precio antes de generar las imágenes, con la voz ya hecha, cuenta los planos
+  que de verdad van a salir (antes los estimaba por la duración y se pasaba).
+
+**Una cruz o un check en las escenas de la Parrilla (5 de noviembre)**
+- En el guion de la Parrilla, una ESCENA puede llevar **«Marca: ✗»** (lo que no
+  se hace) o **«Marca: ✓»** (lo que sí), después de «ESCENA n» y antes de
+  «Visual». Al crear el vídeo, sus planos llevan una cruz roja o un check verde
+  arriba en una esquina, que salta con la primera palabra.
+- Se mueve, se cambia de tamaño o se quita en «✨ Elementos de esta imagen». Es
+  gratis: no cambia ninguna imagen. Sale cuando las imágenes siguen el guion
+  («Imágenes: guion»). Sin «Marca:», todo sale como siempre.
+
+**Los errores del servidor se dicen en una línea (5 de noviembre)**
+- Si el servidor no contesta un momento (por ejemplo, mientras se actualiza),
+  el aviso rojo dice «El servidor no ha contestado… vuelve a intentarlo en un
+  momento» en vez de enseñar la página de error entera. Se va solo cuando el
+  servidor vuelve a contestar.
+
+**«Hacer el vídeo completo» usa la portada del guion (5 de noviembre)**
+- Si el guion de la Parrilla trae la sección **PORTADA**, la portada con IA que
+  prepara el piloto dibuja solo el fondo con esa descripción y pone su texto
+  encima, sin faltas. Esa queda puesta; la del plano sigue como alternativa.
+- Sin portada en el guion, el piloto hace sus portadas como siempre.
+
 **Títulos de YouTube y Facebook que dan ganas de abrir (4 de noviembre)**
 - **«🎯 Dame 4 títulos»**, debajo del título de YouTube y de Facebook en Publicar:
   Claude propone cuatro títulos distintos para que elijas uno con «Usar este».
@@ -25,6 +122,38 @@ vídeos, estilos, claves y contraseña no se tocan.
   emojis (con «Vistoso»; uno con «Normal»; ninguno con «Sobrio» o «Ninguno»), y
   «Optimizar SEO» arregla un título que solo describe.
 - Los textos ya escritos no cambian solos.
+
+**Rehacer una imagen marcada sin que se aleje de su estado (4 de noviembre)**
+- En un **«Espacio que cambia»**, cuando el revisor marca un plano y se rehace,
+  la nota ya no puede redibujar el sitio entero: se aplica dentro de la
+  edición de la imagen de su estado. Si la nota habla del sitio (falta el
+  toallero, el espejo es pequeño), se arregla dejándolo como en esa imagen.
+- La imagen rechazada solo aporta la gente y los objetos sueltos, nunca el
+  sitio, y al rehacer ya no se cuelan los planos vecinos (en «3 paletas» eran
+  otras paletas). Los demás vídeos rehacen exactamente como antes.
+- Si ya habías rehecho con nota algún plano de un vídeo así, puede ofrecerte
+  rehacerlo: solo se rehace si lo pides.
+
+**Gráficas: el Kit de marca y tus primeras piezas (5 de noviembre)**
+
+- En **⚙ Ajustes del proyecto** hay una sección nueva, **Kit de marca**: 5 colores, la letra de títulos y de texto, el logo para fondo oscuro, el estilo de imagen y las reglas de uso. Es de cada proyecto, así que sirve para cualquier cliente. Los vídeos no cambian.
+- En cada proyecto hay un botón **+ Nueva gráfica**: 14 diseños que se adaptan a 8 tamaños (Instagram, Facebook, LinkedIn, X, Threads, TikTok, Pinterest, historias). Escribes el texto, subes una imagen o usas una de un vídeo, eliges el diseño y lo descargas en PNG o JPG.
+- En cada pieza puedes cambiar los colores y la letra sin tocar el kit.
+- El texto queda fuera de lo que tapa o recorta cada red; si no cabe, la letra baja sola y, si aun así no cabe, te avisa. El Studio no gasta nada: no se usa ninguna IA.
+
+**vidIQ desde el Studio, con tu membresía (25 de octubre)**
+- **Configuración → vidIQ**: pega la clave MCP de la cuenta de vidIQ del
+  Studio y pulsa **Probar** (dice los créditos que quedan). No hace falta
+  conectar ningún canal. Sin clave, el Studio sigue exactamente como antes.
+- **Publicar → SEO → 📈 Mejorar con vidIQ**: investiga la palabra clave del
+  vídeo, pone nota a tu título y propone 3 títulos con emojis. Te avisa antes
+  de lo que gasta y no cambia nada hasta que pulses **Usar**.
+- **Parrilla → Conversar con Claude → 📈 Ideas con vidIQ**: por mensaje y
+  apagado de fábrica. Claude consulta vidIQ (como mucho 3 veces por mensaje) y
+  marca con ⚠ lo que saca de ahí.
+- Va por el mismo Claude de tu membresía, **sin API de pago**. Cada consulta
+  gasta créditos de tu plan de vidIQ, por eso todo es a pedido con un botón.
+  Solo consulta y puntúa: publicar, subir o generar con vidIQ está bloqueado.
 
 **Probar el Studio entero con dos comandos (22 de octubre; al servidor, 4 de noviembre)**
 - **`asvs revisar`** (gratis): todas las pruebas del Studio, incluido el recorrido

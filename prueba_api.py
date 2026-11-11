@@ -765,6 +765,22 @@ def probar_regrabar_y_estructura(cliente, carpeta):
           "y en 'todo' se promete ENTERO: «Regenerar Audio» ya no enseña 0 $")
     igual(coste.get("modo"), "todo", "el coste dice con qué modo se ha contado")
 
+    # montaje-rapido (05-11-2026): CON LA VOZ HECHA, EL PRECIO CORTA DE VERDAD.
+    # La prueba completa del 04-11 prometió 15 imágenes por duración y ritmo y
+    # se hicieron 12. Cortar no cuesta nada, así que se cuenta lo que saldrá.
+    import app as servidor                                    # noqa: PLC0415
+    _r, plan = cliente.get(f"/api/proyectos/{pid}/generar?tanda=video")
+    planos = ((plan or {}).get("coste") or {}).get("planos") or {}
+    igual(planos.get("origen"), "cortando la voz de este video",
+          "con la voz hecha y sin plan, los planos se cuentan cortando la voz")
+    ctx_corte = servidor.Contexto(raiz)
+    cortado = servidor.PASOS_MODULOS.p6_assets.planificar(
+        ctx_corte.proyecto, ctx_corte.estado.params("assets") or {})
+    igual(planos.get("total"), len(cortado.get("escenas") or []),
+          "y salen los mismos planos que cortará la tanda")
+    ok(not os.path.exists(os.path.join(raiz, "pasos", "assets", "trabajo", "plan.json")),
+       "contar no escribe el plan (solo lo calcula)")
+
     # DOS SECCIONES: la toma simulada sale de una sola, y lo que se prueba
     # es justo lo que pasa entre secciones. Se parte su meta en el disco.
     meta, ruta_meta = _meta_activa(carpeta, pid, cliente)
@@ -7291,6 +7307,50 @@ def probar_publicar_20oct(cliente, pid):
        "cada envío de la cola dice si ya debió salir")
 
 
+def probar_vidiq(cliente, pid):
+    """Rama `vidiq-1` (25-10-2026): vidIQ desde el Claude del Studio. Con
+    ESTUDIO_SIMULAR no se llama a nadie; se comprueba que sin clave no hay nada,
+    que la clave no baja nunca y que «Mejorar con vidIQ» no cambia ningún texto."""
+    seccion("VIDIQ: CLAVE, PROBAR Y «MEJORAR CON VIDIQ»")
+    clave = "vq_prueba_api_123456789"
+    r, d = cliente.get("/api/vidiq/estado")
+    igual((r.status_code, (d or {}).get("puesta")), (200, False), "GET /api/vidiq/estado: sin clave")
+    ok((d or {}).get("creditos_aprox", {}).get("titulo"), "y dice lo que gasta cada cosa")
+    ruta = f"/api/vidiq/videos/{pid}/titulo"
+    r, _d = cliente.post(ruta)
+    igual(r.status_code, 409, f"POST {ruta} sin clave: 409")
+    r, d = cliente.put("/api/claves", {"vidiq": {"clave": clave}})
+    igual((r.status_code, ((d or {}).get("vidiq") or {}).get("puesta")), (200, True), "la clave se guarda")
+    ok(clave not in json.dumps(d), "y no vuelve en la respuesta")
+    r, d = cliente.get("/api/claves")
+    ok(clave not in json.dumps(d), "ni en GET /api/claves")
+    r, d = cliente.post("/api/vidiq/probar")
+    igual((r.status_code, ((d or {}).get("prueba") or {}).get("estado")), (200, "ok"), "«Probar» (simulado)")
+    igual(((d or {}).get("estado") or {}).get("saldo"), 150, "y apunta el saldo")
+    r, antes = cliente.get(f"/api/publicar/videos/{pid}")
+    palabra_antes = ((antes or {}).get("seo") or {}).get("palabra_propia") or ""
+    r, _d = cliente.put(f"/api/publicar/videos/{pid}", {"palabra_clave": "consolas para fiestas"})
+    igual(r.status_code, 200, "con palabra clave en el vídeo")
+    r, d = cliente.post(ruta)
+    igual(r.status_code, 202, f"POST {ruta}: 202, en un hilo")
+    vista = d or {}
+    for _ in range(50):
+        r, vista = cliente.get(f"/api/vidiq/videos/{pid}")
+        if not (vista or {}).get("trabajando"):
+            break
+        time.sleep(0.2)
+    resultado = (vista or {}).get("resultado") or {}
+    igual(len(resultado.get("alternativas") or []), 3, "tres títulos propuestos")
+    igual((vista or {}).get("palabra"), "consolas para fiestas", "con la palabra con la que se consultó")
+    r, despues = cliente.get(f"/api/publicar/videos/{pid}")
+    igual((despues or {}).get("textos"), (antes or {}).get("textos"), "no cambia ningún texto del vídeo")
+    r, _d = cliente.get("/api/vidiq/videos/noexiste")
+    igual(r.status_code, 404, "un vídeo que no existe: 404")
+    cliente.put(f"/api/publicar/videos/{pid}", {"palabra_clave": palabra_antes})
+    r, d = cliente.put("/api/claves", {"vidiq": {"clave": ""}})
+    igual(((d or {}).get("vidiq") or {}).get("puesta"), False, "«Quitar» la borra")
+
+
 def probar_espacio_fijo():
     """Rama espacio-fijo (20-10-2026): la peticion del catalogo y el ESPACIO FIJO.
 
@@ -9342,6 +9402,29 @@ def probar_el_piloto():
             igual(textos_pedidos, [(("tiktok", "instagram"), False)],
                   "los textos se piden para las redes del proyecto, esperando a que acaben")
             igual(P.leer(base, fa["id"])["redes"], ["tiktok", "instagram"], "y las redes quedan en la ficha")
+            # rama piloto-portada-guion (05-11): con la PORTADA del guion, la de IA
+            # dibuja SOLO el fondo con su descripción, su texto va al título y queda puesta
+            P.cambiar(base, fa["id"], portadas=[], portada_puesta="")
+            for nombre in os.listdir(P.carpeta_portadas(base, fa["id"])):
+                os.remove(os.path.join(P.carpeta_portadas(base, fa["id"]), nombre))
+            PUB.guardar_portada_guion(servidor.raiz_proyectos(), ctx.id,
+                                      {"texto": "Tu baño en 3 días", "imagen": "un baño reformado, luz cálida"})
+            ia_pedida.clear()
+            guardado.clear()
+            prompts = []
+            servidor._correr_portada_ia = lambda avisar, c, que, prompt, refs, calidad, tamano: (
+                prompts.append(prompt), ia_pedida.append((que, calidad, tamano)),
+                {"nombre": "ia_guion.png", "coste_usd": 0.05})[-1]
+            servidor._piloto_portadas(lambda *a, **k: None, ctx, base, fa["id"], aj)
+            ficha_p = P.leer(base, fa["id"])
+            igual(ia_pedida, [("fondo", "low", "vertical")], "con portada en el guion, la IA dibuja SOLO el fondo")
+            ok(prompts and prompts[0].startswith("un baño reformado, luz cálida") and "SIN texto" in prompts[0],
+               "con la descripción del guion y sin letras")
+            ia_c = next((c for c in ficha_p["portadas"] if c["id"] == "ia"), {})
+            ok(ia_c.get("del_guion") is True and ia_c["diseno"]["textos"].get("titulo") == "Tu baño en 3 días"
+               and ia_c["diseno"]["modo"] != "ia", "su texto va al título, en capas")
+            igual(ficha_p["portada_puesta"], "ia", "y queda puesta la del guion")
+            igual(guardado["diseno"]["fondo"].get("imagen"), "ia_guion.png", "como portada del vídeo")
         finally:
             for clave, valor in cambiados.items():
                 modulo, nombre = clave.split(".")
@@ -9460,6 +9543,7 @@ def main():
         probar_cancelar_en_el_taller()
         probar_mas_emojis(cliente, carpeta, pid)
         probar_publicar_20oct(cliente, pid)
+        probar_vidiq(cliente, pid)
         probar_espacio_fijo()
         probar_tipo_relato()
         probar_relato_en_espanol()

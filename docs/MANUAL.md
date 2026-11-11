@@ -336,6 +336,13 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   distancias: si la mampara choca con el inodoro, que el inodoro esté a menos
   de lo que mide la hoja.
 
+  **Si la imagen base no sale como querías:** «Otra imagen base» repite la
+  misma descripción, así que antes corrígela. «Cambiar el espacio fijo ›» te
+  lleva al bloque del sitio; «✎ Cambiar», debajo de la base, reescribe en
+  español lo que la base trae ya puesto; y la casilla de nota vale solo para
+  la próxima «Otra imagen base» («el lavabo a la izquierda», «más luz»). Cada
+  estado admite hasta 1.200 letras.
+
   **Cada estado, dibujado una vez:** en «Un espacio que cambia», cada cambio
   que pide el guion (la mampara abierta contra el inodoro, la corrediza…) se
   dibuja UNA vez editando la base aprobada, y también se aprueba (se ve su
@@ -381,6 +388,12 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   estado. Y en los vídeos creados desde la Parrilla, una línea «Visual:» **sin
   cámara** ya no recibe un encuadre al azar (un retrato, unas manos): la línea
   dice el plano.
+  **Cruz o check desde la Parrilla:** con «Imágenes: guion», una ESCENA puede
+  traer **«Marca: ✗»** (lo que no se hace) o **«Marca: ✓»** (lo que sí), tras
+  «ESCENA n» y antes de «Visual». Sus planos llevan una cruz roja o un check
+  verde arriba a la derecha, que salta con la primera palabra; en «✨ Elementos
+  de esta imagen» se mueve, se cambia de tamaño o se quita (y quitada no
+  vuelve). No toca ninguna imagen.
 - **El reparto y los sitios** (en un vídeo hecho): «Pedido para el reparto de
   sitios» es una frase para Claude al repartir; «Volver a repartir con este
   pedido» no paga imágenes.
@@ -742,6 +755,19 @@ botón está apagado y la barra dice por qué («Falta el texto de Instagram»,
 - La columna **Tendencia** (Google Trends, experimental) dice si la frase sube
   o baja en Perú. Si Trends no contesta, queda en «—».
 
+**vidIQ** (opcional, 25-10; solo sale con la clave en **Configuración → vidIQ**),
+también en el paso **SEO**:
+- **📈 vidIQ → Mejorar con vidIQ** investiga en vidIQ la palabra clave del vídeo
+  (volumen, competencia y su puntuación, y frases relacionadas que el vídeo
+  trata), pone **nota a tu título** con consejos y propone **3 títulos** con
+  emojis. Antes de empezar te dice cuánto gasta (unos 15 a 20 créditos de
+  vidIQ y algo de uso de tu membresía de Claude) y te pregunta.
+- **No cambia nada solo.** **Usar** en una frase la deja como palabra clave del
+  vídeo; **Usar en YouTube** (o en Facebook) pone ese título. Sin palabra clave
+  no se consulta, para no gastar créditos a ciegas.
+- Si cambias la palabra clave después, te avisa de que lo de vidIQ era de la
+  otra: **Volver a consultar**.
+
 **Después de publicar**, al volver a la ficha, arriba dice **Ya publicado en** (con el enlace a cada post) y
 **En camino** (lo programado o subiendo), y al lado de cada red su último
 estado. Cuando una red termina mientras miras, sale un aviso («Publicado en
@@ -876,7 +902,9 @@ botones, con cuántos guiones tiene cada una.
 - **Arriba, la marca del cliente**: «Marca de X: ✓ guardada» o, si falta,
   «Sin marca: Claude escribirá sin saber quién es el cliente…» con
   **«Apuntarla ›»**.
-- **Buscar por título o ID** y las **matrices como filtro**. Con una matriz
+- **Buscar por título o ID** y las **matrices como filtro**, en el
+  desplegable «Matriz: …». Con «Todas las matrices», cada columna agrupa sus
+  guiones por matriz y los grupos se abren y se cierran. Con una matriz
   elegida se ve de dónde salió y puedes **Renombrarla** o **Borrarla** (te
   pregunta antes; los vídeos ya hechos con ella no se tocan).
 - **Pulsar una tarjeta abre su ficha** en un panel a la derecha (a pantalla
@@ -952,6 +980,14 @@ Un chat para preparar guiones hablando: a la izquierda tus conversaciones
 capturas, **🌐 Buscar en internet**, **📊 Con mis resultados**, una cuenta
 analizada como referencia y el modelo. Cada guion que escriba en el formato del
 Studio sale con su **«Guardar en la Parrilla»**.
+
+Con la clave de vidIQ puesta sale también **📈 Ideas con vidIQ** (por mensaje y
+apagado de fábrica): ese mensaje puede consultar vidIQ (palabras clave con su
+volumen y competencia, vídeos que destacan en el nicho, tendencias, nota de
+títulos). Cada consulta gasta créditos de vidIQ, así que Claude hace como mucho
+3 por mensaje; lo que saque de ahí lo dice «(vidIQ)» y, en un guion, lleva
+«⚠ dato de vidIQ» en los avisos. Los datos son de YouTube: para TikTok e
+Instagram sirven de referencia.
 
 ### Cuentas que te gustan
 
@@ -1029,6 +1065,17 @@ Quién es, qué mostrar, qué evitar, el tono, el CTA y otras reglas, una vez po
 proyecto, en dos columnas, con **«Guardar la marca»** en la barra de abajo.
 Claude la usa en todo lo que escribe para él.
 
+## Gráficas
+
+1. Abre un proyecto y entra en **⚙ Ajustes del proyecto → Kit de marca**. Elige los colores y las letras y pulsa **Guardar el kit**. El logo es el de la sección «Logo»; si quieres, sube otro para fondos oscuros.
+2. En el proyecto, pulsa **+ Nueva gráfica**.
+3. Elige **Red y tamaño**, escribe los textos y añade una imagen: subida o de un vídeo de ese proyecto.
+4. A la derecha elige uno de los 14 diseños. La vista se actualiza sola.
+5. Si quieres, ajusta esa pieza: arrastra los textos sobre la vista, cambia su estilo en **Estilo del texto**, elige la parte de la foto en **Qué parte de la foto se ve**, y cambia colores o letra. Pulsa **Aplicar cambios** para verlo. Lo arrastrado y el tamaño de los textos valen para ese diseño y tamaño: al cambiarlos, cada texto vuelve a como viene.
+6. Pulsa **Guardar** y descárgala en PNG o JPG. Para TikTok, usa el JPG.
+
+Las piezas quedan en la sección **Gráficas** del proyecto, donde se pueden abrir, duplicar o borrar.
+
 ## Configuración (⚙)
 
 - **Aspecto: la paleta**: Nocturno (la de siempre), Aurora, Brasa o Día (la
@@ -1044,6 +1091,10 @@ Claude la usa en todo lo que escribe para él.
   **Quitar**; desde qué cuenta se mira Instagram (**Volver a buscar**, y cuándo
   caduca el token), **Usar el servicio de pago cuando lo gratis no sirva**, el
   **tope al mes** y lo gastado. **Probar todas las claves** las prueba también.
+- **vidIQ (ideas, palabras clave y títulos)**: la clave MCP de la cuenta de
+  vidIQ del Studio (app.vidiq.com → Account settings → MCP). **Probar** dice
+  cuántos créditos quedan. Va por el Claude de tu membresía, sin API de pago,
+  y no hace falta conectar ningún canal. Sin ella, nada de vidIQ se enseña.
 - **Enviar al Studio — la extensión de Chrome**: (1) **Descargar la
   extensión** y descomprimirla; (2) la **dirección de tu Studio**, con
   «Copiar»; (3) **Crear el código de envío** (se ve una sola vez; uno nuevo deja

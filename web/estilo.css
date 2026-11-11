@@ -5474,6 +5474,20 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .plano-gv-cabeza { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; min-width: 0; }
 .plano-gv-cabeza .meta { overflow-wrap: anywhere; }
 
+/* ================================================================ VIDIQ
+   Rama vidiq-1: Configuración → vidIQ y «Mejorar con vidIQ» en Publicar → SEO. */
+.vidiq-seo { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.vidiq-seo h4 { margin: 8px 0 0; }
+.lista-vidiq, .consejos-vidiq { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 6px; }
+.lista-vidiq { list-style: none; padding: 0; }
+.frase-vidiq { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.frase-vidiq .crece { min-width: 0; overflow-wrap: anywhere; }
+.titulo-vidiq { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--linea);
+  border-radius: 8px; min-width: 0; }
+.titulo-vidiq b { overflow-wrap: anywhere; }
+.aviso-vidiq { color: var(--aviso); }
+.saldo-vidiq, .resultado-vidiq { overflow-wrap: anywhere; }
+
 /* ============================================================ COLA DEL STUDIO
    rama cola-montaje (25-10-2026): el botón «Cola» de la barra de módulos y su
    panel lateral. El panel reutiliza `.capa-ajustes-proyecto`/`.cajon-proyecto`;
@@ -5766,3 +5780,82 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .portada-guion input[type="text"], .portada-guion .texto-portada-guion { width: 100%; box-sizing: border-box; }
 .portada-guion .texto-portada-guion { resize: vertical; min-height: 64px; }
 .portada-guion .fila { gap: 6px; flex-wrap: wrap; }
+
+/* ==================================================================== GRÁFICAS */
+.nueva-grafica { white-space: nowrap; }
+.seccion-graficas { margin-top: 18px; }
+.rejilla-piezas { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.tarjeta-pieza { display: flex; flex-direction: column; gap: 6px; background: var(--panel); border: 1px solid var(--linea); border-radius: 10px; padding: 8px; min-width: 0; }
+.tarjeta-pieza b { overflow-wrap: anywhere; }
+.tarjeta-pieza .fila { flex-wrap: wrap; gap: 4px; }
+.abrir-pieza { padding: 0; border: 0; background: none; display: block; width: 100%; }
+.abrir-pieza img { display: block; width: 100%; height: 170px; object-fit: contain; background: var(--lienzo); border-radius: 6px; }
+.panel-kit-marca { display: flex; flex-direction: column; gap: 10px; }
+.campo-graf { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.campo-graf > span { font-size: 13px; font-weight: 600; }
+.campo-graf select, .campo-graf input:not([type="color"]), .campo-graf textarea { width: 100%; box-sizing: border-box; }
+.colores-graf { display: flex; flex-wrap: wrap; gap: 8px; }
+.campo-graf.color { width: 76px; }
+.campo-graf.color > span { font-size: 11px; font-weight: 500; color: var(--tenue); }
+.campo-graf.color input { width: 100%; height: 40px; padding: 2px; }
+.capa-grafica { align-items: stretch; padding: 12px; }
+.dialogo.dialogo-grafica { width: min(1500px, 100%); max-height: none; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.cab-grafica { flex-wrap: wrap; gap: 8px; align-items: center; }
+.cab-grafica h3 { margin: 0; }
+.descargas-graf { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.cuerpo-grafica { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr) minmax(190px, 300px); gap: 14px; }
+.form-graf, .lado-grafica { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
+.centro-grafica { min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.barra-vista { flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
+.area-graf { flex: 1 1 0; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+.marco-graf { position: relative; flex: none; background: var(--lienzo); border-radius: 8px; overflow: hidden; }
+.vista-graf { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.cajas-graf, .zonas-graf { position: absolute; inset: 0; }
+.zonas-graf { pointer-events: none; }
+.zona-graf { position: absolute; background: repeating-linear-gradient(45deg, rgba(255, 40, 70, .5) 0 6px, rgba(255, 40, 70, .2) 6px 12px); }
+.zona-graf.top { top: 0; left: 0; right: 0; }
+.zona-graf.bottom { bottom: 0; left: 0; right: 0; }
+.zona-graf.left { top: 0; bottom: 0; left: 0; }
+.zona-graf.right { top: 0; bottom: 0; right: 0; }
+.caja-graf { position: absolute; min-width: 12px; min-height: 12px; padding: 0; background: transparent; border: 1px dashed transparent; border-radius: 2px; cursor: move; touch-action: none; }
+.caja-graf:hover { border-color: var(--blanco); }
+.caja-graf.activa { border: 2px solid var(--acento); }
+.estilo-graf, .encuadre-graf { display: flex; flex-direction: column; gap: 8px; }
+.estilo-graf:empty, .encuadre-graf:empty { display: none; }
+.titulo-graf { font-size: 13px; font-weight: 600; }
+.botones-estilo { flex-wrap: wrap; gap: 4px; }
+.botones-estilo .activo { border-color: var(--acento); color: var(--acento); }
+.lienzo-encuadre { position: relative; line-height: 0; touch-action: none; cursor: move; overflow: hidden; border-radius: 4px; }
+.lienzo-encuadre img { width: 100%; display: block; opacity: .55; pointer-events: none; }
+.ventana-graf { position: absolute; border: 2px solid var(--blanco); box-shadow: 0 0 0 1px var(--negro); background: rgba(255, 255, 255, .18); pointer-events: none; }
+.aviso-graf { color: var(--aviso); font-size: 13px; }
+.rejilla-disenos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.elige-diseno { display: flex; flex-direction: column; gap: 4px; padding: 4px; background: var(--hueco); border: 2px solid transparent; border-radius: 8px; font-size: 12px; color: var(--texto); text-align: left; }
+.elige-diseno.activo { border-color: var(--acento); }
+.elige-diseno img { display: block; width: 100%; aspect-ratio: 4 / 5; object-fit: contain; background: var(--lienzo); border-radius: 4px; }
+.planos-graf { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; max-height: 170px; overflow-y: auto; }
+.plano-graf { padding: 0; border: 1px solid var(--linea); background: none; }
+.plano-graf img { display: block; width: 100%; height: 60px; object-fit: cover; }
+@media (max-width: 900px) {
+  .capa-grafica { padding: 0; }
+  .dialogo.dialogo-grafica { overflow-y: auto; border-radius: 0; }
+  .cuerpo-grafica { display: flex; flex-direction: column; flex: 0 0 auto; }
+  .form-graf, .lado-grafica { overflow: visible; }
+  .centro-grafica { order: -1; }
+  .area-graf { flex: none; height: 56vh; }
+}
+
+/* ---------------------------------------------- RELATO SIN CORTES (06-11) */
+.nota-base-relato { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.nota-base-relato input { width: 100%; }
+.inicial-base-relato { display: flex; flex-direction: column; gap: 6px; }
+.bloque-light.resaltado-espacio-fijo { outline: 2px solid var(--acento); outline-offset: 4px; border-radius: 10px; }
+.desplegable-matrices { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.boton-matrices { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desplegable-matrices .chips-matrices { display: flex; flex-wrap: wrap; gap: 6px; max-height: 40vh; overflow-y: auto; padding: 8px; background: var(--hueco); border: 1px solid var(--linea); border-radius: 10px; }
+.grupo-matriz-parrilla { display: flex; flex-direction: column; gap: 8px; }
+.grupo-matriz-parrilla > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 8px; border-radius: 8px; background: var(--hueco); font-weight: 600; font-size: 13px; }
+.grupo-matriz-parrilla[open] > summary { margin-bottom: 6px; }
+.mandos-elemento { display: inline-flex; flex-wrap: wrap; gap: 2px; }
+.mandos-elemento .mini { min-width: 28px; padding-left: 6px; padding-right: 6px; }
+.otros-proyectos-piloto { margin: 4px 0 8px; }

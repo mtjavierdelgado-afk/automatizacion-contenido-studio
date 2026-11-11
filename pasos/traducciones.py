@@ -50,9 +50,10 @@ MAX_TEXTO = 1200
 #: Lo que se pide de una vez. Un vídeo trae dos o tres estados y una línea de
 #: `inicial`; el tope es para que un catálogo raro no mande cien frases juntas.
 POR_LLAMADA = 30
-#: El tope de un cambio de estado (`tipo_relato._texto(..., 400)`): uno más
-#: largo se cortaría al leerlo, así que se rechaza en vez de guardarlo.
-MAX_INGLES = 400
+#: El tope de un cambio de estado (`tipo_relato.MAX_CAMBIO`): uno más largo
+#: se cortaría al leerlo, así que se rechaza en vez de guardarlo. Eran 400
+#: hasta la rama relato-sin-cortes (06-11).
+MAX_INGLES = 1200
 REINTENTOS_JSON = 1
 
 _LOCK = threading.Lock()

@@ -284,6 +284,12 @@ def ejes_de_plano(escena):
     combinacion, y porque dos planos iguales tienen que recibir lo mismo.
     """
     escena = escena or {}
+    if escena.get("ejes"):
+        # UNA IMAGEN DE REFERENCIA (rama base-fiel) dice sus ejes: sin caras ni
+        # cuerpos. Ningun plano trae esta clave: su tile sale como siempre
+        fijos = [e for e in escena["ejes"] if e in EJES]
+        if fijos:
+            return fijos[:POR_TILE]
     pedidos = []
     if escena.get("personajes"):
         pedidos.extend(POR_CONTENIDO["personajes"])

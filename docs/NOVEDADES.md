@@ -10,6 +10,10 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Las imágenes de referencia del tipo de relato siguen mejor la descripción (11 de noviembre)**
+
+La imagen de referencia de un sitio (la «imagen base» y la de cada ambiente) se pide ahora como una foto de interiores con gran angular que enseña la habitación entera, con todas las puertas y ventanas descritas dentro de la foto (antes, en vertical, se recortaban los lados: de tres ventanas salían dos). Su lámina de estilo ya no lleva caras ni cuerpos. La imagen de cada estado conserva el cuadro de la base y, si cambian los acabados, la puerta, los marcos, el espejo y los grifos se quedan como estaban salvo que el cambio los nombre. «Otra imagen» de un estado acepta ahora una corrección, como la de la base. Los planos de los vídeos no cambian. La prueba `asvs probar relato` tiene `--solo-referencias` para comprobar solo estas imágenes (unas pocas, ~0,5 $) y el segundo intento lleva lo que vio el juez.
+
 **El guion visual se pone al día solo (9 de noviembre)**
 - El bloque «Guion visual» (paso Voz o Imágenes) ya no se queda vacío si lo
   abriste antes de tener el guion: cuando terminan el guion, la voz, una

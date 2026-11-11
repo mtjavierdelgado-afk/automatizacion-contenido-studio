@@ -32,6 +32,9 @@ planos editando la imagen de su estado, pasa el revisor, REHACE lo que marca
 la imagen que editó: ¿el mismo sitio, la misma cámara, el objeto igual y solo
 cambia lo pedido?
 
+    asvs probar relato --solo-referencias    SOLO las imágenes de referencia (la base, la
+                                             de cada estado y la de cada ambiente), juzgadas
+                                             y aprobadas: la comprobación barata, sin planos
     asvs probar relato --solo a --video ID   sigue un vídeo de prueba ya hecho
                                              desde su imagen base
 
@@ -122,7 +125,9 @@ ESCENARIOS = [
                 "a row of three big windows on the left wall, double door at the back, power "
                 "sockets on the right wall; same layout, same camera height and same "
                 "proportions in every shot"),
-            "luz": "evening, warm ceiling lights plus the cool glow of the screens when they are on",
+            # sin «el brillo de las pantallas» (rama base-fiel): la base es la sala
+            # VACIA, y nombrarlas invitaba a dibujarlas
+            "luz": "evening, warm ceiling lights",
             "secundarios": []},
         "material": (
             "Así llega la sala: vacía. En una hora montamos las pantallas, las consolas y los "
@@ -243,6 +248,10 @@ def main():
     ap.add_argument("--tope", type=float, default=5.0)
     ap.add_argument("--seguir", action="store_true")
     ap.add_argument("--solo", default="", help="a, b, c, d, e o varias: «bcde» (sin nada, bcde)")
+    # LAS IMAGENES DE REFERENCIA Y NADA MAS (rama base-fiel): la base, la de cada
+    # estado y la de cada ambiente, juzgadas y aprobadas; ni planos ni montaje.
+    # Es la comprobacion barata (unas pocas imagenes) antes de los videos enteros
+    ap.add_argument("--solo-referencias", action="store_true")
     ap.add_argument("--video", default="", help="con --solo de UNA letra: sigue ese vídeo de prueba ya "
                     "hecho (guion, voz y sitios) desde su imagen base; si la aprobaste tú, no paga otra")
     # PARA PROBAR ESTA PRUEBA en local, con motores simulados
@@ -519,7 +528,8 @@ def main():
                     tid = v.get(clave_tid)
                     if not tid:
                         codigo, lanz = api.post(f"/api/proyectos/{pid}/tipo_relato/base/generar",
-                                                {"usd": usd, "sitio": amb["sitio"], "otra": intento > 0})
+                                                dict({"usd": usd, "sitio": amb["sitio"], "otra": intento > 0},
+                                                     **_nota_del_juez(est, k, f"amb_{amb['sitio']}_{intento - 1}")))
                         tid = (lanz or {}).get("trabajo_id")
                         if not informe.comprueba(codigo == 202 and tid,
                                                  f"se dibuja el ambiente «{amb['nombre']}» (≈ {usd:.3f} $)",
@@ -579,7 +589,8 @@ def main():
                 tid = v.get(f"tid_base{intento}")
                 if not tid:
                     codigo, lanz = api.post(f"/api/proyectos/{pid}/tipo_relato/base/generar",
-                                            {"usd": usd, "otra": intento > 0})
+                                            dict({"usd": usd, "otra": intento > 0},
+                                                 **_nota_del_juez(est, k, f"base{intento - 1}")))
                     tid = (lanz or {}).get("trabajo_id")
                     if not informe.comprueba(codigo == 202 and tid, f"se genera la imagen base (≈ {usd:.3f} $)",
                                              f"HTTP {codigo}: {lanz}"):
@@ -669,7 +680,8 @@ def main():
                     tid = v.get(clave_tid)
                     if not tid:
                         codigo, lanz = api.post(f"/api/proyectos/{pid}/tipo_relato/base/generar",
-                                                {"usd": usd, "estado": e["estado"], "otra": intento > 0})
+                                                dict({"usd": usd, "estado": e["estado"], "otra": intento > 0},
+                                                     **_nota_del_juez(est, k, f"estado_{e['estado']}_{intento - 1}")))
                         tid = (lanz or {}).get("trabajo_id")
                         if not informe.comprueba(codigo == 202 and tid,
                                                  f"se dibuja el estado «{e['estado']}» (≈ {usd:.3f} $)",
@@ -689,8 +701,8 @@ def main():
                             f"Lee con Read la IMAGEN BASE: {ruta_base}\ny la imagen de un ESTADO: {ruta}\n"
                             f"La del estado tiene que ser la MISMA habitación con la misma cámara, vacía, "
                             f"con UN cambio: «{e['cambio']}». Contesta por separado: 'mismo_sitio' (misma "
-                            "distribución y cámara), 'cambio' (se ve el cambio pedido, y nada más del sitio "
-                            "cambia) y 'objeto' (" + ("lo que cambia es un objeto real a escala: recto, "
+                            "distribución y cámara), 'cambio' (se ve el cambio pedido; lo que ese cambio "
+                            "nombra puede cambiar, y nada que no nombre cambia) y 'objeto' (" + ("lo que cambia es un objeto real a escala: recto, "
                             "plano y vertical si es un vidrio o una puerta; no torcido ni deformado"
                             if esc["relato"].get("cambia") == "objeto" else
                             "en este vídeo no cambia ningún objeto: contesta 'si'") + "). Devuelve SOLO "
@@ -717,6 +729,10 @@ def main():
             _c, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
         if not esc.get("ambientes") and not (ficha or {}).get("listo", (ficha or {}).get("base_aprobada")):
             informe.apunta("aviso", f"{k}: faltan imágenes de estado aprobadas, se pasa al siguiente vídeo")
+            continue
+        if args.solo_referencias:
+            informe.apunta("ok", f"{k}: las imágenes de referencia quedan aprobadas (--solo-referencias: "
+                                 "sin planos ni montaje)")
             continue
         # las imagenes y el montaje
         def tanda_entera(tanda, limite, nombre=None):
@@ -976,6 +992,19 @@ def main():
         informe.apunta("ok", f"gastado hasta ahora: {gastado():.2f} $ de {tope:.2f} $")
 
     return cerrar()
+
+
+def _nota_del_juez(est, k, clave):
+    """{"nota": ...} con lo que el juez le reprochó al intento anterior, o {}.
+
+    El segundo intento de una imagen de referencia ya no va a ciegas (rama
+    base-fiel): lleva la razón del juez como la corrección de esta vez, la misma
+    que puede escribir una persona en «Otra imagen base»."""
+    juicio = ((est.get("juicios") or {}).get(k) or {}).get(clave) or {}
+    razon = " ".join(str(juicio.get("por_que") or "").split())
+    if not razon or juicio.get("vale") in ("si", "sí") or razon.startswith("no se pudo"):
+        return {}
+    return {"nota": ("Corrige esto que vio el revisor en el intento anterior: " + razon)[:390]}
 
 
 def _leer_tr(raiz):

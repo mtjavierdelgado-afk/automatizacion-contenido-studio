@@ -5795,12 +5795,13 @@ def _correr_base(avisar, ctx, rehacer, sitio=None, nota=""):
 
 @_medido_en("assets", "base")
 @_con_turno
-def _correr_estado(avisar, ctx, estado, rehacer):
-    """Genera (y paga) la imagen de un estado: la base, cambiada una vez. No la aprueba."""
+def _correr_estado(avisar, ctx, estado, rehacer, nota=""):
+    """Genera (y paga) la imagen de un estado: la base, cambiada una vez. No la aprueba.
+    `nota`: la corrección de esta vez (rama base-fiel), como la de la base; no se guarda."""
     p6 = PASOS_MODULOS.p6_assets
     avisar(0.1, f"dibujando el estado «{estado}» sobre la imagen base (se paga una imagen)")
     hecho = p6.generar_imagen_estado(ctx.proyecto, ctx.estado.params("assets") or {},
-                                     estado, rehacer=rehacer)
+                                     estado, rehacer=rehacer, nota=nota)
     tr = _tipo_relato()
     with _cerrojo_de_cadena(ctx.id):
         guardado = _tipo_relato_guardado(ctx)
@@ -5867,7 +5868,7 @@ def generar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
                 raise ErrorApi(409, "aprueba antes la imagen base: cada estado se dibuja "
                                     "editándola")
             trabajo_id = ctx.gestor.lanzar("tipo_relato_estado", _correr_estado, ctx, estado,
-                                           bool(datos.get("otra")), paso="assets")
+                                           bool(datos.get("otra")), nota, paso="assets")
         else:
             trabajo_id = ctx.gestor.lanzar("tipo_relato_base", _correr_base, ctx,
                                            bool(datos.get("otra")), sitio or None, nota,

@@ -636,6 +636,41 @@ SUBTIPO = {
             "put.",
 }
 
+#: LO QUE LA PALETA NO NOMBRA CONSERVA SU ACABADO (rama base-fiel, prueba
+#: real del 09-11: la imagen de la «paleta 1» aclaro tambien la puerta, su marco
+#: y el marco del espejo). Solo la lleva la referencia «base» de la imagen de un
+#: ESTADO de acabados (`fijos`): los planos no la traen y su prompt no cambia.
+FIJOS_ACABADOS = (" Doors, door frames, window frames, the mirror and its frame, taps, "
+                  "handles and fittings keep exactly the colour, material and shape they "
+                  "have in reference image {indice}, unless the change above names them.")
+
+#: EL CUADRO DE UNA IMAGEN DE REFERENCIA (rama base-fiel). La linea del cuadro
+#: vertical de los planos pide el sujeto grande y lo importante en el tercio
+#: central: en una habitacion vacia eso es recortar los lados (en la prueba
+#: real del 09-11, de tres ventanas en la pared izquierda salieron dos). Solo
+#: la llevan la imagen base y la de cada estado.
+CUADRO_REFERENCIA = (
+    "The frame is PORTRAIT (9:16, vertical, for a phone screen). This picture is the "
+    "reference of a whole room, so it is an architectural interior photograph taken "
+    "with a wide-angle lens from the entrance corner: show the whole room, with every "
+    "wall, door and window the description names fully inside the frame, none of them "
+    "cropped at the edges, and exactly as many windows and doors as it says. Never draw "
+    "black bars, borders or a landscape picture inside the tall frame.")
+
+#: El cuadro de la imagen de un ESTADO: es una EDICION de la base, asi que ni
+#: gran angular nuevo ni «tercio central»: el mismo cuadro, sin reencuadrar.
+CUADRO_ESTADO = (
+    "The frame is PORTRAIT (9:16, vertical, for a phone screen), exactly the frame of "
+    "the image being edited: never crop, zoom or reframe it, and keep every wall, door "
+    "and window it shows fully inside the frame. Never draw black bars, borders or a "
+    "landscape picture inside the tall frame.")
+
+#: Los ejes del moodboard de una imagen de referencia: sin caras ni cuerpos (es
+#: una habitacion vacia) y con dos que no son una sala amueblada, para que la
+#: lamina «interior» no sea la unica habitacion que copiar (el mueble de TV de
+#: la sala del 09-11).
+EJES_REFERENCIA = ("interior", "exterior", "objeto")
+
 #: Lo que se cambia en un plano cuyo tramo no trae cambio (el «antes»).
 SIN_CAMBIO = ("nothing in the room itself: only what the scene description below "
               "shows happening in it (people, gestures, small loose objects)")
@@ -651,11 +686,14 @@ def frase_edicion(indice, ref, modo_imagen="ilustracion"):
         cambio = (_texto(ref.get("cambio"), CAMBIO_ANTERIOR)
                   or "only the product and what the scene description below shows "
                      "of it; the background, surface and light stay exactly the same")
+    subtipo = SUBTIPO.get(cambia, "") if ref.get("modo") == "espacio_que_cambia" else ""
+    if ref.get("fijos") and cambia == "acabados":
+        subtipo += FIJOS_ACABADOS.format(indice=indice)
     return FRASE_EDICION.format(
         indice=indice, sitio=ref.get("nombre") or "the set",
         acabados="" if cambia == "acabados" else " and finishes",
         cambio=cambio,
-        subtipo=SUBTIPO.get(cambia, "") if ref.get("modo") == "espacio_que_cambia" else "",
+        subtipo=subtipo,
         estilo=(" Keep the photographic style of the style references."
                 if modo_imagen == "foto" else
                 " Keep it drawn in the art style of the style references, never "
@@ -707,8 +745,11 @@ def rechazada_edicion(indice, base):
 def cierre_edicion(indice, ref):
     cambia = ref.get("cambia") or ""
     cambio = _texto(ref.get("cambio"), CAMBIO_ANTERIOR) or SIN_CAMBIO   # ver `frase_edicion`
-    return CIERRE_EDICION.format(indice=indice, cambio=cambio,
-                                 acabados="" if cambia == "acabados" else " and finishes")
+    texto = CIERRE_EDICION.format(indice=indice, cambio=cambio,
+                                  acabados="" if cambia == "acabados" else " and finishes")
+    if ref.get("fijos") and cambia == "acabados":
+        texto += FIJOS_ACABADOS.format(indice=indice)
+    return texto
 
 
 # ------------------------------------------------------------ imagen base

@@ -3208,6 +3208,12 @@ def contexto_de_reglas(estilo, escena=None, feedback=""):
     return " ".join(t for t in trozos if t)
 
 
+def _es_referencia(escena):
+    """True en la imagen base de un sitio o la de un estado (rama base-fiel):
+    solo `prompt_y_refs_de_base` y `prompt_y_refs_de_estado` ponen `referencia`."""
+    return bool((escena or {}).get("referencia"))
+
+
 def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
                      formato="", fichas_reparto=None):
     """Prompt final citando cada referencia por su posicion, como espera la API.
@@ -3224,7 +3230,12 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     modo = modo_de(estilo)
     foto = modo == "foto"
     lineas = [CABECERA_PLANO[modo]]
-    if p2_brief.comun.normalizar_formato(formato) == "vertical":
+    if p2_brief.comun.normalizar_formato(formato) == "vertical" and _es_referencia(escena):
+        # LA IMAGEN DE REFERENCIA de un sitio (rama base-fiel): la habitacion
+        # entera, sin recortar los lados; los planos siguen con la de abajo
+        lineas.append(tipo_relato.CUADRO_ESTADO if escena.get("referencia") == "estado"
+                      else tipo_relato.CUADRO_REFERENCIA)
+    elif p2_brief.comun.normalizar_formato(formato) == "vertical":
         # EL CUADRO ES VERTICAL, y hay que decirlo: las referencias de estilo
         # son apaisadas y sin esta linea el generador compone un plano apaisado
         # dentro de un lienzo alto, con el sujeto pequeno en medio y aire arriba
@@ -5996,7 +6007,8 @@ def prompt_y_refs_de_base(proyecto, params, cache, sitio=None, nota=""):
     # corrección que no se guarda en ningún sitio, solo para este intento
     texto = (texto + " " + tipo_relato.nota_base(nota)).strip() if nota else texto
     escena = {"id": "BASE", "prompt": texto, "personajes": [], "set": sitio,
-              "narracion": ""}
+              "narracion": "", "referencia": "base",
+              "ejes": list(tipo_relato.EJES_REFERENCIA)}
     refs = list(_referencias_estilo(p, cache, escena))
     if not refs:
         raise RuntimeError("sin referencias de estilo no se puede hacer la imagen base")
@@ -6044,7 +6056,7 @@ def estados_del_relato(proyecto, params):
     return sitio, tipo_relato.estados_del_catalogo(catalogo, sitio)
 
 
-def prompt_y_refs_de_estado(proyecto, params, estado, cache):
+def prompt_y_refs_de_estado(proyecto, params, estado, cache, nota=""):
     """El prompt y las referencias de la imagen de un ESTADO. -> (sitio, cambio, prompt, refs)
 
     Es la base APROBADA del sitio, editada una vez con el cambio de ese estado
@@ -6064,9 +6076,16 @@ def prompt_y_refs_de_estado(proyecto, params, estado, cache):
     espacio = p.get("espacio_fijo") or {}
     base = [{"papel": "base", "principal": True, "nombre": espacio.get("sitio") or sitio,
              "ruta": imagen.normalizar(ruta, cache), "modo": relato["modo"],
-             "cambia": relato.get("cambia") or "", "cambio": cambio}]
-    escena = {"id": f"ESTADO_{estado}", "prompt": tipo_relato.prompt_imagen_estado(cambio),
-              "personajes": [], "set": sitio, "narracion": ""}
+             "cambia": relato.get("cambia") or "", "cambio": cambio,
+             # en «acabados», lo que el cambio no nombra conserva su acabado
+             # (rama base-fiel); los planos no llevan esta clave
+             "fijos": True}]
+    texto = tipo_relato.prompt_imagen_estado(cambio)
+    # LA CORRECCION DE ESTA VEZ, como la de la base (rama base-fiel): no se guarda
+    texto = (texto + " " + tipo_relato.nota_base(nota)).strip() if nota else texto
+    escena = {"id": f"ESTADO_{estado}", "prompt": texto,
+              "personajes": [], "set": sitio, "narracion": "", "referencia": "estado",
+              "ejes": list(tipo_relato.EJES_REFERENCIA)}
     refs = base + list(_referencias_estilo(p, cache, escena))
     formato = p2_brief.comun.ficha_formato(p4_voz.formato_de_salida(proyecto)) \
         if proyecto is not None else {"id": ""}
@@ -6074,7 +6093,7 @@ def prompt_y_refs_de_estado(proyecto, params, estado, cache):
     return sitio, cambio, prompt, refs
 
 
-def generar_imagen_estado(proyecto, params, estado, rehacer=False):
+def generar_imagen_estado(proyecto, params, estado, rehacer=False, nota=""):
     """Genera (y paga) la imagen de un estado. -> {sitio, estado, cambio, imagen, coste}
 
     Como la base: se guarda por huella en la carpeta del espacio fijo y NO se
@@ -6082,7 +6101,8 @@ def generar_imagen_estado(proyecto, params, estado, rehacer=False):
     p = _con_defectos(params)
     cache = proyecto.ruta("espacio_fijo", "_refs")
     os.makedirs(cache, exist_ok=True)
-    sitio, cambio, prompt, refs = prompt_y_refs_de_estado(proyecto, params, estado, cache)
+    sitio, cambio, prompt, refs = prompt_y_refs_de_estado(proyecto, params, estado, cache,
+                                                          nota=nota)
     temporal = proyecto.ruta("espacio_fijo", "_estado_nuevo.png")
     formato = p2_brief.comun.ficha_formato(p4_voz.formato_de_salida(proyecto))
     meta = _producir_imagen(f"estado_{sitio}_{estado}", prompt, [r["ruta"] for r in refs],

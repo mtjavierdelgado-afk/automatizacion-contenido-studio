@@ -605,6 +605,50 @@ def prueba_retoque_acotado():
     igual(filtradas[0].get("de_edicion"), 1, "y la rechazada, como intento anterior")
 
 
+def prueba_base_fiel():
+    seccion("17] las imágenes de referencia siguen la descripción (rama base-fiel)")
+    import inspect                                           # noqa: PLC0415
+    import moodboard                                         # noqa: PLC0415
+    P6, carpeta, dirs, estilo, base = _p6_y_dirs()
+    est = {"referencias": [estilo], "modo": "foto"}
+    refs_estilo = [{"papel": "estilo", "ruta": estilo}]
+    ref_escena = {"id": "BASE", "prompt": "the empty room", "personajes": [], "set": "sala",
+                  "narracion": "", "referencia": "base", "ejes": list(T.EJES_REFERENCIA)}
+    plano = {"id": "S001", "prompt": "the room", "personajes": [], "set": "sala", "narracion": "x"}
+    t_ref = P6._prompt_completo(ref_escena, refs_estilo, est, formato="vertical")   # noqa: SLF001
+    t_plano = P6._prompt_completo(plano, refs_estilo, est, formato="vertical")      # noqa: SLF001
+    ok(T.CUADRO_REFERENCIA in t_ref and "middle two thirds" not in t_ref,
+       "la imagen de referencia pide la habitación entera, sin el «tercio central»")
+    ok("middle two thirds" in t_plano and T.CUADRO_REFERENCIA not in t_plano,
+       "un plano sigue con la línea del cuadro vertical de siempre")
+    t_apaisado = P6._prompt_completo(ref_escena, refs_estilo, est, formato="apaisado")  # noqa: SLF001
+    ok(T.CUADRO_REFERENCIA not in t_apaisado, "y en apaisado no hay línea de cuadro")
+    cambio = "the walls are warm white and the vanity is light oak"
+    ref_base = {"papel": "base", "principal": True, "nombre": "Baño", "ruta": base,
+                "modo": "espacio_que_cambia", "cambia": "acabados", "cambio": cambio}
+    estado_esc = {"id": "ESTADO_paleta_1", "prompt": T.prompt_imagen_estado(cambio),
+                  "personajes": [], "set": "bano", "narracion": "", "referencia": "estado"}
+    con = P6._prompt_completo(estado_esc, [dict(ref_base, fijos=True)] + refs_estilo, est)  # noqa: SLF001
+    sin = P6._prompt_completo(estado_esc, [ref_base] + refs_estilo, est)                    # noqa: SLF001
+    fijos = T.FIJOS_ACABADOS.format(indice=1)
+    igual(con.count(fijos), 2, "el estado de acabados: lo que no se nombra conserva su acabado "
+                                "(en la presentación de la base y en el FINAL CHECK)")
+    ok(fijos not in sin, "sin la clave `fijos` (los planos) no se añade nada")
+    t_estado = P6._prompt_completo(estado_esc, [ref_base] + refs_estilo, est, formato="vertical")  # noqa: SLF001
+    ok(T.CUADRO_ESTADO in t_estado and T.CUADRO_REFERENCIA not in t_estado,
+       "un estado conserva el cuadro de la imagen que edita (sin gran angular nuevo)")
+    otro = P6._prompt_completo(estado_esc, [dict(ref_base, fijos=True, cambia="estado")]  # noqa: SLF001
+                               + refs_estilo, est)
+    ok(fijos not in otro, "y en un estado que no es de acabados tampoco")
+    igual(moodboard.ejes_de_plano(ref_escena), list(T.EJES_REFERENCIA),
+          "la lámina de una referencia: interior, exterior y objeto, sin caras ni cuerpos")
+    ok("cara" in moodboard.ejes_de_plano({"set": "sala"}),
+       "la de un plano, como siempre")
+    ok("nota" in inspect.signature(P6.generar_imagen_estado).parameters
+       and "nota" in inspect.signature(P6.prompt_y_refs_de_estado).parameters,
+       "la imagen de un estado acepta la corrección de esta vez")
+
+
 def main():
     print("PRUEBA DEL TIPO DE RELATO")
     prueba_modos_y_lineas()
@@ -618,6 +662,7 @@ def main():
     prueba_imagen_base()
     prueba_ambientes_y_camara()
     prueba_retoque_acotado()
+    prueba_base_fiel()
     prueba_revision_03_11()
     import shutil                                            # noqa: PLC0415
     shutil.rmtree(_TEMPORAL, ignore_errors=True)

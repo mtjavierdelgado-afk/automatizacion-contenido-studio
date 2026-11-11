@@ -182,11 +182,11 @@ def _limpiar_capa(capa, vistos):
     if not isinstance(capa, dict) or capa.get("tipo") not in TIPOS:
         raise ErrorGraficas("una capa no tiene la forma esperada")
     cid = str(capa.get("id") or "")
-    if not _RE_ID.match(cid) or cid in vistos:
+    if not _RE_ID.fullmatch(cid) or cid in vistos:
         cid = "c" + secrets.token_hex(4)
     vistos.add(cid)
     rol = str(capa.get("rol") or "")
-    if not _RE_ROL.match(rol):
+    if not _RE_ROL.fullmatch(rol):
         rol = ""
     tipo = capa["tipo"]
     limpia = {
@@ -1146,20 +1146,38 @@ def leer(raiz, cid, pieza_id):
         return _leer(raiz, cid, pieza_id)
 
 
+def _estado(raiz, cid, pieza_id, ficha):
+    """-> (vale, guardado, doc crudo). Manda `capas.json`, que se escribe antes
+    que la ficha pequeña: si el proceso murió entre los dos, la versión en capas
+    sigue valiendo con su número de verdad (3.ª revisión del 11-11: una nacida
+    se quedaba bloqueada para siempre)."""
+    try:
+        crudo = G._leer_json(_rutas(raiz, cid, pieza_id)["json"])
+    except ErrorGraficas:
+        crudo = None
+    origen = (crudo or {}).get("origen") if isinstance(crudo, dict) and isinstance(crudo.get("origen"), dict) else {}
+    if origen.get("sello") and origen.get("sello") == ficha.get("sello"):
+        return True, str(origen.get("guardado") or ""), crudo
+    vale = G.capas_vigentes(raiz, cid, pieza_id, ficha)
+    guardado = ((G.meta_capas(raiz, cid, pieza_id) or {}).get("guardado") or "") if vale else ""
+    return vale, guardado, crudo
+
+
 def _leer(raiz, cid, pieza_id):
     ficha = G.leer_pieza(raiz, cid, pieza_id)
-    if not G.capas_vigentes(raiz, cid, pieza_id, ficha):
+    vale, guardado, crudo = _estado(raiz, cid, pieza_id, ficha)
+    if not vale:
         if ficha.get("nacida_en_capas"):
             # su ficha es mínima: convertirla daría una plantilla vacía, y
             # guardarla borraría el diseño (visto en la revisión del 11-11)
             raise ErrorGraficas("la versión en capas de esta pieza no se puede leer")
         return ficha, None
     try:
-        doc = limpiar_doc(G._leer_json(_rutas(raiz, cid, pieza_id)["json"]))
+        doc = limpiar_doc(crudo)
     except ErrorGraficas as fallo:
         raise ErrorGraficas("la versión en capas de esta pieza no se puede leer") from fallo
     doc["origen"]["sello"] = ficha["sello"]
-    doc["origen"]["guardado"] = (G.meta_capas(raiz, cid, pieza_id) or {}).get("guardado") or ""
+    doc["origen"]["guardado"] = guardado
     return ficha, doc
 
 
@@ -1192,8 +1210,7 @@ def guardar(raiz, cid, doc, pieza_id=None, logo=None, logo_oscuro=None):
     sello_doc, guardado_doc = doc["origen"]["sello"], doc["origen"]["guardado"]
 
     def comprobar(ficha_actual):
-        vigente = G.capas_vigentes(raiz, cid, pieza_id, ficha_actual)
-        ultimo = ((G.meta_capas(raiz, cid, pieza_id) or {}).get("guardado") or "") if vigente else ""
+        _vale, ultimo, _crudo = _estado(raiz, cid, pieza_id, ficha_actual)
         if ficha_actual.get("sello") != sello_doc or ultimo != guardado_doc:
             raise ErrorConflicto("esta pieza ha cambiado desde que la abriste: vuelve a abrirla y repite el cambio")
 

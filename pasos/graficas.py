@@ -167,8 +167,8 @@ def _carpeta_piezas(raiz, cid):
 
 
 def _carpeta_pieza(raiz, cid, pieza_id):
-    if not _RE_PIEZA.match(str(pieza_id or "")):
-        raise ErrorGraficas("esa pieza no está")
+    if not _RE_PIEZA.fullmatch(str(pieza_id or "")):
+        raise ErrorNoEsta("esa pieza no está")
     return os.path.join(_carpeta_piezas(raiz, cid), pieza_id)
 
 
@@ -948,10 +948,20 @@ def guardar_pieza(raiz, cid, datos, pieza_id=None, logo=None, logo_oscuro=None):
         # «Duplicar» una pieza nacida en capas con este editor daría una plantilla vacía
         raise ErrorGraficas("esta pieza se hizo en capas: ábrela con el editor de capas")
     pieza = limpiar_pieza(datos)
-    if pieza_id:
-        if leer_pieza(raiz, cid, pieza_id).get("nacida_en_capas"):
+    descartar = isinstance(datos, dict) and datos.get("descartar_capas") is True
+
+    def comprobar():
+        ficha_actual = leer_pieza(raiz, cid, pieza_id)
+        if ficha_actual.get("nacida_en_capas"):
             # su ficha es mínima (plantilla 2 vacía): guardarla aquí borraría el diseño
             raise ErrorGraficas("esta pieza se hizo en capas: ábrela con el editor de capas")
+        if not descartar and capas_vigentes(raiz, cid, pieza_id, ficha_actual):
+            # 3.ª revisión del 11-11: guardar aquí dejaba sin valor, sin avisar,
+            # la versión en capas (más nueva). Solo si se pide a propósito.
+            raise ErrorGraficas("esta pieza tiene una versión en capas más nueva: ábrela con el editor de capas")
+    existente = bool(pieza_id)
+    if existente:
+        comprobar()
     else:
         pieza_id = secrets.token_hex(6)
     destino = _carpeta_pieza(raiz, cid, pieza_id)
@@ -964,6 +974,8 @@ def guardar_pieza(raiz, cid, datos, pieza_id=None, logo=None, logo_oscuro=None):
                  cambiada=time.strftime("%Y-%m-%dT%H:%M:%S"), sello=secrets.token_hex(4))
     ficha["nombre"] = pieza["nombre"] or pieza["textos"].get("titulo") or pieza["textos"].get("cita") or "Pieza sin título"
     with cerrojo_pieza(cid, pieza_id):
+        if existente:
+            comprobar()            # otra vez: pudo borrarse o cambiar mientras se pintaba
         os.makedirs(destino, exist_ok=True)
         for nombre, contenido in (("pieza.png", png), ("pieza.jpg", jpg)):
             temporal = os.path.join(destino, f"{nombre}.{threading.get_ident()}.tmp")

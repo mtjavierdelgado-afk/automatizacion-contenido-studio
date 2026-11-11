@@ -447,8 +447,15 @@ def guardar_y_leer(carpeta, foto):
        "lo que devuelve un guardado sirve para el siguiente (lleva el número nuevo)")
     _f, leido = C.leer(raiz, "cli", pid)
 
-    print("si la pieza se vuelve a guardar con el editor de antes, manda la más nueva")
-    G.guardar_pieza(raiz, "cli", dict(ficha, textos=dict(TEXTOS, titulo="Cambiado con el editor de antes")), pid)
+    print("el editor de antes no descarta en silencio la versión en capas")
+    # 3.ª revisión del 11-11: guardar con el editor de antes dejaba sin valor,
+    # sin avisar, la versión en capas (más nueva)
+    ok(falla(G.guardar_pieza, raiz, "cli", dict(ficha, textos=dict(TEXTOS, titulo="Cambiado")), pid),
+       "guardar encima con el editor de antes avisa en vez de descartarla")
+    ok(G.capas_vigentes(raiz, "cli", pid), "y la versión en capas sigue valiendo")
+    print("si se pide descartarla a propósito, manda la más nueva")
+    G.guardar_pieza(raiz, "cli", dict(ficha, textos=dict(TEXTOS, titulo="Cambiado con el editor de antes"),
+                                     descartar_capas=True), pid)
     ok(C.leer(raiz, "cli", pid)[1] is None, "la versión en capas deja de valer (otro sello)")
     ok(not G.listar_piezas(raiz, "cli")[0]["en_capas"], "la lista ya no la da por buena")
     ok(G.ruta_final(raiz, "cli", pid, "jpg").endswith("pieza.jpg"), "y se descarga la pieza de siempre")
@@ -562,6 +569,29 @@ def guardar_y_leer(carpeta, foto):
     ok(falla(C.guardar, raiz, "cli", doc_de([capa_texto()]), "../../x"), "y en una ruta rara también")
     ok(falla(C.guardar, raiz, "cli", {"version": 2}), "un documento sin láminas no se guarda")
 
+    print("si el servidor se cae a mitad de guardar, la pieza no se queda bloqueada")
+    _f, antes_del_corte = C.leer(raiz, "cli", nid)
+    escribir = G._escribir_json
+
+    def se_cae(ruta, datos):
+        if ruta.endswith("capas.sello.json"):
+            raise OSError("el servidor se ha caído")
+        return escribir(ruta, datos)
+    G._escribir_json = se_cae
+    try:
+        antes_del_corte["nombre"] = "Guardada justo antes del corte"
+        try:
+            C.guardar(raiz, "cli", antes_del_corte, nid)
+        except OSError:
+            pass
+    finally:
+        G._escribir_json = escribir
+    _f, tras_el_corte = C.leer(raiz, "cli", nid)
+    ok(tras_el_corte and tras_el_corte["nombre"] == "Guardada justo antes del corte",
+       "se abre la última versión completa (la de capas.json)")
+    ok(C.guardar(raiz, "cli", tras_el_corte, nid)["id"] == nid, "y se puede volver a guardar sin aviso de conflicto")
+    ok(falla(C.guardar, raiz, "cli", antes_del_corte, nid), "lo abierto antes del corte sigue recibiendo el aviso")
+
     print("una tipografía quitada de la lista no deja la pieza sin abrir")
     meta_ruta = os.path.join(carpeta_nueva, "capas.json")
     datos = json.load(open(meta_ruta, encoding="utf-8"))
@@ -575,10 +605,18 @@ def guardar_y_leer(carpeta, foto):
     bueno = open(sello_ruta, "rb").read()
     with open(sello_ruta, "w", encoding="utf-8") as fh:
         fh.write("{roto")
+    _f, sin_ficha = C.leer(raiz, "cli", nid)
+    ok(sin_ficha and sin_ficha["laminas"][0]["capas"][0]["txt"] == "Otro texto bien distinto",
+       "una nacida con su ficha pequeña rota abre su diseño de verdad (de capas.json), no una plantilla vacía")
+    json_bueno = open(meta_ruta, "rb").read()
+    with open(meta_ruta, "w", encoding="utf-8") as fh:
+        fh.write("{roto")
     ok(falla(C.leer, raiz, "cli", nid),
-       "una nacida con su ficha pequeña rota da error: nunca se abre convertida en una plantilla vacía")
+       "y si también capas.json está roto, da error: nunca se abre convertida en una plantilla vacía")
     with open(sello_ruta, "wb") as fh:
         fh.write(bueno)
+    with open(meta_ruta, "wb") as fh:
+        fh.write(json_bueno)
     with open(os.path.join(carpeta_nueva, "capas.json"), "w", encoding="utf-8") as fh:
         fh.write('{"version": 2, "laminas": "roto"}')
     ok(falla(C.leer, raiz, "cli", nid), "una versión en capas que vale pero no se lee es un error (no una conversión vacía)")
@@ -648,14 +686,16 @@ def las_rutas(carpeta, foto):
            "comparar una pieza nacida en capas da 400 (no hay versión de antes)")
         ok(codigo(servidor.graficas_leer_capas, cid, "000000000000", _Peticion()) == 404,
            "una pieza que no existe da 404")
-        G.guardar_pieza(raiz, cid, dict(ficha, textos=dict(TEXTOS, titulo="Otro")), pid)
+        ok(codigo(servidor.graficas_cambiar_pieza, cid, pid, _Peticion(), dict(ficha, textos=dict(TEXTOS, titulo="Otro"))) == 400,
+           "el editor de antes no puede guardar encima de la versión en capas (400 con explicación)")
+        G.guardar_pieza(raiz, cid, dict(ficha, textos=dict(TEXTOS, titulo="Otro"), descartar_capas=True), pid)
         ok(codigo(servidor.graficas_guardar_capas, cid, pid, _Peticion(), {"doc": r2["doc"]}) == 409,
            "guardar lo abierto antes de otro guardado da 409")
         for funcion, args, que in (
                 (servidor.graficas_vista_capas, (cid, _Peticion(), {"doc": {"version": 2}}), "una vista sin láminas"),
                 (servidor.graficas_vista_capas, (cid, _Peticion(), {"doc": r["doc"], "lamina": 5}), "una lámina que no está"),
                 (servidor.graficas_vista_capas, (cid, _Peticion(), {"doc": r["doc"], "lamina": True}), "una lámina rara"),
-                (servidor.graficas_guardar_capas, (cid, "zzz", _Peticion(), {"doc": r["doc"]}), "una pieza rara"),
+                (servidor.graficas_guardar_capas, (cid, "zzz", _Peticion(), {"doc": r["doc"]}), "una pieza con id raro"),
                 (servidor.graficas_leer_capas, ("otro", pid, _Peticion()), "un proyecto que no existe")):
             try:
                 funcion(*args)

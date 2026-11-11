@@ -75,55 +75,75 @@
          abrió. Solo se fían si nombran el mismo código que la barra (11-11-2026). */
       const codigo = (location.pathname.match(/\/(?:reels?|p|tv)\/([A-Za-z0-9_-]+)/) || [])[1] || '';
       const ogUrl = meta('og:url');
-      const ogDeEsta = !codigo || !ogUrl || ogUrl.includes('/' + codigo);
+      const ogDeEsta = !codigo || !ogUrl || new RegExp('/' + codigo + '(?:/|$|\\?)').test(ogUrl);
       if (!ogDeEsta) { datos.titulo = 'Instagram'; datos.imagen = ''; datos.url = location.href; descripcion = ''; }
-      /* el reel que se VE: el vídeo que cruza la mitad de la pantalla, y su caja la
-         que trae los botones (me gusta, comentario…) */
+      /* 1) Las etiquetas og: de ESTE post mandan: «1.234 Me gusta, 56 comentarios - usuario
+         el 3 de octubre: "texto"», en inglés «… - usuario on October 3, 2026: "text"», y a
+         veces sin las cifras: «usuario el November 4, 2026: "texto"». */
+      if (ogDeEsta) {
+        const m = descripcion.match(/^(?:(.*?)\s+-\s+)?([A-Za-z0-9._]+)\s+(?:el|on)\s+[^:]+:\s*["“«]?([\s\S]*?)["”»]?\.?$/);
+        if (m) { if (m[1]) cifrasDeFrase(m[1], datos.cifras); datos.autor = m[2]; datos.texto = m[3]; }
+        else cifrasDeFrase(descripcion, datos.cifras);
+      }
+      /* 2) El reel que se VE rellena lo que falte: el vídeo que cruza la mitad de la
+         pantalla, y su caja la primera que trae el botón de comentar. Nada de lo que
+         está dentro de la lista de comentarios (li) cuenta: sus corazones y textos son
+         de otras personas. */
       const enMedio = e => { const r = e.getBoundingClientRect(); return r.height > 0 && r.top < innerHeight / 2 && r.bottom > innerHeight / 2; };
-      const BOTONES = 'svg[aria-label="Comentario"], svg[aria-label="Comment"], svg[aria-label="Comentar"]';
+      const fueraDeComentarios = e => !e.closest('li, ul');
+      const BOTONES = ['Comentario', 'Comment', 'Comentar'].map(x => `svg[aria-label="${x}"]`).join(', ');
       let caja = [...document.querySelectorAll('video')].find(enMedio) || null;
-      while (caja && !caja.querySelector(BOTONES)) caja = caja.parentElement;
-      if (caja && caja !== document.body && caja !== document.documentElement) {
-        datos.lector = 'instagram-reel';
-        const enlace = [...caja.querySelectorAll('a')].find(a => /^[A-Za-z0-9._]{2,30}$/.test(limpio(a.innerText)));
-        datos.autor = enlace ? limpio(enlace.innerText) : '';
-        datos.texto = [...caja.querySelectorAll('[dir="auto"], h1')].map(e => e.innerText || '')
-          .filter(x => limpio(x) && limpio(x) !== datos.autor).sort((a, b) => b.length - a.length)[0] || '';
-        /* la cifra de cada botón es el primer hermano que sea SOLO un número: así no
-           se cuela lo que otras extensiones (vidIQ: «1.4K VPH») pintan al lado */
+      while (caja && ![...caja.querySelectorAll(BOTONES)].some(fueraDeComentarios)) caja = caja.parentElement;
+      const hayCaja = !!caja && caja !== document.body && caja !== document.documentElement;
+      if (hayCaja) {
+        datos.lector = ogDeEsta ? 'instagram' : 'instagram-reel';
+        /* el autor: el enlace que lleva a su propio perfil (/usuario/ o /usuario/reels/) */
+        const enlace = [...caja.querySelectorAll('a')].filter(fueraDeComentarios).find(a => {
+          const u = limpio(a.innerText);
+          return /^[A-Za-z0-9._]{2,30}$/.test(u) && ((a.getAttribute('href') || '') + '/').startsWith('/' + u + '/');
+        });
+        if (!datos.autor && enlace) datos.autor = limpio(enlace.innerText);
+        if (!datos.texto) {
+          datos.texto = [...caja.querySelectorAll('[dir="auto"], h1')].filter(fueraDeComentarios).map(e => e.innerText || '')
+            .filter(x => limpio(x) && limpio(x) !== datos.autor && !/(audio original|original audio)/i.test(x))
+            .sort((x, y) => y.length - x.length)[0] || '';
+        }
+        /* la cifra de cada botón es el primer hermano que sea SOLO un número: así no se
+           cuela lo que otras extensiones (vidIQ: «1.4K VPH») pintan al lado; y se para al
+           llegar al botón siguiente */
         const SOLO = /^\d[\d.,]*\s*(?:mil millones|mill(?:ones|\.)?|mil|[kmb])?$/i;
         const cuenta = (...nombres) => {
-          let n = caja.querySelector(nombres.map(x => `svg[aria-label="${x}"]`).join(','));
+          /* el botón del reel es el corazón GRANDE: los de los comentarios son más pequeños */
+          let n = [...caja.querySelectorAll(nombres.map(x => `svg[aria-label="${x}"]`).join(','))].filter(fueraDeComentarios)
+            .sort((x, y) => y.getBoundingClientRect().height - x.getBoundingClientRect().height)[0];
           for (let i = 0; n && n !== caja && i < 6; i++, n = n.parentElement) {
             for (let h = n.nextElementSibling; h; h = h.nextElementSibling) {
               const v = limpio(h.innerText);
               if (SOLO.test(v)) return v;
-              if (h.querySelector('svg[aria-label]')) break;   // ya es el botón siguiente
+              if (h.querySelector('svg[aria-label]')) break;
             }
           }
           return '';
         };
-        datos.cifras.me_gusta = cuenta('Me gusta', 'Like');
-        datos.cifras.comentarios = cuenta('Comentario', 'Comment', 'Comentar');
-        datos.cifras.compartidos = cuenta('Compartir', 'Share');
-        if (datos.autor) datos.titulo = `Reel de @${datos.autor}`;
-      } else if (ogDeEsta) {
-        /* og:description: «1.234 Me gusta, 56 comentarios - usuario el 3 de octubre: "texto"»,
-           en inglés «1,234 likes, 56 comments - usuario on October 3, 2026: "text"», y a
-           veces sin las cifras: «usuario el November 4, 2026: "texto"». */
-        const m = descripcion.match(/^(?:(.*?)\s+-\s+)?([A-Za-z0-9._]+)\s+(?:el|on)\s+[^:]+:\s*["“«]?([\s\S]*?)["”»]?\.?$/);
-        if (m) { if (m[1]) cifrasDeFrase(m[1], datos.cifras); datos.autor = m[2]; datos.texto = m[3]; }
-        else cifrasDeFrase(descripcion, datos.cifras);
+        datos.cifras.me_gusta = datos.cifras.me_gusta || cuenta('Me gusta', 'Like', 'Ya no me gusta', 'Unlike');
+        datos.cifras.comentarios = datos.cifras.comentarios || cuenta('Comentario', 'Comment', 'Comentar');
+        datos.cifras.compartidos = datos.cifras.compartidos || cuenta('Compartir', 'Share');
+        if (!ogDeEsta && datos.autor) datos.titulo = `Reel de @${datos.autor}`;
+      } else if (!ogDeEsta) {
+        datos.aviso = 'no se ha podido leer este reel; va el enlace y la captura';
       }
       if (ogDeEsta) {
         datos.texto = datos.texto || texto('article h1', 'article ._a9zs', 'h1');
         datos.autor = datos.autor || corto('article header a[role="link"]', 'header h2', 'header a');
       }
-      /* las vistas, en la caja del reel que se ve (en el muro hay otros reels debajo) */
-      const dondeVistas = caja && caja !== document.body && caja !== document.documentElement ? caja : document;
-      for (const el of dondeVistas.querySelectorAll('span, a')) {
-        const t = limpio(el.innerText);
-        if (t.length < 40 && /\d/.test(t) && /(reproducciones|visualizaciones|views|plays)/i.test(t)) { cifrasDeFrase(t, datos.cifras); break; }
+      /* las vistas: en la caja del reel que se ve, o en la página si es la de este post */
+      const dondeVistas = hayCaja ? caja : (ogDeEsta ? document : null);
+      if (dondeVistas) {
+        for (const el of dondeVistas.querySelectorAll('span, a')) {
+          if (!fueraDeComentarios(el)) continue;
+          const t = limpio(el.innerText);
+          if (t.length < 40 && /\d/.test(t) && /(reproducciones|visualizaciones|views|plays)/i.test(t)) { cifrasDeFrase(t, datos.cifras); break; }
+        }
       }
     } else if (es('tiktok.com')) {
       datos.red = 'tiktok'; datos.lector = 'tiktok';
@@ -198,7 +218,7 @@
     /* el primer trozo de la dirección es el autor (instagram.com/ana/, tiktok.com/@ana)
        salvo que sea una sección de la red: /reels/, /p/, /watch… no son nadie */
     const m = location.pathname.match(/^\/@?([A-Za-z0-9._-]{2,40})(?:\/|$)/);
-    const SECCIONES = /^(reels?|p|tv|explore|stories|watch|shorts|feed|home|search|status|video|videos|channel|c|user|hashtag|i|in|posts|groups|pages|events|marketplace|live|music|tag|discover|foryou|following)$/i;
+    const SECCIONES = /^(reels?|p|tv|explore|stories|watch|shorts|feed|home|search|status|video|videos|channel|c|user|hashtag|i|in|posts|groups|pages|events|marketplace|live|music|tag|discover|foryou|following|company|school|pin|profile\.php)$/i;
     datos.autor = meta('author') || meta('twitter:creator') || (datos.red !== 'web' && m && !SECCIONES.test(m[1]) ? m[1] : '');
   }
   datos.autor = limpio(datos.autor).replace(/^@/, '');

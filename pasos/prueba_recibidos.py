@@ -280,6 +280,29 @@ PAGINAS = {
       <meta property="og:url" content="https://www.instagram.com/gkdesign/reel/Dxyz/">
       <meta property="og:description" content='gkdesign el November 4, 2026: "Un baño bien medido"'>
       </head><body></body></html>""",
+    "https://www.instagram.com/ana/reel/Dpropio/": """<html><head><title>Instagram</title>
+      <meta property="og:url" content="https://www.instagram.com/ana/reel/Dpropio/">
+      <meta property="og:description" content='1.234 Me gusta, 56 comentarios - ana el 3 de noviembre de 2026: "Pie corto"'>
+      </head><body><div style="position:absolute;top:10px;left:0;width:700px">
+        <div><video style="width:400px;height:700px;display:block"></video></div>
+        <a href="/ana/">ana</a>
+        <div><div role="button"><svg aria-label="Me gusta" width="24" height="24"></svg></div><span>9</span></div>
+        <div><div role="button"><svg aria-label="Comentar" width="24" height="24"></svg></div></div>
+        <div dir="auto">Un comentario muy largo de otra persona que no es la leyenda del reel y no debe salir como texto</div>
+        <div><svg aria-label="Me gusta" width="12" height="12"></svg><span>3</span></div>
+      </div></body></html>""",
+    "https://www.instagram.com/reels/Dmegusta/": """<html><head><title>Instagram</title>
+      <meta property="og:url" content="https://www.instagram.com/otro/reel/Dotro/">
+      </head><body><div style="position:absolute;top:10px;left:0;width:400px">
+        <div><video style="width:400px;height:700px;display:block"></video></div>
+        <a href="/bea/reels/">bea</a><div dir="auto">Ya le di me gusta a este</div>
+        <div><div role="button"><svg aria-label="Ya no me gusta" width="24" height="24"></svg></div><span>2.300</span></div>
+        <div><div role="button"><svg aria-label="Comentario" width="24" height="24"></svg></div><span>40</span></div>
+        <div><div role="button"><svg aria-label="Compartir" width="24" height="24"></svg></div></div>
+      </div></body></html>""",
+    "https://www.instagram.com/reels/Dsinvideo/": """<html><head><title>Instagram</title>
+      <meta property="og:url" content="https://www.instagram.com/otro/reel/Dotro/">
+      </head><body><div style="position:absolute;top:2000px"><span>99 mil reproducciones</span></div></body></html>""",
     "https://www.instagram.com/reels/Dvacio/": """<html><head><title>Instagram</title></head><body></body></html>""",
     "https://www.youtube.com/watch?v=abc": """<html><head><title>Vídeo - YouTube</title>
       <meta itemprop="interactionCount" content="45678"></head><body>
@@ -358,6 +381,15 @@ def prueba_lector():
           "Instagram: la descripción sin cifras («usuario el …: texto») también se lee")
     igual(resultados["https://www.instagram.com/reels/Dvacio/"]["autor"], "",
           "«reels» en la dirección no es el autor")
+    pr = resultados["https://www.instagram.com/ana/reel/Dpropio/"]
+    igual((pr["autor"], pr["texto"], pr["cifras"]), ("ana", "Pie corto", {"me_gusta": "1.234", "comentarios": "56"}),
+          "un reel abierto en su página: mandan sus etiquetas, no los comentarios de otros")
+    mg = resultados["https://www.instagram.com/reels/Dmegusta/"]
+    igual((mg["autor"], mg["cifras"]), ("bea", {"me_gusta": "2.300", "comentarios": "40"}),
+          "un reel que ya te gusta («Ya no me gusta») conserva sus me gusta; el autor con su enlace /bea/reels/")
+    sv = resultados["https://www.instagram.com/reels/Dsinvideo/"]
+    ok(not sv["cifras"] and "no se ha podido leer este reel" in sv.get("aviso", ""),
+       "sin reel a la vista y con etiquetas de otro: ni cifras ajenas, y lo dice")
     y = resultados["https://www.youtube.com/watch?v=abc"]
     igual((y["red"], y["titulo"], y["autor"], y["cifras"].get("vistas"), y["cifras"].get("me_gusta")),
           ("youtube", "Cómo montar una fiesta gamer", "Canal Ana", "45678", "1,2 K"), "YouTube: título, canal, vistas y me gusta")

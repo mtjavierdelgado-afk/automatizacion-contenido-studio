@@ -258,6 +258,29 @@ PAGINAS = {
     "https://www.instagram.com/reel/Cabc/": """<html><head><title>Instagram</title>
       <meta property="og:description" content='1.234 Me gusta, 56 comentarios - estadoplay el 3 de octubre de 2026: "Así quedó la fiesta 🎮"'>
       </head><body><article><span>12,3 mil reproducciones</span></article></body></html>""",
+    "https://www.instagram.com/reels/Dsegundo/": """<html><head><title>Instagram</title>
+      <meta property="og:url" content="https://www.instagram.com/otro.perfil/reel/Dprimero/">
+      <meta property="og:title" content="Otro perfil en Instagram">
+      <meta property="og:description" content='otro.perfil el November 4, 2026: "El reel que se abrió primero"'>
+      </head><body>
+      <div style="position:absolute;top:-900px;left:0;width:400px">
+        <div><video style="width:400px;height:700px;display:block"></video></div>
+        <a href="/otro.perfil/">otro.perfil</a><div dir="auto">El reel que se abrió primero</div>
+        <div><div role="button"><svg aria-label="Comentario"></svg></div><span>3</span></div>
+      </div>
+      <div style="position:absolute;top:10px;left:0;width:400px">
+        <div><video style="width:400px;height:700px;display:block"></video></div>
+        <a href="/ana.fiestas/">ana.fiestas</a><span>Seguir</span>
+        <div dir="auto">Así se ve una fiesta gamer de verdad 🎮</div>
+        <div><div><div role="button"><svg aria-label="Me gusta"></svg></div><div><span>1x</span> <span>1.4K</span> <span>VPH</span></div></div><span>719</span></div>
+        <div><div role="button"><svg aria-label="Comentario"></svg></div><span>60</span></div>
+        <div><div role="button"><svg aria-label="Compartir"></svg></div><span>56</span></div>
+      </div></body></html>""",
+    "https://www.instagram.com/gkdesign/reel/Dxyz/": """<html><head><title>Instagram</title>
+      <meta property="og:url" content="https://www.instagram.com/gkdesign/reel/Dxyz/">
+      <meta property="og:description" content='gkdesign el November 4, 2026: "Un baño bien medido"'>
+      </head><body></body></html>""",
+    "https://www.instagram.com/reels/Dvacio/": """<html><head><title>Instagram</title></head><body></body></html>""",
     "https://www.youtube.com/watch?v=abc": """<html><head><title>Vídeo - YouTube</title>
       <meta itemprop="interactionCount" content="45678"></head><body>
       <h1 class="ytd-watch-metadata">Cómo montar una fiesta gamer</h1>
@@ -324,6 +347,17 @@ def prueba_lector():
           "Instagram: autor y texto desde la descripción de la página")
     igual(i["cifras"], {"me_gusta": "1.234", "comentarios": "56", "vistas": "12,3 mil"},
           "Instagram: me gusta, comentarios y reproducciones")
+    ri = resultados["https://www.instagram.com/reels/Dsegundo/"]
+    igual((ri["autor"], ri["texto"], ri["titulo"], ri.get("imagen", "")),
+          ("ana.fiestas", "Así se ve una fiesta gamer de verdad 🎮", "Reel de @ana.fiestas", ""),
+          "Instagram Reels: el reel que SE VE, no el primero que se abrió (11-11)")
+    igual(ri["cifras"], {"me_gusta": "719", "comentarios": "60", "compartidos": "56"},
+          "Instagram Reels: sus cifras, sin lo que pinta vidIQ al lado («1.4K VPH»)")
+    igual((resultados["https://www.instagram.com/gkdesign/reel/Dxyz/"]["autor"],
+           resultados["https://www.instagram.com/gkdesign/reel/Dxyz/"]["texto"]), ("gkdesign", "Un baño bien medido"),
+          "Instagram: la descripción sin cifras («usuario el …: texto») también se lee")
+    igual(resultados["https://www.instagram.com/reels/Dvacio/"]["autor"], "",
+          "«reels» en la dirección no es el autor")
     y = resultados["https://www.youtube.com/watch?v=abc"]
     igual((y["red"], y["titulo"], y["autor"], y["cifras"].get("vistas"), y["cifras"].get("me_gusta")),
           ("youtube", "Cómo montar una fiesta gamer", "Canal Ana", "45678", "1,2 K"), "YouTube: título, canal, vistas y me gusta")

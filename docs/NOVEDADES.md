@@ -21,6 +21,10 @@ vídeos, estilos, claves y contraseña no se tocan.
 - El ZIP trae los ficheros sin carpeta de más: con «Extraer todo» de Windows ya
   no quedan dos carpetas iguales. La extensión pasa a la versión 1.1.0.
 - Se configura **una vez por Chrome**: después sirve en todas las pestañas.
+- **Instagram Reels** (versión 1.2.0): al ir pasando reels en el muro, se lee el
+  que tienes delante —autor, texto, me gusta, comentarios y compartidos—, y no el
+  primero que se abrió. Lo que otras extensiones pintan al lado de los botones
+  (por ejemplo vidIQ) ya no se cuela en las cifras.
 
 **El guion visual se pone al día solo (9 de noviembre)**
 - El bloque «Guion visual» (paso Voz o Imágenes) ya no se queda vacío si lo

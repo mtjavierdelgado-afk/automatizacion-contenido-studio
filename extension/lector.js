@@ -65,19 +65,63 @@
     const canon = new URL(datos.url, location.href);
     if (canon.hostname !== location.hostname || canon.pathname === '/' && location.pathname !== '/') datos.url = location.href;
   } catch (e) { datos.url = location.href; }
-  const descripcion = meta('og:description') || meta('description');
+  let descripcion = meta('og:description') || meta('description');
 
   try {
     if (es('instagram.com')) {
       datos.red = 'instagram'; datos.lector = 'instagram';
-      /* og:description: «1.234 Me gusta, 56 comentarios - usuario el 3 de octubre: "texto"»
-         o en inglés «1,234 likes, 56 comments - usuario on October 3, 2026: "text"». */
-      const m = descripcion.match(/^(.*?)\s+-\s+([A-Za-z0-9._]+)\s+(?:el|on)\s+[^:]+:\s*["“«]?([\s\S]*?)["”»]?\.?$/);
-      if (m) { cifrasDeFrase(m[1], datos.cifras); datos.autor = m[2]; datos.texto = m[3]; }
-      else cifrasDeFrase(descripcion, datos.cifras);
-      datos.texto = datos.texto || texto('article h1', 'article ._a9zs', 'h1');
-      datos.autor = datos.autor || corto('article header a[role="link"]', 'header h2', 'header a');
-      for (const el of document.querySelectorAll('span, a')) {
+      /* Instagram es una página que no se recarga al pasar de un reel a otro: la
+         barra cambia, pero las etiquetas og: siguen siendo las del PRIMER reel que se
+         abrió. Solo se fían si nombran el mismo código que la barra (11-11-2026). */
+      const codigo = (location.pathname.match(/\/(?:reels?|p|tv)\/([A-Za-z0-9_-]+)/) || [])[1] || '';
+      const ogUrl = meta('og:url');
+      const ogDeEsta = !codigo || !ogUrl || ogUrl.includes('/' + codigo);
+      if (!ogDeEsta) { datos.titulo = 'Instagram'; datos.imagen = ''; datos.url = location.href; descripcion = ''; }
+      /* el reel que se VE: el vídeo que cruza la mitad de la pantalla, y su caja la
+         que trae los botones (me gusta, comentario…) */
+      const enMedio = e => { const r = e.getBoundingClientRect(); return r.height > 0 && r.top < innerHeight / 2 && r.bottom > innerHeight / 2; };
+      const BOTONES = 'svg[aria-label="Comentario"], svg[aria-label="Comment"], svg[aria-label="Comentar"]';
+      let caja = [...document.querySelectorAll('video')].find(enMedio) || null;
+      while (caja && !caja.querySelector(BOTONES)) caja = caja.parentElement;
+      if (caja && caja !== document.body && caja !== document.documentElement) {
+        datos.lector = 'instagram-reel';
+        const enlace = [...caja.querySelectorAll('a')].find(a => /^[A-Za-z0-9._]{2,30}$/.test(limpio(a.innerText)));
+        datos.autor = enlace ? limpio(enlace.innerText) : '';
+        datos.texto = [...caja.querySelectorAll('[dir="auto"], h1')].map(e => e.innerText || '')
+          .filter(x => limpio(x) && limpio(x) !== datos.autor).sort((a, b) => b.length - a.length)[0] || '';
+        /* la cifra de cada botón es el primer hermano que sea SOLO un número: así no
+           se cuela lo que otras extensiones (vidIQ: «1.4K VPH») pintan al lado */
+        const SOLO = /^\d[\d.,]*\s*(?:mil millones|mill(?:ones|\.)?|mil|[kmb])?$/i;
+        const cuenta = (...nombres) => {
+          let n = caja.querySelector(nombres.map(x => `svg[aria-label="${x}"]`).join(','));
+          for (let i = 0; n && n !== caja && i < 6; i++, n = n.parentElement) {
+            for (let h = n.nextElementSibling; h; h = h.nextElementSibling) {
+              const v = limpio(h.innerText);
+              if (SOLO.test(v)) return v;
+              if (h.querySelector('svg[aria-label]')) break;   // ya es el botón siguiente
+            }
+          }
+          return '';
+        };
+        datos.cifras.me_gusta = cuenta('Me gusta', 'Like');
+        datos.cifras.comentarios = cuenta('Comentario', 'Comment', 'Comentar');
+        datos.cifras.compartidos = cuenta('Compartir', 'Share');
+        if (datos.autor) datos.titulo = `Reel de @${datos.autor}`;
+      } else if (ogDeEsta) {
+        /* og:description: «1.234 Me gusta, 56 comentarios - usuario el 3 de octubre: "texto"»,
+           en inglés «1,234 likes, 56 comments - usuario on October 3, 2026: "text"», y a
+           veces sin las cifras: «usuario el November 4, 2026: "texto"». */
+        const m = descripcion.match(/^(?:(.*?)\s+-\s+)?([A-Za-z0-9._]+)\s+(?:el|on)\s+[^:]+:\s*["“«]?([\s\S]*?)["”»]?\.?$/);
+        if (m) { if (m[1]) cifrasDeFrase(m[1], datos.cifras); datos.autor = m[2]; datos.texto = m[3]; }
+        else cifrasDeFrase(descripcion, datos.cifras);
+      }
+      if (ogDeEsta) {
+        datos.texto = datos.texto || texto('article h1', 'article ._a9zs', 'h1');
+        datos.autor = datos.autor || corto('article header a[role="link"]', 'header h2', 'header a');
+      }
+      /* las vistas, en la caja del reel que se ve (en el muro hay otros reels debajo) */
+      const dondeVistas = caja && caja !== document.body && caja !== document.documentElement ? caja : document;
+      for (const el of dondeVistas.querySelectorAll('span, a')) {
         const t = limpio(el.innerText);
         if (t.length < 40 && /\d/.test(t) && /(reproducciones|visualizaciones|views|plays)/i.test(t)) { cifrasDeFrase(t, datos.cifras); break; }
       }
@@ -147,11 +191,15 @@
     datos.aviso = `el lector de ${datos.red} no ha podido leer esta página (${e.message}); va lo genérico`;
   }
 
-  /* lo genérico, para lo que el lector de la red no haya llenado */
+  /* lo genérico, para lo que el lector de la red no haya llenado (en Instagram, la
+     descripción ya se ha vaciado si era la de otro reel) */
   if (!datos.texto) datos.texto = descripcion;
   if (!datos.autor) {
+    /* el primer trozo de la dirección es el autor (instagram.com/ana/, tiktok.com/@ana)
+       salvo que sea una sección de la red: /reels/, /p/, /watch… no son nadie */
     const m = location.pathname.match(/^\/@?([A-Za-z0-9._-]{2,40})(?:\/|$)/);
-    datos.autor = meta('author') || meta('twitter:creator') || (datos.red !== 'web' && m ? m[1] : '');
+    const SECCIONES = /^(reels?|p|tv|explore|stories|watch|shorts|feed|home|search|status|video|videos|channel|c|user|hashtag|i|in|posts|groups|pages|events|marketplace|live|music|tag|discover|foryou|following)$/i;
+    datos.autor = meta('author') || meta('twitter:creator') || (datos.red !== 'web' && m && !SECCIONES.test(m[1]) ? m[1] : '');
   }
   datos.autor = limpio(datos.autor).replace(/^@/, '');
   datos.texto = largo(datos.texto).slice(0, 5000);

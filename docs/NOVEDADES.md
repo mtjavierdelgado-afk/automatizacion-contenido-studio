@@ -10,6 +10,26 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Un vídeo hecho, en otro idioma (11 de noviembre)**
+- Debajo del vídeo montado, **«🌐 Hacer este vídeo en otro idioma»**: inglés,
+  portugués, francés, italiano o alemán.
+- Crea un **vídeo nuevo** con el MISMO guion traducido plano a plano (Claude no
+  lo reescribe), la voz grabada en ese idioma, los subtítulos y las cartelas
+  traducidos, y **las mismas imágenes**: no se vuelven a dibujar ni a pagar.
+- **Antes de hacer nada dice lo que cuesta** (la voz, por caracteres; Claude, 0 $
+  porque va con la suscripción; las imágenes, 0 $) y espera tu «Sí, hacerlo».
+  Al acabar se abre el vídeo nuevo, que sigue solo con la voz y el montaje.
+- Se puede elegir la voz: la misma de ahora (habla los dos idiomas) o una
+  nativa de ese idioma.
+- El vídeo de origen no cambia en nada.
+- Lo que no se traduce, y lo dice antes: el texto dibujado DENTRO de una imagen
+  (cambiarlo es redibujarla con una nota, y eso sí se paga), las imágenes
+  insertadas o quitadas a mano (en la copia se vuelven a hacer) y los textos de
+  Publicar (tienen su botón).
+- De paso: la lista «Cómo se pronuncia» (escrita con sonidos del español) ya
+  solo se aplica a una voz en español; a una en inglés le hacía leer
+  «Pléi Estéishon».
+
 **El guion visual se pone al día solo (9 de noviembre)**
 - El bloque «Guion visual» (paso Voz o Imágenes) ya no se queda vacío si lo
   abriste antes de tener el guion: cuando terminan el guion, la voz, una

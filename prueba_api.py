@@ -4905,6 +4905,30 @@ def probar_turno_y_notas_de_otro_texto():
     igual(sin_nada.escrito, [], "ni que escribir")
 
 
+def probar_otro_idioma(cliente):
+    """«Hacer este vídeo en otro idioma» (rama otro-idioma, 11-11-2026): sin
+    planos ni voz no se puede (409, sin escribir nada); sin el OK no se lanza
+    (400); un idioma que no existe es un 400. El recorrido entero (traducir,
+    grabar y montar con las mismas imágenes) lo prueba prueba_recorrido."""
+    seccion("UN VÍDEO EN OTRO IDIOMA: LO QUE SE PIDE ANTES DE HACER NADA")
+    _r, datos = cliente.post("/api/proyectos", {"nombre": "Para otro idioma"})
+    pid = (datos.get("proyecto") or {}).get("id")
+    _r, antes = cliente.get(f"/api/proyectos/{pid}/pasos/voz")
+    respuesta, info = cliente.get(f"/api/proyectos/{pid}/otro_idioma?idioma=en")
+    igual(respuesta.status_code, 409, "un vídeo sin planos todavía no se puede pasar")
+    ok("planos" in str(info.get("error") or info), f"y dice por qué: {info}")
+    respuesta, _d = cliente.post(f"/api/proyectos/{pid}/otro_idioma", {"idioma": "en"})
+    igual(respuesta.status_code, 400, "sin el OK no se lanza nada")
+    respuesta, _d = cliente.post(f"/api/proyectos/{pid}/otro_idioma",
+                                 {"idioma": "klingon", "confirmado": True})
+    igual(respuesta.status_code, 400, "un idioma que no existe es un 400")
+    respuesta, _d = cliente.post(f"/api/proyectos/{pid}/otro_idioma",
+                                 {"idioma": "en", "confirmado": True, "voz_id": "a b/c"})
+    igual(respuesta.status_code, 400, "una voz con caracteres raros es un 400")
+    _r, despues = cliente.get(f"/api/proyectos/{pid}/pasos/voz")
+    igual(despues.get("params"), antes.get("params"), "y nada de eso escribe en el vídeo")
+
+
 def probar_montaje_por_plano(cliente, carpeta):
     """El movimiento y la 2.5D de UN plano (rama montaje-por-plano, 19-10-2026).
 
@@ -9489,6 +9513,7 @@ def main():
         probar_audio_y_musica_de_la_previa(cliente, carpeta)
         probar_taller_oculto(cliente)
         probar_montaje_por_plano(cliente, carpeta)
+        probar_otro_idioma(cliente)
         probar_descargar_imagenes(cliente, carpeta)
         probar_cartelas_y_transiciones(cliente, pid, os.path.join(carpeta, pid))
         probar_direccion(cliente, pid)

@@ -34,9 +34,6 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/proyectos/{pid}` | Cambia el nombre VISIBLE del proyecto. -> la ficha. |
 | `GET` | `/api/proyectos/{pid}/diagramas` | — |
 | `PUT` | `/api/proyectos/{pid}/diagramas` | {diagramas: modo | null}: cuanto se explica dibujando en ESTE video. |
-
-| `GET` | `/api/proyectos/{pid}/diagramas` | El ajuste «Diagramas» de un vídeo: el que manda, el del vídeo, el del estilo y lo deducido (tramos que explican y gráficos). |
-| `PUT` | `/api/proyectos/{pid}/diagramas` | {diagramas: ninguna | solo_si_lo_pide | equilibrada | didactica | null}: el de ESTE vídeo; null vuelve al del estilo. No dibuja nada. |
 | `POST` | `/api/proyectos/{pid}/duplicar` | Copia un proyecto entero con lo que tiene puesto HOY. -> el nuevo. |
 | `POST` | `/api/proyectos/{pid}/elementos/aplicar` | Pone los elementos de varios planos de una vez: {planos: {sid: [...]}, |
 | `POST` | `/api/proyectos/{pid}/elementos/proponer` | Claude propone elementos para el video (o para {planos: [sid]}) con la |
@@ -62,6 +59,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/ortografia/descartar` | Lo que se deja SIN marcar al aplicar: {rid, ids: [...]}. Esos textos se |
 | `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
 | `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
+| `GET` | `/api/proyectos/{pid}/otro_idioma` | Lo que hace falta para elegir: idiomas, de qué idioma sale, avisos y, con |
+| `POST` | `/api/proyectos/{pid}/otro_idioma` | {idioma, voz_id?, nombre?, confirmado: true} -> el trabajo que lo hace. |
 | `POST` | `/api/proyectos/{pid}/planos/describir` | Pide a Claude, en un hilo, la descripción en español de los planos que |
 | `GET` | `/api/proyectos/{pid}/planos/descripciones` | Lo que se pidió dibujar en cada plano, en español. -> la ficha |
 | `POST` | `/api/proyectos/{pid}/planos/devolver` | Deshace «Quitar esta imagen». {narracion: lo que decía la imagen quitada} |
@@ -560,6 +559,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**437 endpoints.** Escrito por `generar_api.py` desde `app.py`.
-
-**429 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**445 endpoints.** Escrito por `generar_api.py` desde `app.py`.

@@ -10617,14 +10617,40 @@ def video_en_otro_idioma(navegador, datos):
     ok(r.status_code == 400, "sin el OK no hace nada (400)")
     ok(_foto_del_estado(datos, pid) == antes, "y preguntar no escribe nada en el vídeo")
 
-    r, lanzado = api.post(f"/api/proyectos/{pid}/otro_idioma", {"idioma": "en", "confirmado": True})
-    ok(r.status_code == 202 and lanzado.get("trabajo_id"), f"con el OK se lanza ({r.status_code} {lanzado})")
-    fin = api.esperar(lanzado.get("trabajo_id"), 600)
-    res = fin.get("resultado") or {}
-    ok(fin.get("estado") == "listo" and res.get("copia"), f"la copia está hecha ({fin.get('estado')} {fin.get('error')})")
-    copia = res.get("copia") or ""
-    ok(res.get("tanda"), f"y su voz y su montaje se lanzan solos ({res.get('aviso')})")
-    ok(api.libre(copia, 1500), "la tanda de la copia termina")
+    # LA PANTALLA: el botón debajo del vídeo, el cuadro con lo que cuesta y el OK
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();")
+    ok(pg.esperar(".otro-idioma-video button", "Hacer este vídeo en otro idioma", 20),
+       "debajo del vídeo está «🌐 Hacer este vídeo en otro idioma»")
+    pg.p.locator(".otro-idioma-video button").first.click()
+    ok(pg.esperar(".otro-idioma-idiomas button", "inglés", 20), "pregunta a qué idioma")
+    ok(not pg.visible(".otro-idioma button.primario"), "y no ofrece hacerlo sin elegir antes")
+    pg.p.locator(".otro-idioma-idiomas button", has_text="inglés").first.click()
+    ok(pg.esperar(".otro-idioma h2", "Lo que cuesta", 20), "dice lo que cuesta antes de hacer nada")
+    texto = pg.p.locator("#coste-video").inner_text()
+    ok("Claude" in texto and "0 $" in texto and "reutilizadas" in texto and "caracteres" in texto,
+       "la voz por caracteres, Claude 0 $ y las imágenes reutilizadas")
+    ok(pg.visible(".otro-idioma button.primario", "Sí, hacerlo"), "con su «Sí, hacerlo»")
+    pg.captura("otro_idioma_coste", entera=False)
+    ok(_foto_del_estado(datos, pid) == antes, "abrir el cuadro no ha escrito nada")
+    pg.p.locator(".otro-idioma button.primario").first.click()
+    copia = ""
+    for _i in range(600):
+        copia = pg.p.evaluate("() => (APP.light.video || {}).pid || ''")
+        if copia and copia != pid:
+            break
+        pg.p.wait_for_timeout(1000)
+    ok(copia and copia != pid, f"al acabar se abre el vídeo nuevo ({copia})")
+    pg.captura("otro_idioma_copia_abierta", entera=False)
+    ok(api.libre(copia, 1500), "la tanda de la copia termina sola")
+    pg.js(f"await abrirVideoLight('{copia}'); APP.light.video.vista = 'video'; pintarLight();")
+    pg.p.wait_for_timeout(3000)
+    rotas = pg.p.evaluate("""() => [...document.querySelectorAll('main img, #contenido img')]
+      .filter(i => i.complete && i.getAttribute('src') && !i.naturalWidth).map(i => i.getAttribute('src'))""")
+    ok(not rotas, f"el vídeo nuevo se ve con sus imágenes (rotas: {rotas[:3]})")
+    pg.captura("otro_idioma_copia_montada", entera=False)
+    pg.sin_errores("el vídeo en otro idioma")
+    pg.cerrar()
     ok(_foto_del_estado(datos, pid) == antes, "el vídeo de origen no ha cambiado en nada (params, firmas, versiones)")
 
     r, c_guion = api.get(f"/api/proyectos/{copia}/pasos/guion")

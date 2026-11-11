@@ -3923,6 +3923,17 @@ button.eleccion-paleta.activa { border-color: var(--acento); box-shadow: 0 0 0 2
 /* el calendario enseña todo; esta línea dice que los filtros son de la lista */
 .nota-filtros-cola { margin-top: 4px; }
 
+/* El vídeo en otro idioma (rama otro-idioma): su caja en el vídeo y el cuadro
+   que dice lo que cuesta antes de hacer nada */
+.otro-idioma-video { margin-top: 12px; }
+.otro-idioma .otro-idioma-idiomas { flex-wrap: wrap; margin-bottom: 4px; }
+.otro-idioma-pasos { margin: 0 0 6px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.otro-idioma-nombre { width: min(100%, 360px); margin-left: 4px; }
+.otro-idioma-coste th { text-align: left; padding-right: 12px; white-space: nowrap; vertical-align: top; }
+.otro-idioma-coste tr.total th, .otro-idioma-coste tr.total td { color: var(--texto); font-weight: 600; }
+.otro-idioma-avisos { margin: 4px 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.otro-idioma .campo select { width: min(100%, 420px); }
+
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo
    Publicar. Todo nuevo y aquí, al final, para no chocar con las otras ramas.

@@ -320,7 +320,7 @@ def guardar(raiz, datos, proyectos_validos=None):
                 fh.write(captura)
             os.replace(ruta + ".tmp", ruta)
         escribir_json(_ruta(raiz, rid), recibido)
-        _podar(raiz)
+        _podar(raiz, conservar=rid, validos=proyectos_validos)
     return recibido
 
 
@@ -339,17 +339,22 @@ def _todos(raiz):
     return salida
 
 
-def _podar(raiz):
+def _podar(raiz, conservar="", validos=None):
     """Pasados MAX_RECIBIDOS se borran primero los archivados, después los que no
-    tienen proyecto y, al final, los más viejos de un proyecto (11-11-2026)."""
+    tienen proyecto (o lo tienen borrado) y, al final, los más viejos de un
+    proyecto (11-11-2026). El que acaba de llegar (`conservar`) no se borra nunca:
+    la extensión ya ha dicho «Enviado»."""
     todos = _todos(raiz)
     sobran = len(todos) - MAX_RECIBIDOS
     if sobran <= 0:
         return
+    def con_proyecto(d):
+        return bool(d.get("proyecto")) and (validos is None or d["proyecto"] in validos)
     def prioridad(d):    # 0 se borra antes; dentro de cada grupo, el más viejo antes
-        grupo = 0 if d.get("archivado") else (1 if not d.get("proyecto") else 2)
+        grupo = 0 if d.get("archivado") else (2 if con_proyecto(d) else 1)
         return (grupo, d.get("orden") or 0, d.get("cuando") or "")
-    for viejo in sorted(todos, key=prioridad)[:sobran]:
+    candidatos = [d for d in todos if d.get("id") != conservar]
+    for viejo in sorted(candidatos, key=prioridad)[:sobran]:
         _quitar(raiz, viejo)
 
 

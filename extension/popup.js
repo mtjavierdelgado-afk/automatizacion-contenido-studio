@@ -196,13 +196,17 @@ async function leerPestana() {
 /* El menú «Proyecto»: los proyectos del Studio (con el código de envío) y el
    último elegido marcado. Si no se pueden leer, queda «Sin proyecto» y se envía
    igual: anexarlo después se hace en el Studio (11-11-2026). */
+let proyectosCargados = false;
 async function cargarProyectos() {
   const cfg = await config();
   if (!cfg) return;
+  $('proyecto').disabled = true;   // hasta que llegue la lista: elegir ahora no serviría
   const { ultimoProyecto } = await chrome.storage.local.get(['ultimoProyecto']).catch(() => ({}));
   const r = await hablarConElStudio(cfg, 'recibidos/proyectos', 'GET', null).catch(() => ({}));
   const sel = $('proyecto');
   const lista = (r.bien && r.bien.proyectos) || [];
+  proyectosCargados = !!r.bien;
+  sel.disabled = false;
   while (sel.options.length > 1) sel.remove(1);   // al volver a cargarlos, sin repetir
   for (const p of lista) {
     const o = document.createElement('option');
@@ -228,7 +232,8 @@ async function enviar() {
     nota: $('nota').value.trim(), cifras: leido.cifras || {}, imagen: leido.imagen || '', captura,
     proyecto: $('proyecto').value,
   });
-  chrome.storage.local.set({ ultimoProyecto: $('proyecto').value }).catch(() => {});
+  /* solo si la lista llegó: con el menú vacío, «Sin proyecto» no es una elección */
+  if (proyectosCargados) chrome.storage.local.set({ ultimoProyecto: $('proyecto').value }).catch(() => {});
   const r = await hablarConElStudio(cfg, 'recibidos', 'POST', cuerpo);
   if (r.bien) {
     const nombre = $('proyecto').value ? $('proyecto').selectedOptions[0].textContent : '';

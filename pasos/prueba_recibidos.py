@@ -252,6 +252,14 @@ def prueba_recibidos():
         R.guardar(raiz, {"url": "https://ejemplo.com/n2", "texto": "nuevo 2"})
         quedan = {d["id"] for d in R._todos(raiz)}
         ok(viejo_proyecto["id"] in quedan and suelto1["id"] not in quedan, "y después, lo suelto")
+        # todo lo demás con proyecto y llega uno suelto: el recién llegado NO se borra
+        for d in R._todos(raiz):
+            R.borrar(raiz, d["id"])
+        for i in range(3):
+            R.guardar(raiz, {"url": f"https://ejemplo.com/pp{i}", "texto": "de un proyecto", "proyecto": "casas"}, validos)
+        recien = R.guardar(raiz, {"url": "https://ejemplo.com/recien", "texto": "recién llegado"}, validos)
+        quedan = {d["id"] for d in R._todos(raiz)}
+        ok(recien["id"] in quedan and len(quedan) == 3, "el que acaba de llegar nunca se borra al podar (la extensión ya dijo «Enviado»)")
     finally:
         R.MAX_RECIBIDOS = antes
 

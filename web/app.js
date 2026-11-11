@@ -33965,7 +33965,9 @@ function selectorProyectoRecibido(r) {
   const sel = h('select', { clase: 'mini', 'aria-label': 'Proyecto de este recibido',
     onchange: e => anexarRecibido(r, e.target.value) },
   h('option', { value: '', selected: !r.proyecto ? true : null }, 'Sin proyecto'),
-  ...proyectos.map(p => h('option', { value: p.id, selected: r.proyecto === p.id ? true : null }, p.nombre || p.id)));
+  ...proyectos.map(p => h('option', { value: p.id, selected: r.proyecto === p.id ? true : null }, p.nombre || p.id)),
+  /* con la lista aún sin cargar, su proyecto se enseña igual (no «Sin proyecto») */
+  r.proyecto && !proyectos.some(p => p.id === r.proyecto) ? h('option', { value: r.proyecto, selected: true }, r.proyecto) : null);
   const fila = h('div', { clase: 'proyecto-recibido' },
     h('label', { clase: 'fila' }, h('span', { clase: 'meta' }, 'Proyecto'), sel));
   const estilos = r.proyecto ? estilosDelProyectoRecibido(r.proyecto) : [];
@@ -34038,11 +34040,21 @@ function tarjetaRecibido(r) {
 }
 
 async function usarRecibidoEnChat(r, peticion, enviarYa) {
-  /* el chat es el de SU proyecto: si está anexado a otro, se cambia antes (cambiar de
-     proyecto vacía el borrador del chat, así que va lo primero) */
-  if (r.proyecto && r.proyecto !== PAR.cid && (PAR.proyectos || []).some(p => p.id === r.proyecto)) {
+  /* el chat es el de SU proyecto: si está anexado a otro, se cambia antes. Cambiar de
+     proyecto vacía el borrador del chat: si hay algo a medio escribir, se pregunta. */
+  const cambiar = r.proyecto && r.proyecto !== PAR.cid && (PAR.proyectos || []).some(p => p.id === r.proyecto);
+  if (cambiar) {
+    const hayBorrador = String(PAR.chatTexto || '').trim() || PAR.chatCapturas.length;
+    const destino = ((PAR.proyectos || []).find(p => p.id === r.proyecto) || {}).nombre || r.proyecto;
+    if (hayBorrador && !(await preguntarParrilla('Cambiar de proyecto',
+      `Tienes un mensaje a medio escribir en el chat de ${nombreProyectoParrilla() || 'este proyecto'}. Al pasar a ${destino} se descarta. ¿Seguir?`,
+      'Seguir'))) return;
     elegirProyectoParrilla(r.proyecto);
   }
+  /* «Escribir el guion» se manda en una conversación NUEVA y solo con la referencia y
+     el pedido: lo que tuvieras a medio escribir se aparta y vuelve después */
+  const apartado = enviarYa ? { texto: PAR.chatTexto, capturas: PAR.chatCapturas } : null;
+  if (enviarYa) { PAR.chatTexto = ''; PAR.chatCapturas = []; PAR.chat = null; }
   const maximo = (PAR.chatsInfo && PAR.chatsInfo.max_capturas) || 6;
   if (r.captura && PAR.chatCapturas.length < maximo) {
     try {
@@ -34065,6 +34077,11 @@ async function usarRecibidoEnChat(r, peticion, enviarYa) {
   if (enviarYa) {
     toast('pedido a Claude: cuando conteste, «Guardar en la Parrilla» y luego «🤖 Hacer el vídeo completo»');
     await enviarChatParrilla();
+    if (apartado && (String(apartado.texto || '').trim() || apartado.capturas.length)) {
+      PAR.chatTexto = apartado.texto;
+      PAR.chatCapturas = apartado.capturas.concat(PAR.chatCapturas);
+      pintarModulo();
+    }
   } else toast('pasado al chat: revísalo y pulsa Enviar');
 }
 

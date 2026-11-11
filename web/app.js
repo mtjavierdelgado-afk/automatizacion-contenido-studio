@@ -28358,9 +28358,9 @@ function avisoEmojisPublicar(red, campo) {
    apunta en el servidor que se copiaron los textos de esa red, y el vídeo sale
    solo de la lista del piloto. Apuntarlo no cambia nada del vídeo ni de sus
    envíos; si falla, el texto ya está copiado y no se dice nada. */
-function copiarTextoParaPublicar(texto, red) {
-  copiarTexto(texto);
+async function copiarTextoParaPublicar(texto, red) {
   const pid = PUB.pid;
+  try { await copiarTexto(texto); } catch (e) { return; }   // sin copiar, no se apunta
   if (!pid) return;
   pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/copiado`), { method: 'POST', cuerpo: { red } })
     .catch(() => {});
@@ -35138,7 +35138,7 @@ function nombreEtapaPiloto(id) {
 /* Una parada que no espera al dueño (piloto-lista): se paró solo porque el
    vídeo tenía otra cosa en marcha, y se retoma sola cuando acaba. */
 function esperaSolaPiloto(v) {
-  return v.estado === 'parado' && v.tipo_parada === 'ocupado';
+  return v.estado === 'parado' && v.tipo_parada === 'ocupado' && !!v.espera_sola;
 }
 
 function tarjetaVideoPiloto(v) {

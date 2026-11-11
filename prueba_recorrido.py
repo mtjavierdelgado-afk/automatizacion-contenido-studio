@@ -10479,7 +10479,7 @@ def piloto_lista(navegador, datos):
     videos = [
         ficha("v5", "L05 — en cola", "en_cola", mensaje="esperando su turno"),
         ficha("v4", "L04 — listo", "listo", pid="p4"),
-        ficha("v3", "L03 — esperando", "parado", pid="p3", tipo_parada="ocupado",
+        ficha("v3", "L03 — esperando", "parado", pid="p3", tipo_parada="ocupado", espera_sola=True,
               porque="ese vídeo tiene algo en marcha", donde="el vídeo"),
         ficha("v2", "L02 — ya publicado", "revisar", pid="p2", salio=True),
         ficha("v1", "L01 — trabajando", "trabajando", etapa="imagenes", mensaje="dibujando"),

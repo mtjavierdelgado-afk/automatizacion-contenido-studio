@@ -2521,6 +2521,8 @@ function conservandoScroll(selectores, pintar, sostener) {
      más arriba. Un relleno al final con lo que falta de alto, durante un
      segundo y medio, deja sitio para volver a donde estabas. */
   const caja = sostener ? $(sostener) : null;
+  // el relleno de un repintado anterior no cuenta como alto de verdad
+  if (caja) caja.querySelectorAll(':scope > .relleno-repintado').forEach(n => n.remove());
   const alto = caja ? caja.scrollHeight : 0;
   try { return pintar(); } finally {
     // lo que falte de alto, como un relleno al final (que se va solo)
@@ -20162,6 +20164,15 @@ function irAInicio(paso) {
 }
 
 function pintarInicio() {
+  /* SOLO EN LA MISMA TARJETA (revisión): «Siguiente ›» y «‹ Atrás» llevan a
+     otra tarjeta, que empieza arriba como siempre. */
+  if (INICIO.pasoPintado !== INICIO.paso) {
+    INICIO.pasoPintado = INICIO.paso;
+    pintarInicioDentro();
+    const cuadro = $('#inicio .cuadro');
+    if (cuadro) cuadro.scrollTop = 0;
+    return;
+  }
   return conservandoScroll(['#inicio', '#inicio .cuadro'], pintarInicioDentro, '#inicio .cuadro');
 }
 

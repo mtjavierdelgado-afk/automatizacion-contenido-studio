@@ -695,6 +695,26 @@ def prueba_arranques_escalonados():
             comprobar(False, "cancelar mientras espera no lanza nada")
         except KeyboardInterrupt:
             comprobar(True, "cancelar mientras espera no lanza nada")
+        # una llamada EN COLA (esperando el turno) se entera de la cancelacion
+        # en el acto y no arranca nada
+        cli_claude._ARRANQUES.clear()
+        cerrojo = cli_claude._CERROJOS_ARRANQUE[cli_claude._clave_de_cuenta(a)]
+        cerrojo.acquire()
+        lanzados = []
+        real_falso = cli_claude.subprocess.Popen
+        cli_claude.subprocess.Popen = lambda orden, **k: lanzados.append(orden) or real_falso(orden, **k)
+        t0 = time.time()
+        try:
+            cli_claude.lanzar_escalonado(["cola"], a, Avance(), "la prueba")
+        except KeyboardInterrupt:
+            pass
+        finally:
+            cerrojo.release()
+            cli_claude.subprocess.Popen = real_falso
+        comprobar(time.time() - t0 < 1 and not lanzados,
+                  "una llamada en cola que cancelan no espera su turno ni arranca nada")
+        comprobar(cli_claude._clave_de_cuenta({"config_dir": "/tmp/cuenta_a/"})
+                  == cli_claude._clave_de_cuenta(a), "la misma carpeta escrita de dos formas es la misma cuenta")
         cli_claude.ESPACIO_ARRANQUE_S = 0
         t0 = time.time()
         cli_claude.lanzar_escalonado(["d"], a)

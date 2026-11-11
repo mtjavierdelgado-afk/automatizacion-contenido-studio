@@ -909,6 +909,11 @@ def _subir_cancelacion(avance, para):
 # segunda espera a que la primera lleve `ESPACIO_ARRANQUE_S` en marcha (o haya
 # terminado), que es tiempo de sobra para renovar y guardar la llave nueva. Lo
 # que ya esta corriendo no se toca, y cuentas distintas no se esperan.
+# OJO, ES UNA HIPOTESIS sacada de los registros (no se ha visto renovar al
+# CLI) y solo coordina DENTRO de este proceso: otro proceso con la misma
+# carpeta de cuenta (una consola, `herramientas/prueba_real.py`) no la ve. Si
+# vuelven las caidas, el siguiente paso es un cerrojo de fichero en la carpeta
+# de la cuenta.
 
 #: Segundos entre dos arranques del CLI con la misma cuenta (mientras el
 #: primero sigue vivo). 0 lo desactiva.
@@ -919,7 +924,8 @@ _LOCK_ARRANQUES = threading.Lock()
 
 
 def _clave_de_cuenta(cuenta):
-    return str((cuenta or {}).get("config_dir") or "") or "_por_defecto"
+    carpeta = str((cuenta or {}).get("config_dir") or "")
+    return os.path.realpath(carpeta) if carpeta else "_por_defecto"
 
 
 def _sigue_vivo(proceso):
@@ -939,20 +945,34 @@ def lanzar_escalonado(orden, cuenta=None, avance=None, para="la llamada", **opci
     clave = _clave_de_cuenta(cuenta)
     with _LOCK_ARRANQUES:
         cerrojo = _CERROJOS_ARRANQUE.setdefault(clave, threading.Lock())
-    with cerrojo:
+
+    def cancelada():
+        return avance is not None and getattr(avance, "cancelado", False)
+    # el turno tambien se espera mirando la cancelacion: una llamada en cola
+    # se entera en el acto, sin esperar a que le toque
+    while not cerrojo.acquire(timeout=0.25):
+        if cancelada():
+            _subir_cancelacion(avance, para)
+    try:
         while ESPACIO_ARRANQUE_S > 0:
-            ahora = time.time()
+            ahora = time.monotonic()
             recientes = [(t, p) for t, p in _ARRANQUES.get(clave, [])
                          if ahora - t < ESPACIO_ARRANQUE_S and _sigue_vivo(p)]
             _ARRANQUES[clave] = recientes
             if not recientes:
                 break
-            if avance is not None and getattr(avance, "cancelado", False):
+            if cancelada():
                 _subir_cancelacion(avance, para)
             falta = ESPACIO_ARRANQUE_S - (ahora - max(t for t, _ in recientes))
             time.sleep(min(0.25, max(0.02, falta)))
+        # y justo antes de arrancar: arrancar para matarlo en el acto es justo
+        # lo que puede pillar al CLI renovando el acceso
+        if cancelada():
+            _subir_cancelacion(avance, para)
         proceso = subprocess.Popen(orden, **opciones)
-        _ARRANQUES.setdefault(clave, []).append((time.time(), proceso))
+        _ARRANQUES.setdefault(clave, []).append((time.monotonic(), proceso))
+    finally:
+        cerrojo.release()
     return proceso
 
 

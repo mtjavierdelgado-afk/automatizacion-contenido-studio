@@ -100,7 +100,8 @@
         /* el autor: el enlace que lleva a su propio perfil (/usuario/ o /usuario/reels/) */
         const enlace = [...caja.querySelectorAll('a')].filter(fueraDeComentarios).find(a => {
           const u = limpio(a.innerText);
-          return /^[A-Za-z0-9._]{2,30}$/.test(u) && ((a.getAttribute('href') || '') + '/').startsWith('/' + u + '/');
+          const ruta = (a.getAttribute('href') || '').replace(/^https?:\/\/[^/]+/, '');
+          return /^[A-Za-z0-9._]{2,30}$/.test(u) && (ruta + '/').startsWith('/' + u + '/');
         });
         if (!datos.autor && enlace) datos.autor = limpio(enlace.innerText);
         if (!datos.texto) {
@@ -121,6 +122,7 @@
               const v = limpio(h.innerText);
               if (SOLO.test(v)) return v;
               if (h.querySelector('svg[aria-label]')) break;
+              if (h.matches('time') || h.querySelector('time')) break;   // «5m» es la hora, no 5 millones
             }
           }
           return '';

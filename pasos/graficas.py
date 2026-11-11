@@ -572,17 +572,28 @@ def _sustituir_imagen(cuerpo, uri):
     return re.sub(r'<img src="«img»" alt="[^"]*" style="([^"]*)">', bloque, cuerpo)
 
 
-def html_de(pieza, kit=None, imagen=None, logo=None, logo_oscuro=None):
-    """El documento entero. `imagen`, `logo`, `logo_oscuro`: rutas de disco."""
+#: Sobre qué color cae la caja de la marca en cada diseño: decide si va el logo
+#: normal o el de fondo oscuro. La usan también las capas (graficas_capas).
+FONDO_MARCA = {1: "a", 2: "d", 5: "d", 6: "l", 7: "b", 8: "l", 9: "d", 10: "d", 13: "a", 14: "l"}
+
+
+def html_de(pieza, kit=None, imagen=None, logo=None, logo_oscuro=None, _testigos=None):
+    """El documento entero. `imagen`, `logo`, `logo_oscuro`: rutas de disco.
+
+    `_testigos` solo lo usa la conversión a capas (graficas_capas): cambia el
+    valor de algunas variables DESPUÉS de elegir el logo, y puede traer una
+    imagen de muestra, para saber qué color del Kit pinta cada parte. Sin él,
+    el documento es byte a byte el de siempre."""
     pieza = limpiar_pieza(pieza)
     f = formato(pieza["formato"])
     colores = colores_finales(kit, pieza)
     variables, margenes = _variables(f, colores)
     cuerpo = _PL.PLANTILLAS[pieza["plantilla"]]
-    cuerpo = _sustituir_imagen(cuerpo, _data_uri(imagen) if imagen else "")
+    uri = (_testigos or {}).get("imagen_uri") or (_data_uri(imagen) if imagen else "")
+    cuerpo = _sustituir_imagen(cuerpo, uri)
     cuerpo = _aplicar_tamanos(cuerpo, pieza["capas"])
     # el logo: el normal, o el de fondo oscuro si la caja cae sobre color oscuro
-    fondo_marca = {1: "a", 2: "d", 5: "d", 6: "l", 7: "b", 8: "l", 9: "d", 10: "d", 13: "a", 14: "l"}.get(pieza["plantilla"], "l")
+    fondo_marca = FONDO_MARCA.get(pieza["plantilla"], "l")
     logo_ruta = logo
     if logo_oscuro and _luz(variables[fondo_marca]) < 0.3:
         logo_ruta = logo_oscuro
@@ -608,6 +619,7 @@ def html_de(pieza, kit=None, imagen=None, logo=None, logo_oscuro=None):
         familia_texto = f"'{FUENTES[fuente_b][0]}'"
         usadas.add(fuente_b)
     faltan = [FUENTES[u][0] for u in usadas if not fuente_lista(u)]
+    variables.update((_testigos or {}).get("variables") or {})
     caras = "".join(_css_de_fuente(u) for u in sorted(usadas))
     raiz = ";".join(f"--{k}:{v}" for k, v in variables.items())
     documento = (
@@ -857,6 +869,44 @@ def _ficha(raiz, cid, pieza_id):
     return _leer_json(os.path.join(_carpeta_pieza(raiz, cid, pieza_id), "pieza.json"))
 
 
+_CERROJOS_PIEZA = {}
+_CERROJO_CERROJOS = threading.Lock()
+
+
+def cerrojo_pieza(cid, pieza_id):
+    """Un cerrojo por pieza: lo toman el guardado de siempre y el de capas
+    (rama graficas-2-capas) para que uno no escriba a medias del otro."""
+    with _CERROJO_CERROJOS:
+        return _CERROJOS_PIEZA.setdefault((cid, pieza_id), threading.Lock())
+
+
+def meta_capas(raiz, cid, pieza_id):
+    """La ficha pequeña de la versión en capas (`capas.sello.json`: sello,
+    cambiada, nombre), o None. Solo lee, y nunca falla."""
+    try:
+        meta = _leer_json(os.path.join(_carpeta_pieza(raiz, cid, pieza_id), "capas.sello.json"))
+    except Exception:                                       # noqa: BLE001
+        return None
+    return meta if isinstance(meta, dict) else None
+
+
+def capas_vigentes(raiz, cid, pieza_id, ficha=None):
+    """¿Tiene esta pieza una versión en capas que sigue valiendo? (rama
+    graficas-2-capas). Vale si salió de ESTE pieza.json (mismo sello), también
+    en las nacidas en capas: si alguien la vuelve a guardar con el editor de
+    antes, el sello cambia y manda lo más nuevo. Solo lee, y una ficha
+    ilegible cuenta como «sin capas» (la descarga de siempre no se rompe)."""
+    meta = meta_capas(raiz, cid, pieza_id)
+    if not meta or not meta.get("sello"):
+        return False
+    if ficha is None:
+        try:
+            ficha = _ficha(raiz, cid, pieza_id)
+        except Exception:                                   # noqa: BLE001
+            return False
+    return bool(ficha) and meta.get("sello") == ficha.get("sello")
+
+
 def listar_piezas(raiz, cid):
     carpeta_cliente = _carpeta_piezas(raiz, cid)
     salida = []
@@ -870,7 +920,13 @@ def listar_piezas(raiz, cid):
         except ErrorGraficas:
             continue
         if ficha:
-            salida.append(ficha)
+            en_capas = capas_vigentes(raiz, cid, pieza_id, ficha)
+            if en_capas:
+                # lo último que se guardó es la versión en capas: su nombre y su fecha
+                meta = meta_capas(raiz, cid, pieza_id)
+                ficha = dict(ficha, nombre=meta.get("nombre") or ficha.get("nombre"),
+                             cambiada=meta.get("cambiada") or ficha.get("cambiada"))
+            salida.append(dict(ficha, en_capas=en_capas))
     salida.sort(key=lambda p: p.get("cambiada") or "", reverse=True)
     return salida
 
@@ -886,30 +942,39 @@ def guardar_pieza(raiz, cid, datos, pieza_id=None, logo=None, logo_oscuro=None):
     """Guarda los datos y pinta el PNG y el JPG finales."""
     pieza = limpiar_pieza(datos)
     if pieza_id:
-        leer_pieza(raiz, cid, pieza_id)
+        if leer_pieza(raiz, cid, pieza_id).get("nacida_en_capas"):
+            # su ficha es mínima (plantilla 2 vacía): guardarla aquí borraría el diseño
+            raise ErrorGraficas("esta pieza se hizo en capas: ábrela con el editor de capas")
     else:
         pieza_id = secrets.token_hex(6)
     destino = _carpeta_pieza(raiz, cid, pieza_id)
     kit = leer_kit(raiz, cid)
     imagen = ruta_imagen(raiz, cid, pieza["imagen"])
     png, avisos, _ = _con_turno(lambda p: pintar(p, pieza, kit, imagen, logo, logo_oscuro))
-    os.makedirs(destino, exist_ok=True)
-    for nombre, contenido in (("pieza.png", png), ("pieza.jpg", a_jpg(png))):
-        temporal = os.path.join(destino, f"{nombre}.tmp")
-        with open(temporal, "wb") as fh:
-            fh.write(contenido)
-        os.replace(temporal, os.path.join(destino, nombre))
+    jpg = a_jpg(png)
     f = formato(pieza["formato"])
     ficha = dict(pieza, id=pieza_id, cid=cid, avisos=avisos, medida=f"{f['W']}×{f['H']}",
                  cambiada=time.strftime("%Y-%m-%dT%H:%M:%S"), sello=secrets.token_hex(4))
     ficha["nombre"] = pieza["nombre"] or pieza["textos"].get("titulo") or pieza["textos"].get("cita") or "Pieza sin título"
-    _escribir_json(os.path.join(destino, "pieza.json"), ficha)
+    with cerrojo_pieza(cid, pieza_id):
+        os.makedirs(destino, exist_ok=True)
+        for nombre, contenido in (("pieza.png", png), ("pieza.jpg", jpg)):
+            temporal = os.path.join(destino, f"{nombre}.{threading.get_ident()}.tmp")
+            with open(temporal, "wb") as fh:
+                fh.write(contenido)
+            os.replace(temporal, os.path.join(destino, nombre))
+        _escribir_json(os.path.join(destino, "pieza.json"), ficha)
     return ficha
 
 
 def ruta_final(raiz, cid, pieza_id, extension):
     if extension not in ("png", "jpg"):
         raise ErrorGraficas("eso solo se descarga en PNG o JPG")
+    # si tiene versión en capas vigente, esa es la última que se guardó
+    if capas_vigentes(raiz, cid, pieza_id):
+        ruta = os.path.join(_carpeta_pieza(raiz, cid, pieza_id), f"capas.{extension}")
+        if os.path.isfile(ruta):
+            return ruta
     ruta = os.path.join(_carpeta_pieza(raiz, cid, pieza_id), f"pieza.{extension}")
     if not os.path.isfile(ruta):
         raise ErrorGraficas("esa pieza no está")

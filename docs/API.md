@@ -34,9 +34,6 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/proyectos/{pid}` | Cambia el nombre VISIBLE del proyecto. -> la ficha. |
 | `GET` | `/api/proyectos/{pid}/diagramas` | — |
 | `PUT` | `/api/proyectos/{pid}/diagramas` | {diagramas: modo | null}: cuanto se explica dibujando en ESTE video. |
-
-| `GET` | `/api/proyectos/{pid}/diagramas` | El ajuste «Diagramas» de un vídeo: el que manda, el del vídeo, el del estilo y lo deducido (tramos que explican y gráficos). |
-| `PUT` | `/api/proyectos/{pid}/diagramas` | {diagramas: ninguna | solo_si_lo_pide | equilibrada | didactica | null}: el de ESTE vídeo; null vuelve al del estilo. No dibuja nada. |
 | `POST` | `/api/proyectos/{pid}/duplicar` | Copia un proyecto entero con lo que tiene puesto HOY. -> el nuevo. |
 | `POST` | `/api/proyectos/{pid}/elementos/aplicar` | Pone los elementos de varios planos de una vez: {planos: {sid: [...]}, |
 | `POST` | `/api/proyectos/{pid}/elementos/proponer` | Claude propone elementos para el video (o para {planos: [sid]}) con la |
@@ -379,6 +376,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee; sin nombres de proyectos con clave). |
 | `GET` | `/api/dominios` | El negocio general y las fichas de los clientes (Etapa Foto C). |
 | `GET` | `/api/graficas/catalogo` | — |
+| `POST` | `/api/graficas/{cid}/capas` | Una pieza nueva que nace en capas. |
+| `POST` | `/api/graficas/{cid}/capas/vista` | La vista de una pieza en capas tal como saldría. No guarda nada. |
 | `POST` | `/api/graficas/{cid}/imagen` | — |
 | `POST` | `/api/graficas/{cid}/imagen/de-plano` | Copia la imagen ya hecha de un plano de un vídeo DE ESTE proyecto. Gratis. |
 | `GET` | `/api/graficas/{cid}/imagen/{nombre}` | — |
@@ -388,6 +387,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/graficas/{cid}/piezas` | — |
 | `DELETE` | `/api/graficas/{cid}/piezas/{pieza_id}` | — |
 | `PUT` | `/api/graficas/{cid}/piezas/{pieza_id}` | — |
+| `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/capas` | La pieza en capas: la guardada si sigue valiendo, o la pieza de siempre |
+| `PUT` | `/api/graficas/{cid}/piezas/{pieza_id}/capas` | Guarda la versión en capas de una pieza, al lado de la de siempre. |
+| `POST` | `/api/graficas/{cid}/piezas/{pieza_id}/comparar` | Pinta la pieza como siempre y convertida en capas, y dice si salen |
 | `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/fichero.{extension}` | — |
 | `POST` | `/api/graficas/{cid}/vista` | Las miniaturas de los diseños con estos datos. No guarda nada. |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
@@ -560,6 +562,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**437 endpoints.** Escrito por `generar_api.py` desde `app.py`.
-
-**429 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**448 endpoints.** Escrito por `generar_api.py` desde `app.py`.

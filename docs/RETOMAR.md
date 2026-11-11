@@ -504,3 +504,41 @@ En la rama, sin unir a `main`. `estilo.modo` = "ilustracion" | "foto".
   se sustituyeron con `ESTUDIO_FUENTES` y el navegador fue Chromium con
   `--no-sandbox` en `ESTUDIO_EDGE`. `prueba_login` falla aqui porque el CLI de
   la sesion entra por token y no por suscripcion; en el VPS no aplica.
+
+## 11. Gráficas en capas: la base (11-11-2026, rama `graficas-2-capas`)
+
+Una pieza de Gráficas puede guardarse como **documento en capas** (versión 2):
+láminas, y en cada una capas sueltas de texto, foto, logo o forma. Lo hace
+`pasos/graficas_capas.py`; el editor de pantalla llega en `graficas-2-editor`.
+
+- **La pieza de siempre no se toca.** Lo nuevo va en `capas.json`, `capas.png`
+  y `capas.jpg`, al lado de `pieza.*`. `capas.json` apunta el `sello` del
+  `pieza.json` del que salió: si alguien vuelve a guardar con el editor de
+  antes, el sello cambia y la versión en capas deja de valer
+  (`graficas.capas_vigentes`). Una pieza nacida en capas lleva una ficha mínima
+  y una copia en `pieza.png`/`pieza.jpg` para que `main` la liste y la descargue.
+- **Convertir** pinta la plantilla con colores «testigo» únicos para saber qué
+  color del Kit usa cada parte (`html_de(..., _testigos=)`), quita un instante
+  los giros para leer las cajas sin girar, y recorre los elementos en el orden
+  en que el navegador los pinta (`_Convertidor.pintar_grupo`).
+
+### Trampas de esta parte (las 112 combinaciones salieron iguales al final)
+
+- **El navegador mide en 1/64 de píxel y redondea hacia abajo.** Con 4
+  decimales en % una posición caía 1/64 a la izquierda y cambiaba el suavizado
+  de las letras. Ahora: 6 decimales y + 0,002 px en cada posición.
+- **Los bordes se redondean hacia abajo a píxeles enteros**: 7 px guardados
+  como 0,648148 cqmin salían de 6. Se pintan con + 0,01 px.
+- **La holgura del ancho de un texto** (para que se parta en las mismas líneas)
+  es de 2/64 px y va hacia donde no mueve las letras (izquierda, centro,
+  derecha). Con 0,1 px se movían los textos centrados y el punto de giro.
+- **Un texto girado dentro de una caja girada** (el sello de la plantilla 7) no
+  se suaviza igual que girado suelto aunque caiga en el mismo sitio: medido en
+  aislado, 0,4 % de píxeles distintos. Por eso la comparación mira también la
+  «diferencia visible» (`diferencia_visible`, que perdona el medio píxel de los
+  bordes) y la prueba comprueba que caza un cambio de verdad.
+- **Una casilla que corta lo que se sale** (plantilla 8 con un texto movido con
+  el editor de antes): la capa se lleva su `recorte`, o se vería entera.
+- **La foto se pinta con `object-fit` y `object-view-box`**, como las
+  plantillas; `encaje()` hace la misma cuenta con posición y tamaño para la
+  pantalla del editor (que puede no ser Chromium).

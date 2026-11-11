@@ -23974,6 +23974,94 @@ def graficas_fichero(cid: str, pieza_id: str, extension: str, peticion: Request)
     return servir_fichero(peticion, ruta)
 
 
+# --- Las piezas en capas (rama graficas-2-capas, 11-11-2026; graficas_capas.py).
+# Lo nuevo va en capas.json/png/jpg y la pieza de siempre NO se toca, así que
+# `main` sigue leyéndola. Leer, convertir, comparar y la vista previa no escriben
+# nada. Nada de esto llama a una IA: no cuesta dinero.
+
+# aparte: si las capas no cargan, el resto de Gráficas sigue funcionando
+try:
+    import graficas_capas as GRAFICAS_CAPAS  # noqa: E402
+    ERROR_GRAFICAS_CAPAS = ""
+except Exception as _fallo_capas:  # noqa: BLE001
+    GRAFICAS_CAPAS = None
+    ERROR_GRAFICAS_CAPAS = f"{type(_fallo_capas).__name__}: {_fallo_capas}"
+
+
+def _por_capas(fn, *args, **kwargs):
+    """Como `_por_graficas`, con el 409 de «la pieza cambió» y el 404 de «no está»."""
+    G = _graficas()
+    try:
+        return fn(*args, **kwargs)
+    except GRAFICAS_CAPAS.ErrorConflicto as fallo:
+        raise ErrorApi(409, str(fallo))
+    except G.ErrorGraficas as fallo:
+        raise ErrorApi(404 if str(fallo) == "esa pieza no está" else 400, str(fallo))
+
+
+def _contexto_capas(cid, peticion):
+    if GRAFICAS_CAPAS is None:
+        raise ErrorApi(503, f"Las capas de Gráficas no se han podido cargar: {ERROR_GRAFICAS_CAPAS}")
+    ficha = _ficha_de_graficas(cid, peticion)
+    G = _graficas()
+    raiz = raiz_proyectos()
+    kit = _por_capas(G.leer_kit, raiz, cid)
+    logo, oscuro = _logos_de_graficas(ficha, kit)
+    return G, GRAFICAS_CAPAS, raiz, kit, logo, oscuro
+
+
+@app.get("/api/graficas/{cid}/piezas/{pieza_id}/capas")
+def graficas_leer_capas(cid: str, pieza_id: str, peticion: Request):
+    """La pieza en capas: la guardada si sigue valiendo, o la pieza de siempre
+    convertida ahora mismo. No guarda nada."""
+    G, C, raiz, kit, logo, oscuro = _contexto_capas(cid, peticion)
+    ficha, doc = _por_capas(C.leer, raiz, cid, pieza_id)
+    if doc:
+        return {"doc": doc, "origen": "guardada"}
+    doc = _por_capas(G._con_turno, lambda p: C.convertir(p, ficha, kit, logo, oscuro))
+    return {"doc": doc, "origen": "convertida"}
+
+
+@app.post("/api/graficas/{cid}/piezas/{pieza_id}/comparar")
+def graficas_comparar_capas(cid: str, pieza_id: str, peticion: Request):
+    """Pinta la pieza como siempre y convertida en capas, y dice si salen
+    iguales. No guarda nada: es la comprobación antes de abrirla en capas."""
+    G, C, raiz, kit, logo, oscuro = _contexto_capas(cid, peticion)
+    ficha = _por_capas(G.leer_pieza, raiz, cid, pieza_id)
+    if ficha.get("nacida_en_capas"):
+        raise ErrorApi(400, "esta pieza nació en capas: no hay una versión de antes con la que compararla")
+    imagen = G.ruta_imagen(raiz, cid, ficha.get("imagen") or "")
+    r = _por_capas(G._con_turno, lambda p: C.comparar(p, ficha, kit, imagen, logo, oscuro))
+    return {k: r[k] for k in ("igual", "diferencia", "visible", "lineas", "faltan", "movidos")}
+
+
+@app.post("/api/graficas/{cid}/capas/vista")
+def graficas_vista_capas(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """La vista de una pieza en capas tal como saldría. No guarda nada."""
+    G, C, raiz, kit, logo, oscuro = _contexto_capas(cid, peticion)
+    cuerpo = cuerpo or {}
+    lamina = cuerpo.get("lamina", 0)
+    if not isinstance(lamina, int) or isinstance(lamina, bool):
+        raise ErrorApi(400, "esa lámina no está")
+    png, avisos, _ = _por_capas(G._con_turno, lambda p: C.pintar(
+        p, cuerpo.get("doc"), kit, lambda n: G.ruta_imagen(raiz, cid, n), logo, oscuro, lamina))
+    return {"img": G._uri_jpg(G.a_jpg(png, 1080, 88)), "avisos": avisos}
+
+
+@app.put("/api/graficas/{cid}/piezas/{pieza_id}/capas")
+def graficas_guardar_capas(cid: str, pieza_id: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Guarda la versión en capas de una pieza, al lado de la de siempre."""
+    _G, C, raiz, _kit, logo, oscuro = _contexto_capas(cid, peticion)
+    return _por_capas(C.guardar, raiz, cid, (cuerpo or {}).get("doc"), pieza_id, logo, oscuro)
+
+
+@app.post("/api/graficas/{cid}/capas", status_code=201)
+def graficas_crear_en_capas(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Una pieza nueva que nace en capas."""
+    _G, C, raiz, _kit, logo, oscuro = _contexto_capas(cid, peticion)
+    return _por_capas(C.guardar, raiz, cid, (cuerpo or {}).get("doc"), None, logo, oscuro)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Servicio HTTP del Estudio de Video")
     parser.add_argument("--puerto", type=int, default=8020)

@@ -10587,6 +10587,40 @@ def piloto_lista(navegador, datos):
         pg.p.unroute("**/api/piloto")
         pg.js("PIL.verPublicados = false; PIL.datos = null;")
         pg.sin_errores("piloto lista")
+# ========================================================= SESION Y SALTOS
+# sesion-y-saltos (11-11-2026): mientras se espera el acceso a Claude,
+# Configuración se repinta cada 2 s y volvía arriba (el dueño lo vio el 09-11).
+# Repintar tiene que dejar el cajón donde estaba.
+@escenario
+def repintar_no_salta(navegador, datos):
+    pg = Pagina(navegador, datos, nombre="repintar no salta")
+    try:
+        pg.pulsar("#btn-config")
+        ok(pg.esperar("#config", "Hora de tu región"), "(1) Configuración se abre")
+        cuerpo = "#cuerpo-config"
+        alto = pg.p.evaluate(f"() => document.querySelector('{cuerpo}').scrollHeight")
+        pg.p.evaluate(f"() => {{ document.querySelector('{cuerpo}').scrollTop = 900; }}")
+        antes = pg.p.evaluate(f"() => document.querySelector('{cuerpo}').scrollTop")
+        ok(antes > 100, f"(1) el cajón se baja ({antes} de {alto})")
+        for _ in range(3):
+            pg.js("repintarClaves();")
+        despues = pg.p.evaluate(f"() => document.querySelector('{cuerpo}').scrollTop")
+        ok(abs(despues - antes) < 4,
+           f"(2) repintarlo tres veces no lo devuelve arriba ({antes} → {despues})")
+        # (3) LO QUE PASABA: una pasada en la que las secciones aún están
+        # «cargando…» (el cajón, más corto) y la siguiente ya con todo
+        pg.js("const fuente = (typeof pintarConfigDentro === 'function' ? pintarConfigDentro : pintarConfig).toString(); "
+              "window.__nombres = [...new Set(fuente.match(/\\b(seccion|bloque)[A-Z]\\w*(?=\\()/g))]; "
+              "window.__reales = window.__nombres.map(n => window[n]); "
+              "window.__nombres.forEach(n => { window[n] = () => h('div', { clase: 'cargando' }, 'cargando…'); }); "
+              "repintarClaves();")
+        pg.js("window.__nombres.forEach((n, i) => { window[n] = window.__reales[i]; }); repintarClaves();")
+        luego = pg.p.evaluate(f"() => document.querySelector('{cuerpo}').scrollTop")
+        ok(abs(luego - antes) < 4,
+           f"(3) ni cuando una pasada sale más corta mientras carga ({antes} → {luego})")
+        pg.captura("repintar_no_salta", entera=False)
+    finally:
+        pg.sin_errores("repintar no salta")
         pg.cerrar()
 
 

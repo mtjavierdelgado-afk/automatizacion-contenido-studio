@@ -5864,3 +5864,4 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .grupo-vivos { margin-bottom: 4px; }
 .grupo-publicados .tarjeta-piloto { opacity: 0.75; }
 .ver-publicados-piloto { align-self: flex-start; }
+.relleno-repintado { pointer-events: none; }

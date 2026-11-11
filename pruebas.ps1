@@ -92,6 +92,7 @@ $suites = @(
   'pasos\prueba_relato_sin_cortes.py',
   'pasos\prueba_portada_guion.py',
   'pasos\prueba_gv_sitios.py',
+  'pasos\prueba_png_seguro.py',
   'pasos\prueba_diagnostico_velocidad.py',
   'pasos\prueba_consumo_claude.py',
   'pasos\prueba_piloto.py',

@@ -635,11 +635,82 @@ def prueba_mcp():
     comprobar(json.loads(lineas[1])["result"]["tools"], "y la segunda es la lista")
 
 
+def prueba_arranques_escalonados():
+    seccion("2d] dos llamadas de la misma cuenta no ARRANCAN a la vez (sesion-y-saltos)")
+    import threading                                           # noqa: PLC0415
+    import time                                                # noqa: PLC0415
+
+    class Falso:
+        def __init__(self, orden, **_k):
+            self.orden, self.vivo = orden, True
+
+        def poll(self):
+            return None if self.vivo else 0
+
+    real, espacio = cli_claude.subprocess.Popen, cli_claude.ESPACIO_ARRANQUE_S
+    cli_claude.subprocess.Popen = Falso
+    cli_claude.ESPACIO_ARRANQUE_S = 0.8
+    cli_claude._ARRANQUES.clear()
+    try:
+        a = {"config_dir": "/tmp/cuenta_a"}
+        b = {"config_dir": "/tmp/cuenta_b"}
+        t0 = time.time()
+        primero = cli_claude.lanzar_escalonado(["x"], a)
+        comprobar(time.time() - t0 < 0.2, "la primera arranca en el acto")
+        t0 = time.time()
+        cli_claude.lanzar_escalonado(["y"], b)
+        comprobar(time.time() - t0 < 0.2, "otra cuenta no espera")
+        t0 = time.time()
+        segundo = cli_claude.lanzar_escalonado(["z"], a)
+        esperado = time.time() - t0
+        comprobar(esperado >= 0.6,
+                  f"la segunda de la MISMA cuenta espera a que la primera lleve un rato ({esperado:.2f} s)")
+        primero.vivo = segundo.vivo = False
+        t0 = time.time()
+        cli_claude.lanzar_escalonado(["w"], a)
+        comprobar(time.time() - t0 < 0.2, "si la anterior ya termino, no se espera")
+        # dos a la vez desde dos hilos: salen separadas
+        cli_claude._ARRANQUES.clear()
+        horas = []
+
+        def lanza():
+            cli_claude.lanzar_escalonado(["h"], a)
+            horas.append(time.time())
+        hilos = [threading.Thread(target=lanza) for _ in range(2)]
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join()
+        horas.sort()
+        comprobar(len(horas) == 2 and horas[1] - horas[0] >= 0.6,
+                  f"dos hilos a la vez arrancan separados ({horas[1] - horas[0]:.2f} s)")
+
+        class Avance:
+            cancelado = True
+
+            def relanzar_cancelacion(self, para):
+                raise KeyboardInterrupt(para)
+        try:
+            cli_claude.lanzar_escalonado(["c"], a, Avance(), "la prueba")
+            comprobar(False, "cancelar mientras espera no lanza nada")
+        except KeyboardInterrupt:
+            comprobar(True, "cancelar mientras espera no lanza nada")
+        cli_claude.ESPACIO_ARRANQUE_S = 0
+        t0 = time.time()
+        cli_claude.lanzar_escalonado(["d"], a)
+        comprobar(time.time() - t0 < 0.2, "con ESTUDIO_CLI_ESPACIO_S=0 no se espera nunca")
+    finally:
+        cli_claude.subprocess.Popen = real
+        cli_claude.ESPACIO_ARRANQUE_S = espacio
+        cli_claude._ARRANQUES.clear()
+
+
 def main():
     try:
         prueba_salud()
         prueba_una_pasada()
         prueba_fallo_pasajero()
+        prueba_arranques_escalonados()
         prueba_cancelar_corta_el_cli()
         prueba_claves()
         prueba_mcp()

@@ -10,6 +10,14 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**La sesión de Claude ya no se cae por llamadas a la vez, y los menús no saltan (11 de noviembre)**
+- Dos llamadas a Claude con la misma cuenta ya no arrancan en el mismo segundo:
+  la segunda espera unos segundos a que la primera renueve el acceso. Arrancar
+  a la vez era lo que dejaba la cuenta sin sesión y obligaba a volver a entrar.
+  Lo que ya está trabajando no se toca y no se paga nada de más.
+- Configuración y la guía de inicio ya no vuelven arriba solas mientras esperas
+  a entrar en Claude: se quedan donde estabas.
+
 **El guion visual se pone al día solo (9 de noviembre)**
 - El bloque «Guion visual» (paso Voz o Imágenes) ya no se queda vacío si lo
   abriste antes de tener el guion: cuando terminan el guion, la voz, una

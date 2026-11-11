@@ -2506,7 +2506,42 @@ function repintarClaves() {
   if (INICIO.abierta) pintarInicio();
 }
 
+/* REPINTAR SIN SALTAR (rama sesion-y-saltos, visto por el dueño el 09-11):
+   mientras se espera el acceso a Claude, Configuración se repinta cada 2 s, y
+   vaciar el cajón lo dejaba un instante sin altura: el navegador perdía dónde
+   estabas y el menú volvía arriba. Se apunta el desplazamiento de lo que se
+   desplaza (el cajón, su cuerpo y la página) y se devuelve al terminar. */
+function conservandoScroll(selectores, pintar, sostener) {
+  const nodos = selectores.map(s => (typeof s === 'string' ? $(s) : s))
+    .concat([document.scrollingElement]).filter(Boolean);
+  const antes = nodos.map(n => [n, n.scrollTop, n.scrollLeft]);
+  /* EL ALTO SE SOSTIENE UN MOMENTO: una sección que vuelve a pintarse
+     «cargando…» deja el cajón más corto, el navegador recorta el
+     desplazamiento al nuevo fondo y, cuando la sección se rellena, ya estabas
+     más arriba. Un relleno al final con lo que falta de alto, durante un
+     segundo y medio, deja sitio para volver a donde estabas. */
+  const caja = sostener ? $(sostener) : null;
+  const alto = caja ? caja.scrollHeight : 0;
+  try { return pintar(); } finally {
+    // lo que falte de alto, como un relleno al final (que se va solo)
+    if (caja && caja.scrollHeight < alto) {
+      const relleno = h('div', { clase: 'relleno-repintado', 'aria-hidden': 'true' });
+      relleno.style.height = `${alto - caja.scrollHeight}px`;
+      caja.appendChild(relleno);
+      setTimeout(() => relleno.remove(), 1500);
+    }
+    antes.forEach(([n, arriba, izquierda]) => {
+      if (n.scrollTop !== arriba) n.scrollTop = arriba;
+      if (n.scrollLeft !== izquierda) n.scrollLeft = izquierda;
+    });
+  }
+}
+
 function pintarConfig() {
+  return conservandoScroll(['#config', '#cuerpo-config'], pintarConfigDentro, '#cuerpo-config');
+}
+
+function pintarConfigDentro() {
   const caja = vaciar($('#cuerpo-config'));
   const vista = estadoConfig();
   if (vista.error) {
@@ -20127,6 +20162,10 @@ function irAInicio(paso) {
 }
 
 function pintarInicio() {
+  return conservandoScroll(['#inicio', '#inicio .cuadro'], pintarInicioDentro, '#inicio .cuadro');
+}
+
+function pintarInicioDentro() {
   const capa = $('#inicio');
   if (!capa || !INICIO.abierta) return;
   const cuadro = vaciar(capa.querySelector('.cuadro'));

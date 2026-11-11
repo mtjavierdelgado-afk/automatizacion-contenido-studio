@@ -10555,5 +10555,136 @@ def gv_refresco(navegador, datos):
         pg.cerrar()
 
 
+# ======================================================================
+# EL VÍDEO EN OTRO IDIOMA (rama `otro-idioma`, 11-11-2026). Tramo propio y al
+# final, para no chocar con las otras ramas.
+
+def _huellas_de_imagenes(datos, pid):
+    """{plano: md5} de las imágenes del plan activo de un vídeo."""
+    import hashlib                                              # noqa: PLC0415
+    base = os.path.join(datos["proyectos"], pid, "pasos", "assets")
+    try:
+        with open(os.path.join(base, "activa.json"), encoding="utf-8") as fh:
+            activa = json.load(fh).get("activa")
+    except (OSError, ValueError):
+        return {}
+    carpeta = os.path.join(base, f"v{activa}", "escenas")
+    salida = {}
+    for nombre in sorted(os.listdir(carpeta)) if os.path.isdir(carpeta) else []:
+        if nombre.endswith(".png"):
+            with open(os.path.join(carpeta, nombre), "rb") as fh:
+                salida[nombre[:-4]] = hashlib.md5(fh.read()).hexdigest()
+    return salida
+
+
+def _foto_del_estado(datos, pid):
+    try:
+        with open(os.path.join(datos["proyectos"], pid, "estado.json"), encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return {paso: (d.get("params"), d.get("firma"), d.get("activa"))
+            for paso, d in (doc.get("pasos") or {}).items()}
+
+
+@escenario
+def video_en_otro_idioma(navegador, datos):
+    """«Hacer este vídeo en otro idioma»: primero dice lo que cuesta y espera el
+    OK; con el OK duplica, traduce plano a plano (el Claude falso pone «EN:»),
+    graba la voz en inglés y monta con LAS MISMAS imágenes, sin dibujar ninguna.
+    El vídeo de origen no cambia en nada (regla 1)."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid, 600)
+    antes = _foto_del_estado(datos, pid)
+    imagenes = _huellas_de_imagenes(datos, pid)
+    ok(imagenes, f"el vídeo de prueba tiene imágenes ({len(imagenes)})")
+
+    r, info = api.get(f"/api/proyectos/{pid}/otro_idioma")
+    ok(r.status_code == 200 and info.get("origen") == "es", f"sabe de qué idioma sale ({info.get('origen')})")
+    ok("en" in [i["id"] for i in info.get("idiomas") or []] and
+       "es" not in [i["id"] for i in info.get("idiomas") or []],
+       "ofrece el inglés y no el español")
+    r, info = api.get(f"/api/proyectos/{pid}/otro_idioma?idioma=en")
+    est = info.get("estimacion") or {}
+    ok(r.status_code == 200 and (est.get("voz") or {}).get("caracteres", 0) > 0,
+       f"dice cuántos caracteres va a locutar ({(est.get('voz') or {}).get('caracteres')})")
+    ok((est.get("claude") or {}).get("usd") == 0 and (est.get("imagenes") or {}).get("a_dibujar") == 0,
+       "Claude va con la suscripción y no hay imágenes que dibujar")
+    ok((est.get("imagenes") or {}).get("reutilizadas", 0) > 0, "y las imágenes se reutilizan")
+    ok("(EN)" in str(info.get("nombre_sugerido")), f"propone un nombre ({info.get('nombre_sugerido')})")
+    r, _d = api.post(f"/api/proyectos/{pid}/otro_idioma", {"idioma": "en"})
+    ok(r.status_code == 400, "sin el OK no hace nada (400)")
+    ok(_foto_del_estado(datos, pid) == antes, "y preguntar no escribe nada en el vídeo")
+
+    r, lanzado = api.post(f"/api/proyectos/{pid}/otro_idioma", {"idioma": "en", "confirmado": True})
+    ok(r.status_code == 202 and lanzado.get("trabajo_id"), f"con el OK se lanza ({r.status_code} {lanzado})")
+    fin = api.esperar(lanzado.get("trabajo_id"), 600)
+    res = fin.get("resultado") or {}
+    ok(fin.get("estado") == "listo" and res.get("copia"), f"la copia está hecha ({fin.get('estado')} {fin.get('error')})")
+    copia = res.get("copia") or ""
+    ok(res.get("tanda"), f"y su voz y su montaje se lanzan solos ({res.get('aviso')})")
+    ok(api.libre(copia, 1500), "la tanda de la copia termina")
+    ok(_foto_del_estado(datos, pid) == antes, "el vídeo de origen no ha cambiado en nada (params, firmas, versiones)")
+
+    r, c_guion = api.get(f"/api/proyectos/{copia}/pasos/guion")
+    bloques = (c_guion.get("params") or {}).get("bloques") or {}
+    ok(bloques and all(str(t).startswith("EN:") for t in bloques.values()),
+       f"el guion de la copia está traducido bloque a bloque ({len(bloques)})")
+    ok(c_guion.get("estado") == "listo", f"y el guion no pide reescribirse ({c_guion.get('estado')})")
+    r, c_voz = api.get(f"/api/proyectos/{copia}/pasos/voz")
+    ok((c_voz.get("params") or {}).get("idioma") == "en" and c_voz.get("estado") == "listo",
+       f"la voz se ha grabado en inglés ({c_voz.get('estado')})")
+    r, c_render = api.get(f"/api/proyectos/{copia}/pasos/render")
+    ok(c_render.get("estado") == "listo", f"y está montada ({c_render.get('estado')})")
+    nuevas = _huellas_de_imagenes(datos, copia)
+    ok(nuevas == imagenes, f"con LAS MISMAS imágenes, byte a byte ({len(nuevas)} de {len(imagenes)})")
+    base = os.path.join(datos["proyectos"], copia, "pasos", "assets")
+    with open(os.path.join(base, "activa.json"), encoding="utf-8") as fh:
+        activa = json.load(fh).get("activa")
+    with open(os.path.join(base, f"v{activa}", "plan.json"), encoding="utf-8") as fh:
+        plan = json.load(fh)
+    escenas = plan.get("escenas") or []
+    ok(len(escenas) == len([e for e in escenas]) and escenas and
+       all("EN:" in str(e.get("narracion")) for e in escenas if e.get("narracion")),
+       "cada plano dice lo suyo en inglés")
+    fichas = []
+    for e in escenas:
+        ruta = os.path.join(base, f"v{activa}", "escenas", f"{e['id']}.json")
+        if os.path.exists(ruta):
+            with open(ruta, encoding="utf-8") as fh:
+                fichas.append(json.load(fh))
+    ok(fichas and len(fichas) == len(escenas), "cada plano conserva la ficha de su imagen")
+    imagenes_pagadas = 0
+    try:
+        with open(os.path.join(datos["base"], "coste.jsonl"), encoding="utf-8") as fh:
+            for linea in fh:
+                try:
+                    gasto = json.loads(linea)
+                except ValueError:
+                    continue
+                if gasto.get("proyecto") == copia and gasto.get("operacion") == "imagen":
+                    imagenes_pagadas += 1
+    except OSError:
+        pass
+    ok(imagenes_pagadas == 0, f"ninguna imagen se ha dibujado ni pagado ({imagenes_pagadas})")
+    r, c_assets = api.get(f"/api/proyectos/{copia}/pasos/assets")
+    ok(not (c_assets.get("unidades_obsoletas") or []),
+       f"y ninguna sale obsoleta ({len(c_assets.get('unidades_obsoletas') or [])})")
+    with open(os.path.join(datos["proyectos"], copia, "proyecto.json"), encoding="utf-8") as fh:
+        config = json.load(fh)
+    ok((config.get("traduccion_de") or {}).get("video") == pid and config.get("video_light"),
+       "la copia sabe de qué vídeo sale y es un vídeo como los demás")
+    capas = os.path.join(datos["proyectos"], copia, "pasos", "callouts")
+    with open(os.path.join(capas, "activa.json"), encoding="utf-8") as fh:
+        activa_c = json.load(fh).get("activa")
+    textos = ""
+    carpeta = os.path.join(capas, f"v{activa_c}", "capas_fijas")
+    for nombre in sorted(os.listdir(carpeta))[:6]:
+        with open(os.path.join(carpeta, nombre), encoding="utf-8") as fh:
+            textos += fh.read()
+    ok("EN:" in textos or "EN" in textos, "los subtítulos salen en inglés")
+
+
 if __name__ == "__main__":
     sys.exit(main())

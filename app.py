@@ -1631,6 +1631,178 @@ def duplicar_proyecto(pid: str, cuerpo: dict = Body(default=None)):
             "pasos": [ficha_paso(destino, p["id"]) for p in PASOS]}
 
 
+# ----------------------------------------------- OTRO IDIOMA (11-11-2026)
+# «Hacer este vídeo en otro idioma»: duplica el vídeo, traduce el MISMO guion
+# plano a plano, graba la voz en ese idioma y monta con las MISMAS imágenes.
+# Todo lo que se escribe es de la COPIA; el vídeo de origen no se toca (regla 1).
+# El cómo y el porqué están en `pasos/otro_idioma.py`.
+
+import otro_idioma as OTRO_IDIOMA  # noqa: E402
+
+#: Lo que la tanda de la copia NO corre aunque la receta lo dé por puesto: todo
+#: lo que decide de nuevo qué se ve (y podría pedir imágenes nuevas). La copia
+#: trae ya sus cartelas, su dirección, su guía y sus hojas; se monta con eso.
+_OTRO_IDIOMA_SIN = {"plan_cartelas": False, "direccion": False, "guia_estilo": False,
+                    "piezas": False}
+
+
+def _material_otro_idioma(ctx):
+    try:
+        return OTRO_IDIOMA.material(ctx.proyecto, ctx.estado, PASOS_MODULOS.p6_assets)
+    except OTRO_IDIOMA.ErrorOtroIdioma as fallo:
+        raise ErrorApi(409, str(fallo))
+
+
+def _estimacion_otro_idioma(ctx, datos, idioma):
+    assets = ctx.estado.params("assets") or {}
+    calidad = str(assets.get("calidad") or "low").lower()
+    modo = PASOS_MODULOS.p6_assets.modo_de(assets.get("estilo"))
+    try:
+        return OTRO_IDIOMA.estimar(datos, idioma, tarifa_caracter=COSTE.tarifa_caracter(),
+                                   usd_por_imagen=PASOS_MODULOS.presets_light.usd_por_imagen(
+                                       calidad, modo=modo))
+    except OTRO_IDIOMA.ErrorOtroIdioma as fallo:
+        raise ErrorApi(400, str(fallo))
+
+
+def _nombre_en_otro_idioma(ctx, idioma):
+    base = str(ctx.proyecto.config.get("nombre") or ctx.id).strip()
+    corto = OTRO_IDIOMA.IDIOMAS[idioma]["corto"]
+    nombre = f"{base} ({corto})"[:80]
+    intento = 2
+    while os.path.isdir(os.path.join(raiz_proyectos(), identificador(nombre))):
+        nombre = f"{base} ({corto} {intento})"[:80]
+        intento += 1
+    return nombre
+
+
+@app.get("/api/proyectos/{pid}/otro_idioma")
+def otro_idioma_estimacion(pid: str, idioma: str = Query(default="")):
+    """Lo que hace falta para elegir: idiomas, de qué idioma sale, avisos y, con
+    `idioma`, lo que costaría (voz y Claude). No escribe nada."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    ctx = contexto(pid)
+    datos = _material_otro_idioma(ctx)
+    origen = datos["idioma_origen"]
+    voz = ctx.estado.params("voz") or {}
+    salida = {
+        "origen": origen,
+        "nombre_origen": OTRO_IDIOMA.IDIOMAS.get(origen, {}).get("nombre", origen),
+        "idiomas": [{"id": k, "nombre": v["nombre"]} for k, v in OTRO_IDIOMA.IDIOMAS.items()
+                    if k != origen],
+        "planos": datos["planos"], "con_imagen": datos["con_imagen"],
+        "palabras": datos["palabras"], "avisos": datos["avisos"],
+        "cartelas": sum(len(c) for c in datos["cartelas"].values()),
+        "voz_id": str(voz.get("voz_id") or ""),
+        "traduccion_de": ctx.proyecto.config.get(OTRO_IDIOMA.CONFIG_TRADUCCION) or None,
+    }
+    idioma = str(idioma or "").strip().lower()
+    if idioma:
+        salida["estimacion"] = _estimacion_otro_idioma(ctx, datos, idioma)
+        salida["nombre_sugerido"] = _nombre_en_otro_idioma(ctx, idioma)
+    return salida
+
+
+@app.post("/api/proyectos/{pid}/otro_idioma", status_code=202)
+def otro_idioma_lanzar(pid: str, cuerpo: dict = Body(default=None)):
+    """{idioma, voz_id?, nombre?, confirmado: true} -> el trabajo que lo hace.
+
+    Sin `confirmado` no hace nada: lo que cuesta se enseña antes (GET) y aquí
+    solo se lanza con el OK dado. Duplica, traduce, prepara la copia y deja
+    lanzada su tanda (voz, imágenes y montaje); el vídeo de origen no se toca.
+    """
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    ctx = contexto(pid)
+    datos_peticion = _cuerpo(cuerpo)
+    idioma = str(datos_peticion.get("idioma") or "").strip().lower()
+    if idioma not in OTRO_IDIOMA.IDIOMAS:
+        raise ErrorApi(400, "elige el idioma: " + ", ".join(OTRO_IDIOMA.IDIOMAS))
+    if datos_peticion.get("confirmado") is not True:
+        raise ErrorApi(400, "falta tu OK: mira antes lo que cuesta y confírmalo")
+    voz_id = str(datos_peticion.get("voz_id") or "").strip()
+    if voz_id and not re.fullmatch(r"[A-Za-z0-9_-]{4,80}", voz_id):
+        raise ErrorApi(400, "esa voz no es válida")
+    nombre = str(datos_peticion.get("nombre") or "").strip()[:80]
+    if nombre and not identificador(nombre):
+        raise ErrorApi(400, f"'{nombre}' no da un nombre de vídeo válido")
+    # NO CON ALGO CORRIENDO EN EL ORIGEN: duplicar en mitad de una tanda copia
+    # una versión a medio escribir (ver `duplicar_proyecto`).
+    activos = ctx.gestor.listar(activos=True)
+    if activos:
+        raise ErrorApi(409, f"«{activos[0].get('nombre')}» está corriendo en este vídeo: "
+                            "espera a que termine para pasarlo a otro idioma")
+    datos = _material_otro_idioma(ctx)
+    estimacion = _estimacion_otro_idioma(ctx, datos, idioma)
+    nombre = nombre or _nombre_en_otro_idioma(ctx, idioma)
+    trabajo_id = ctx.gestor.lanzar("otro idioma", _correr_otro_idioma, ctx, idioma,
+                                   voz_id, nombre)
+    _registrar_trabajo(trabajo_id, ctx.id)
+    ctx.bitacora.anotar("otro_idioma_pedido", None,
+                        {"idioma": idioma, "voz_id": voz_id, "nombre": nombre,
+                         "usd_previsto": estimacion.get("usd_total")})
+    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),
+            "estimacion": estimacion, "nombre": nombre}
+
+
+def _correr_otro_idioma(avisar, ctx, idioma, voz_id, nombre):
+    """El trabajo: traducir (Claude), duplicar, preparar la copia y lanzar su
+    tanda. TRADUCE PRIMERO: si Claude falla, no queda una copia a medias."""
+    avisar(0.02, "leyendo el vídeo", "Leyendo el vídeo")
+    datos = OTRO_IDIOMA.material(ctx.proyecto, ctx.estado, PASOS_MODULOS.p6_assets)
+
+    def tramo(valor, mensaje="", publico=""):
+        return avisar(0.05 + 0.75 * float(valor or 0), mensaje,
+                      publico or "Traduciendo el guion")
+    if hasattr(avisar, "al_cancelar"):
+        tramo.al_cancelar = avisar.al_cancelar
+    traduccion = OTRO_IDIOMA.traducir(datos, idioma, cwd=ctx.proyecto.raiz, avisar=tramo)
+
+    avisar(0.82, "creando la copia", "Creando el vídeo nuevo")
+    try:
+        nuevo = ctx.proyecto.duplicar(raiz_proyectos(), nombre)
+    except OSError as fallo:
+        raise RuntimeError(f"no se ha podido crear la copia: {fallo}")
+    copia = contexto(nuevo.id)
+    for clave in OTRO_IDIOMA.CONFIG_QUE_VIAJA:
+        if clave in ctx.proyecto.config:
+            copia.proyecto.config[clave] = copy.deepcopy(ctx.proyecto.config[clave])
+    copia.proyecto.guardar_config()
+    # el proyecto (cliente) del original, si se lo asignaron a mano
+    try:
+        propio = CLIENTES._leer(raiz_proyectos()).get("videos", {}).get(ctx.id)
+        if propio:
+            CLIENTES.asignar_video(raiz_proyectos(), copia.id, propio)
+    except Exception:                                            # noqa: BLE001
+        pass
+
+    avisar(0.88, "preparando la copia", "Preparando la copia")
+    resumen = OTRO_IDIOMA.preparar_copia(copia.proyecto, copia.estado, datos, traduccion,
+                                         idioma, voz_id=voz_id, origen=ctx.id,
+                                         p6=PASOS_MODULOS.p6_assets)
+    copia.bitacora.anotar("otro_idioma_creado", None,
+                          {"de": ctx.id, "idioma": idioma, **resumen})
+    ctx.bitacora.anotar("otro_idioma_hecho", None,
+                        {"a": copia.id, "idioma": idioma, **resumen})
+
+    # LA TANDA DE LA COPIA: la voz, las imágenes (que se conservan) y el MP4.
+    avisar(0.95, "lanzando la voz y el montaje", "Lanzando la voz y el montaje")
+    tanda, aviso = None, ""
+    try:
+        lanzada = generar_video(copia.id, {"pestanas": ["voz", "video", "render"],
+                                           "modo": "pendientes",
+                                           "tareas": dict(_OTRO_IDIOMA_SIN)})
+        tanda = lanzada.get("trabajo_id")
+    except ErrorApi as fallo:
+        aviso = (f"la copia está lista, pero no se ha podido lanzar su voz y su montaje "
+                 f"({fallo.mensaje}): ábrela y pulsa "
+                 "«Generar»")
+    avisar(1.0, "hecho", "Hecho")
+    return {"copia": copia.id, "nombre": nombre, "idioma": idioma,
+            "tanda": tanda, "aviso": aviso, **resumen}
+
+
 # -------------------------------------------------------------- la papelera
 # Un proyecto es el trabajo de varias horas y varios euros de generacion. No se
 # borra: se aparta. La carpeta se mueve a proyectos/_papelera/, que no aparece en

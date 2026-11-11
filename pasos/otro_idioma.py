@@ -403,7 +403,9 @@ Reglas:
   orden, sin añadir, quitar ni resumir nada. Que suene natural dicho en voz alta
   ({destino} neutro, como lo diría un locutor nativo).
 - Los nombres propios, las marcas y los nombres de productos se quedan como están.
-  Las cifras y las medidas, las mismas (escritas como se dirían en {destino}).
+- Las cifras y las medidas, las mismas, y ESCRITAS CON LETRAS como se dicen en
+  {destino} («four thousand kilometres», no «4,000 km»): la voz lee lo escrito,
+  igual que en el original. Lo mismo con los símbolos (%, $, &).
 - Cada <t> tiene una o varias <p> (partes). Devuelve EXACTAMENTE el mismo número
   de partes, cortando la traducción en el punto equivalente: cada parte va a un
   tramo distinto del audio.

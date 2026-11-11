@@ -3596,7 +3596,7 @@ EXTRAS = ("alcance", "impresiones", "nuevos_seguidores", "visitas_perfil", "vist
           "tiempo_total_s")
 #: Lo que no es una cuenta: la curva de retencion de TikTok y los repartos (de
 #: donde vinieron las vistas, que publico). Se guarda por envio y no se suma.
-DETALLE = ("curva", "fuentes", "publico")
+DETALLE = ("curva", "mitad_s", "fuentes", "publico")
 #: Todo lo que se apunta de un envio
 CAMPOS_ENVIO = METRICAS + EXTRAS + RETENCION + DETALLE
 LOTES_POR_VUELTA = 30

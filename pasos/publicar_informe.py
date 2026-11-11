@@ -323,7 +323,8 @@ def resumen(inf):
                   f"{inf['dias_con_publicacion']} día(s) con publicación)"
                   + _cambio(t.get("posts"), a.get("posts"), frente))
     for k, nombre in (("vistas", "Vistas"), ("me_gusta", "Me gusta"),
-                      ("comentarios", "Comentarios"), ("compartidos", "Compartidos")):
+                      ("comentarios", "Comentarios"), ("compartidos", "Compartidos"),
+                      ("guardados", "Guardados")):
         if isinstance(t.get(k), (int, float)):
             lineas.append(f"• {nombre}: {_num(t[k])}" + _cambio(t.get(k), a.get(k), frente))
     if inf["por_red"]:

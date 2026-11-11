@@ -599,15 +599,23 @@ class ClienteUploadPost:
         datos.update(cls._detalle(bruto))
         return datos
 
-    @staticmethod
-    def _fraccion(valor):
-        """Un porcentaje como fraccion (0..1): acepta 0,85 y 85."""
-        v = ClienteUploadPost._numero(valor)
-        if v is None or v < 0:
-            return None
-        if v > 1:
-            v = v / 100
-        return round(v, 4) if v <= 1 else None
+    @classmethod
+    def _escala_comun(cls, crudos):
+        """Porcentajes de UNA lista como fracciones (0..1). La escala se decide
+        una vez POR LISTA, no punto a punto (revision independiente, 11-11): si
+        algun valor pasa de 1, la lista viene en 0-100 y se dividen TODOS. Punto
+        a punto, el 1 % del final de una curva en 0-100 se leia como 100 % y la
+        curva volvia a subir. Lo que no es un numero >= 0 queda en None.
+        -> [fraccion|None] en el mismo orden"""
+        numeros = [cls._numero(v) for v in crudos]
+        numeros = [v if v is not None and v >= 0 else None for v in numeros]
+        en_cien = any(v is not None and v > 1 for v in numeros)
+        salida = []
+        for v in numeros:
+            if v is not None and en_cien:
+                v = v / 100
+            salida.append(round(v, 6) if v is not None and v <= 1 else None)
+        return salida
 
     @classmethod
     def _detalle(cls, bruto):
@@ -615,7 +623,8 @@ class ClienteUploadPost:
         visto, la CURVA de retencion de TikTok (que parte sigue viendo en cada
         segundo), de donde vinieron las vistas y que publico lo vio. Cada red
         trae lo suyo y con su forma: lo que no se entiende se deja fuera (None),
-        nunca se inventa. -> {"tiempo_total_s", "curva", "fuentes", "publico"}"""
+        nunca se inventa.
+        -> {"tiempo_total_s", "curva", "mitad_s", "fuentes", "publico"}"""
         bruto = bruto if isinstance(bruto, dict) else {}
         total = None
         for suyo in cls.CAMPOS_TIEMPO_TOTAL:
@@ -623,52 +632,70 @@ class ClienteUploadPost:
             if v is not None and 0 <= v < 10 ** 10:
                 total = round(v, 1)
                 break
-        curva = []
+        curva, mitad = [], None
         crudo = bruto.get("retention")
         if isinstance(crudo, dict):
             crudo = [{"second": k, "percentage": v} for k, v in crudo.items()]
         if isinstance(crudo, list):
-            for punto in crudo:
-                if not isinstance(punto, dict):
+            puntos = [p for p in crudo if isinstance(p, dict)]
+            segundos = [cls._numero(p.get("second", p.get("time", p.get("seconds")))) for p in puntos]
+            partes = cls._escala_comun([p.get("percentage", p.get("rate", p.get("value"))) for p in puntos])
+            por_segundo = {}
+            for segundo, parte in zip(segundos, partes):
+                if segundo is None or parte is None or segundo < 0 or segundo > 86400:
                     continue
-                segundo = cls._numero(punto.get("second", punto.get("time", punto.get("seconds"))))
-                parte = cls._fraccion(punto.get("percentage", punto.get("rate", punto.get("value"))))
-                if segundo is None or parte is None or segundo < 0:
-                    continue
-                curva.append([round(segundo, 1), parte])
-            curva.sort(key=lambda p: p[0])
-            curva = curva[:cls.TOPE_CURVA]
+                por_segundo[round(segundo, 1)] = parte      # un segundo repetido: manda el ultimo
+            curva = [[sg, round(pt, 4)] for sg, pt in sorted(por_segundo.items())]
+            # EN QUE SEGUNDO SE VA LA MITAD, con la curva ENTERA (antes de
+            # aligerarla): la pantalla lo dice en una frase y no puede mentir
+            mitad = next((sg for sg, pt in curva if pt <= 0.5), None)
+            if len(curva) > cls.TOPE_CURVA:
+                # se aligera repartiendo los puntos por TODO el video (no los
+                # primeros 120: un video de 200 s se cortaba en el segundo 119) y
+                # conservando siempre el ultimo
+                paso = -(-len(curva) // cls.TOPE_CURVA)
+                ligera = curva[::paso]
+                if ligera[-1] != curva[-1]:
+                    ligera = ligera[:cls.TOPE_CURVA - 1] + [curva[-1]]
+                curva = ligera
 
         def reparto(crudo, claves):
-            salida = []
             if isinstance(crudo, dict):
                 crudo = [{"nombre": k, "percentage": v} for k, v in crudo.items()]
             if not isinstance(crudo, list):
                 return None
-            for item in crudo:
-                if not isinstance(item, dict):
-                    continue
+            items = [i for i in crudo if isinstance(i, dict)]
+            partes = cls._escala_comun([i.get("percentage", i.get("value")) for i in items])
+            salida = []
+            for item, parte in zip(items, partes):
                 nombre = next((str(item[k]) for k in claves if item.get(k) not in (None, "")), "")
-                parte = cls._fraccion(item.get("percentage", item.get("value")))
                 if nombre and parte is not None:
-                    salida.append([nombre[:60], parte])
+                    salida.append([nombre[:60], round(parte, 4)])
             salida.sort(key=lambda x: -x[1])
             return salida[:cls.TOPE_REPARTO] or None
 
         return {"tiempo_total_s": total, "curva": curva or None,
+                "mitad_s": mitad if curva else None,
                 "fuentes": reparto(bruto.get("impression_sources"),
                                    ("impression_source", "source", "nombre", "name")),
                 "publico": reparto(bruto.get("audience_types"), ("type", "nombre", "name"))}
 
+    #: Un recuento por encima de esto no es una cifra, es un error
+    TOPE_RECUENTO = 10 ** 12
+
     @classmethod
     def _numeros(cls, bruto):
+        """Los recuentos (vistas, me gusta…): numeros >= 0 y razonables; un
+        numero en texto («3») vale, un negativo o un 1e30 no (no se sumarian
+        bien en los totales de Resultados)."""
         bruto = bruto if isinstance(bruto, dict) else {}
         salida = {}
         for nuestro, suyos in cls.CAMPOS_METRICAS.items():
             valor = None
             for suyo in suyos:
-                if isinstance(bruto.get(suyo), (int, float)) and not isinstance(bruto.get(suyo), bool):
-                    valor = int(bruto[suyo])
+                v = cls._numero(bruto.get(suyo))
+                if v is not None and 0 <= v < cls.TOPE_RECUENTO:
+                    valor = int(v)
                     break
             salida[nuestro] = valor
         return salida

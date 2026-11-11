@@ -28879,9 +28879,11 @@ const NOMBRES_METRICA = {
 /* «3 h 20 min», «12 min», «45 s»: el tiempo total visto de TikTok. */
 function tiempoLegible(segundos) {
   const s = Math.round(Number(segundos) || 0);
-  if (s >= 3600) return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
-  if (s >= 60) return `${Math.round(s / 60)} min`;
-  return `${s} s`;
+  if (s < 60) return `${s} s`;
+  const minutos = Math.round(s / 60);
+  if (minutos < 60) return `${minutos} min`;
+  const resto = minutos % 60;
+  return `${Math.floor(minutos / 60)} h${resto ? ` ${resto} min` : ''}`;
 }
 
 function textoMetricas(m) {
@@ -28917,8 +28919,7 @@ function curvaRetencionPublicar(curva) {
   svg.setAttribute('viewBox', `0 0 ${ancho} ${alto}`);
   svg.setAttribute('class', 'curva-retencion');
   svg.setAttribute('role', 'img');
-  const mitad = puntos.find(p => p[1] <= 0.5);
-  svg.setAttribute('aria-label', mitad ? `La mitad se va en el segundo ${Math.round(mitad[0])}` : 'Más de la mitad lo ve entero');
+  svg.setAttribute('aria-label', 'Qué parte sigue viendo en cada segundo');
   const linea = document.createElementNS(NS, 'polyline');
   linea.setAttribute('points', puntos.map(([s, f]) =>
     `${(s / ultimo * (ancho - 4) + 2).toFixed(1)},${((1 - f) * (alto - 4) + 2).toFixed(1)}`).join(' '));
@@ -28946,7 +28947,11 @@ function detalleMetricasEnvio(e) {
   const fuentes = reparto(m.fuentes, 'De dónde vinieron las vistas');
   const publico = reparto(m.publico, 'Quién lo vio');
   if (!aparte && !curva && !fuentes && !publico) return null;
-  const mitad = (m.curva || []).find(p => Array.isArray(p) && p[1] <= 0.5);
+  // el segundo en que se va la mitad viene calculado con la curva ENTERA
+  // (la guardada puede ir aligerada); en los envíos de antes, de la curva
+  const mitadS = typeof m.mitad_s === 'number' ? m.mitad_s
+    : ((m.curva || []).find(p => Array.isArray(p) && p[1] <= 0.5) || [])[0];
+  const mitad = typeof mitadS === 'number' ? [mitadS] : null;
   return h('details', { clase: 'mas-cifras-envio' },
     h('summary', {}, 'Más cifras'),
     aparte ? h('div', { clase: 'meta' }, aparte) : null,

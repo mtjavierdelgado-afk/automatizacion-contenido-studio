@@ -1937,7 +1937,7 @@ def prueba_portada():
 
 def prueba_metricas_completas():
     """metricas-completas (11-11-2026): lo que Upload-Post ya trae y no se guardaba."""
-    seccion("4c] métricas completas: impresiones aparte, seguidores nuevos, curva de TikTok")
+    seccion("4d] métricas completas: impresiones aparte, seguidores nuevos, curva de TikTok")
     from motores.publicar_uploadpost.cliente import ClienteUploadPost as C
     # 1) el lector, con la forma CRUDA de Upload-Post (docs: post-analytics)
     crudo = {"views": 1000, "likes": 50, "saves": 7, "reach": 800, "impressions": 2400,
@@ -1956,8 +1956,29 @@ def prueba_metricas_completas():
           "los seguidores que trajo, las visitas al perfil y el tiempo total visto")
     igual(c["curva"], [[0.0, 1.0], [3.0, 0.7], [6.0, 0.45]],
           "la curva, ordenada por segundo, en fracción y sin los puntos que no se entienden")
-    igual(c["fuentes"], [["For You", 0.85], ["Search", 0.05]],
-          "de dónde vinieron las vistas, de más a menos (acepta 85 y 0,85)")
+    igual(c["mitad_s"], 6.0, "y en qué segundo se va la mitad")
+    # LA ESCALA SE DECIDE POR LISTA (revisión independiente, 11-11): en una
+    # lista 0-100, el 0,05 es 0,05 % (no 5 %) y el 1 del final de una curva es
+    # 1 % (antes se leía 100 % y la curva volvía a subir)
+    igual(c["fuentes"], [["For You", 0.85], ["Search", 0.0005]],
+          "de dónde vinieron las vistas: lista en 0-100, así que 0,05 es 0,05 %")
+    igual(C._detalle({"impression_sources": [{"source": "A", "percentage": 0.6},
+                                             {"source": "B", "percentage": 0.4}]})["fuentes"],
+          [["A", 0.6], ["B", 0.4]], "una lista que ya viene en fracciones se deja igual")
+    igual(C._detalle({"retention": [{"second": 0, "percentage": 100}, {"second": 5, "percentage": 40},
+                                    {"second": 10, "percentage": 1}]})["curva"],
+          [[0.0, 1.0], [5.0, 0.4], [10.0, 0.01]], "el 1 % del final de una curva no se lee como 100 %")
+    igual(C._detalle({"retention": [{"second": 0, "percentage": 100}, {"second": 0, "percentage": 90},
+                                    {"second": 2, "percentage": 50}]})["curva"],
+          [[0.0, 0.9], [2.0, 0.5]], "un segundo repetido: manda el último (sin tramos verticales)")
+    larga = C._detalle({"retention": [{"second": s, "percentage": max(0, 100 - s * 0.3)}
+                                      for s in range(201)]})
+    ok(len(larga["curva"]) <= C.TOPE_CURVA and larga["curva"][-1][0] == 200.0,
+       f"una curva larga se aligera por TODO el vídeo y conserva el final ({len(larga['curva'])} puntos)")
+    igual(larga["mitad_s"], 167.0, "y la mitad se calcula con la curva entera")
+    raros = C._numeros({"impressions": -5, "profile_views": 1e30, "new_followers": "3", "views": True})
+    igual((raros["impresiones"], raros["visitas_perfil"], raros["nuevos_seguidores"], raros["vistas"]),
+          (None, None, 3, None), "recuentos: ni negativos ni absurdos ni «true»; un número en texto sí")
     igual(c["publico"], [["New viewers", 0.9], ["Returning viewers", 0.1]], "y qué público")
     vacio = C._cifras({"views": 5})
     igual([vacio[k] for k in ("impresiones", "curva", "fuentes", "publico", "tiempo_total_s")],
@@ -2008,13 +2029,32 @@ def prueba_metricas_completas():
         igual(t["alcance"], (tt.get("alcance") or 0) + (ig.get("alcance") or 0), "y el alcance (sumado)")
         ok("curva" not in t and "fuentes" not in t, "la curva y los repartos no se suman")
         igual(res["videos"][0]["impresiones"], t["impresiones"], "el vídeo trae sus impresiones")
-        # la lectura guardada también trae lo nuevo y no lo borra
+        # LA LECTURA GUARDADA (revisión independiente: antes la prueba pasaba
+        # aunque no se leyera nada). 1) una guardada MÁS VIEJA con otra curva no
+        # pisa la que hay; 2) una MÁS NUEVA sí la pone.
         antes = dict(tt)
-        P.leer_guardadas(raiz, ["completo"])
+        datos_sim = json.load(open(simulador, encoding="utf-8"))
+        for trabajo in datos_sim["trabajos"].values():
+            g = (trabajo.get("guardadas") or {}).get("tiktok")
+            if g:
+                g.update(al="2020-01-01T00:00:00+00:00", curva=[[0.0, 1.0], [9.0, 0.1]],
+                         nuevos_seguidores=999)
+        json.dump(datos_sim, open(simulador, "w", encoding="utf-8"))
+        r = P.leer_guardadas(raiz, ["completo"])
+        ok((r or {}).get("leidos", 0) > 0, f"la lectura guardada lee algo: {r}")
         tt2 = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}["tiktok"]["metricas"]
-        ok(tt2.get("curva") and tt2.get("nuevos_seguidores") is not None,
-           "la lectura guardada conserva la curva y los seguidores nuevos")
-        ok(tt2["curva"] == antes["curva"], "sin cambiarlos si no son más nuevos")
+        igual((tt2["curva"], tt2["nuevos_seguidores"]), (antes["curva"], antes["nuevos_seguidores"]),
+              "una lectura guardada MÁS VIEJA no pisa la curva ni los seguidores nuevos")
+        datos_sim = json.load(open(simulador, encoding="utf-8"))
+        for trabajo in datos_sim["trabajos"].values():
+            g = (trabajo.get("guardadas") or {}).get("tiktok")
+            if g:
+                g.update(al="2099-01-01T00:00:00+00:00")
+        json.dump(datos_sim, open(simulador, "w", encoding="utf-8"))
+        P.leer_guardadas(raiz, ["completo"])
+        tt3 = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}["tiktok"]["metricas"]
+        igual((tt3["curva"], tt3["nuevos_seguidores"]), ([[0.0, 1.0], [9.0, 0.1]], 999),
+              "y una MÁS NUEVA sí las pone")
     finally:
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 

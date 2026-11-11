@@ -11715,7 +11715,7 @@ function abrirOtroIdioma(pid) {
       h('div', { clase: 'cab' }, h('b', {}, 'Hacer este vídeo en otro idioma'),
         h('span', { clase: 'meta' }, 'el original no cambia'),
         h('span', { clase: 'crece' }),
-        h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: () => capa.remove() }, '×')),
+        h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: () => cerrar() }, '×')),
       cuerpo));
   document.body.appendChild(capa);
 
@@ -11763,7 +11763,11 @@ function abrirOtroIdioma(pid) {
           else toast(`«${res.nombre}» creado: grabando la voz y montando`);
           capa.remove();
           await cargarGaleriaLight(true).catch(() => null);
-          await abrirVideoLight(res.copia);
+          try {
+            await abrirVideoLight(res.copia);
+          } catch (e) {
+            toast(`«${res.nombre}» está creado, pero no se ha podido abrir: búscalo en tus vídeos (${e.message})`, true);
+          }
           return;
         }
         est.trabajo = null;
@@ -11824,7 +11828,7 @@ function abrirOtroIdioma(pid) {
           disabled: est.lanzando, oninput: ev => { est.nombre = ev.target.value; } })),
       h('li', {}, `Claude traduce el guion al ${nombreIdioma}, plano a plano y sin reescribirlo (${e.claude.palabras} palabras${info.cartelas ? `, y ${info.cartelas} texto(s) de cartela` : ''}).`),
       h('li', {}, `Se graba la voz en ${nombreIdioma}, con subtítulos en ${nombreIdioma}.`),
-      h('li', {}, `Se monta con las mismas ${e.imagenes.reutilizadas} imágenes, sin volver a dibujarlas.`)));
+      h('li', {}, `Se monta con las mismas ${e.imagenes.reutilizadas} imágenes, sin volver a dibujarlas. Si con la voz nueva no salieran los mismos planos, se para antes de montar y no dibuja nada.`)));
     const voces = est.voces || [];
     cuerpo.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'La voz'),
       h('select', { disabled: est.lanzando, onchange: ev => { est.vozId = ev.target.value; } },
@@ -11844,7 +11848,9 @@ function abrirOtroIdioma(pid) {
     cuerpo.appendChild(h('table', { clase: 'tabla otro-idioma-coste' },
       ...filas.map(([a, b]) => h('tr', {}, h('th', {}, a), h('td', {}, b))),
       h('tr', { clase: 'total' }, h('th', {}, 'En total'),
-        h('td', {}, e.usd_total == null ? 'lo de la voz (sin precio puesto)' : `≈ ${dolaresOtroIdioma(e.usd_total)}`))));
+        h('td', {}, e.usd_total != null ? `≈ ${dolaresOtroIdioma(e.usd_total)}`
+          : (e.imagenes.usd ? `≈ ${dolaresOtroIdioma(e.imagenes.usd)} de imágenes, más la voz (sin precio puesto)`
+            : 'lo de la voz (sin precio puesto)')))));
     const avisos = (info.avisos || []).concat([
       'El texto que vaya dibujado DENTRO de una imagen (un cartel, una pizarra) se queda como está: cambiarlo es redibujar esa imagen con una nota, y eso sí se paga.',
       'Los textos de Publicar (título, descripción, hashtags) no se traducen aquí: tienen su propio botón.',
@@ -11854,7 +11860,7 @@ function abrirOtroIdioma(pid) {
       h('button', { clase: 'primario', disabled: est.lanzando, onclick: lanzar },
         est.lanzando ? 'Empezando…'
           : `Sí, hacerlo${e.usd_total == null ? '' : ` (≈ ${dolaresOtroIdioma(e.usd_total)})`}`),
-      h('button', { clase: 'mini fantasma', disabled: est.lanzando, onclick: () => capa.remove() }, 'Ahora no')));
+      h('button', { clase: 'mini fantasma', disabled: est.lanzando, onclick: () => cerrar() }, 'Ahora no')));
   }
 
   pintar();

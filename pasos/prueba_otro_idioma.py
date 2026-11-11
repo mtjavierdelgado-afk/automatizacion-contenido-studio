@@ -196,15 +196,18 @@ def prueba_preparar():
     estado = Estado(copia)
     estado.set_params("guion", {"bloques": {"B009": "texto viejo"}})
     estado.set_params("voz", {"voz_id": "voz-es", "velocidad": "normal"})
-    estado.set_params("revision_audio", {"comentarios": [{"id": "c1", "bloque_id": "B001"}]})
+    estado.set_params("revision_audio", {"comentarios": [{"id": "c1", "bloque_id": "B001"}],
+                                         "idioma": "es", "voz_id": "voz-es", "umbral": 3})
     estado.set_params("assets", {"calidad": "low", "unidades": {
         "escena:S002": {"cartela": {"plantilla": "cifra", "fondo": "negro",
-                                    "datos": {"texto": "CUATRO MIL KM", "n": 4000}},
+                                    "datos": {"texto": "CUATRO MIL KM", "n": 4000},
+                                    "ancla": "Cuatro mil kilómetros de mar"},
                         "direccion": "close-up"},
         "escena:S003": {"direccion": "wide"}}})
     estado.set_params("callouts", {"unidades": {
         "escena:S001": {"subtitulo_texto": "Hola", "subtitulo_ancla": "Hola", "evitar": [{"x": 1}]},
-        "escena:S003": {"subtitulo_texto": "Solo esto"}}})
+        "escena:S003": {"subtitulo_texto": "Solo esto"},
+        "escena:S002": {"elementos": [{"tipo": "flecha", "palabra": "mar"}]}}})
     os.makedirs(copia.ruta_paso("assets", 1, crear=True), exist_ok=True)
     base = copia.ruta_paso("assets", 1)
     os.makedirs(os.path.join(base, "escenas"), exist_ok=True)
@@ -222,7 +225,8 @@ def prueba_preparar():
                                                            "texto": t}]}
                         for i, t in enumerate(CORTE)],
              "escenas": [{"id": "S001", "trozos": [0, 1]}, {"id": "S002", "trozos": [2]},
-                         {"id": "S003", "trozos": [3]}]}
+                         {"id": "S003", "trozos": [3]}],
+             "anclas": {"escena:S002": 2}}
     traduccion = {"trozos": {"T001": ["The freighter left port."], "T002": ["It was full."],
                              "T003": ["Four thousand kilometres of sea"],
                              "T004": ["separated the two ports."]},
@@ -237,17 +241,18 @@ def prueba_preparar():
     voz = estado.params("voz")
     igual((voz["idioma"], voz["voz_id"], voz["velocidad"]), ("en", "voz-en", "normal"),
           "la voz, en el idioma nuevo y con la voz elegida, sin perder sus mandos")
-    igual(estado.params("revision_audio").get("comentarios"), [],
-          "los comentarios de la revisión (sobre el texto de antes) fuera")
+    igual(estado.params("revision_audio"), {"comentarios": [], "umbral": 3},
+          "los comentarios de la revisión y su idioma y voz de antes, fuera; lo demás se queda")
     unidades = estado.params("assets")["unidades"]
     igual(unidades["escena:S002"]["cartela"],
-          {"plantilla": "cifra", "fondo": "negro", "datos": {"texto": "FOUR THOUSAND KM", "n": 4000}},
-          "la cartela traducida conserva su plantilla y sus otros datos")
+          {"plantilla": "cifra", "fondo": "negro", "datos": {"texto": "FOUR THOUSAND KM", "n": 4000},
+           "ancla": "Four thousand kilometres of sea"},
+          "la cartela traducida conserva su plantilla y sus otros datos, y se ancla al trozo traducido")
     igual(unidades["escena:S002"]["direccion"], "close-up", "y el plano su dirección")
     igual(unidades["escena:S003"], {"direccion": "wide"}, "los demás planos, igual")
     cu = estado.params("callouts")["unidades"]
     igual(cu, {"escena:S001": {"evitar": [{"x": 1}]}},
-          "los subtítulos escritos a mano fuera, lo demás de cada plano se queda")
+          "los subtítulos escritos a mano y los elementos sobre una palabra, fuera; lo demás se queda")
     with open(os.path.join(base, "plan.json"), encoding="utf-8") as fh:
         plan = json.load(fh)
     igual(plan["corte"], ["The freighter left port.", "It was full.",
@@ -265,6 +270,103 @@ def prueba_preparar():
           "la copia apunta de qué vídeo sale")
 
 
+def prueba_traducir_parar():
+    seccion("parar es parar, y una parte no se estira a dos sin palabras")
+    datos = {"trozos": [{"id": "T001", "partes": [{"bloque": "B001", "texto": "Uno"},
+                                                  {"bloque": "B002", "texto": "dos"}]}],
+             "escenas": [], "sueltos": [], "cartelas": {}}
+
+    class Cancelado(Exception):
+        pass
+    llamadas = []
+
+    def cancela(instruccion, que):
+        llamadas.append(1)
+        raise Cancelado("parado")
+    try:
+        oi.traducir(datos, "en", llamar=cancela)
+        ok(False, "cancelar corta")
+    except Cancelado:
+        igual(len(llamadas), 1, "cancelar corta en el acto, sin reintentar")
+
+    def una(instruccion, que):
+        return {"trozos": {"T001": ["One"]}}
+    try:
+        oi.traducir(datos, "en", llamar=una)
+        ok(False, "una palabra no se parte en dos bloques")
+    except oi.ErrorOtroIdioma as fallo:
+        ok("faltan" in str(fallo), "una palabra no se parte en dos bloques: falta y lo dice")
+
+    def rota(instruccion, que):
+        raise RuntimeError("cupo agotado hasta las 18:00")
+    try:
+        oi.traducir(datos, "en", llamar=rota)
+        ok(False, "sin respuesta no sigue")
+    except oi.ErrorOtroIdioma as fallo:
+        ok("cupo agotado" in str(fallo), "y dice lo último que contestó Claude")
+
+
+class _P6Falso:
+    """Lo que `comprobar_planos` usa de p6: planificar y cartelas.sin_imagen."""
+
+    def __init__(self, escenas):
+        self._escenas = escenas
+
+        class _Cartelas:
+            @staticmethod
+            def sin_imagen(e):
+                return bool(e.get("cartela"))
+        self.cartelas = _Cartelas
+
+    def planificar(self, proyecto, params):
+        return {"escenas": [dict(e) for e in self._escenas]}
+
+
+def prueba_red():
+    seccion("con la voz nueva, los mismos planos o no se monta")
+    raiz = os.path.join(_TMP, "proyectos")
+    copia = Proyecto.crear(raiz, "Copia red")
+    estado = Estado(copia)
+    estado.set_params("assets", {"calidad": "low"})
+    base = copia.ruta_paso("assets", 1, crear=True)
+    os.makedirs(os.path.join(base, "escenas"), exist_ok=True)
+    with open(os.path.join(base, "plan.json"), "w", encoding="utf-8") as fh:
+        json.dump({"escenas": []}, fh)
+    for sid in ("S001", "S002"):
+        with open(os.path.join(base, "escenas", f"{sid}.json"), "w", encoding="utf-8") as fh:
+            json.dump({"id": sid, "narracion": "the freighter left port", "narracion_imagen": "x"}, fh)
+        with open(os.path.join(base, "escenas", f"{sid}.png"), "wb") as fh:
+            fh.write(b"png")
+    estado.completar("assets", {"plan": "plan.json"})
+    datos = {"ids": ["S001", "S002", "S003"], "sin_dibujo": []}
+    buenas = [{"id": "S001", "narracion": "The freighter left port."},
+              {"id": "S002", "narracion": "It was full.", "narracion_imagen": "full"},
+              {"id": "S003", "narracion": "", "cartela": {"plantilla": "cifra"}}]
+    try:
+        oi.comprobar_planos(copia, estado, _P6Falso(buenas[:2]), datos)
+        ok(False, "otro número de planos para")
+    except oi.ErrorOtroIdioma as fallo:
+        ok("2 planos" in str(fallo) and "no se ha dibujado nada" in str(fallo),
+           "otro número de planos para, y dice que no se dibujó nada")
+    sin_png = buenas[:2] + [{"id": "S003", "narracion": "separated the ports"}]
+    try:
+        oi.comprobar_planos(copia, estado, _P6Falso(sin_png), datos)
+        ok(False, "un plano con imagen sin su PNG para")
+    except oi.ErrorOtroIdioma as fallo:
+        ok("S003" in str(fallo), "un plano que pide imagen y no la tiene para (y lo nombra)")
+    tolerado = dict(datos, sin_dibujo=["S003"])
+    resumen = oi.comprobar_planos(copia, estado, _P6Falso(sin_png), tolerado)
+    igual(resumen["planos"], 3, "lo que ya faltaba en el original (y se avisó) no para")
+    resumen = oi.comprobar_planos(copia, estado, _P6Falso(buenas), datos)
+    igual(resumen["planos"], 3, "los mismos planos: sigue")
+    with open(os.path.join(base, "escenas", "S001.json"), encoding="utf-8") as fh:
+        ficha = json.load(fh)
+    igual((ficha["narracion"], "narracion_imagen" in ficha), ("The freighter left port.", False),
+          "y cada ficha dice exactamente lo que dice su plano ahora")
+    with open(os.path.join(base, "escenas", "S002.json"), encoding="utf-8") as fh:
+        igual(json.load(fh)["narracion"], "full", "con la frase con la que se reconoce el plano")
+
+
 def prueba_pronunciacion():
     seccion("«Cómo se pronuncia» solo para una voz en español")
     ok(pronunciacion.cargar("es") == pronunciacion.cargar(), "en español, la lista de siempre")
@@ -279,6 +381,8 @@ def main():
     prueba_traducir()
     prueba_estimar()
     prueba_preparar()
+    prueba_traducir_parar()
+    prueba_red()
     prueba_pronunciacion()
     print("\n" + "=" * 70)
     if _fallos:

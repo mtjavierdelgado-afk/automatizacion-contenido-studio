@@ -10615,6 +10615,15 @@ def video_en_otro_idioma(navegador, datos):
     ok("(EN)" in str(info.get("nombre_sugerido")), f"propone un nombre ({info.get('nombre_sugerido')})")
     r, _d = api.post(f"/api/proyectos/{pid}/otro_idioma", {"idioma": "en"})
     ok(r.status_code == 400, "sin el OK no hace nada (400)")
+    # CON UNA IMAGEN QUITADA A MANO NO SE OFRECE: se reconoce por su frase en
+    # español, y en inglés volvería a salir (y se dibujaría)
+    quitados = os.path.join(datos["proyectos"], pid, "planos_quitados.json")
+    with open(quitados, "w", encoding="utf-8") as fh:
+        json.dump({"quitados": [{"texto": "algo"}]}, fh)
+    r, info_q = api.get(f"/api/proyectos/{pid}/otro_idioma?idioma=en")
+    ok(r.status_code == 409 and "quitadas" in str(info_q),
+       f"con imágenes quitadas a mano no se ofrece, y dice qué hacer ({r.status_code})")
+    os.remove(quitados)
     ok(_foto_del_estado(datos, pid) == antes, "y preguntar no escribe nada en el vídeo")
 
     # LA PANTALLA: el botón debajo del vídeo, el cuadro con lo que cuesta y el OK
@@ -10694,6 +10703,10 @@ def video_en_otro_idioma(navegador, datos):
     except OSError:
         pass
     ok(imagenes_pagadas == 0, f"ninguna imagen se ha dibujado ni pagado ({imagenes_pagadas})")
+    with open(os.path.join(datos["proyectos"], copia, "bitacora.jsonl"), encoding="utf-8") as fh:
+        bitacora = fh.read()
+    ok("otro_idioma_planos_ok" in bitacora,
+       "antes de montar comprobó que la voz nueva corta en los mismos planos")
     r, c_assets = api.get(f"/api/proyectos/{copia}/pasos/assets")
     ok(not (c_assets.get("unidades_obsoletas") or []),
        f"y ninguna sale obsoleta ({len(c_assets.get('unidades_obsoletas') or [])})")

@@ -61,10 +61,11 @@ import re
 import shutil
 
 try:
-    from . import cli_claude, comun, medios, marcas_tts
+    from . import cli_claude, comun, estadisticas, medios, marcas_tts
 except ImportError:  # ejecutado con la carpeta pasos directamente en sys.path
     import cli_claude
     import comun
+    import estadisticas
     import medios
     import marcas_tts
 
@@ -196,10 +197,33 @@ def material(proyecto, estado, p6):
                               "del guion (es de una versión muy antigua): vuelve a "
                               "grabarla antes de pasarlo a otro idioma")
 
+    # LO INSERTADO Y LO QUITADO A MANO SE RECONOCE POR SU FRASE EN EL IDIOMA DE
+    # ANTES (`insertar_planos`, `quitar_planos`): en la copia no casaría, el
+    # vídeo saldría con otros planos y alguno se dibujaría (y se pagaría). Hasta
+    # que se pueda traducir, no se ofrece: se dice qué hacer.
+    raiz = proyecto.raiz
+    insertados = _entradas_de(os.path.join(raiz, "planos_insertados.json"))
+    quitados = _entradas_de(os.path.join(raiz, "planos_quitados.json"))
+    if insertados or quitados:
+        raise ErrorOtroIdioma(
+            "este vídeo tiene imágenes insertadas o quitadas a mano "
+            f"({insertados + quitados}), y esas se reconocen por su frase en este idioma: "
+            "en la versión traducida cambiarían los planos y alguno se volvería a dibujar "
+            "(y a pagar). Deshazlas antes (en Imágenes) o espera a que se pueda.")
+
     # LA UNIDAD QUE SE TRADUCE ES EL CORTE CRUDO (`plan["corte"]`), que es lo
     # que `segmentar.heredar` vuelve a poner sobre la voz nueva. Un plan de antes
-    # del 31-08 no lo trae: entonces se traducen los planos tal cual.
-    corte = [str(x or "") for x in (plan.get("corte") or []) if str(x or "").strip()]
+    # del 31-08 no lo trae: entonces se traducen los planos tal cual. Y en el
+    # modo «lo que dice el guion» tampoco vale: ahí el corte va por las líneas
+    # del guion visual (por bloque, sin depender del idioma) y el `corte`
+    # guardado es el de una voz anterior.
+    modo_guion = False
+    try:
+        modo_guion = p6.guion_visual.modo_de(params_assets) == "guion"
+    except Exception:                                            # noqa: BLE001
+        modo_guion = False
+    corte = [] if modo_guion else [str(x or "") for x in (plan.get("corte") or [])
+                                   if str(x or "").strip()]
     if not corte:
         corte = [str(e.get("narracion") or "") for e in escenas
                  if str(e.get("narracion") or "").strip()]
@@ -224,16 +248,32 @@ def material(proyecto, estado, p6):
     # de la ficha de su imagen.
     escenas_trozos = _escenas_por_trozos(escenas, corte)
 
-    # LOS BLOQUES QUE NO DICE NINGÚN TROZO (no debería pasar: todo lo que se oye
-    # está en algún plano). Si pasa, se traducen enteros: un bloque que se
-    # quedara en el idioma de antes se locutaría tal cual en mitad del vídeo.
+    # TODO LO QUE SE OYE, EN ALGÚN TROZO, Y CADA TROZO EN SU BLOQUE. Si un bloque
+    # que se oye no lo dice ningún trozo (o un trozo no cae en ningún bloque),
+    # la voz y el plan no casan: traducirlo aparte lo diría dos veces, y dejarlo
+    # lo locutaría en el idioma de antes. Se pide poner el vídeo al día.
     con_trozo = {p["bloque"] for t in trozos for p in t["partes"]}
-    sueltos = [{"bloque": bid, "texto": texto} for bid, texto in _bloques_de_voz(meta)
-               if bid not in con_trozo and texto.strip()]
+    sin_trozo = [bid for bid, texto in _bloques_de_voz(meta)
+                 if bid not in con_trozo and texto.strip()]
+    if sin_trozo or "" in con_trozo or None in con_trozo:
+        raise ErrorOtroIdioma(
+            "la voz y los planos de este vídeo no casan "
+            f"({', '.join(sin_trozo[:4]) or 'un trozo sin bloque'}): vuelve a cortar los "
+            "planos o a grabar la voz (Imágenes o Voz) antes de pasarlo a otro idioma")
+    sueltos = []
 
     # LAS CARTELAS: su texto vive en la unidad de cada plano (`params.assets.
-    # unidades[uid].cartela.datos`). Se traducen los campos de texto.
-    cartelas = {}
+    # unidades[uid].cartela.datos`). Se traducen los campos de texto. Y se
+    # coloca por su `ancla` (la frase en este idioma contra la que se decidió):
+    # si esa frase es uno de los trozos, en la copia el ancla pasa a ser ese
+    # trozo traducido (`anclas`: {uid: índice del trozo}); si no es ninguno,
+    # tampoco casaba en el original, y las dos van por su número.
+    clave_de = getattr(p6, "_texto_clave", None) or (
+        lambda e: " ".join(_palabras_de(e.get("narracion") or "")))
+    por_clave = {}
+    for indice, texto in enumerate(corte):
+        por_clave.setdefault(clave_de({"narracion": texto}), indice)
+    cartelas, anclas = {}, {}
     for uid, bloque in ((params_assets.get("unidades") or {}).items()):
         datos = ((bloque or {}).get("cartela") or {}).get("datos") if isinstance(bloque, dict) else None
         if not isinstance(datos, dict):
@@ -241,6 +281,11 @@ def material(proyecto, estado, p6):
         campos = {k: v for k, v in datos.items() if isinstance(v, str) and v.strip()}
         if campos:
             cartelas[str(uid)] = campos
+        ancla = (bloque.get("cartela") or {}).get("ancla")
+        if ancla:
+            indice = por_clave.get(clave_de({"narracion": ancla}))
+            if indice is not None:
+                anclas[str(uid)] = indice
 
     # LO QUE NO TIENE DIBUJO TODAVÍA: en la copia se dibujaría (y se pagaría).
     base = os.path.dirname(medios.salida_de(proyecto, "assets", claves=("plan",),
@@ -253,16 +298,6 @@ def material(proyecto, estado, p6):
             sin_dibujo.append(escena["id"])
 
     avisos = []
-    raiz = proyecto.raiz
-    insertados = _entradas_de(os.path.join(raiz, "planos_insertados.json"))
-    quitados = _entradas_de(os.path.join(raiz, "planos_quitados.json"))
-    if insertados:
-        avisos.append(f"Tiene {insertados} imagen(es) insertada(s) a mano dentro de un plano: "
-                      "en la versión traducida no estarán (el plano vuelve a ir con su "
-                      "imagen de siempre). Se pueden volver a insertar en la copia.")
-    if quitados:
-        avisos.append(f"Tiene {quitados} imagen(es) quitada(s) a mano: en la versión "
-                      "traducida vuelven a salir. Se pueden volver a quitar en la copia.")
     if sin_dibujo:
         avisos.append(f"{len(sin_dibujo)} plano(s) no tienen imagen todavía "
                       f"({', '.join(sin_dibujo[:6])}{'…' if len(sin_dibujo) > 6 else ''}): "
@@ -278,6 +313,11 @@ def material(proyecto, estado, p6):
         "escenas": escenas_trozos,
         "sueltos": sueltos,
         "cartelas": cartelas,
+        "anclas": anclas,
+        "modo_guion": modo_guion,
+        "bloques_voz": [{"id": b.get("id"), "texto": b.get("texto")}
+                        for b in ((meta or {}).get("bloques") or []) if isinstance(b, dict)],
+        "ids": [str(e.get("id")) for e in escenas],
         "caracteres": len(hablado),
         "palabras": len(_palabras_de(texto_total)),
         "planos": len(escenas),
@@ -293,8 +333,11 @@ def _entradas_de(ruta):
             datos = json.load(fh)
     except (OSError, ValueError):
         return 0
+    # {"quitados": [...]} / {"insertados": [...]} (`quitar_planos`,
+    # `insertar_planos`); una lista vacía (todo deshecho) no cuenta
     if isinstance(datos, dict):
-        datos = datos.get("entradas") or datos.get("planos") or list(datos.values())
+        datos = [e for clave in ("quitados", "insertados")
+                 for e in (datos.get(clave) or []) if isinstance(e, dict)]
     return len(datos) if isinstance(datos, list) else 0
 
 
@@ -459,7 +502,7 @@ def traducir(datos, idioma, cwd=None, avisar=None, llamar=None):
     traducir se locutaría en dos idiomas.
     """
     destino = IDIOMAS[idioma]["en_su_idioma"]
-    llamar = llamar or _llamar_a_claude(cwd)
+    llamar = llamar or _llamar_a_claude(cwd, avisar)
     avisar = avisar or (lambda *_a, **_k: None)
     trozos = list(datos.get("trozos") or [])
     # los bloques sueltos van como trozos de una parte (su id no choca: «B»)
@@ -479,6 +522,7 @@ def traducir(datos, idioma, cwd=None, avisar=None, llamar=None):
                       for t in (datos.get("trozos") or []))
 
     hechos, hechas = {}, {}
+    ultimo = ""
     lotes = [trozos[i:i + PLANOS_POR_LLAMADA] for i in range(0, len(trozos), PLANOS_POR_LLAMADA)]
     if not lotes:
         lotes = [[]]
@@ -498,6 +542,9 @@ def traducir(datos, idioma, cwd=None, avisar=None, llamar=None):
             except ErrorOtroIdioma:
                 raise
             except Exception as fallo:                            # noqa: BLE001
+                # PARAR ES PARAR: la cancelación del trabajo no se reintenta
+                if type(fallo).__name__ == "Cancelado":
+                    raise
                 ultimo = str(fallo)
                 continue
             vuelta = (respuesta or {}).get("trozos") if isinstance(respuesta, dict) else None
@@ -510,7 +557,8 @@ def traducir(datos, idioma, cwd=None, avisar=None, llamar=None):
                 partes = [_limpio(x) for x in partes]
                 if len(partes) == len(trozo["partes"]) and all(partes):
                     hechos[trozo["id"]] = partes
-                elif len(trozo["partes"]) > 1 and len(partes) == 1 and partes[0]:
+                elif (len(trozo["partes"]) > 1 and len(partes) == 1 and partes[0]
+                      and len(_palabras_de(partes[0])) >= len(trozo["partes"])):
                     # una sola parte para un trozo de varias: se reparte por
                     # palabras en la misma proporción que el original
                     hechos[trozo["id"]] = _repartir(partes[0], trozo["partes"])
@@ -526,7 +574,8 @@ def traducir(datos, idioma, cwd=None, avisar=None, llamar=None):
             raise ErrorOtroIdioma(
                 "Claude no ha devuelto la traducción de todo el vídeo (faltan "
                 f"{len(faltan)} trozos: {', '.join(faltan[:5])}…). No se ha grabado "
-                "nada ni gastado nada en voz: vuelve a intentarlo.")
+                "nada ni gastado nada en voz: vuelve a intentarlo."
+                + (f"\n\nLo último que dijo: {ultimo[:300]}" if ultimo else ""))
     avisar(1.0, "traducción hecha")
 
     salida = {"trozos": {}, "sueltos": {}, "propios": {}, "cartelas": {}}
@@ -555,21 +604,89 @@ def _repartir(texto, partes):
     return salida
 
 
-def _llamar_a_claude(cwd):
+def _llamar_a_claude(cwd, avisar=None):
     """La llamada de verdad: el modelo y el esfuerzo del GUION (es el guion lo
-    que se traduce, y el dueño lo quiere escrito con el modelo del guion)."""
+    que se traduce, y el dueño lo quiere escrito con el modelo del guion).
+
+    Con `avisar`, la llamada va con su `Avance`: «Cancelar» corta el CLI en el
+    acto, en vez de esperar a que Claude termine la tanda."""
     ajuste = cli_claude.por_defecto_de("guion")
 
     def llamar(instruccion, que):
-        respuesta, _sobre = cli_claude.ejecutar(
-            instruccion, modelo=ajuste["modelo"], esfuerzo=ajuste["esfuerzo"], cwd=cwd,
-            base_tiempo_s=600, sistema=SISTEMA,
-            extra=["--no-session-persistence"], para=que)
+        avance = None
+        if avisar is not None:
+            try:
+                avance = estadisticas.Avance(avisar, 0.1, 0.85, 240,
+                                             "traduciendo el guion con Claude")
+                avance.arrancar()
+            except Exception:                                    # noqa: BLE001
+                avance = None
+        try:
+            respuesta, _sobre = cli_claude.ejecutar(
+                instruccion, modelo=ajuste["modelo"], esfuerzo=ajuste["esfuerzo"], cwd=cwd,
+                base_tiempo_s=600, sistema=SISTEMA,
+                extra=["--no-session-persistence"], para=que, avance=avance)
+        finally:
+            if avance is not None:
+                avance.parar()
         datos = comun.extraer_json(respuesta, que)
         if not isinstance(datos, dict):
             raise ErrorOtroIdioma(f"{que}: Claude no ha devuelto un objeto JSON")
         return datos
     return llamar
+
+
+# ---------------------------------------------------- la red, con la voz hecha
+
+def comprobar_planos(copia, estado, p6, datos):
+    """Con la voz nueva ya grabada, ANTES de montar: ¿salen los mismos planos? -> resumen
+
+    Es la red de seguridad del dinero. El corte nuevo se calcula igual que lo
+    hará la tanda de imágenes (`planificar`, que no dibuja ni escribe nada) y
+    se compara con el del vídeo de origen: los mismos planos con los mismos
+    números, y cada uno que tenía su dibujo, con su PNG en la copia. Si algo no
+    casa, ErrorOtroIdioma y no se monta: la voz ya está pagada, pero ninguna
+    imagen se vuelve a dibujar sin que nadie lo vea.
+
+    Si casa, cada ficha de imagen pasa a decir EXACTAMENTE lo que dice su plano
+    ahora (la voz transcrita puede diferir de la traducción en una coma), para
+    que `_recolocar_escenas` deje cada dibujo en su sitio.
+    """
+    plan = p6.planificar(copia, estado.params("assets") or {})
+    escenas = [e for e in (plan.get("escenas") or []) if isinstance(e, dict)]
+    ids = [str(e.get("id")) for e in escenas]
+    esperados = [str(x) for x in (datos.get("ids") or [])]
+    if ids != esperados:
+        raise ErrorOtroIdioma(
+            f"con la voz nueva el vídeo sale con {len(ids)} planos y el original tiene "
+            f"{len(esperados)}: montarlo así volvería a dibujar (y pagar) imágenes. "
+            "La voz está grabada; no se ha dibujado nada. Revisa la copia en "
+            "Imágenes antes de montarla.")
+    ruta_plan = medios.salida_de(copia, "assets", claves=("plan",),
+                                 patrones=(r"plan\.json",), estado=estado)
+    carpeta = os.path.join(os.path.dirname(ruta_plan or ""), "escenas")
+    tolerados = set(datos.get("sin_dibujo") or [])
+    faltan = [e["id"] for e in escenas
+              if not p6.cartelas.sin_imagen(e) and e["id"] not in tolerados
+              and not os.path.exists(os.path.join(carpeta, f"{e['id']}.png"))]
+    if faltan:
+        raise ErrorOtroIdioma(
+            f"con la voz nueva, {len(faltan)} plano(s) que tenían imagen se quedarían sin "
+            f"ella ({', '.join(faltan[:6])}): montarlo así los volvería a dibujar (y "
+            "pagar). La voz está grabada; no se ha dibujado nada.")
+    fichas = 0
+    for escena in escenas:
+        ruta = os.path.join(carpeta, f"{escena['id']}.json")
+        ficha = medios.leer_json(ruta, None)
+        if not isinstance(ficha, dict):
+            continue
+        dicho = escena.get("narracion_imagen") or escena.get("narracion") or ""
+        if ficha.get("narracion") != dicho or "narracion_imagen" in ficha:
+            ficha["narracion"] = dicho
+            ficha.pop("narracion_imagen", None)
+            medios.escribir_json(ruta, ficha)
+            fichas += 1
+    return {"planos": len(ids), "fichas_ajustadas": fichas}
 
 
 # --------------------------------------------------------------- la copia
@@ -631,9 +748,14 @@ def preparar_copia(copia, estado, datos, traduccion, idioma, voz_id="", origen=N
 
     # 3. LA REVISIÓN POR SECCIONES: sus comentarios son notas sobre el texto de
     #    antes; aplicados a la traducción la reescribirían en el otro idioma.
-    revision = estado.params("revision_audio") or {}
-    if revision.get("comentarios"):
-        estado.actualizar_params("revision_audio", {"comentarios": []})
+    #    Y sus claves de voz (idioma, voz) eran las del original: la resíntesis
+    #    saldría en el idioma de antes. Fuera, para que mande la de `voz`.
+    revision = dict(estado.params("revision_audio") or {})
+    if revision.get("comentarios") or any(k in revision for k in ("idioma", "voz_id", "voz")):
+        revision["comentarios"] = []
+        for clave in ("idioma", "voz_id", "voz"):
+            revision.pop(clave, None)
+        estado.set_params("revision_audio", revision)
 
     # 4. LAS IMÁGENES: las cartelas traducidas y, si el vídeo cortaba por el
     #    guion visual (líneas en el idioma de antes), por la voz: el corte tiene
@@ -641,21 +763,39 @@ def preparar_copia(copia, estado, datos, traduccion, idioma, voz_id="", origen=N
     assets = estado.params("assets") or {}
     unidades = {k: (dict(v) if isinstance(v, dict) else v)
                 for k, v in (assets.get("unidades") or {}).items()}
-    for uid, campos in (traduccion.get("cartelas") or {}).items():
+    anclas = datos.get("anclas") or {}
+    tocadas = set(traduccion.get("cartelas") or {}) | set(anclas)
+    for uid in tocadas:
         bloque = unidades.get(uid)
         if not isinstance(bloque, dict) or not isinstance(bloque.get("cartela"), dict):
             continue
         cartela = dict(bloque["cartela"])
-        cartela["datos"] = dict(cartela.get("datos") or {}, **campos)
+        campos = (traduccion.get("cartelas") or {}).get(uid) or {}
+        if campos:
+            cartela["datos"] = dict(cartela.get("datos") or {}, **campos)
+        indice = anclas.get(uid)
+        if indice is not None and 0 <= indice < len(por_trozo) and por_trozo[indice]:
+            cartela["ancla"] = por_trozo[indice]
         bloque["cartela"] = cartela
         unidades[uid] = bloque
     cambios_assets = {}
-    if traduccion.get("cartelas"):
+    if tocadas:
         cambios_assets["unidades"] = unidades
-    if p6 is not None:
+    # EL GUION VISUAL SE QUEDA (si el vídeo dibujaba «lo que dice el guion»): el
+    # corte va por sus líneas, bloque a bloque, y eso no depende del idioma, así
+    # que salen los mismos planos. Las líneas de la Parrilla se dan por buenas
+    # si casan con el texto del guion (`efectivo`); traducido ya no casarían, así
+    # que en la copia se guardan aprobadas, tal y como mandaban en el original.
+    if p6 is not None and datos.get("modo_guion"):
         try:
-            if p6.guion_visual.modo_de(assets) == "guion":
-                cambios_assets["imagenes"] = "voz"
+            meta_bloques = [{"id": b.get("id"), "texto": b.get("texto")}
+                            for b in (datos.get("bloques_voz") or [])]
+            lineas, origen_gv = p6.guion_visual.efectivo(assets, meta_bloques)
+            if lineas and origen_gv == "parrilla":
+                gv = dict(p6.guion_visual.normalizar(assets.get("guion_visual")))
+                gv["planos"] = [{k: v for k, v in pl.items() if k != "id"} for pl in lineas]
+                gv["aprobado"] = True
+                cambios_assets["guion_visual"] = gv
         except Exception:                                          # noqa: BLE001
             pass
     if cambios_assets:
@@ -666,9 +806,11 @@ def preparar_copia(copia, estado, datos, traduccion, idioma, voz_id="", origen=N
     cu = callouts.get("unidades") or {}
     limpias, tocado = {}, False
     for uid, bloque in cu.items():
-        if isinstance(bloque, dict) and ("subtitulo_texto" in bloque or "subtitulo_ancla" in bloque):
-            bloque = {k: v for k, v in bloque.items()
-                      if k not in ("subtitulo_texto", "subtitulo_ancla")}
+        # y los ELEMENTOS (flechas, rótulos) colocados sobre una palabra dicha:
+        # su palabra ya no se dice
+        fuera = ("subtitulo_texto", "subtitulo_ancla", "elementos")
+        if isinstance(bloque, dict) and any(k in bloque for k in fuera):
+            bloque = {k: v for k, v in bloque.items() if k not in fuera}
             tocado = True
         if bloque:
             limpias[uid] = bloque

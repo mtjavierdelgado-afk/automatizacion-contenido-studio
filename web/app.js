@@ -34077,8 +34077,12 @@ async function usarRecibidoEnChat(r, peticion, enviarYa) {
   if (enviarYa) {
     toast('pedido a Claude: cuando conteste, «Guardar en la Parrilla» y luego «🤖 Hacer el vídeo completo»');
     await enviarChatParrilla();
+    /* tu borrador vuelve SUMADO a lo que haya en el campo: si el pedido no salió (un
+       fallo, otro envío en curso) o escribiste mientras se subía, nada se pierde */
     if (apartado && (String(apartado.texto || '').trim() || apartado.capturas.length)) {
-      PAR.chatTexto = apartado.texto;
+      const queda = String(PAR.chatTexto || '').trim();
+      const tuyo = String(apartado.texto || '').trim();
+      PAR.chatTexto = [tuyo, queda].filter(Boolean).join('\n\n');
       PAR.chatCapturas = apartado.capturas.concat(PAR.chatCapturas);
       pintarModulo();
     }

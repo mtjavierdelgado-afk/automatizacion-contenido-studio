@@ -3234,7 +3234,7 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
         # LA IMAGEN DE REFERENCIA de un sitio (rama base-fiel): la habitacion
         # entera, sin recortar los lados; los planos siguen con la de abajo
         lineas.append(tipo_relato.CUADRO_ESTADO if escena.get("referencia") == "estado"
-                      else tipo_relato.CUADRO_REFERENCIA)
+                      else tipo_relato.cuadro_referencia(modo))
     elif p2_brief.comun.normalizar_formato(formato) == "vertical":
         # EL CUADRO ES VERTICAL, y hay que decirlo: las referencias de estilo
         # son apaisadas y sin esta linea el generador compone un plano apaisado
@@ -6080,16 +6080,17 @@ def prompt_y_refs_de_estado(proyecto, params, estado, cache, nota=""):
              # en «acabados», lo que el cambio no nombra conserva su acabado
              # (rama base-fiel); los planos no llevan esta clave
              "fijos": True}]
-    texto = tipo_relato.prompt_imagen_estado(cambio)
-    # LA CORRECCION DE ESTA VEZ, como la de la base (rama base-fiel): no se guarda
-    texto = (texto + " " + tipo_relato.nota_base(nota)).strip() if nota else texto
-    escena = {"id": f"ESTADO_{estado}", "prompt": texto,
+    escena = {"id": f"ESTADO_{estado}", "prompt": tipo_relato.prompt_imagen_estado(cambio),
               "personajes": [], "set": sitio, "narracion": "", "referencia": "estado",
               "ejes": list(tipo_relato.EJES_REFERENCIA)}
     refs = base + list(_referencias_estilo(p, cache, escena))
     formato = p2_brief.comun.ficha_formato(p4_voz.formato_de_salida(proyecto)) \
         if proyecto is not None else {"id": ""}
     prompt = _prompt_completo(escena, refs, p["estilo"], formato=formato.get("id") or "")
+    if nota:
+        # LA CORRECCION DE ESTA VEZ (rama base-fiel), como la de la base y sin
+        # guardarse; va la ULTIMA, detras del FINAL CHECK, que si no la anulaba
+        prompt = (prompt + " " + tipo_relato.nota_base(nota)).strip()
     return sitio, cambio, prompt, refs
 
 

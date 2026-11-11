@@ -651,11 +651,22 @@ FIJOS_ACABADOS = (" Doors, door frames, window frames, the mirror and its frame,
 #: la llevan la imagen base y la de cada estado.
 CUADRO_REFERENCIA = (
     "The frame is PORTRAIT (9:16, vertical, for a phone screen). This picture is the "
-    "reference of a whole room, so it is an architectural interior photograph taken "
-    "with a wide-angle lens from the entrance corner: show the whole room, with every "
-    "wall, door and window the description names fully inside the frame, none of them "
-    "cropped at the edges, and exactly as many windows and doors as it says. Never draw "
-    "black bars, borders or a landscape picture inside the tall frame.")
+    "reference of a whole room, so it is {que} from the entrance at eye height, with a "
+    "wide-angle view: show the whole room, with every wall, door and window the "
+    "description names fully inside the frame, none of them cropped at the edges, and "
+    "exactly as many windows and doors as it says. Never draw black bars, borders or a "
+    "landscape picture inside the tall frame.")
+
+#: Lo que es la imagen de referencia, segun el modo (revision del arbitro: en un
+#: video de dibujo, «photograph» empujaba la base, y con ella todos los planos
+#: que la editan, hacia la foto)
+CUADRO_QUE = {"foto": "an architectural interior photograph taken",
+              "ilustracion": "a wide interior view drawn in the style of the references, seen"}
+
+
+def cuadro_referencia(modo_imagen="ilustracion"):
+    return CUADRO_REFERENCIA.format(que=CUADRO_QUE.get(modo_imagen, CUADRO_QUE["ilustracion"]))
+
 
 #: El cuadro de la imagen de un ESTADO: es una EDICION de la base, asi que ni
 #: gran angular nuevo ni «tercio central»: el mismo cuadro, sin reencuadrar.

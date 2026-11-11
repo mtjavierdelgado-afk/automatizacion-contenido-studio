@@ -617,12 +617,16 @@ def prueba_base_fiel():
     plano = {"id": "S001", "prompt": "the room", "personajes": [], "set": "sala", "narracion": "x"}
     t_ref = P6._prompt_completo(ref_escena, refs_estilo, est, formato="vertical")   # noqa: SLF001
     t_plano = P6._prompt_completo(plano, refs_estilo, est, formato="vertical")      # noqa: SLF001
-    ok(T.CUADRO_REFERENCIA in t_ref and "middle two thirds" not in t_ref,
+    ok(T.cuadro_referencia("foto") in t_ref and "middle two thirds" not in t_ref,
        "la imagen de referencia pide la habitación entera, sin el «tercio central»")
-    ok("middle two thirds" in t_plano and T.CUADRO_REFERENCIA not in t_plano,
+    ok("middle two thirds" in t_plano and "reference of a whole room" not in t_plano,
        "un plano sigue con la línea del cuadro vertical de siempre")
     t_apaisado = P6._prompt_completo(ref_escena, refs_estilo, est, formato="apaisado")  # noqa: SLF001
-    ok(T.CUADRO_REFERENCIA not in t_apaisado, "y en apaisado no hay línea de cuadro")
+    ok("reference of a whole room" not in t_apaisado, "y en apaisado no hay línea de cuadro")
+    t_dibujo = P6._prompt_completo(ref_escena, refs_estilo, {"referencias": [estilo]},  # noqa: SLF001
+                                   formato="vertical")
+    ok(T.cuadro_referencia("ilustracion") in t_dibujo and "photograph" not in T.cuadro_referencia("ilustracion"),
+       "en un vídeo de dibujo la referencia no se pide como fotografía")
     cambio = "the walls are warm white and the vanity is light oak"
     ref_base = {"papel": "base", "principal": True, "nombre": "Baño", "ruta": base,
                 "modo": "espacio_que_cambia", "cambia": "acabados", "cambio": cambio}
@@ -635,7 +639,7 @@ def prueba_base_fiel():
                                 "(en la presentación de la base y en el FINAL CHECK)")
     ok(fijos not in sin, "sin la clave `fijos` (los planos) no se añade nada")
     t_estado = P6._prompt_completo(estado_esc, [ref_base] + refs_estilo, est, formato="vertical")  # noqa: SLF001
-    ok(T.CUADRO_ESTADO in t_estado and T.CUADRO_REFERENCIA not in t_estado,
+    ok(T.CUADRO_ESTADO in t_estado and "reference of a whole room" not in t_estado,
        "un estado conserva el cuadro de la imagen que edita (sin gran angular nuevo)")
     otro = P6._prompt_completo(estado_esc, [dict(ref_base, fijos=True, cambia="estado")]  # noqa: SLF001
                                + refs_estilo, est)

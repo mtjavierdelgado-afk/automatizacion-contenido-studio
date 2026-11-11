@@ -34,7 +34,8 @@ cambia lo pedido?
 
     asvs probar relato --solo-referencias    SOLO las imágenes de referencia (la base, la
                                              de cada estado y la de cada ambiente), juzgadas
-                                             y aprobadas: la comprobación barata, sin planos
+                                             y aprobadas, sin planos ni montaje (se pagan
+                                             también el guion y la voz de cada vídeo)
     asvs probar relato --solo a --video ID   sigue un vídeo de prueba ya hecho
                                              desde su imagen base
 

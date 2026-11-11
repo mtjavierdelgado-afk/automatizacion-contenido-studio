@@ -9788,8 +9788,11 @@ def enviar_al_studio(navegador, datos):
     ok(direccion.startswith(datos["url"]), f"la dirección del Studio, lista para copiar ({direccion})")
     pg.pulsar("#conf-enviar button", "Crear el código de envío")
     ok(pg.esperar("#conf-enviar .caja-aviso", "no se vuelve a enseñar", 10), "crear el código lo enseña una vez")
-    codigo = pg.p.input_value("[data-foco=codigo-envio]")
-    ok(codigo.startswith("env_"), "un código env_…")
+    clave = pg.p.input_value("[data-foco=codigo-envio]")
+    direccion_de_la_clave, _, codigo = clave.partition("#")
+    ok(direccion_de_la_clave == direccion and codigo.startswith("env_"),
+       "una sola «clave de conexión»: la dirección y el código env_… juntos, para pegar una vez (11-11)")
+    ok(pg.esperar("#conf-enviar button", "Copiar la clave", 5), "con su botón «Copiar la clave»")
     pg.captura("enviar_al_studio_config")
     pg.js("conmutarConfig(false);")
 

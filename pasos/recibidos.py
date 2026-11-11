@@ -417,7 +417,11 @@ def texto_para_chat(d):
 # ------------------------------------------------------------- la extensión
 
 def zip_extension(carpeta_ext=None):
-    """La carpeta extension/ en un ZIP, para descargarla desde Configuración."""
+    """La carpeta extension/ en un ZIP, para descargarla desde Configuración.
+
+    Los ficheros van en la RAÍZ del ZIP: «Extraer todo» de Windows ya crea una
+    carpeta con el nombre del ZIP, y con otra dentro quedaban dos iguales y
+    Chrome no encontraba el manifiesto en la de fuera (11-11-2026)."""
     carpeta_ext = carpeta_ext or CARPETA_EXTENSION
     if not os.path.isfile(os.path.join(carpeta_ext, "manifest.json")):
         raise ErrorRecibidos("la extensión no está en el servidor (falta extension/manifest.json)", 503)
@@ -429,7 +433,7 @@ def zip_extension(carpeta_ext=None):
                 if nombre.startswith(".") or nombre.endswith((".pyc", ".map")):
                     continue
                 ruta = os.path.join(base, nombre)
-                dentro = os.path.join("crearia-enviar-al-studio", os.path.relpath(ruta, carpeta_ext))
+                dentro = os.path.relpath(ruta, carpeta_ext)
                 z.write(ruta, dentro.replace(os.sep, "/"))
     return memoria.getvalue()
 

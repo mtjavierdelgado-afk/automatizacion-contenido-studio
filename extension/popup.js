@@ -8,7 +8,12 @@
  *    /login), se envía DESDE una pestaña del Studio que tengas abierta, que sí
  *    la lleva. Si no hay ninguna, te lo dice.
  *
- * La dirección y el código se guardan en chrome.storage.local, en este Chrome.
+ * La dirección y el código se guardan en chrome.storage.local, en este Chrome:
+ * se ponen UNA vez y sirven para todas las pestañas. Mientras se escriben se
+ * guardan como borrador (la ventanita se cierra en cuanto pulsas fuera de ella,
+ * y sin eso se perdía lo pegado). El Studio da una «clave de conexión» que
+ * lleva las dos cosas juntas (`https://…/#env_…`): pegada en cualquiera de los
+ * dos campos, se reparte sola.
  */
 const $ = id => document.getElementById(id);
 let leido = null;
@@ -34,6 +39,46 @@ async function config() {
   const c = await chrome.storage.local.get(['studio', 'codigo']);
   const n = normalizar(c.studio);
   return n && c.codigo ? Object.assign(n, { codigo: c.codigo }) : null;
+}
+
+/* «https://studio…/#env_abc» → { studio: 'https://studio…/', codigo: 'env_abc' }.
+   Un código suelto o una dirección sola se devuelven tal cual en su sitio. */
+function repartirClave(texto) {
+  const t = String(texto || '').trim();
+  const m = t.match(/^(.*?)#(env_[A-Za-z0-9_-]+)\s*$/);
+  if (m) return { studio: m[1].trim(), codigo: m[2] };
+  if (/^env_[A-Za-z0-9_-]+$/.test(t)) return { codigo: t };
+  return { studio: t };
+}
+
+/* La clave pegada en cualquiera de los dos campos se reparte; un código a medio
+   escribir («env») no es una dirección: solo se mueve lo que empieza por http. */
+function repartirCampos() {
+  const enDireccion = repartirClave($('studio').value);
+  if (enDireccion.codigo) {            // la clave entera (o un código suelto) en el primer campo
+    $('studio').value = enDireccion.studio || $('studio').value.replace(/#?env_[A-Za-z0-9_-]+\s*$/, '').trim();
+    $('codigo').value = enDireccion.codigo;
+  }
+  const enCodigo = repartirClave($('codigo').value);
+  if (enCodigo.studio && /^https?:\/\//i.test(enCodigo.studio)) {   // una dirección (o la clave entera) en el campo del código
+    if (enCodigo.codigo) { $('studio').value = enCodigo.studio; $('codigo').value = enCodigo.codigo; }
+    else { if (!$('studio').value.trim()) $('studio').value = enCodigo.studio; $('codigo').value = ''; }
+  }
+}
+
+/* Lo escrito se guarda al momento como borrador: cerrar la ventanita no lo pierde. */
+async function guardarBorrador() {
+  repartirCampos();
+  try { await chrome.storage.local.set({ borradorStudio: $('studio').value.trim(), borradorCodigo: $('codigo').value.trim() }); }
+  catch (e) { /* sin almacén no hay borrador; lo demás sigue igual */ }
+  const falta = !$('studio').value.trim() ? 'la dirección' : !$('codigo').value.trim() ? 'el código' : '';
+  estado('estadoConfig', falta ? `Guardado lo que has puesto. Falta ${falta}: puedes salir a copiarlo y volver.` : 'Pulsa «Probar» para conectar.', '');
+}
+
+async function rellenarConfig() {
+  const c = await chrome.storage.local.get(['studio', 'codigo', 'borradorStudio', 'borradorCodigo']);
+  $('studio').value = c.borradorStudio || c.studio || '';
+  $('codigo').value = c.borradorCodigo || c.codigo || '';
 }
 
 function mostrarConfig(mostrar) {
@@ -169,10 +214,12 @@ async function esUnStudio(n) {
 }
 
 async function guardar() {
+  await guardarBorrador();
   const n = normalizar($('studio').value);
   const codigo = $('codigo').value.trim();
+  if (!$('studio').value.trim()) { estado('estadoConfig', 'Falta la dirección de tu Studio. Lo demás queda guardado: puedes salir a copiarla y volver.', 'mal'); return false; }
   if (!n) { estado('estadoConfig', 'La dirección no parece una web (https://…).', 'mal'); return false; }
-  if (!codigo) { estado('estadoConfig', 'Falta el código de envío.', 'mal'); return false; }
+  if (!codigo) { estado('estadoConfig', 'Falta el código de envío. La dirección queda guardada: puedes salir a copiarlo y volver.', 'mal'); return false; }
   /* el permiso para hablar con TU Studio, y solo con él */
   const ok = await chrome.permissions.request({ origins: [n.origen + '/*'] }).catch(() => false);
   if (!ok) { estado('estadoConfig', 'Sin ese permiso la extensión no puede mandar nada a tu Studio.', 'mal'); return false; }
@@ -182,6 +229,7 @@ async function guardar() {
     return false;
   }
   await chrome.storage.local.set({ studio: n.base, codigo });
+  try { await chrome.storage.local.remove(['borradorStudio', 'borradorCodigo']); } catch (e) { /* el borrador sobra, no estorba */ }
   estado('estadoConfig', 'Guardado. Pulsa «Probar» para comprobarlo.', 'bien');
   return true;
 }
@@ -193,21 +241,22 @@ async function probar() {
   estado('estadoConfig', 'probando…');
   const r = await hablarConElStudio(cfg, 'recibidos/ping', 'GET', null);
   if (r.bien) {
-    estado('estadoConfig', '✓ Conectado con tu Studio.', 'bien');
-    setTimeout(() => { mostrarConfig(false); leerPestana(); }, 900);
+    estado('estadoConfig', '✓ Conectado con tu Studio. No hace falta volver a ponerlo: sirve en todas las pestañas de este Chrome.', 'bien');
+    setTimeout(() => { mostrarConfig(false); leerPestana(); }, 2500);
   } else estado('estadoConfig', r.mal, 'mal');
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
   $('ajustes').addEventListener('click', async () => {
-    const c = await chrome.storage.local.get(['studio', 'codigo']);
-    $('studio').value = c.studio || '';
-    $('codigo').value = c.codigo || '';
-    mostrarConfig($('config').hidden);
+    const abrir = $('config').hidden;
+    if (abrir) await rellenarConfig();
+    else if (await config()) leerPestana();
+    mostrarConfig(abrir);
   });
+  for (const id of ['studio', 'codigo']) $(id).addEventListener('input', guardarBorrador);
   $('guardar').addEventListener('click', guardar);
   $('probar').addEventListener('click', probar);
   $('enviar').addEventListener('click', enviar);
   if (await config()) { mostrarConfig(false); leerPestana(); }
-  else mostrarConfig(true);
+  else { await rellenarConfig(); mostrarConfig(true); }
 });

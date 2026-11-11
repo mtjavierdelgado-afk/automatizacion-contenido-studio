@@ -10,6 +10,18 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**La extensión «Enviar al Studio», más fácil de poner (11 de noviembre)**
+- En **Configuración → Enviar al Studio**, al crear el código sale una sola
+  **clave de conexión** (la dirección y el código juntos) con «Copiar la clave»:
+  se pega una vez en el primer campo de la extensión y se reparte sola.
+- Lo que pegas en la ventanita de la extensión **se guarda solo**: si se cierra
+  al ir a copiar algo, vuelve a abrirla y sigue ahí.
+- Mientras falta configurarla, la ventanita solo enseña la configuración (antes
+  salía también la parte de enviar y confundía).
+- El ZIP trae los ficheros sin carpeta de más: con «Extraer todo» de Windows ya
+  no quedan dos carpetas iguales. La extensión pasa a la versión 1.1.0.
+- Se configura **una vez por Chrome**: después sirve en todas las pestañas.
+
 **El guion visual se pone al día solo (9 de noviembre)**
 - El bloque «Guion visual» (paso Voz o Imágenes) ya no se queda vacío si lo
   abriste antes de tener el guion: cuando terminan el guion, la voz, una

@@ -34003,22 +34003,25 @@ function seccionEnviarAlStudio() {
     h('span', { clase: 'crece' }),
     h('button', { type: 'button', clase: 'mini', onclick: () => crearCodigoEnvio(!!codigo.puesto) },
       codigo.puesto ? 'Crear uno nuevo' : 'Crear el código de envío'))];
-  /* el código en claro se ve 5 minutos, para copiarlo; después, nunca más */
+  /* el código en claro se ve 5 minutos, para copiarlo; después, nunca más. Se da como
+     «clave de conexión»: la dirección y el código juntos (`…/#env_…`), que la extensión
+     reparte sola, para pegar UNA cosa y no ir y volver entre el Studio y la ventanita */
   if (PAR.codigoEnvioNuevo && Date.now() - (PAR.codigoEnvioNuevoAl || 0) > 5 * 60 * 1000) PAR.codigoEnvioNuevo = '';
   if (PAR.codigoEnvioNuevo) {
-    const campo = h('input', { type: 'text', readonly: true, 'aria-label': 'Tu código de envío', datos: { foco: 'codigo-envio' } });
-    campo.value = PAR.codigoEnvioNuevo;
-    filaCodigo.push(h('div', { clase: 'fila-clave' }, campo,
-      h('button', { type: 'button', clase: 'mini primario', onclick: () => copiarTexto(campo.value) }, 'Copiar')),
-    h('div', { clase: 'caja-aviso' }, 'Cópialo ahora y pégalo en la extensión: por seguridad se ve solo unos minutos y no '
-      + 'se vuelve a enseñar. Si lo pierdes, crea uno nuevo.'));
+    const campo = h('input', { type: 'text', readonly: true, 'aria-label': 'Tu clave de conexión', datos: { foco: 'codigo-envio' } });
+    campo.value = `${direccion.value}#${PAR.codigoEnvioNuevo}`;
+    filaCodigo.push(h('div', { clase: 'pista' }, h('b', {}, 'Tu clave de conexión'), ' (la dirección y el código juntos):'),
+      h('div', { clase: 'fila-clave' }, campo,
+        h('button', { type: 'button', clase: 'mini primario', onclick: () => copiarTexto(campo.value) }, 'Copiar la clave')),
+      h('div', { clase: 'caja-aviso' }, 'Cópiala ahora y pégala en el primer campo de la extensión: se reparte sola. '
+        + 'Por seguridad se ve solo unos minutos y no se vuelve a enseñar. Si la pierdes, crea un código nuevo.'));
   }
-  caja.appendChild(paso(3, 'El código de envío', h('div', { clase: 'pista' },
+  caja.appendChild(paso(3, 'La clave de conexión', h('div', { clase: 'pista' },
     'Es lo que impide que otro mande cosas a tu Studio. Solo se guarda su huella.'), ...filaCodigo));
   caja.appendChild(paso(4, 'Cárgala en Chrome', h('ol', { clase: 'pasos-instalar' },
     h('li', {}, 'Abre chrome://extensions y activa «Modo de desarrollador» (arriba a la derecha).'),
-    h('li', {}, 'Pulsa «Cargar descomprimida» y elige la carpeta del paso 1.'),
-    h('li', {}, 'Fija el botón con la pieza de puzle, ábrelo, pega la dirección y el código, y pulsa «Probar».'),
+    h('li', {}, 'Pulsa «Cargar extensión sin empaquetar» y elige la carpeta del paso 1 (la que tiene dentro manifest.json).'),
+    h('li', {}, 'Pulsa el icono de la extensión (arriba a la derecha de Chrome), pega la clave de conexión en el primer campo y pulsa «Probar». Se hace una sola vez: sirve para todas las pestañas.'),
     h('li', {}, 'Abre un post y pulsa «Enviar al Studio». Lo verás en Automatizar → Recibidos de Chrome.'))));
   return caja;
 }

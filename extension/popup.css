@@ -11,6 +11,8 @@
   }
 }
 * { box-sizing: border-box; }
+/* `section { display: grid }` ganaba al atributo hidden y se veían las dos partes a la vez */
+[hidden] { display: none !important; }
 body { margin: 0; width: 340px; padding: 12px 14px 14px; background: var(--fondo); color: var(--texto);
   font: 14px/1.45 system-ui, "Segoe UI", sans-serif; }
 header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }

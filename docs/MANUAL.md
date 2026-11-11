@@ -1097,10 +1097,12 @@ Las piezas quedan en la sección **Gráficas** del proyecto, donde se pueden abr
   y no hace falta conectar ningún canal. Sin ella, nada de vidIQ se enseña.
 - **Enviar al Studio — la extensión de Chrome**: (1) **Descargar la
   extensión** y descomprimirla; (2) la **dirección de tu Studio**, con
-  «Copiar»; (3) **Crear el código de envío** (se ve una sola vez; uno nuevo deja
-  sin valer el de antes); (4) en `chrome://extensions`, «Modo de desarrollador» →
-  «Cargar descomprimida», y en la extensión pegar la dirección y el código y
-  pulsar «Probar».
+  «Copiar»; (3) **Crear el código de envío**, que da la **clave de conexión**
+  (la dirección y el código juntos; se ve una sola vez; uno nuevo deja sin valer
+  el de antes); (4) en `chrome://extensions`, «Modo de desarrollador» →
+  «Cargar extensión sin empaquetar» (la carpeta que tiene `manifest.json`), y en
+  la extensión pegar la clave en el primer campo y pulsar «Probar». Se hace una
+  vez por Chrome; lo que se pega se guarda solo aunque la ventanita se cierre.
 - **Calidad de las imágenes**: el punto de partida de los vídeos nuevos.
 - **Dictado al asistente**: con OpenAI o con el del navegador.
 - **Hora de tu región**: para que el chat y los vídeos enseñen tu hora.

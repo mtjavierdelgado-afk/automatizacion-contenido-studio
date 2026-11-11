@@ -236,8 +236,8 @@ def prueba_extension():
     datos = R.zip_extension()
     with zipfile.ZipFile(io.BytesIO(datos)) as z:
         nombres = z.namelist()
-        dentro = json.loads(z.read("crearia-enviar-al-studio/manifest.json"))
-    ok("crearia-enviar-al-studio/manifest.json" in nombres and "crearia-enviar-al-studio/lector.js" in nombres,
+        dentro = json.loads(z.read("manifest.json"))
+    ok("manifest.json" in nombres and "lector.js" in nombres,
        "el ZIP trae la carpeta lista para «Cargar descomprimida»")
     ok(not any("/." in n or n.endswith(".pyc") for n in nombres), "sin ficheros ocultos")
     igual(dentro["version"], R.version_extension(), "y su versión")
@@ -359,6 +359,7 @@ window.chrome = {
   storage: { local: {
     get: async () => Object.assign({}, window.__estado.guardado),
     set: async o => { Object.assign(window.__estado.guardado, o); },
+    remove: async ks => { for (const k of [].concat(ks)) delete window.__estado.guardado[k]; },
   } },
   tabs: {
     query: async q => q.active
@@ -464,6 +465,33 @@ def prueba_boton():
             pagina.goto("https://studio.prueba/popup.html")
             pagina.wait_for_selector("#config:not([hidden])", timeout=5000)
             ok(True, "sin ajustes, abre en la dirección y el código")
+            ok(pagina.evaluate("getComputedStyle(document.getElementById('envio')).display") == "none",
+               "y la parte de enviar NO se ve mientras falta configurarla (11-11)")
+            # lo escrito se guarda solo: salir de la ventanita y volver no lo pierde (11-11)
+            pagina.fill("#studio", "https://studio.prueba/")
+            guardado = pagina.evaluate("window.__estado.guardado")
+            igual(guardado.get("borradorStudio"), "https://studio.prueba/", "la dirección sola queda de borrador, sin pulsar nada")
+            ok("Falta el código" in pagina.inner_text("#estadoConfig"),
+               "y dice que falta el código y que puede salir a copiarlo")
+            otra = navegador.new_page(viewport={"width": 360, "height": 640})
+            otra.add_init_script(CHROME_FALSO + "window.__estado.guardado = " + json.dumps(guardado) + ";")
+            otra.route("**/*", servir)
+            otra.goto("https://studio.prueba/popup.html")
+            otra.wait_for_selector("#config:not([hidden])", timeout=5000)
+            igual(otra.input_value("#studio"), "https://studio.prueba/", "al volver a abrirla, la dirección sigue ahí")
+            # un código a medio escribir no salta al campo de la dirección
+            otra.fill("#codigo", "env")
+            igual((otra.input_value("#studio"), otra.input_value("#codigo")), ("https://studio.prueba/", "env"),
+                  "un código a medio escribir se queda en su campo")
+            # la clave de conexión (dirección y código juntos), pegada en el primer campo, se reparte
+            otra.fill("#studio", "https://studio.prueba/v2/#env_Clave-1_x")
+            igual((otra.input_value("#studio"), otra.input_value("#codigo")), ("https://studio.prueba/v2/", "env_Clave-1_x"),
+                  "la clave de conexión pegada en el primer campo se reparte en dirección y código")
+            otra.fill("#studio", "")
+            otra.fill("#codigo", "https://studio.prueba/#env_otra")
+            igual((otra.input_value("#studio"), otra.input_value("#codigo")), ("https://studio.prueba/", "env_otra"),
+                  "y pegada en el campo del código, también")
+            otra.close()
             # una dirección que no es un Studio: no recibe el código
             pagina.fill("#studio", "https://studio.prueba/otra/")
             pagina.fill("#codigo", "env_nuevo")
@@ -563,7 +591,7 @@ def prueba_studio():
         ok(z.status_code == 200 and z.headers.get("content-type") == "application/zip"
            and "crearia-enviar-al-studio.zip" in z.headers.get("content-disposition", ""), "descargar la extensión")
         with zipfile.ZipFile(io.BytesIO(z.content)) as zz:
-            ok("crearia-enviar-al-studio/manifest.json" in zz.namelist(), "(con su manifiesto)")
+            ok("manifest.json" in zz.namelist(), "(con su manifiesto)")
         igual(s.delete(base + f"/api/recibidos/{rid}").status_code, 200, "borrarlo")
         igual(s.get(base + "/api/recibidos").json()["total"], 0, "y ya no está")
         nuevo = s.post(base + "/api/recibidos/codigo", json={}).json()

@@ -1717,7 +1717,10 @@ GUIAS["enviar_al_studio"] = {
         "Selecciona el trozo de texto que te interesa antes de pulsar: va aparte, como «lo que marqué».",
         "Escribe una nota corta de qué te gusta o qué quieres hacer: Claude la lee primero.",
         "Abre el post en su página (no en el muro) para que se lean bien el texto y las cifras.",
-        "Si cambias de ordenador, crea un código nuevo y pégalo en la extensión de ese Chrome.",
+        "Pega la «clave de conexión» (la dirección y el código juntos) en el primer campo de la extensión: se reparte sola.",
+        "Se pone UNA vez por Chrome: después sirve en todas las pestañas sin volver a escribir nada.",
+        "Si la ventanita se cierra a medias, vuelve a abrirla: lo que pegaste sigue ahí.",
+        "Si cambias de ordenador, crea un código nuevo y pega su clave en la extensión de ese Chrome.",
     ],
     "no": [
         "Compartir el código de envío: con él cualquiera podría mandar cosas a tu Studio.",
@@ -1725,8 +1728,7 @@ GUIAS["enviar_al_studio"] = {
         "Usarlo para copiar contenido ajeno tal cual: es una referencia para hacer lo tuyo.",
     ],
     "plantilla": (
-        "DIRECCIÓN: [la de Configuración → Enviar al Studio, paso 2]\n"
-        "CÓDIGO: env_… (paso 3, se ve una vez)\n"
+        "CLAVE DE CONEXIÓN: https://tu-studio/#env_… (Configuración → Enviar al Studio, paso 3; se ve una vez)\n"
         "NOTA AL ENVIAR: [qué te gusta de este post o qué quieres hacer con él]"
     ),
     "ejemplo": (

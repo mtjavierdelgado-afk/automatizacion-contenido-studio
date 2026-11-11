@@ -10,6 +10,17 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**La lista del piloto, ordenada y sin vídeos ya publicados (11 de noviembre)**
+- «En marcha y en cola» sale siempre arriba, y cada grupo va en el orden en que
+  lanzaste los vídeos.
+- Un vídeo que ya programaste, publicaste, subiste a mano o cuyos textos
+  copiaste en Publicar sale solo de la lista. Los ves con **Ver los ya
+  publicados**.
+- Si el piloto se para porque el vídeo tenía otra cosa en marcha, ya no te pide
+  decidir: dice «esperando: sigue solo» y continúa en cuanto eso termina. En
+  esa parada ya no sale «Seguir igualmente» (no hacía nada distinto de
+  «Reintentar»).
+
 **El guion visual se pone al día solo (9 de noviembre)**
 - El bloque «Guion visual» (paso Voz o Imágenes) ya no se queda vacío si lo
   abriste antes de tener el guion: cuando terminan el guion, la voz, una

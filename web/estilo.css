@@ -5859,3 +5859,7 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .mandos-elemento { display: inline-flex; flex-wrap: wrap; gap: 2px; }
 .mandos-elemento .mini { min-width: 28px; padding-left: 6px; padding-right: 6px; }
 .otros-proyectos-piloto { margin: 4px 0 8px; }
+/* la lista del piloto (rama piloto-lista): lo que ya salió, apagado */
+.grupo-vivos { margin-bottom: 4px; }
+.grupo-publicados .tarjeta-piloto { opacity: 0.75; }
+.ver-publicados-piloto { align-self: flex-start; }

@@ -21021,6 +21021,15 @@ def publicar_guardar_ficha(pid: str, peticion: Request, cuerpo: dict = Body(defa
     return publicar_ficha(pid, peticion)
 
 
+@app.post("/api/publicar/videos/{pid}/copiado")
+def publicar_copiado(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{red}: se copiaron los textos de esa red para publicar a mano. Solo lo
+    apunta (rama piloto-lista: el video sale de la lista del piloto)."""
+    ctx = _ctx_publicable(pid, peticion)
+    red = str(_cuerpo(cuerpo).get("red") or "")
+    return {"copiado": _por_publicar(_publicar().marcar_copiado, raiz_proyectos(), ctx.id, red)}
+
+
 @app.get("/api/publicar/videos/{pid}/fotograma")
 def publicar_fotograma(pid: str, peticion: Request, ms: int = 0):
     """El fotograma del momento `ms` (vista pequeña), para elegir la portada."""
@@ -21805,6 +21814,26 @@ def _video_publicado(pid):
     except Exception:                                       # noqa: BLE001
         return False
     return any((e or {}).get("estado") in ("publicado", "a_mano")
+               for e in (datos or {}).get("envios") or [])
+
+
+#: Los estados de un envio que dicen que el video ya salio o va a salir solo:
+#: programado, en camino, publicado o subido a mano (rama piloto-lista).
+ENVIOS_QUE_SALEN = ("enviando", "programado", "publicando", "publicado", "comprobar", "a_mano")
+
+
+def _video_salio(pid):
+    """Si el video ya salio o esta programado en Publicar, o se copiaron sus
+    textos para publicarlo a mano. -> bool (rama piloto-lista). Solo lee."""
+    if PUBLICAR is None or not pid:
+        return False
+    try:
+        datos = PUBLICAR._leer_video(raiz_proyectos(), pid)
+    except Exception:                                       # noqa: BLE001
+        return False
+    if (datos or {}).get("copiado"):
+        return True
+    return any((e or {}).get("estado") in ENVIOS_QUE_SALEN
                for e in (datos or {}).get("envios") or [])
 
 
@@ -22642,11 +22671,45 @@ def _piloto_cupo_lleno(tope_pct):
     return ""
 
 
+def _piloto_ocupado(pid):
+    """Si el video tiene algo en marcha (lo mismo que mira `_piloto_correr`
+    antes de arrancar). -> bool; ante la duda, True (no se retoma)."""
+    try:
+        ctx = contexto(pid)
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            return True
+        with _COLA_LOCK:
+            return bool(_cola_dibujando(ctx))
+    except Exception:                                       # noqa: BLE001
+        return True
+
+
+def _piloto_retomar_ocupados(P, raiz):
+    """LO QUE SE PARO SOLO POR ESPERAR se retoma solo (rama piloto-lista).
+
+    Una parada «ocupado» no es una decision del dueño: el piloto se aparto
+    porque el video tenia otra cosa en marcha (algo lanzado a mano, una tanda
+    de notas). En cuanto termina, vuelve a la cola como con «Reintentar» --sigue
+    donde iba, sin repagar lo hecho--. Las demas paradas (el tope, las
+    imagenes marcadas, los vistos buenos) siguen esperando a una persona."""
+    for ficha in P.listar(raiz):
+        if ficha.get("estado") != "parado" or ficha.get("tipo_parada") != "ocupado":
+            continue
+        if not ficha.get("pid") or _piloto_ocupado(ficha["pid"]):
+            continue
+        try:
+            P.preparar_reintento(raiz, ficha["id"])
+            P.cambiar(raiz, ficha["id"], mensaje="retomado solo: lo que tenía en marcha ya terminó")
+        except P.ErrorPiloto:
+            continue
+
+
 def _piloto_una_vuelta():
     """Arranca los videos que tocan, si hay hueco y cupo."""
     P = _piloto()
     raiz = raiz_proyectos()
     ajustes = P.ajustes(raiz)
+    _piloto_retomar_ocupados(P, raiz)
     with _PILOTO_LOCK:
         vivos = {v for v, h in _PILOTO_HILOS.items() if h.is_alive()}
         for v in list(_PILOTO_HILOS):
@@ -22691,12 +22754,14 @@ def _piloto_correr(raiz, vid):
                 raise _PilotoCancelado()
             activo = _trabajo_de_cadena(ctx)
             if activo is not None or ctx.gestor.listar(activos=True):
-                raise _PilotoPara("ese vídeo tiene algo en marcha: cuando acabe, pulsa «Reintentar»",
+                raise _PilotoPara("ese vídeo tiene algo en marcha (míralo en «Abrir el vídeo» → "
+                                  "la cola): el piloto sigue solo cuando acabe",
                                   "el vídeo", "ocupado")
             with _COLA_LOCK:
                 if _cola_dibujando(ctx):
-                    raise _PilotoPara("se están rehaciendo imágenes con tus notas en ese vídeo: "
-                                      "cuando acaben, pulsa «Reintentar»", "Imágenes", "ocupado")
+                    raise _PilotoPara("se están rehaciendo imágenes con tus notas en ese vídeo "
+                                      "(«Abrir el vídeo» → Imágenes): el piloto sigue solo "
+                                      "cuando acaben", "Imágenes", "ocupado")
             trabajo_id = ctx.gestor.lanzar("generar:piloto", _piloto_cadena, ctx, raiz, vid,
                                            paso="ingesta", toca=[p["id"] for p in PASOS])
         _registrar_trabajo(trabajo_id, ctx.id)
@@ -23332,6 +23397,11 @@ def _piloto_para_pantalla(ficha):
     salida["portadas"] = [{k: v for k, v in c.items() if k != "diseno"}
                           for c in ficha.get("portadas") or []]
     salida["vivo"] = _piloto_vivo(ficha)
+    # YA SALIO (rama piloto-lista): programado, publicado, subido a mano o con
+    # sus textos copiados. La pantalla lo saca de «Necesita revisión» y de
+    # «Listos» sin que nadie pulse «Quitar de la lista»
+    if ficha.get("pid") and ficha.get("estado") not in ("en_cola", "trabajando"):
+        salida["salio"] = _video_salio(ficha["pid"])
     return salida
 
 

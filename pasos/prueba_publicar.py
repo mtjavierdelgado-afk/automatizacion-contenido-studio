@@ -2038,7 +2038,7 @@ def prueba_metricas_completas():
             g = (trabajo.get("guardadas") or {}).get("tiktok")
             if g:
                 g.update(al="2020-01-01T00:00:00+00:00", curva=[[0.0, 1.0], [9.0, 0.1]],
-                         nuevos_seguidores=999)
+                         mitad_s=9.0, nuevos_seguidores=999)
         json.dump(datos_sim, open(simulador, "w", encoding="utf-8"))
         r = P.leer_guardadas(raiz, ["completo"])
         ok((r or {}).get("leidos", 0) > 0, f"la lectura guardada lee algo: {r}")
@@ -2055,6 +2055,21 @@ def prueba_metricas_completas():
         tt3 = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}["tiktok"]["metricas"]
         igual((tt3["curva"], tt3["nuevos_seguidores"]), ([[0.0, 1.0], [9.0, 0.1]], 999),
               "y una MÁS NUEVA sí las pone")
+        igual(tt3.get("mitad_s"), 9.0, "con su «mitad» (va junta con la curva)")
+        # una curva nueva que NUNCA baja del 50 %: la «mitad» de antes no se queda
+        datos_sim = json.load(open(simulador, encoding="utf-8"))
+        for trabajo in datos_sim["trabajos"].values():
+            g = (trabajo.get("guardadas") or {}).get("tiktok")
+            if g:
+                g.update(al="2099-02-01T00:00:00+00:00", curva=[[0.0, 1.0], [7.0, 0.6]], mitad_s=None)
+        json.dump(datos_sim, open(simulador, "w", encoding="utf-8"))
+        P.leer_guardadas(raiz, ["completo"])
+        tt4 = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}["tiktok"]["metricas"]
+        igual((tt4["curva"], tt4.get("mitad_s")), ([[0.0, 1.0], [7.0, 0.6]], None),
+              "una curva nueva que no baja del 50 % deja la «mitad» vacía (no la de antes)")
+        igual(C._detalle({"retention": [{"second": 0, "percentage": 1.0}, {"second": 5, "percentage": 1.02},
+                                        {"second": 10, "percentage": 0.4}]})["mitad_s"], 10.0,
+              "una fracción que se pasa un pelo de 1 no divide la lista entera entre 100")
     finally:
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 

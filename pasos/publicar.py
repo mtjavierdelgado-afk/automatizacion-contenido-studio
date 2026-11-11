@@ -3734,6 +3734,11 @@ def _apuntar_metricas(raiz, envios, cifras, error=""):
                 for k in nuevas:
                     if nuevas[k] is None and viejas.get(k) is not None:
                         nuevas[k] = viejas[k]
+                # la curva y su «mitad» van JUNTAS (2.ª revision, 11-11): una
+                # curva nueva que no baja del 50 % trae mitad_s None, y eso es
+                # una respuesta, no un «no lo se»
+                if propias.get("curva") is not None:
+                    nuevas["mitad_s"] = propias.get("mitad_s")
                 nuevas.update(al=al, error=propias.get("error") or "")
                 # el reloj de la lectura guardada es suyo: una lectura en vivo no
                 # lo borra (sin el, una guardada MAS VIEJA volvia a pisar la
@@ -3877,6 +3882,9 @@ def _apuntar_guardadas(raiz, envios, indice):
                     if (manda or viejas.get(k) is None) and nuevas.get(k) != valor:
                         nuevas[k] = valor
                         tocado = True
+                        if k == "curva":
+                            # su «mitad» con ella, aunque sea None (ver arriba)
+                            nuevas["mitad_s"] = post.get("mitad_s")
                 if retencion_nueva and nuevas.get("guardada_al") != _iso_lima(cuando):
                     nuevas["guardada_al"] = _iso_lima(cuando)
                 if not tocado:

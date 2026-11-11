@@ -609,7 +609,10 @@ class ClienteUploadPost:
         -> [fraccion|None] en el mismo orden"""
         numeros = [cls._numero(v) for v in crudos]
         numeros = [v if v is not None and v >= 0 else None for v in numeros]
-        en_cien = any(v is not None and v > 1 for v in numeros)
+        # 1,5 y no 1: una lista 0-100 de verdad nunca tiene su maximo tan bajo
+        # (la curva empieza cerca de 100, un reparto suma cerca de 100), y una
+        # fraccion que se pasa un pelo de 1 (1,02) no divide la lista entera
+        en_cien = any(v is not None and v > 1.5 for v in numeros)
         salida = []
         for v in numeros:
             if v is not None and en_cien:

@@ -1266,7 +1266,7 @@ def _lineas_del_catalogo(catalogo):
     return salida
 
 
-def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=()):
+def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=(), por_lineas=True):
     """La camara y la gente de cada linea del guion visual (rama guion-visual).
 
     La camara de la linea va LITERAL como encuadre (el SHOT TYPE del prompt) y
@@ -1280,7 +1280,9 @@ def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=()):
     metia a una persona en primer plano aunque la linea dijera «No people in
     the shot». Una carta forzada a mano en ese plano (`forzadas`) se respeta."""
     reparto = (catalogo or {}).get("reparto") or {}
-    por_linea = _lineas_del_catalogo(catalogo)
+    # con un espacio fijo o un tipo de relato puestos DESPUES de repartir desde
+    # las lineas, manda el sitio fijado: `por_lineas` llega en False
+    por_linea = _lineas_del_catalogo(catalogo) if por_lineas else {}
     for escena in escenas:
         linea = escena.get("linea_gv")
         if not linea:
@@ -1307,10 +1309,14 @@ def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=()):
         # linea no dice quien sale, sale quien el catalogo ato a ella. Sin
         # 'desde_lineas' no se entra aqui y el plano es el de siempre.
         propia = por_linea.get(catalogo_visual._clave_linea(linea.get("visual")))
-        if propia is not None:
+        # un mapa o un grafico copia su imagen: ni sitio ni gente (como siempre)
+        if propia is not None and not escena.get("componente"):
             sitio = propia.get("set")
             escena["set"] = sitio if sitio in (catalogo.get("sets") or {}) else None
-            if not linea.get("personajes"):
+            # la gente de la linea manda; si ninguna esta en el reparto de ahora
+            # (una linea escrita con el reparto de antes), la que el catalogo
+            # ato a esa linea
+            if not escena["personajes"]:
                 escena["personajes"] = [q for q in (propia.get("personajes") or [])
                                         if q in reparto]
             escena["linea_manda"] = True
@@ -1484,7 +1490,13 @@ def planificar(proyecto, params, inventario=None, replantear=False,
             sin_sorteo = False
         forzadas = {e["id"] for e in escenas
                     if _ajustes_unidad(p, f"escena:{e['id']}").get("carta")} if sin_sorteo else set()
-        _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=sin_sorteo, forzadas=forzadas)
+        try:
+            fijado = bool(catalogo_visual.normalizar_espacio_fijo(p.get("espacio_fijo")))
+        except ValueError:
+            fijado = False
+        fijado = fijado or tipo_relato.activo(tipo_relato.resolver(p))
+        _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=sin_sorteo, forzadas=forzadas,
+                           por_lineas=not fijado)
     modo = modo_de(p["estilo"])
     # EL TIPO DE RELATO (rama tipo-de-relato). Solo con un modo EXPLICITO que
     # edita: sin el, `relato_edita` es False y ningun plano cambia.
@@ -1592,8 +1604,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
         if escena.get("linea_manda"):
             # la luz es la del sitio de SU linea (rama gv-sitios): la del tramo
             # es la de otro sitio, y «must not drift» la imponia
-            escena["luz"] = (catalogo["sets"].get(escena["set"]) or {}).get("luz", "") \
-                if escena.get("set") else ""
+            escena["luz"] = ((catalogo["sets"].get(escena["set"]) or {}).get("luz", "")
+                             if escena.get("set") else catalogo.get("luz_por_defecto", ""))
         # LA ACCION DEL TRAMO, ESCRITA EN EL PLANO. Ya viajaba dentro del
         # prompt, pero disuelta: quien lo lee despues --el agente que dirige los
         # planos-- no puede sacarla de ahi. Escrita aparte, se puede decir «esto

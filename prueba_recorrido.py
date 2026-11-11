@@ -10505,7 +10505,11 @@ def gv_sitios(navegador, datos):
            "(1) con «Volver a repartir desde las líneas»")
         pg.captura("gv_sitios_aviso", entera=False)
         ok(_huellas_de_planos(datos, pid) == antes, "(1) pintar el aviso no toca ninguna imagen")
+        ok(pg.visible(".aviso-sitios-lineas .meta", "quedarán por rehacer"),
+           "(1) con imágenes hechas, dice que quedarán por rehacer")
         pg.pulsar(".aviso-sitios-lineas button", "Volver a repartir desde las líneas")
+        ok(any("quedarán por rehacer" in d for d in pg.dialogos),
+           "(2) y antes de repartir lo pregunta")
         fin = time.time() + 10
         while time.time() < fin and not pedidos:
             pg.p.wait_for_timeout(300)

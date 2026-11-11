@@ -307,14 +307,32 @@ def prueba_el_fallo_y_el_arreglo(proyecto):
     return catalogo
 
 
+def prueba_casos_raros(proyecto, catalogo_nuevo):
+    seccion("4b] una línea con gente de un reparto viejo, y un mapa")
+    params = _params(catalogo_nuevo)
+    params["guion_visual"]["planos"][0]["personajes"] = ["publico"]   # el reparto de antes
+    escena = _planos(proyecto, params)[0]
+    igual(escena.get("personajes"), ["artista"],
+          "una línea que nombra a alguien que ya no está: sale quien el catálogo ató a ella")
+    escenas = [{"id": "S001", "linea_gv": dict(LINEAS[0]), "componente": "mapa_ruta",
+                "set": None, "personajes": []}]
+    P6._aplicar_lineas_gv(escenas, catalogo_nuevo)                    # noqa: SLF001
+    ok(not escenas[0].get("linea_manda") and escenas[0]["set"] is None and not escenas[0]["personajes"],
+       "un plano de mapa o gráfico no toma sitio ni gente de su línea (copia su imagen)")
+
+
 def prueba_lo_de_antes(proyecto, catalogo_nuevo):
     seccion("5] lo de antes no se mueve")
     sin_marca = {k: v for k, v in catalogo_nuevo.items() if k not in ("lineas", "desde_lineas")}
     a = [e["prompt"] for e in _planos(proyecto, _params(sin_marca))]
-    b = [e["prompt"] for e in _planos(proyecto, _params(dict(sin_marca, lineas=[])))]
-    igual(a, b, "sin 'desde_lineas', los prompts son los de siempre")
+    b = [e["prompt"] for e in _planos(proyecto, _params(dict(sin_marca, lineas=catalogo_nuevo["lineas"])))]
+    igual(a, b, "con 'lineas' pero sin 'desde_lineas', los prompts son los de sin lineas")
     ok(not any(p.startswith(LINEAS[0]["visual"]) for p in a[:1]),
        "y el sitio va delante como antes (nada se reordena en un video hecho)")
+    con_espacio = _params(catalogo_nuevo)
+    con_espacio["espacio_fijo"] = {"sitio": "Mi plato", "descripcion": "a small studio set"}
+    ok(not any(e.get("linea_manda") for e in _planos(proyecto, con_espacio)),
+       "con un espacio fijo puesto después, manda el espacio (no las líneas)")
     voz_con = [e["prompt"] for e in _planos(proyecto, _params(catalogo_nuevo, modo="voz"))]
     voz_sin = [e["prompt"] for e in _planos(proyecto, _params(sin_marca, modo="voz"))]
     igual(voz_con, voz_sin, "en modo voz, las lineas del catalogo no cambian ningun prompt")
@@ -357,6 +375,12 @@ def prueba_el_servidor():
         igual(servidor._sitios_y_lineas(ctx, params, params["catalogo"]), {},
               "en modo voz no hay nada que avisar")
         igual(servidor._lineas_para_catalogo(ctx, bloques), None, "ni lineas que pasar al catalogo")
+        try:
+            servidor._correr_escenarios(lambda *a, **k: None, ctx, {}, "", True, desde_lineas=True)
+            ok(False, "en modo voz, «desde las líneas» se niega")
+        except RuntimeError as fallo:
+            ok("no dibuja desde el guion" in str(fallo) and not pedidas,
+               "en modo voz, «desde las líneas» se niega sin llamar a Claude")
         ctx.estado.actualizar_params("assets", {"imagenes": "guion"})
         servidor._correr_escenarios(lambda *a, **k: None, ctx, {}, "", True)
         ok(not pedidas, "«rehacer» con el guion igual NO vuelve a repartir (como siempre)")
@@ -375,6 +399,15 @@ def prueba_el_servidor():
         guardado = (ctx.estado.params("assets") or {}).get("catalogo") or {}
         ok(guardado.get("desde_lineas") is True and guardado.get("lineas"),
            "corregir el reparto a mano (PUT /catalogo) conserva lo de cada línea")
+        otro = copy.deepcopy(sin_marca)
+        otro["sets"].pop("azotea")
+        otro["beats"] = [b for b in otro["beats"] if b.get("set") != "azotea"]
+        servidor.guardar_catalogo(pid, {"catalogo": otro})
+        quitado = (ctx.estado.params("assets") or {}).get("catalogo") or {}
+        ok("desde_lineas" not in quitado and "lineas" not in quitado,
+           "pero si se quita un sitio que usaban las líneas, no se arrastran (irían a un sitio que no está)")
+        servidor.guardar_catalogo(pid, {"catalogo": guardado})
+        guardado = (ctx.estado.params("assets") or {}).get("catalogo") or {}
         mas = copy.deepcopy(LINEAS) + [{"bloque": "B003", "visual": "Una línea nueva"}]
         ctx.estado.actualizar_params("assets", {
             "guion_visual": {"origen": "manual", "aprobado": True, "planos": mas}})
@@ -393,6 +426,7 @@ def main():
         prueba_limpieza()
         proyecto = _proyecto(os.path.join(carpeta, "video"))
         catalogo = prueba_el_fallo_y_el_arreglo(proyecto)
+        prueba_casos_raros(proyecto, catalogo)
         prueba_lo_de_antes(proyecto, catalogo)
         prueba_el_servidor()
     finally:

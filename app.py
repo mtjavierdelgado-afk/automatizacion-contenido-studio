@@ -4444,12 +4444,20 @@ def guardar_catalogo(pid: str, cuerpo: dict = Body(default=None)):
     # /escenarios. Guardar el catalogo a mano las borraba, y con ellas
     # desaparecian los logos de todos los planos.
     previo = (ctx.estado.params("assets") or {}).get("catalogo") or {}
-    for clave in ("reales", "_firma_guion", "relato", "_pedido", "lineas", "desde_lineas"):
+    for clave in ("reales", "_firma_guion", "relato", "_pedido"):
         if clave in previo and clave not in catalogo:
             limpio[clave] = previo[clave]
-    # repartido desde las lineas (rama gv-sitios): lo que traiga la propuesta
+    # REPARTIDO DESDE LAS LINEAS (rama gv-sitios): lo que traiga la propuesta,
+    # o lo guardado SOLO si sigue cuadrando con los sitios de ahora. Un
+    # catalogo distinto (otra propuesta, un sitio renombrado o quitado a mano)
+    # no hereda el sitio de cada linea: lo mandaria a un sitio que ya no esta
     if catalogo.get("desde_lineas") is True and isinstance(catalogo.get("lineas"), list):
         limpio["lineas"], limpio["desde_lineas"] = catalogo["lineas"], True
+    elif previo.get("desde_lineas") is True and "lineas" not in catalogo:
+        sitios = set(limpio["sets"] or {})
+        if all((x or {}).get("set") in sitios for x in previo.get("lineas") or []
+               if (x or {}).get("set")):
+            limpio["lineas"], limpio["desde_lineas"] = previo.get("lineas") or [], True
     if isinstance(catalogo.get("relato"), dict) and catalogo["relato"]:
         limpio["relato"] = catalogo["relato"]
     # los tramos que explican y los graficos (rama diagramas-por-contenido):
@@ -4776,6 +4784,9 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer, desde_li
     pedido = " ".join(str(peticion or "").split())
     if pedido and hay:
         avisar(0.02, "con tu pedido: se vuelve a repartir el reparto y los sitios")
+    if desde_lineas and not _lineas_para_catalogo(ctx, _bloques_del_guion(ctx)):
+        raise RuntimeError("este vídeo no dibuja desde el guion visual (o aún no tiene "
+                           "líneas): no hay líneas desde las que repartir")
     if desde_lineas and hay:
         avisar(0.02, "desde las líneas visuales: se vuelve a repartir el reparto y los sitios")
     if (rehacer and cambio) or incompleto or not hay or pedido or desde_lineas:

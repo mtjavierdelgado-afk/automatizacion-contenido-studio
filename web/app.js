@@ -9974,13 +9974,25 @@ function avisoSitiosDeLineas(est, corriendo) {
     h('div', { clase: 'fila' },
       h('button', { clase: 'mini', disabled: corriendo, onclick: () => repartirSitiosDesdeLineas() },
         'Volver a repartir desde las líneas'),
-      h('span', { clase: 'meta' }, 'lo lee Claude (no se paga ninguna imagen); las imágenes '
-        + 'hechas se quedan hasta que pidas rehacerlas')));
+      h('span', { clase: 'meta' }, videoConImagenesLight()
+        ? 'lo lee Claude; ojo: las imágenes ya hechas quedarán por rehacer, y rehacerlas se paga al generar'
+        : 'lo lee Claude: no se paga ninguna imagen')));
+}
+
+/* Si el vídeo abierto ya tiene alguna tanda de imágenes. */
+function videoConImagenesLight() {
+  const v = APP.light.video || {};
+  return !!versionDe((v.fichas || {}).assets || {});
 }
 
 async function repartirSitiosDesdeLineas() {
   const est = relatoDelVideoLight();
   const pid = est.pid;
+  /* CON IMÁGENES HECHAS, se pregunta (revisión de gv-sitios): repartir no
+     paga, pero cambia lo que pide cada plano y todas quedan por rehacer. */
+  if (videoConImagenesLight() && !window.confirm('Repartir desde las líneas cambia lo que pide cada '
+    + 'plano: las imágenes ya hechas quedarán por rehacer, y rehacerlas se paga al pulsar «Generar». '
+    + '¿Repartir igualmente?')) return;
   limpiarError(CLAVE_VIDEO_LIGHT);
   try {
     const datos = await pedir(API.escenarios(pid), { method: 'POST', cuerpo: { rehacer: true, desde_lineas: true } });

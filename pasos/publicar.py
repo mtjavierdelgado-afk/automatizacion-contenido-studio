@@ -3874,6 +3874,8 @@ def _apuntar_guardadas(raiz, envios, indice):
                 nuevas = dict(viejas)
                 tocado = False
                 for k in CAMPOS_ENVIO:
+                    if k == "mitad_s":
+                        continue        # solo se escribe junto a su curva (abajo)
                     valor = post.get(k)
                     if valor is None:
                         continue

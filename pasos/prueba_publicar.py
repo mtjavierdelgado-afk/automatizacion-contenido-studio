@@ -2067,6 +2067,18 @@ def prueba_metricas_completas():
         tt4 = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}["tiktok"]["metricas"]
         igual((tt4["curva"], tt4.get("mitad_s")), ([[0.0, 1.0], [7.0, 0.6]], None),
               "una curva nueva que no baja del 50 % deja la «mitad» vacía (no la de antes)")
+        # 3.ª revisión: una guardada MÁS VIEJA con otra curva y su «mitad» no
+        # cuela la «mitad» bajo la curva que hay
+        datos_sim = json.load(open(simulador, encoding="utf-8"))
+        for trabajo in datos_sim["trabajos"].values():
+            g = (trabajo.get("guardadas") or {}).get("tiktok")
+            if g:
+                g.update(al="2020-01-01T00:00:00+00:00", curva=[[0.0, 1.0], [8.0, 0.4]], mitad_s=8.0)
+        json.dump(datos_sim, open(simulador, "w", encoding="utf-8"))
+        P.leer_guardadas(raiz, ["completo"])
+        tt5 = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}["tiktok"]["metricas"]
+        igual((tt5["curva"], tt5.get("mitad_s")), ([[0.0, 1.0], [7.0, 0.6]], None),
+              "una guardada más vieja no cuela su «mitad» bajo la curva que hay")
         igual(C._detalle({"retention": [{"second": 0, "percentage": 1.0}, {"second": 5, "percentage": 1.02},
                                         {"second": 10, "percentage": 0.4}]})["mitad_s"], 10.0,
               "una fracción que se pasa un pelo de 1 no divide la lista entera entre 100")

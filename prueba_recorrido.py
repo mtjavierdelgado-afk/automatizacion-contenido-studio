@@ -10486,32 +10486,6 @@ def gv_sitios(navegador, datos):
     pedidos = []
 
     def ficha_de_la_voz(ruta):
-# ============================================================ PILOTO LISTA
-# piloto-lista (11-11-2026, pedido del dueño): «En marcha y en cola» arriba y en
-# el orden en que se lanzaron; lo ya publicado sale solo de la lista (y se ve con
-# «Ver los ya publicados»); una parada por «tiene algo en marcha» no ofrece
-# «Seguir igualmente». La lista se fabrica interceptando GET /api/piloto: el
-# servidor de prueba no tiene vídeos en esos estados. Lo del servidor (qué
-# cuenta como publicado, la retomada sola) lo prueba `pasos/prueba_piloto.py`.
-@escenario
-def piloto_lista(navegador, datos):
-    cid = datos["cliente"]
-    pg = Pagina(navegador, datos, nombre="piloto lista")
-
-    def ficha(vid, nombre, estado, **mas):
-        return dict({"id": vid, "cid": cid, "titulo": nombre, "nombre": nombre, "estado": estado,
-                     "portadas": [], "revisar": [], "vivo": None}, **mas)
-    # el servidor los da del más nuevo al más viejo
-    videos = [
-        ficha("v5", "L05 — en cola", "en_cola", mensaje="esperando su turno"),
-        ficha("v4", "L04 — listo", "listo", pid="p4"),
-        ficha("v3", "L03 — esperando", "parado", pid="p3", tipo_parada="ocupado", espera_sola=True,
-              porque="ese vídeo tiene algo en marcha", donde="el vídeo"),
-        ficha("v2", "L02 — ya publicado", "revisar", pid="p2", salio=True),
-        ficha("v1", "L01 — trabajando", "trabajando", etapa="imagenes", mensaje="dibujando"),
-    ]
-
-    def lista(ruta):
         if ruta.request.method != "GET":
             ruta.continue_()
             return
@@ -10558,6 +10532,40 @@ def piloto_lista(navegador, datos):
         # el 409 de mentira lo escribe `pedir` en la consola: es el esperado
         pg.errores[:] = [e for e in pg.errores if "no se reparte nada" not in str(e)]
         pg.sin_errores("gv sitios")
+        pg.cerrar()
+
+
+# ============================================================ PILOTO LISTA
+# piloto-lista (11-11-2026, pedido del dueño): «En marcha y en cola» arriba y en
+# el orden en que se lanzaron; lo ya publicado sale solo de la lista (y se ve con
+# «Ver los ya publicados»); una parada por «tiene algo en marcha» no ofrece
+# «Seguir igualmente». La lista se fabrica interceptando GET /api/piloto: el
+# servidor de prueba no tiene vídeos en esos estados. Lo del servidor (qué
+# cuenta como publicado, la retomada sola) lo prueba `pasos/prueba_piloto.py`.
+@escenario
+def piloto_lista(navegador, datos):
+    cid = datos["cliente"]
+    pg = Pagina(navegador, datos, nombre="piloto lista")
+
+    def ficha(vid, nombre, estado, **mas):
+        return dict({"id": vid, "cid": cid, "titulo": nombre, "nombre": nombre, "estado": estado,
+                     "portadas": [], "revisar": [], "vivo": None}, **mas)
+    # el servidor los da del más nuevo al más viejo
+    videos = [
+        ficha("v5", "L05 — en cola", "en_cola", mensaje="esperando su turno"),
+        ficha("v4", "L04 — listo", "listo", pid="p4"),
+        ficha("v3", "L03 — esperando", "parado", pid="p3", tipo_parada="ocupado", espera_sola=True,
+              porque="ese vídeo tiene algo en marcha", donde="el vídeo"),
+        ficha("v2", "L02 — ya publicado", "revisar", pid="p2", salio=True),
+        ficha("v1", "L01 — trabajando", "trabajando", etapa="imagenes", mensaje="dibujando"),
+    ]
+
+    def lista(ruta):
+        if ruta.request.method != "GET":
+            ruta.continue_()
+            return
+        respuesta = ruta.fetch()
+        cuerpo = respuesta.json()
         cuerpo["videos"] = videos
         ruta.fulfill(response=respuesta, body=json.dumps(cuerpo), content_type="application/json")
     try:
@@ -10587,6 +10595,9 @@ def piloto_lista(navegador, datos):
         pg.p.unroute("**/api/piloto")
         pg.js("PIL.verPublicados = false; PIL.datos = null;")
         pg.sin_errores("piloto lista")
+        pg.cerrar()
+
+
 # ========================================================= SESION Y SALTOS
 # sesion-y-saltos (11-11-2026): mientras se espera el acceso a Claude,
 # Configuración se repinta cada 2 s y volvía arriba (el dueño lo vio el 09-11).

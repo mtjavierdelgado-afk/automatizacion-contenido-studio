@@ -27,7 +27,10 @@ function estado(id, texto, tipo) {
 function normalizar(direccion) {
   let u;
   try { u = new URL(String(direccion || '').trim()); } catch (e) { return null; }
-  if (!/^https?:$/.test(u.protocol)) return null;
+  /* https siempre: por http el código viajaría sin cifrar. Solo un Studio en este
+     mismo ordenador (localhost) puede ir por http. */
+  const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname);
+  if (!(u.protocol === 'https:' || (u.protocol === 'http:' && local))) return null;
   /* la dirección del Studio puede llevar una carpeta (/v2/): la API cuelga de ahí. Si se
      pega la de una pantalla (…/login, …/index.html) se quita ese último trozo */
   let carpeta = u.pathname.replace(/\/(login|studio|index\.html|[^/]*\.[a-z0-9]+)\/?$/i, '/');
@@ -51,34 +54,53 @@ function repartirClave(texto) {
   return { studio: t };
 }
 
-/* La clave pegada en cualquiera de los dos campos se reparte; un código a medio
-   escribir («env») no es una dirección: solo se mueve lo que empieza por http. */
+/* La clave pegada en cualquiera de los dos campos se reparte, aunque Chrome la
+   haya añadido detrás de lo que ya había (se busca la ÚLTIMA clave entera). Un
+   código a medio escribir («env») no es una dirección: solo se mueve lo que
+   empieza por http. */
+const CLAVE_ENTERA = /https?:\/\/(?:(?!https?:\/\/)[^\s#"'«»])+#env_[A-Za-z0-9_-]+/g;
+
 function repartirCampos() {
+  const claves = ($('studio').value + ' ' + $('codigo').value).match(CLAVE_ENTERA);
+  if (claves) {
+    const r = repartirClave(claves[claves.length - 1]);
+    $('studio').value = r.studio;
+    $('codigo').value = r.codigo;
+    return;
+  }
   const enDireccion = repartirClave($('studio').value);
-  if (enDireccion.codigo) {            // la clave entera (o un código suelto) en el primer campo
-    $('studio').value = enDireccion.studio || $('studio').value.replace(/#?env_[A-Za-z0-9_-]+\s*$/, '').trim();
+  if (enDireccion.codigo && !enDireccion.studio) {   // un código suelto pegado en el primer campo
+    $('studio').value = '';
     $('codigo').value = enDireccion.codigo;
   }
   const enCodigo = repartirClave($('codigo').value);
-  if (enCodigo.studio && /^https?:\/\//i.test(enCodigo.studio)) {   // una dirección (o la clave entera) en el campo del código
-    if (enCodigo.codigo) { $('studio').value = enCodigo.studio; $('codigo').value = enCodigo.codigo; }
-    else { if (!$('studio').value.trim()) $('studio').value = enCodigo.studio; $('codigo').value = ''; }
+  if (enCodigo.studio && /^https?:\/\//i.test(enCodigo.studio)) {   // una dirección en el campo del código
+    if (!$('studio').value.trim()) $('studio').value = enCodigo.studio;
+    $('codigo').value = '';
   }
 }
 
 /* Lo escrito se guarda al momento como borrador: cerrar la ventanita no lo pierde. */
-async function guardarBorrador() {
+function guardarBorrador() {
   repartirCampos();
-  try { await chrome.storage.local.set({ borradorStudio: $('studio').value.trim(), borradorCodigo: $('codigo').value.trim() }); }
-  catch (e) { /* sin almacén no hay borrador; lo demás sigue igual */ }
+  /* sin esperar: «Guardar»/«Probar» tienen que pedir el permiso de Chrome antes de
+     ninguna otra espera (Chrome solo lo concede justo después del clic) */
+  chrome.storage.local.set({ borradorStudio: $('studio').value.trim(), borradorCodigo: $('codigo').value.trim() })
+    .catch(() => { /* sin almacén no hay borrador; lo demás sigue igual */ });
   const falta = !$('studio').value.trim() ? 'la dirección' : !$('codigo').value.trim() ? 'el código' : '';
-  estado('estadoConfig', falta ? `Guardado lo que has puesto. Falta ${falta}: puedes salir a copiarlo y volver.` : 'Pulsa «Probar» para conectar.', '');
+  const completo = /^env_[A-Za-z0-9_-]{10,}$/.test($('codigo').value.trim());
+  estado('estadoConfig', falta ? `Guardado lo que has puesto. Falta ${falta}: puedes salir a copiarlo y volver.`
+    : completo ? 'Pulsa «Probar» para conectar.' : 'El código parece incompleto: cópialo entero del Studio.', '');
 }
 
+/* Lo que se enseña al abrir: el borrador ENTERO si lo hay (aunque tenga un campo
+   vacío: mezclarlo con lo guardado pondría el código de un Studio con la dirección
+   de otro), y si no, lo guardado. */
 async function rellenarConfig() {
   const c = await chrome.storage.local.get(['studio', 'codigo', 'borradorStudio', 'borradorCodigo']);
-  $('studio').value = c.borradorStudio || c.studio || '';
-  $('codigo').value = c.borradorCodigo || c.codigo || '';
+  const hayBorrador = 'borradorStudio' in c || 'borradorCodigo' in c;
+  $('studio').value = (hayBorrador ? c.borradorStudio : c.studio) ?? '';
+  $('codigo').value = (hayBorrador ? c.borradorCodigo : c.codigo) ?? '';
 }
 
 function mostrarConfig(mostrar) {
@@ -214,11 +236,11 @@ async function esUnStudio(n) {
 }
 
 async function guardar() {
-  await guardarBorrador();
+  guardarBorrador();
   const n = normalizar($('studio').value);
   const codigo = $('codigo').value.trim();
   if (!$('studio').value.trim()) { estado('estadoConfig', 'Falta la dirección de tu Studio. Lo demás queda guardado: puedes salir a copiarla y volver.', 'mal'); return false; }
-  if (!n) { estado('estadoConfig', 'La dirección no parece una web (https://…).', 'mal'); return false; }
+  if (!n) { estado('estadoConfig', 'La dirección tiene que ser una web que empiece por https://', 'mal'); return false; }
   if (!codigo) { estado('estadoConfig', 'Falta el código de envío. La dirección queda guardada: puedes salir a copiarlo y volver.', 'mal'); return false; }
   /* el permiso para hablar con TU Studio, y solo con él */
   const ok = await chrome.permissions.request({ origins: [n.origen + '/*'] }).catch(() => false);
@@ -249,11 +271,17 @@ async function probar() {
 document.addEventListener('DOMContentLoaded', async () => {
   $('ajustes').addEventListener('click', async () => {
     const abrir = $('config').hidden;
-    if (abrir) await rellenarConfig();
-    else if (await config()) leerPestana();
-    mostrarConfig(abrir);
+    if (abrir) { await rellenarConfig(); mostrarConfig(true); return; }
+    /* sin configurar no hay nada a lo que volver: se queda en la configuración */
+    if (!(await config())) return;
+    mostrarConfig(false);
+    leerPestana();
   });
-  for (const id of ['studio', 'codigo']) $(id).addEventListener('input', guardarBorrador);
+  for (const id of ['studio', 'codigo']) {
+    $(id).addEventListener('input', guardarBorrador);
+    /* al entrar en un campo se selecciona entero: pegar lo REEMPLAZA en vez de añadirse detrás */
+    $(id).addEventListener('focus', e => e.target.select());
+  }
   $('guardar').addEventListener('click', guardar);
   $('probar').addEventListener('click', probar);
   $('enviar').addEventListener('click', enviar);

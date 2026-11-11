@@ -33988,15 +33988,19 @@ function seccionEnviarAlStudio() {
   const version = datos.version_extension ? ` (versión ${datos.version_extension})` : '';
   const paso = (n, titulo, ...resto) => h('div', { clase: 'paso-enviar' },
     h('div', { clase: 'fila' }, h('span', { clase: 'numero-paso' }, String(n)), h('b', {}, titulo)), ...resto);
+  /* El orden es el de quien la pone: descargar, cargar en Chrome y, con la ventanita
+     ya a mano, crear la clave y pegarla (la clave solo se ve 5 minutos). */
   caja.appendChild(paso(1, `Descarga la extensión${version}`,
     h('div', { clase: 'fila' },
       h('a', { href: rutaRecibidos('/extension.zip'), download: 'crearia-enviar-al-studio.zip', clase: 'boton mini primario' }, 'Descargar la extensión'),
-      h('span', { clase: 'meta' }, 'Descomprime el ZIP en una carpeta que no vayas a borrar.'))));
+      h('span', { clase: 'meta' }, 'En Descargas: clic derecho en el ZIP → «Extraer todo…» → «Extraer». Deja esa carpeta donde está: Chrome la usa.'))));
+  caja.appendChild(paso(2, 'Cárgala en Chrome', h('ol', { clase: 'pasos-instalar' },
+    h('li', {}, 'Abre chrome://extensions y activa «Modo de desarrollador» (arriba a la derecha).'),
+    h('li', {}, 'Si ya tenías una versión anterior de «Enviar a CrearIA Studio», pulsa «Quitar» en ella.'),
+    h('li', {}, 'Pulsa «Cargar extensión sin empaquetar» y elige la carpeta del paso 1 (la que tiene dentro manifest.json).'),
+    h('li', {}, 'Para tenerla a mano: pieza de puzle 🧩 (arriba a la derecha de Chrome) → chincheta junto a «Enviar a CrearIA Studio».'))));
   const direccion = h('input', { type: 'text', readonly: true, 'aria-label': 'La dirección de tu Studio' });
   direccion.value = direccionDelStudio();
-  caja.appendChild(paso(2, 'La dirección de tu Studio',
-    h('div', { clase: 'fila-clave' }, direccion,
-      h('button', { type: 'button', clase: 'mini', onclick: () => copiarTexto(direccion.value) }, 'Copiar'))));
   const filaCodigo = [h('div', { clase: 'fila' },
     pastillaEstado(codigo.puesto ? 'ok' : 'vacio', codigo.puesto ? `puesto (${codigo.cola || ''})` : 'sin crear'),
     codigo.creado ? h('span', { clase: 'meta' }, `creado el ${fechaCorta(codigo.creado).slice(0, 16)}`) : null,
@@ -34015,14 +34019,22 @@ function seccionEnviarAlStudio() {
         h('button', { type: 'button', clase: 'mini primario', onclick: () => copiarTexto(campo.value) }, 'Copiar la clave')),
       h('div', { clase: 'caja-aviso' }, 'Cópiala ahora y pégala en el primer campo de la extensión: se reparte sola. '
         + 'Por seguridad se ve solo unos minutos y no se vuelve a enseñar. Si la pierdes, crea un código nuevo.'));
+  } else if (codigo.puesto) {
+    filaCodigo.push(h('div', { clase: 'pista' }, 'Para ver tu clave de conexión, pulsa «Crear uno nuevo» '
+      + '(el código de antes deja de valer en el Chrome donde lo pusiste).'));
   }
-  caja.appendChild(paso(3, 'La clave de conexión', h('div', { clase: 'pista' },
-    'Es lo que impide que otro mande cosas a tu Studio. Solo se guarda su huella.'), ...filaCodigo));
-  caja.appendChild(paso(4, 'Cárgala en Chrome', h('ol', { clase: 'pasos-instalar' },
-    h('li', {}, 'Abre chrome://extensions y activa «Modo de desarrollador» (arriba a la derecha).'),
-    h('li', {}, 'Pulsa «Cargar extensión sin empaquetar» y elige la carpeta del paso 1 (la que tiene dentro manifest.json).'),
-    h('li', {}, 'Pulsa el icono de la extensión (arriba a la derecha de Chrome), pega la clave de conexión en el primer campo y pulsa «Probar». Se hace una sola vez: sirve para todas las pestañas.'),
-    h('li', {}, 'Abre un post y pulsa «Enviar al Studio». Lo verás en Automatizar → Recibidos de Chrome.'))));
+  caja.appendChild(paso(3, 'Conéctala con tu clave de conexión',
+    h('ol', { clase: 'pasos-instalar' },
+      h('li', {}, 'Pulsa el icono de la extensión para abrir su ventanita.'),
+      h('li', {}, 'Aquí, crea la clave y pulsa «Copiar la clave».'),
+      h('li', {}, 'Pégala en el primer campo de la ventanita y pulsa «Probar». Se hace UNA vez: sirve en todas las pestañas de ese Chrome.')),
+    h('div', { clase: 'pista' }, 'Es lo que impide que otro mande cosas a tu Studio. Solo se guarda su huella.'),
+    ...filaCodigo,
+    h('div', { clase: 'pista' }, 'La dirección de tu Studio, por si la extensión te la pide sola:'),
+    h('div', { clase: 'fila-clave' }, direccion,
+      h('button', { type: 'button', clase: 'mini', onclick: () => copiarTexto(direccion.value) }, 'Copiar'))));
+  caja.appendChild(paso(4, 'Úsala', h('div', { clase: 'pista' },
+    'Abre un post, pulsa el icono de la extensión y «Enviar al Studio». Lo verás en Automatizar → Recibidos de Chrome.')));
   return caja;
 }
 

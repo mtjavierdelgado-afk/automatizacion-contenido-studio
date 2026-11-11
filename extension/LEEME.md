@@ -7,14 +7,20 @@ Chrome**.
 ## Instalarla
 
 1. En el Studio, **Configuración → Enviar al Studio → Descargar la extensión**.
-   Descomprime el ZIP en una carpeta que no vayas a borrar.
-2. En el mismo sitio, copia **la dirección de tu Studio** y pulsa **Crear el
-   código de envío** (se ve una sola vez: cópialo).
-3. En Chrome abre `chrome://extensions`, activa **Modo de desarrollador** y pulsa
-   **Cargar descomprimida**. Elige la carpeta del paso 1.
-4. Fija el botón (pieza de puzle → chincheta), ábrelo, pega la dirección y el
-   código y pulsa **Probar**. Chrome te pedirá permiso para hablar con tu
-   Studio: acéptalo.
+   En Descargas: clic derecho en el ZIP → **Extraer todo…** → **Extraer**. Deja
+   esa carpeta donde está: Chrome la usa.
+2. En Chrome abre `chrome://extensions`, activa **Modo de desarrollador** y pulsa
+   **Cargar extensión sin empaquetar**. Elige la carpeta que tiene dentro
+   `manifest.json`. Si tenías una versión anterior, pulsa **Quitar** en ella.
+3. Fíjala: pieza de puzle (arriba a la derecha) → chincheta junto a «Enviar a
+   CrearIA Studio».
+4. Abre su ventanita. En el Studio pulsa **Crear el código de envío** (o «Crear
+   uno nuevo») y **Copiar la clave**: es la dirección y el código juntos.
+   Pégala en el primer campo de la ventanita y pulsa **Probar**. Chrome te
+   pedirá permiso para hablar con tu Studio: acéptalo.
+
+Se hace UNA vez por Chrome: después sirve en todas las pestañas. Lo que pegas
+se guarda solo, aunque la ventanita se cierre al ir a copiar algo.
 
 ## Usarla
 
@@ -27,7 +33,8 @@ Chrome, entra y vuelve a pulsar.
 
 - Lee solo la pestaña que tienes delante y solo cuando pulsas (permiso
   `activeTab`). No recorre perfiles ni pide nada a ninguna red.
-- Guarda la dirección y el código en este Chrome (`chrome.storage.local`).
+- Guarda la dirección y el código en este Chrome (`chrome.storage.local`), y
+  mientras los escribes, un borrador para no perderlos si la ventanita se cierra.
 - Si una red cambia su página y no lee bien las cifras, va lo genérico: el
   título, la descripción, el enlace y la captura.
 

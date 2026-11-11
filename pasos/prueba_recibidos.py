@@ -491,7 +491,37 @@ def prueba_boton():
             otra.fill("#codigo", "https://studio.prueba/#env_otra")
             igual((otra.input_value("#studio"), otra.input_value("#codigo")), ("https://studio.prueba/", "env_otra"),
                   "y pegada en el campo del código, también")
+            # pegada DETRÁS de lo que ya había (Chrome añade al pegar): manda la última clave entera
+            otra.fill("#studio", "https://studio.prueba/v2/https://studio.prueba/#env_Nueva_123")
+            igual((otra.input_value("#studio"), otra.input_value("#codigo")), ("https://studio.prueba/", "env_Nueva_123"),
+                  "pegada detrás de una dirección vieja, se queda la clave nueva")
+            otra.fill("#codigo", "env_Viejo_000https://studio.prueba/v2/#env_Nueva_456")
+            igual((otra.input_value("#studio"), otra.input_value("#codigo")), ("https://studio.prueba/v2/", "env_Nueva_456"),
+                  "y pegada detrás de un código viejo, también")
+            # ⚙ sin configurar no enseña la parte de enviar
+            otra.click("#ajustes")
+            otra.wait_for_timeout(300)
+            ok(otra.evaluate("getComputedStyle(document.getElementById('envio')).display") == "none"
+               and not otra.is_hidden("#config"), "⚙ sin configurar se queda en la configuración")
+            # http: el código viajaría sin cifrar
+            otra.fill("#studio", "http://studio.prueba/")
+            otra.fill("#codigo", "env_Nueva_456789")
+            otra.click("#guardar")
+            otra.wait_for_function("document.getElementById('estadoConfig').classList.contains('mal')", timeout=5000)
+            ok("https://" in otra.inner_text("#estadoConfig"), "una dirección http:// no se acepta (el código iría sin cifrar)")
             otra.close()
+            # un borrador con un campo vacío no se mezcla con lo guardado de otro Studio
+            mezcla = navegador.new_page(viewport={"width": 360, "height": 640})
+            mezcla.add_init_script(CHROME_FALSO + "window.__estado.guardado = {studio: 'https://a.prueba/', codigo: 'env_de_A',"
+                                   " borradorStudio: 'https://b.prueba/', borradorCodigo: ''};")
+            mezcla.route("**/*", servir)
+            mezcla.goto("https://studio.prueba/popup.html")
+            mezcla.wait_for_selector("#envio:not([hidden])", timeout=5000)
+            mezcla.click("#ajustes")
+            mezcla.wait_for_selector("#config:not([hidden])", timeout=5000)
+            igual((mezcla.input_value("#studio"), mezcla.input_value("#codigo")), ("https://b.prueba/", ""),
+                  "al reabrir, el borrador entero: el código de A no se pone con la dirección de B")
+            mezcla.close()
             # una dirección que no es un Studio: no recibe el código
             pagina.fill("#studio", "https://studio.prueba/otra/")
             pagina.fill("#codigo", "env_nuevo")
@@ -513,6 +543,9 @@ def prueba_boton():
                 raise
             igual(llegadas[-1][1:3], ("https://studio.prueba/v2/api/recibidos/ping", "env_nuevo"),
                   "«Probar» llama al ping de un Studio en una carpeta (/v2/) con el código nuevo")
+            guardado = pagina.evaluate("window.__estado.guardado")
+            ok(guardado.get("studio") == "https://studio.prueba/v2/" and "borradorStudio" not in guardado
+               and "borradorCodigo" not in guardado, "guardado bien, el borrador se borra")
             pagina.close()
             navegador.close()
     except Exception as fallo:                          # noqa: BLE001

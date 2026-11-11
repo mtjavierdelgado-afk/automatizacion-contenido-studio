@@ -1250,6 +1250,22 @@ def _asignar_cartas(escenas, p, texto=""):
     return cartas
 
 
+def _lineas_del_catalogo(catalogo):
+    """El sitio y la gente de cada linea visual, si el catalogo se repartio desde
+    ellas (rama gv-sitios). -> {texto de la linea: {set, personajes}}; {} si no.
+
+    Un catalogo de antes de la rama (o de un video en modo voz) no trae
+    'desde_lineas', y entonces nada de esto aplica: sus planos se arman como
+    siempre y ninguna imagen ya pagada cambia de prompt."""
+    if not (catalogo or {}).get("desde_lineas"):
+        return {}
+    salida = {}
+    for linea in catalogo.get("lineas") or []:
+        if isinstance(linea, dict) and str(linea.get("visual") or "").strip():
+            salida.setdefault(catalogo_visual._clave_linea(linea["visual"]), linea)
+    return salida
+
+
 def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=()):
     """La camara y la gente de cada linea del guion visual (rama guion-visual).
 
@@ -1264,6 +1280,7 @@ def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=()):
     metia a una persona en primer plano aunque la linea dijera «No people in
     the shot». Una carta forzada a mano en ese plano (`forzadas`) se respeta."""
     reparto = (catalogo or {}).get("reparto") or {}
+    por_linea = _lineas_del_catalogo(catalogo)
     for escena in escenas:
         linea = escena.get("linea_gv")
         if not linea:
@@ -1284,6 +1301,19 @@ def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=()):
             # del tramo sale de la frase de la voz, que en modo guion no manda;
             # con ella aparecia una persona en planos que nadie la pedia.
             escena["personajes"] = []
+        # REPARTIDO DESDE LAS LINEAS (rama gv-sitios): el sitio de este plano es
+        # el que el catalogo le dio a SU linea (o ninguno, si la linea describe
+        # un lugar que no es ningun sitio), no el del tramo de voz; y si la
+        # linea no dice quien sale, sale quien el catalogo ato a ella. Sin
+        # 'desde_lineas' no se entra aqui y el plano es el de siempre.
+        propia = por_linea.get(catalogo_visual._clave_linea(linea.get("visual")))
+        if propia is not None:
+            sitio = propia.get("set")
+            escena["set"] = sitio if sitio in (catalogo.get("sets") or {}) else None
+            if not linea.get("personajes"):
+                escena["personajes"] = [q for q in (propia.get("personajes") or [])
+                                        if q in reparto]
+            escena["linea_manda"] = True
 
 
 def _repartir_zoom(escenas, modo="ilustracion", servicios=None, dominio=None):
@@ -1559,6 +1589,11 @@ def planificar(proyecto, params, inventario=None, replantear=False,
         escena["luz"] = (beat.get("luz")
                          or (catalogo["sets"].get(escena["set"]) or {}).get("luz")
                          or catalogo.get("luz_por_defecto", ""))
+        if escena.get("linea_manda"):
+            # la luz es la del sitio de SU linea (rama gv-sitios): la del tramo
+            # es la de otro sitio, y «must not drift» la imponia
+            escena["luz"] = (catalogo["sets"].get(escena["set"]) or {}).get("luz", "") \
+                if escena.get("set") else ""
         # LA ACCION DEL TRAMO, ESCRITA EN EL PLANO. Ya viajaba dentro del
         # prompt, pero disuelta: quien lo lee despues --el agente que dirige los
         # planos-- no puede sacarla de ahi. Escrita aparte, se puede decir «esto
@@ -2318,6 +2353,9 @@ def _prompt_visual(escena, beat, catalogo, modo="ilustracion"):
         base = _con_narracion(redactado, escena)
         return (f"{base} SHOT TYPE, and this is not optional: "
                 f"{escena['encuadre']}." if _con_encuadre(escena) else base)
+    if escena.get("linea_manda") and escena.get("linea_gv") \
+            and not escena.get("abstracta") and not escena.get("componente"):
+        return _prompt_de_linea(escena, beat, catalogo, modo)
     # EN MODO GUION EL PROMPT DEL BEAT NO ENTRA (rama guion-visual-2): lo escribe
     # el catalogo desde la VOZ del tramo, y delante de la linea visual le decia
     # al dibujante lo que la voz cuenta. Sin linea, como siempre.
@@ -2413,6 +2451,32 @@ def _prompt_visual(escena, beat, catalogo, modo="ilustracion"):
         # que es la misma regla que ya rige la guia de estilo.
         base = (f"{base} SHOT TYPE, and this is not optional: "
                 f"{escena['encuadre']}.")
+    return base
+
+
+def _prompt_de_linea(escena, beat, catalogo, modo="ilustracion"):
+    """El plano de un video repartido DESDE SUS LINEAS (rama gv-sitios). -> str
+
+    La linea va PRIMERO y entera: es lo que se ve. Detras, el sitio que el
+    catalogo le dio a esa linea (o ninguno), quien sale con su hoja, la
+    expresion y el encuadre. Antes el sitio del tramo de voz iba delante y
+    ganaba: en ZV01 un backstage obligatorio delante de «el rostro serio del
+    artista en una azotea»."""
+    linea = " ".join(str(escena.get("direccion")
+                         or (escena.get("linea_gv") or {}).get("visual") or "").split())
+    base = linea
+    spec_set = (catalogo.get("sets") or {}).get(escena.get("set")) or {}
+    sitio = spec_set.get("prompt") or spec_set.get("descripcion")
+    if sitio:
+        base = _unir(base, f"Where it happens: {sitio}")
+    if escena.get("personajes"):
+        base = _unir(base, "With " + _citar_reparto(escena["personajes"], catalogo)
+                     + ", " + _expresion(_tono_de(escena, beat), modo))
+    if escena.get("primer_termino"):
+        base = _unir(base, "With " + _sujeto(escena["primer_termino"], catalogo)
+                     + " large and close in the immediate foreground")
+    if _con_encuadre(escena):
+        base = f"{base} SHOT TYPE, and this is not optional: {escena['encuadre']}."
     return base
 
 

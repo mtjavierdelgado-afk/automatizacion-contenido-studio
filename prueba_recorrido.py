@@ -10460,6 +10460,67 @@ def _piloto_del_proyecto_y_portada(navegador, datos):
 
 
 
+# ============================================================== GV SITIOS
+# gv-sitios (11-11-2026): visto en ZV01. En modo guion, un reparto escrito
+# leyendo la VOZ pone en los planos un sitio que ninguna línea pide. El Encargo
+# lo avisa en «El reparto y los sitios» ANTES de generar, con «Volver a repartir
+# desde las líneas». El CLI falso no reparte sitios, así que la ficha se
+# completa con lo que diría el servidor (`sitios_de_lineas`, comprobado contra
+# el servidor de verdad en `pasos/prueba_gv_sitios.py`) y el reparto se
+# intercepta: se comprueba que se pide «desde las líneas» y no se lanza nada.
+# Va delante de gv_refresco (que regraba la voz y tiene que ser el último).
+@escenario
+def gv_sitios(navegador, datos):
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="gv sitios")
+    pedidos = []
+
+    def ficha_de_la_voz(ruta):
+        if ruta.request.method != "GET":
+            ruta.continue_()
+            return
+        respuesta = ruta.fetch()
+        cuerpo = respuesta.json()
+        cuerpo["sitios_de_lineas"] = {"de_la_voz": True, "lineas": 19}
+        ruta.fulfill(response=respuesta, body=json.dumps(cuerpo),
+                     content_type="application/json")
+
+    def reparto(ruta):
+        if ruta.request.method == "POST":
+            pedidos.append(ruta.request.post_data_json or {})
+            ruta.fulfill(status=409, content_type="application/json",
+                         body=json.dumps({"detail": "prueba: no se reparte nada"}))
+            return
+        ruta.continue_()
+    try:
+        pg.sin_trabajo(300)
+        antes = _huellas_de_planos(datos, pid)
+        pg.p.route("**/tipo_relato*", ficha_de_la_voz)
+        pg.p.route("**/escenarios", reparto)
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; "
+              "APP.light.video.relato = null; pintarLight();")
+        ok(pg.esperar(".aviso-sitios-lineas", "leyendo la voz", 20),
+           "(1) «El reparto y los sitios» avisa: se escribió leyendo la voz, no tus 19 líneas")
+        ok(pg.visible(".aviso-sitios-lineas button", "Volver a repartir desde las líneas"),
+           "(1) con «Volver a repartir desde las líneas»")
+        pg.captura("gv_sitios_aviso", entera=False)
+        ok(_huellas_de_planos(datos, pid) == antes, "(1) pintar el aviso no toca ninguna imagen")
+        pg.pulsar(".aviso-sitios-lineas button", "Volver a repartir desde las líneas")
+        fin = time.time() + 10
+        while time.time() < fin and not pedidos:
+            pg.p.wait_for_timeout(300)
+        ok(pedidos and pedidos[0].get("desde_lineas") is True and pedidos[0].get("rehacer") is True,
+           f"(2) el botón pide repartir desde las líneas ({pedidos[:1]})")
+    finally:
+        pg.p.unroute("**/tipo_relato*")
+        pg.p.unroute("**/escenarios")
+        pg.js("APP.light.video.relato = null; pintarLight();")
+        # el 409 de mentira lo escribe `pedir` en la consola: es el esperado
+        pg.errores[:] = [e for e in pg.errores if "no se reparte nada" not in str(e)]
+        pg.sin_errores("gv sitios")
+        pg.cerrar()
+
+
 # ============================================================== GV REFRESCO
 # gv-refresco (09-11-2026): visto en ZV01. El bloque «Guion visual» se pedía al
 # servidor UNA vez por vídeo; si se pedía antes de que hubiera guion llegaba sin

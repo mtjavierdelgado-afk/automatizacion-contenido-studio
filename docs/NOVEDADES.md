@@ -28,6 +28,16 @@ vídeos, estilos, claves y contraseña no se tocan.
   se vuelve a producir en lugar de cortar el vídeo. «Reintentar» ya no tropieza
   con ella.
 - Si OpenAI devuelve una imagen que no se puede leer, no se guarda y se dice.
+**La lista del piloto, ordenada y sin vídeos ya publicados (11 de noviembre)**
+- «En marcha y en cola» sale siempre arriba, y cada grupo va en el orden en que
+  lanzaste los vídeos.
+- Un vídeo que ya programaste, publicaste, subiste a mano o cuyos textos
+  copiaste en Publicar sale solo de la lista. Los ves con **Ver los ya
+  publicados**.
+- Si el piloto se para porque el vídeo tenía otra cosa en marcha, ya no te pide
+  decidir: dice «esperando: sigue solo» y continúa en cuanto eso termina. En
+  esa parada ya no sale «Seguir igualmente» (no hacía nada distinto de
+  «Reintentar»).
 
 **El guion visual se pone al día solo (9 de noviembre)**
 - El bloque «Guion visual» (paso Voz o Imágenes) ya no se queda vacío si lo

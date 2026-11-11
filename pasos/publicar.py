@@ -3587,6 +3587,18 @@ METRICAS = ("vistas", "me_gusta", "comentarios", "compartidos", "guardados")
 #: fraccion que lo vio hasta el final), `media_vista` (YouTube: que parte se ve
 #: de media; pasa de 1 si se vuelve a ver) y `tiempo_medio_s`.
 RETENCION = ("vista_entera", "media_vista", "tiempo_medio_s")
+#: METRICAS COMPLETAS (rama `metricas-completas`, 11-11-2026): las demas cuentas
+#: que Upload-Post ya trae. Se SUMAN como las de arriba, pero van aparte para no
+#: cambiar lo que otros leen de METRICAS (el informe, la Parrilla, el piloto).
+#: Las impresiones NO son vistas (veces que se enseño, no que se reprodujo) y el
+#: alcance sumado cuenta dos veces a quien vio dos posts: la pantalla lo dice.
+EXTRAS = ("alcance", "impresiones", "nuevos_seguidores", "visitas_perfil", "vistas_facebook",
+          "tiempo_total_s")
+#: Lo que no es una cuenta: la curva de retencion de TikTok y los repartos (de
+#: donde vinieron las vistas, que publico). Se guarda por envio y no se suma.
+DETALLE = ("curva", "fuentes", "publico")
+#: Todo lo que se apunta de un envio
+CAMPOS_ENVIO = METRICAS + EXTRAS + RETENCION + DETALLE
 LOTES_POR_VUELTA = 30
 RESPIRO_METRICAS_S = float(os.environ.get("ESTUDIO_METRICAS_RESPIRO") or 600)
 
@@ -3716,7 +3728,7 @@ def _apuntar_metricas(raiz, envios, cifras, error=""):
                     e["metricas"] = dict(viejas, al=al,
                                          error="Upload-Post no trae cifras de esta red")
                     continue
-                nuevas = {k: propias.get(k) for k in METRICAS + ("alcance",) + RETENCION}
+                nuevas = {k: propias.get(k) for k in CAMPOS_ENVIO}
                 # una consulta sin cifras (TikTok las completa en horas) no
                 # borra las que ya se sabian
                 for k in nuevas:
@@ -3856,7 +3868,7 @@ def _apuntar_guardadas(raiz, envios, indice):
                 retencion_nueva = guardada is None or cuando >= guardada
                 nuevas = dict(viejas)
                 tocado = False
-                for k in METRICAS + ("alcance",) + RETENCION:
+                for k in CAMPOS_ENVIO:
                     valor = post.get(k)
                     if valor is None:
                         continue
@@ -3961,10 +3973,10 @@ def actualizar_seguidores(raiz, cid):
 
 
 def _suma(destino, metricas):
-    for k in METRICAS:
+    for k in METRICAS + EXTRAS:
         v = (metricas or {}).get(k)
-        if isinstance(v, (int, float)):
-            destino[k] = (destino.get(k) or 0) + int(v)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            destino[k] = (destino.get(k) or 0) + (round(float(v), 1) if k == "tiempo_total_s" else int(v))
     vistas = (metricas or {}).get("vistas")
     peso = float(vistas) if isinstance(vistas, (int, float)) and vistas > 0 else 0.0
     for k in RETENCION:
@@ -4057,7 +4069,7 @@ def resultados(raiz, videos, cid, dias=30):
         suma = _medias(fila.pop("_suma"))
         for propia in fila["redes"].values():
             _medias(propia)
-        lista.append(dict(fila, **{k: suma.get(k) for k in METRICAS + RETENCION}))
+        lista.append(dict(fila, **{k: suma.get(k) for k in METRICAS + EXTRAS + RETENCION}))
     lista.sort(key=lambda f: (f.get("vistas") or 0), reverse=True)
     for r in por_red.values():
         _medias(r)
@@ -4188,7 +4200,7 @@ def lo_que_funciono(raiz, videos, cid=None, dias=30, red=None, por="vistas", cua
             "hora": momento.strftime("%H:%M"), "url": e.get("url") or "",
             "titulo": str(texto.get("titulo") or "")[:200],
             "descripcion": str(texto.get("descripcion") or "")[:600],
-            "metricas": {k: m.get(k) for k in METRICAS + RETENCION},
+            "metricas": {k: m.get(k) for k in METRICAS + EXTRAS + RETENCION},
             "interaccion": interaccion, "mirado": m.get("al") or ""}))
     filas.sort(key=lambda x: x[0], reverse=True)
     return {"por": por, "dias": dias, "red": red or "", "desde": desde.strftime("%Y-%m-%d"),

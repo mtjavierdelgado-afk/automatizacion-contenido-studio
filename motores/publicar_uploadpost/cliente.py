@@ -521,7 +521,22 @@ class ClienteUploadPost:
         "compartidos": ("shares", "share_count"),
         "guardados": ("saves", "saved", "favorites"),
         "alcance": ("reach",),
+        # METRICAS COMPLETAS (rama `metricas-completas`, 11-11-2026): lo que
+        # Upload-Post ya trae y no se guardaba. Las impresiones van APARTE de las
+        # vistas (veces que se ENSEÑÓ, no que se reprodujo); de TikTok, los
+        # seguidores que trajo el post y las visitas al perfil; de Instagram, lo
+        # que se vio del mismo Reel en Facebook.
+        "impresiones": ("impressions",),
+        "nuevos_seguidores": ("new_followers",),
+        "visitas_perfil": ("profile_views", "profileViews"),
+        "vistas_facebook": ("facebook_views",),
     }
+    #: Tiempo TOTAL visto (TikTok), en segundos: no es una cuenta de veces
+    CAMPOS_TIEMPO_TOTAL = ("total_time_watched",)
+    #: Cuántos puntos de la curva de retención se guardan como mucho
+    TOPE_CURVA = 120
+    #: Cuántas fuentes / tipos de público se guardan como mucho
+    TOPE_REPARTO = 12
 
     #: LA RETENCION (publicar-redes-2, 17-10-2026). Son DOS medidas distintas y
     #: van en campos distintos, porque no se pueden comparar ni promediar juntas:
@@ -581,7 +596,69 @@ class ClienteUploadPost:
     def _cifras(cls, bruto):
         datos = cls._numeros(bruto)
         datos.update(cls._retencion(bruto))
+        datos.update(cls._detalle(bruto))
         return datos
+
+    @staticmethod
+    def _fraccion(valor):
+        """Un porcentaje como fraccion (0..1): acepta 0,85 y 85."""
+        v = ClienteUploadPost._numero(valor)
+        if v is None or v < 0:
+            return None
+        if v > 1:
+            v = v / 100
+        return round(v, 4) if v <= 1 else None
+
+    @classmethod
+    def _detalle(cls, bruto):
+        """Lo que no es una cuenta (rama `metricas-completas`): el tiempo total
+        visto, la CURVA de retencion de TikTok (que parte sigue viendo en cada
+        segundo), de donde vinieron las vistas y que publico lo vio. Cada red
+        trae lo suyo y con su forma: lo que no se entiende se deja fuera (None),
+        nunca se inventa. -> {"tiempo_total_s", "curva", "fuentes", "publico"}"""
+        bruto = bruto if isinstance(bruto, dict) else {}
+        total = None
+        for suyo in cls.CAMPOS_TIEMPO_TOTAL:
+            v = cls._numero(bruto.get(suyo))
+            if v is not None and 0 <= v < 10 ** 10:
+                total = round(v, 1)
+                break
+        curva = []
+        crudo = bruto.get("retention")
+        if isinstance(crudo, dict):
+            crudo = [{"second": k, "percentage": v} for k, v in crudo.items()]
+        if isinstance(crudo, list):
+            for punto in crudo:
+                if not isinstance(punto, dict):
+                    continue
+                segundo = cls._numero(punto.get("second", punto.get("time", punto.get("seconds"))))
+                parte = cls._fraccion(punto.get("percentage", punto.get("rate", punto.get("value"))))
+                if segundo is None or parte is None or segundo < 0:
+                    continue
+                curva.append([round(segundo, 1), parte])
+            curva.sort(key=lambda p: p[0])
+            curva = curva[:cls.TOPE_CURVA]
+
+        def reparto(crudo, claves):
+            salida = []
+            if isinstance(crudo, dict):
+                crudo = [{"nombre": k, "percentage": v} for k, v in crudo.items()]
+            if not isinstance(crudo, list):
+                return None
+            for item in crudo:
+                if not isinstance(item, dict):
+                    continue
+                nombre = next((str(item[k]) for k in claves if item.get(k) not in (None, "")), "")
+                parte = cls._fraccion(item.get("percentage", item.get("value")))
+                if nombre and parte is not None:
+                    salida.append([nombre[:60], parte])
+            salida.sort(key=lambda x: -x[1])
+            return salida[:cls.TOPE_REPARTO] or None
+
+        return {"tiempo_total_s": total, "curva": curva or None,
+                "fuentes": reparto(bruto.get("impression_sources"),
+                                   ("impression_source", "source", "nombre", "name")),
+                "publico": reparto(bruto.get("audience_types"), ("type", "nombre", "name"))}
 
     @classmethod
     def _numeros(cls, bruto):

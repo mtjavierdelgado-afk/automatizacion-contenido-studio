@@ -259,6 +259,28 @@ class SimuladoUploadPost:
                              "tiempo_medio_s": float(base % 20 + 3) if r == "tiktok" else None,
                              "url": f"https://{r}.example/{request_id[:10]}", "post_id": post_id,
                              "error": ""}
+                # METRICAS COMPLETAS: lo de mas, en la forma CRUDA de Upload-Post y
+                # pasado por el mismo lector que la respuesta de verdad
+                crudo = {}
+                if r == "tiktok":
+                    duracion = 30
+                    crudo = {"new_followers": base // 90 + vueltas, "profile_views": base // 30,
+                             "total_time_watched": float(base * vueltas * 7),
+                             "retention": [{"second": str(s), "percentage": 100 if s == 0 else max(5, 100 - s * 3 - base % 7)}
+                                           for s in range(0, duracion + 1, 3)],
+                             "impression_sources": [
+                                 {"impression_source": "For You", "percentage": 0.81},
+                                 {"impression_source": "Personal Profile", "percentage": 0.12},
+                                 {"impression_source": "Search", "percentage": 0.07}],
+                             "audience_types": [{"type": "New viewers", "percentage": 0.9},
+                                                {"type": "Returning viewers", "percentage": 0.1}]}
+                elif r == "instagram":
+                    crudo = {"impressions": base * vueltas * 2, "reach": base * vueltas,
+                             "facebook_views": base // 3}
+                lector = ClienteUploadPost
+                extra = {k: v for k, v in lector._numeros(crudo).items() if v is not None}
+                extra.update({k: v for k, v in lector._detalle(crudo).items() if v is not None})
+                salida[r].update(extra)
                 guardadas = trabajo.setdefault("guardadas", {})
                 guardadas[r] = dict(salida[r], al=dt.datetime.now(dt.timezone.utc).isoformat())
             self._escribir(datos)

@@ -28871,7 +28871,18 @@ function numeroCorto(n) {
 const NOMBRES_METRICA = {
   vistas: 'vistas', me_gusta: 'me gusta', comentarios: 'comentarios',
   compartidos: 'compartidos', guardados: 'guardados',
+  // metricas-completas: lo demás que da cada red (lo que no da no se escribe)
+  nuevos_seguidores: 'seguidores nuevos', visitas_perfil: 'visitas al perfil',
+  vistas_facebook: 'vistas en Facebook',
 };
+
+/* «3 h 20 min», «12 min», «45 s»: el tiempo total visto de TikTok. */
+function tiempoLegible(segundos) {
+  const s = Math.round(Number(segundos) || 0);
+  if (s >= 3600) return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
+  if (s >= 60) return `${Math.round(s / 60)} min`;
+  return `${s} s`;
+}
 
 function textoMetricas(m) {
   if (!m) return '';
@@ -28879,6 +28890,71 @@ function textoMetricas(m) {
     .filter(k => typeof m[k] === 'number')
     .map(k => `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}`)
     .concat(textoRetencion(m) ? [textoRetencion(m)] : []).join(' · ');
+}
+
+/* Lo que va APARTE de las vistas (metricas-completas): las impresiones (veces
+   que la red lo ENSEÑÓ, no que se reprodujo), el alcance (personas distintas)
+   y el tiempo total visto. Sumados entre varios posts, el alcance cuenta dos
+   veces a quien vio dos: por eso dice «sumado». */
+function textoMetricasAparte(m, sumado) {
+  if (!m) return '';
+  const partes = [];
+  if (typeof m.alcance === 'number') partes.push(`${numeroCorto(m.alcance)} personas alcanzadas${sumado ? ' (sumado)' : ''}`);
+  if (typeof m.impresiones === 'number') partes.push(`${numeroCorto(m.impresiones)} impresiones`);
+  if (typeof m.tiempo_total_s === 'number') partes.push(`${tiempoLegible(m.tiempo_total_s)} vistas en total`);
+  return partes.join(' · ');
+}
+
+/* La curva de retención de TikTok (qué parte sigue viendo en cada segundo),
+   dibujada en un SVG pequeño sin estilos en línea (CSP). */
+function curvaRetencionPublicar(curva) {
+  const puntos = (curva || []).filter(p => Array.isArray(p) && p.length === 2);
+  if (puntos.length < 2) return null;
+  const NS = 'http://www.w3.org/2000/svg';
+  const ancho = 240, alto = 60;
+  const ultimo = puntos[puntos.length - 1][0] || 1;
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${ancho} ${alto}`);
+  svg.setAttribute('class', 'curva-retencion');
+  svg.setAttribute('role', 'img');
+  const mitad = puntos.find(p => p[1] <= 0.5);
+  svg.setAttribute('aria-label', mitad ? `La mitad se va en el segundo ${Math.round(mitad[0])}` : 'Más de la mitad lo ve entero');
+  const linea = document.createElementNS(NS, 'polyline');
+  linea.setAttribute('points', puntos.map(([s, f]) =>
+    `${(s / ultimo * (ancho - 4) + 2).toFixed(1)},${((1 - f) * (alto - 4) + 2).toFixed(1)}`).join(' '));
+  linea.setAttribute('class', 'curva-linea');
+  svg.appendChild(linea);
+  return svg;
+}
+
+/* Lo que TikTok dice en inglés, en español; lo que no se conoce, tal cual. */
+const NOMBRES_REPARTO_TIKTOK = {
+  'for you': 'Para ti', 'personal profile': 'Tu perfil', 'search': 'Búsqueda', 'follow': 'Siguiendo',
+  'following': 'Siguiendo', 'sound': 'Sonido', 'hashtag': 'Hashtag', 'others': 'Otros', 'other': 'Otros',
+  'new viewers': 'Espectadores nuevos', 'returning viewers': 'Que ya lo habían visto',
+  'followers': 'Seguidores', 'non-followers': 'No seguidores',
+};
+
+/* «Más cifras» de un envío: la curva, de dónde vinieron las vistas y qué público. */
+function detalleMetricasEnvio(e) {
+  const m = e.metricas || {};
+  const aparte = textoMetricasAparte(m, false);
+  const curva = curvaRetencionPublicar(m.curva);
+  const reparto = (lista, titulo) => (lista || []).length
+    ? h('div', { clase: 'meta' }, `${titulo}: ${lista.map(([n, f]) =>
+      `${NOMBRES_REPARTO_TIKTOK[String(n).trim().toLowerCase()] || n} ${porcentaje(f)}`).join(' · ')}`) : null;
+  const fuentes = reparto(m.fuentes, 'De dónde vinieron las vistas');
+  const publico = reparto(m.publico, 'Quién lo vio');
+  if (!aparte && !curva && !fuentes && !publico) return null;
+  const mitad = (m.curva || []).find(p => Array.isArray(p) && p[1] <= 0.5);
+  return h('details', { clase: 'mas-cifras-envio' },
+    h('summary', {}, 'Más cifras'),
+    aparte ? h('div', { clase: 'meta' }, aparte) : null,
+    curva ? h('div', { clase: 'fila curva-envio' }, curva,
+      h('span', { clase: 'meta' }, mitad
+        ? `La mitad deja de verlo en el segundo ${Math.round(mitad[0])}.`
+        : 'Más de la mitad lo ve hasta el final.')) : null,
+    fuentes, publico);
 }
 
 /* La retención (publicar-redes-2): solo la dan TikTok y YouTube. Lo que no
@@ -28972,6 +29048,8 @@ function filasEnvioFicha(e) {
     filas.push(h('div', { clase: 'caja-aviso aviso-recortado' },
       `⚠ ${CORTOS_RED[e.red] || e.red}: ${e.recortado}. Mira el post y, si hace falta, pega el texto a mano.`));
   }
+  const masCifras = detalleMetricasEnvio(e);
+  if (masCifras) filas.push(masCifras);
   filas.push(loMandadoPublicar(e));
   return filas;
 }
@@ -29655,9 +29733,16 @@ function seccionResultadosPublicar() {
   const total = r.total || {};
   caja.appendChild(h('div', { clase: 'cifras-publicar cifras-grandes-publicar' },
     ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],
-      ['comentarios', 'comentarios'], ['compartidos', 'compartidos']].map(([k, t]) =>
+      ['comentarios', 'comentarios'], ['compartidos', 'compartidos'], ['guardados', 'guardados'],
+      ['nuevos_seguidores', 'seguidores nuevos']].map(([k, t]) =>
       h('div', { clase: 'cifra' }, h('b', {}, typeof total[k] === 'number' ? numeroCorto(total[k]) : '—'),
         h('span', { clase: 'meta' }, t)))));
+  // metricas-completas: lo que no son reproducciones, aparte y dicho como es
+  const aparteTotal = textoMetricasAparte(total, true);
+  if (aparteTotal) {
+    caja.appendChild(h('div', { clase: 'meta cifras-aparte', title: 'Impresiones: veces que la red lo enseñó (no que se reprodujo). '
+      + 'Alcance sumado: cuenta dos veces a quien vio dos publicaciones.' }, `Además: ${aparteTotal}`));
+  }
   if (r.sin_cifras) {
     caja.appendChild(h('div', { clase: 'meta' }, `${r.sin_cifras} publicación(es) sin cifras todavía: `
       + 'las subidas a mano no se pueden medir desde aquí, y TikTok tarda unas horas en darlas.'));
@@ -33708,7 +33793,7 @@ function seccionInformePublicar() {
   const a = r.anterior || {};
   caja.appendChild(h('div', { clase: 'cifras-publicar' },
     ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],
-      ['comentarios', 'comentarios'], ['compartidos', 'compartidos']].map(([k, nombre]) => {
+      ['comentarios', 'comentarios'], ['compartidos', 'compartidos'], ['guardados', 'guardados']].map(([k, nombre]) => {
       const cambio = variacion(t[k], a[k]);
       return h('div', { clase: 'cifra' }, h('b', {}, typeof t[k] === 'number' ? numeroCorto(t[k]) : '—'),
         h('span', { clase: 'meta' }, nombre),

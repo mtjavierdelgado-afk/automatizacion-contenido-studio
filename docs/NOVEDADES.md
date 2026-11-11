@@ -10,6 +10,18 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**En «Lo que dice el guion», las imágenes siguen tus líneas visuales (11 de noviembre)**
+- El reparto y los sitios se sacan de las líneas «Visual:», no de la voz. Si la
+  voz es la letra de una canción que habla de un escenario y ninguna línea lo
+  pide, ya no sale un escenario en cada plano.
+- Cada imagen empieza por su línea; detrás va el sitio que encaja con ella (o
+  ninguno) y quien sale. Si varias líneas hablan de «el artista», es un solo
+  personaje con su hoja, y su cara es la misma en todos sus planos.
+- Los vídeos ya hechos no cambian. Si uno en modo guion tiene el reparto
+  escrito leyendo la voz, «El reparto y los sitios» (en el Encargo) lo avisa
+  antes de generar, con **Volver a repartir desde las líneas** (no paga ninguna
+  imagen; las hechas se quedan hasta que pidas rehacerlas).
+
 **El guion visual se pone al día solo (9 de noviembre)**
 - El bloque «Guion visual» (paso Voz o Imágenes) ya no se queda vacío si lo
   abriste antes de tener el guion: cuando terminan el guion, la voz, una

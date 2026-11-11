@@ -4284,6 +4284,34 @@ def _espacio_fijo_guardado(ctx):
         raise RuntimeError(f"el espacio fijo guardado no vale: {fallo}")
 
 
+def _lineas_para_catalogo(ctx, bloques):
+    """Las lineas visuales con las que se reparten el reparto y los sitios. -> lista o None
+
+    Rama gv-sitios (11-11-2026): en modo «guion» lo que se ve lo dicen las
+    lineas, y un catalogo escrito leyendo la VOZ las contradecia (ZV01: un
+    backstage en todos los planos de un video de calle y azotea). Las que
+    mandan (aprobadas, o las de la Parrilla que casan solas) y, si aun no hay,
+    las propuestas o las de la Parrilla casadas con el guion. En modo «voz»,
+    None: el catalogo se pide como siempre. Solo lee, no escribe nada."""
+    params = ctx.estado.params("assets") or {}
+    gv = _guion_visual()
+    if gv.modo_de(params) != "guion":
+        return None
+    planos, _origen = gv.efectivo(params, bloques)
+    if planos:
+        return planos
+    try:
+        guardado = gv.normalizar(params.get("guion_visual"))
+    except ValueError:
+        return None
+    if guardado.get("planos"):
+        return guardado["planos"]
+    if guardado.get("visuales"):
+        casados, _avisos = gv.casar(guardado["visuales"], bloques)
+        return [{"id": f"V{i + 1:03d}", **pl} for i, pl in enumerate(casados)] or None
+    return None
+
+
 def _correr_catalogo(avisar, ctx, ajuste, peticion):
     catalogo = _catalogo_visual()
     bloques = _bloques_del_guion(ctx)
@@ -4336,7 +4364,10 @@ def _correr_catalogo(avisar, ctx, ajuste, peticion):
                               relato=PASOS_MODULOS.tipo_relato.resolver(params),
                               # cuanto se explica dibujando (rama
                               # diagramas-por-contenido): sin ajuste, ""
-                              diagramas=_diagramas_del_video(ctx))
+                              diagramas=_diagramas_del_video(ctx),
+                              # en modo guion, desde las lineas visuales
+                              # (rama gv-sitios); en modo voz, None
+                              lineas=_lineas_para_catalogo(ctx, bloques))
     ctx.bitacora.anotar("catalogo_propuesto", "assets", {
         "personajes": len(ficha.get("reparto") or {}),
         "sets": len(ficha.get("sets") or {}),
@@ -4416,6 +4447,17 @@ def guardar_catalogo(pid: str, cuerpo: dict = Body(default=None)):
     for clave in ("reales", "_firma_guion", "relato", "_pedido"):
         if clave in previo and clave not in catalogo:
             limpio[clave] = previo[clave]
+    # REPARTIDO DESDE LAS LINEAS (rama gv-sitios): lo que traiga la propuesta,
+    # o lo guardado SOLO si sigue cuadrando con los sitios de ahora. Un
+    # catalogo distinto (otra propuesta, un sitio renombrado o quitado a mano)
+    # no hereda el sitio de cada linea: lo mandaria a un sitio que ya no esta
+    if catalogo.get("desde_lineas") is True and isinstance(catalogo.get("lineas"), list):
+        limpio["lineas"], limpio["desde_lineas"] = catalogo["lineas"], True
+    elif previo.get("desde_lineas") is True and "lineas" not in catalogo:
+        sitios = set(limpio["sets"] or {})
+        if all((x or {}).get("set") in sitios for x in previo.get("lineas") or []
+               if (x or {}).get("set")):
+            limpio["lineas"], limpio["desde_lineas"] = previo.get("lineas") or [], True
     if isinstance(catalogo.get("relato"), dict) and catalogo["relato"]:
         limpio["relato"] = catalogo["relato"]
     # los tramos que explican y los graficos (rama diagramas-por-contenido):
@@ -4666,8 +4708,12 @@ def _firma_del_guion(ctx):
 
 
 
-def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
-    """Deduce del guion quien sale y donde ocurre."""
+def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer, desde_lineas=False):
+    """Deduce del guion quien sale y donde ocurre.
+
+    `desde_lineas` (rama gv-sitios): «Volver a repartir desde las líneas»,
+    en un video hecho en modo guion cuyo reparto se escribio leyendo la voz.
+    Vuelve a leer aunque el guion no haya cambiado (como un pedido escrito)."""
     guardado = (ctx.estado.params("assets") or {}).get("catalogo") or {}
     hay = bool(guardado.get("sets") or guardado.get("reparto"))
 
@@ -4738,7 +4784,12 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
     pedido = " ".join(str(peticion or "").split())
     if pedido and hay:
         avisar(0.02, "con tu pedido: se vuelve a repartir el reparto y los sitios")
-    if (rehacer and cambio) or incompleto or not hay or pedido:
+    if desde_lineas and not _lineas_para_catalogo(ctx, _bloques_del_guion(ctx)):
+        raise RuntimeError("este vídeo no dibuja desde el guion visual (o aún no tiene "
+                           "líneas): no hay líneas desde las que repartir")
+    if desde_lineas and hay:
+        avisar(0.02, "desde las líneas visuales: se vuelve a repartir el reparto y los sitios")
+    if (rehacer and cambio) or incompleto or not hay or pedido or desde_lineas:
         avisar(0.02, "leyendo el guion para deducir quien sale y donde ocurre")
         ficha = _correr_catalogo(_tramo(0.02, 0.33), ctx, ajuste_catalogo, peticion)
         # Se guarda lo mismo que guardaba el PUT de aprobar: reparto, sitios y
@@ -4764,6 +4815,11 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
         if pedido:
             # el ultimo pedido con el que se repartio, para enseñarlo
             limpio["_pedido"] = pedido[:400]
+        if ficha.get("desde_lineas"):
+            # repartido desde las lineas visuales (rama gv-sitios): el sitio y
+            # la gente de cada linea. Sin lineas no hay clave (regla 1)
+            limpio["lineas"] = ficha.get("lineas") or []
+            limpio["desde_lineas"] = True
         if diagramas:
             # CON EL AJUSTE «DIAGRAMAS», sus tramos y SOLO los graficos con
             # cifras (los mapas siguen fuera, como siempre). Sin el, nada.
@@ -4802,6 +4858,7 @@ def construir_escenarios(pid: str, cuerpo: dict = Body(default=None)):
                                    ajuste_catalogo,
                                    str(datos.get("peticion") or ""),
                                    bool(datos.get("rehacer")),
+                                   desde_lineas=datos.get("desde_lineas") is True,
                                    paso="assets")
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "ajuste": ajuste_catalogo,
@@ -5140,6 +5197,7 @@ def _ficha_tipo_relato(ctx):
         ambientes = []
     return {
         "ambientes": ambientes,
+        "sitios_de_lineas": _sitios_y_lineas(ctx, params, catalogo),
         "tipo_relato": {k: v for k, v in guardado.items() if k != "bases"},
         "resuelto": dict(resuelto, nombre=tr.nombre(resuelto["modo"], resuelto.get("cambia"))),
         "del_estilo": tr.normalizar_de_estilo((params.get("estilo") or {}).get("relato"))
@@ -5165,6 +5223,37 @@ def _ficha_tipo_relato(ctx):
         "donde_base": en_espanol["donde_base"],
         "traduccion": en_espanol["traduccion"],
     }
+
+
+def _sitios_y_lineas(ctx, params, catalogo):
+    """Si el reparto y los sitios contradicen las lineas visuales. -> {} o {de_la_voz?, nuevas, sin_sitio}
+
+    Rama gv-sitios: se avisa en «El reparto y los sitios» ANTES de generar.
+    `de_la_voz`: en modo guion con lineas, el catalogo guardado se escribio
+    leyendo la voz (un video de antes de esta rama, o de cuando no habia
+    lineas). `nuevas`: lineas que el reparto no conoce (se cambio el guion
+    visual despues de repartir). Solo lee."""
+    try:
+        if not (catalogo.get("sets") or catalogo.get("reparto")):
+            return {}
+        if _espacio_fijo_guardado(ctx) or PASOS_MODULOS.tipo_relato.activo(
+                PASOS_MODULOS.tipo_relato.resolver(params)):
+            return {}
+        lineas = _lineas_para_catalogo(ctx, _bloques_del_guion(ctx)) or []
+    except Exception:                                       # noqa: BLE001
+        return {}
+    if not lineas:
+        return {}
+    if not catalogo.get("desde_lineas"):
+        return {"de_la_voz": True, "lineas": len(lineas)}
+    clave = _catalogo_visual()._clave_linea
+    conocidas = {clave(x.get("visual")): x for x in catalogo.get("lineas") or []
+                 if isinstance(x, dict)}
+    nuevas = [x["id"] for x in lineas if clave(x.get("visual")) not in conocidas]
+    sin_sitio = [x["id"] for x in lineas
+                 if not (conocidas.get(clave(x.get("visual"))) or {}).get("set")
+                 and clave(x.get("visual")) in conocidas]
+    return {"lineas": len(lineas), "nuevas": nuevas, "sin_sitio": sin_sitio}
 
 
 @app.get("/api/proyectos/{pid}/tipo_relato")

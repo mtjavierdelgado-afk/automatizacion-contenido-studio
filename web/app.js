@@ -9942,6 +9942,7 @@ function bloquePedidoSitiosDelVideo() {
   const est = relatoDelVideoLight();
   const corriendo = !!trabajoVideoLight();
   return h('div', { clase: 'pedido-sitios' },
+    avisoSitiosDeLineas(est, corriendo),
     campoTexto('Pedido para el reparto de sitios', est.pedido, x => { est.pedido = x; },
       { pista: 'todo en la cocina; el patio solo en el último tramo' }),
     h('div', { clase: 'fila' },
@@ -9949,6 +9950,66 @@ function bloquePedidoSitiosDelVideo() {
         onclick: () => repartirSitiosConPedido() }, 'Volver a repartir con este pedido'),
       h('span', { clase: 'meta' }, 'lo lee Claude (no se paga ninguna imagen); las imágenes '
         + 'hechas se quedan hasta que pidas rehacerlas')));
+}
+
+/* EL REPARTO Y LAS LÍNEAS VISUALES (rama gv-sitios, 11-11-2026). En modo
+   «guion», si el reparto y los sitios se escribieron leyendo la VOZ (un vídeo
+   de antes, o de cuando aún no había líneas), las imágenes pueden salir en un
+   sitio que ninguna línea pide (ZV01: un backstage en un vídeo de calle y
+   azotea). Se avisa ANTES de generar, con el botón para repartir desde las
+   líneas (lo lee Claude: no se paga ninguna imagen). Pintar no escribe nada. */
+function avisoSitiosDeLineas(est, corriendo) {
+  const s = ((est || {}).ficha || {}).sitios_de_lineas || {};
+  if (!s.lineas) return null;
+  const nuevas = (s.nuevas || []).length;
+  if (!s.de_la_voz && !nuevas) return null;
+  const texto = s.de_la_voz
+    ? `El reparto y los sitios se escribieron leyendo la voz, no tus ${s.lineas} líneas visuales: `
+      + 'las imágenes pueden salir en un sitio que ninguna línea pide, o sin la hoja de quien sale. '
+      + 'Repártelos desde las líneas antes de generar.'
+    : `${nuevas} línea(s) visual(es) son nuevas desde que se repartió (${s.nuevas.slice(0, 6).join(', ')}): `
+      + 'no tienen sitio ni reparto asignado. Vuelve a repartir desde las líneas.';
+  return h('div', { clase: 'caja-aviso aviso-sitios-lineas' },
+    h('div', {}, texto),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo, onclick: () => repartirSitiosDesdeLineas() },
+        'Volver a repartir desde las líneas'),
+      h('span', { clase: 'meta' }, videoConImagenesLight()
+        ? 'lo lee Claude; ojo: las imágenes ya hechas quedarán por rehacer, y rehacerlas se paga al generar'
+        : 'lo lee Claude: no se paga ninguna imagen')));
+}
+
+/* Si el vídeo abierto ya tiene alguna tanda de imágenes. */
+function videoConImagenesLight() {
+  const v = APP.light.video || {};
+  return !!versionDe((v.fichas || {}).assets || {});
+}
+
+async function repartirSitiosDesdeLineas() {
+  const est = relatoDelVideoLight();
+  const pid = est.pid;
+  /* CON IMÁGENES HECHAS, se pregunta (revisión de gv-sitios): repartir no
+     paga, pero cambia lo que pide cada plano y todas quedan por rehacer. */
+  if (videoConImagenesLight() && !window.confirm('Repartir desde las líneas cambia lo que pide cada '
+    + 'plano: las imágenes ya hechas quedarán por rehacer, y rehacerlas se paga al pulsar «Generar». '
+    + '¿Repartir igualmente?')) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(API.escenarios(pid), { method: 'POST', cuerpo: { rehacer: true, desde_lineas: true } });
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        toast('reparto y sitios repartidos desde las líneas visuales');
+        APP.light.video.relato = null;
+        APP.light.video.espacio = null;
+        await cargarVideoLight(pid);
+      }
+      pintarLight();
+    }, () => refrescarVivosLight(), pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
 }
 
 async function repartirSitiosConPedido() {

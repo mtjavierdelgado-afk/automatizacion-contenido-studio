@@ -5859,3 +5859,4 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .mandos-elemento { display: inline-flex; flex-wrap: wrap; gap: 2px; }
 .mandos-elemento .mini { min-width: 28px; padding-left: 6px; padding-right: 6px; }
 .otros-proyectos-piloto { margin: 4px 0 8px; }
+.aviso-sitios-lineas .fila { margin-top: 6px; }

@@ -278,8 +278,20 @@ def _cifras(crudas):
     return salida, vistas
 
 
-def guardar(raiz, datos):
-    """Lo que manda la extensión → el recibido guardado."""
+def _proyecto(cid, validos):
+    """El proyecto al que se anexa: uno que exista, o ninguno («»). `validos` es el
+    conjunto de ids de proyecto de ESTE Studio (lo pasa app.py desde clientes.py):
+    un id que no existe no se guarda, para no dejar recibidos colgando de nada."""
+    cid = str(cid or "").strip()
+    if not cid or cid == "_sin":
+        return ""
+    if validos is not None and cid not in validos:
+        raise ErrorRecibidos("ese proyecto no existe en tu Studio", 400)
+    return cid
+
+
+def guardar(raiz, datos, proyectos_validos=None):
+    """Lo que manda la extensión → el recibido guardado (con su proyecto, si lo trae)."""
     if not isinstance(datos, dict):
         raise ErrorRecibidos("no llega nada que guardar")
     url = _url_valida(datos.get("url"))
@@ -296,6 +308,7 @@ def guardar(raiz, datos):
         "nota": _largo(datos.get("nota"), 1000), "cifras": cifras, "cifras_vistas": cifras_vistas,
         "imagen": _url_valida(datos.get("imagen")), "usado": "",
         "captura": f"{rid}.{tipo}" if captura else "",
+        "proyecto": _proyecto(datos.get("proyecto"), proyectos_validos), "archivado": "",
     }
     if not any(recibido[k] for k in ("titulo", "texto", "seleccion", "nota", "captura")) and not cifras:
         raise ErrorRecibidos("no llega nada de la página: ni texto, ni cifras, ni captura")
@@ -327,7 +340,16 @@ def _todos(raiz):
 
 
 def _podar(raiz):
-    for viejo in _todos(raiz)[MAX_RECIBIDOS:]:
+    """Pasados MAX_RECIBIDOS se borran primero los archivados, después los que no
+    tienen proyecto y, al final, los más viejos de un proyecto (11-11-2026)."""
+    todos = _todos(raiz)
+    sobran = len(todos) - MAX_RECIBIDOS
+    if sobran <= 0:
+        return
+    def prioridad(d):    # 0 se borra antes; dentro de cada grupo, el más viejo antes
+        grupo = 0 if d.get("archivado") else (1 if not d.get("proyecto") else 2)
+        return (grupo, d.get("orden") or 0, d.get("cuando") or "")
+    for viejo in sorted(todos, key=prioridad)[:sobran]:
         _quitar(raiz, viejo)
 
 
@@ -340,12 +362,41 @@ def _quitar(raiz, d):
                 pass
 
 
-def listar(raiz, cuantos=100):
-    """Los recibidos, el más nuevo primero, con su mensaje para el chat."""
+FILTROS = ("todos", "proyecto", "sin", "archivados")
+
+
+def _pasa(d, filtro, cid):
+    if filtro == "archivados":
+        return bool(d.get("archivado"))
+    if d.get("archivado"):
+        return False
+    if filtro == "proyecto":
+        return bool(cid) and d.get("proyecto") == cid
+    if filtro == "sin":
+        return not d.get("proyecto")
+    return True
+
+
+def listar(raiz, cuantos=100, filtro="todos", proyecto="", proyectos_validos=None):
+    """Los recibidos, el más nuevo primero, con su mensaje para el chat.
+
+    `filtro`: «todos» (sin los archivados), «proyecto» (los de `proyecto`), «sin»
+    (sin proyecto) o «archivados». `cuentas` trae cuántos hay en cada uno. Un
+    recibido anexado a un proyecto que ya se borró cuenta como «sin proyecto»."""
+    filtro = filtro if filtro in FILTROS else "todos"
+    cid = str(proyecto or "").strip()
+    if cid == "_sin":
+        cid = ""
     lista = _todos(raiz)
+    if proyectos_validos is not None:
+        for d in lista:
+            if d.get("proyecto") and d["proyecto"] not in proyectos_validos:
+                d["proyecto"] = ""
+    cuentas = {f: sum(1 for d in lista if _pasa(d, f, cid)) for f in FILTROS}
+    elegidos = [d for d in lista if _pasa(d, filtro, cid)]
     return {"recibidos": [dict(d, red_nombre=REDES.get(d.get("red"), "Web"),
-                               texto_chat=texto_para_chat(d)) for d in lista[:max(1, int(cuantos))]],
-            "total": len(lista)}
+                               texto_chat=texto_para_chat(d)) for d in elegidos[:max(1, int(cuantos))]],
+            "total": len(lista), "cuentas": cuentas, "filtro": filtro}
 
 
 def leer(raiz, rid):
@@ -358,6 +409,31 @@ def leer(raiz, rid):
 def borrar(raiz, rid):
     with _LOCK:
         _quitar(raiz, leer(raiz, rid))
+
+
+def anexar(raiz, rid, proyecto, proyectos_validos=None, estilo=None):
+    """Lo anexa a un proyecto («» lo deja sin proyecto) y, si se dice, al estilo de
+    ese proyecto con el que se hará su vídeo. Cambiar de proyecto olvida el estilo
+    de antes (era de otro proyecto)."""
+    cid = _proyecto(proyecto, proyectos_validos)
+    with _LOCK:
+        d = leer(raiz, rid)
+        if d.get("proyecto") != cid:
+            d["estilo"] = ""
+        d["proyecto"] = cid
+        if estilo is not None:
+            d["estilo"] = re.sub(r"[^\w.\-]", "", str(estilo or ""))[:120] if cid else ""
+        escribir_json(_ruta(raiz, rid), d)
+    return d
+
+
+def archivar(raiz, rid, si=True):
+    """Lo archiva (sale de las listas y se borra antes al podar) o lo devuelve."""
+    with _LOCK:
+        d = leer(raiz, rid)
+        d["archivado"] = ahora() if si else ""
+        escribir_json(_ruta(raiz, rid), d)
+    return d
 
 
 def marcar_usado(raiz, rid):

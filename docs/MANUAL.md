@@ -1053,6 +1053,16 @@ Lo que mandas con la extensión **«Enviar al Studio»** mientras ves un post en
 Chrome: tarjetas con la captura, la red, el autor, las cifras que se veían, el
 texto y tu nota, la más nueva primero.
 
+Cada recibido puede ir a un **proyecto** (se elige en la extensión al enviar, o
+después con el menú **Proyecto** de su tarjeta) y, dentro de él, a un
+**estilo**. Los filtros de arriba enseñan **Todos**, **De este proyecto** (el
+elegido arriba en Automatizar), **Sin proyecto** o **Archivados**. **Archivar**
+lo quita de la bandeja sin borrarlo; **Borrar** (o **Borrar todos los
+archivados**) lo borra con su captura. Con proyecto, **✍️ Escribir el guion**
+abre el chat de ese proyecto y le pide a Claude un guion listo para la Parrilla;
+guárdalo con «Guardar en la Parrilla» y pásalo a «🤖 Hacer el vídeo completo»,
+que sale con el estilo del recibido.
+
 - **Usar en el chat**: lo pasa a «Conversar con Claude» con su captura y un
   mensaje listo («Te paso una referencia que vi en…»). Revísalo y pulsa Enviar.
 - **Ver el original** abre el post; **Borrar** se lleva el texto y la captura.

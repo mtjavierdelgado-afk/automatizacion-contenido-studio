@@ -34,9 +34,6 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/proyectos/{pid}` | Cambia el nombre VISIBLE del proyecto. -> la ficha. |
 | `GET` | `/api/proyectos/{pid}/diagramas` | — |
 | `PUT` | `/api/proyectos/{pid}/diagramas` | {diagramas: modo | null}: cuanto se explica dibujando en ESTE video. |
-
-| `GET` | `/api/proyectos/{pid}/diagramas` | El ajuste «Diagramas» de un vídeo: el que manda, el del vídeo, el del estilo y lo deducido (tramos que explican y gráficos). |
-| `PUT` | `/api/proyectos/{pid}/diagramas` | {diagramas: ninguna | solo_si_lo_pide | equilibrada | didactica | null}: el de ESTE vídeo; null vuelve al del estilo. No dibuja nada. |
 | `POST` | `/api/proyectos/{pid}/duplicar` | Copia un proyecto entero con lo que tiene puesto HOY. -> el nuevo. |
 | `POST` | `/api/proyectos/{pid}/elementos/aplicar` | Pone los elementos de varios planos de una vez: {planos: {sid: [...]}, |
 | `POST` | `/api/proyectos/{pid}/elementos/proponer` | Claude propone elementos para el video (o para {planos: [sid]}) con la |
@@ -533,8 +530,11 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/recibidos/codigo` | Un código de envío nuevo (el de antes deja de valer). Se ve UNA vez. |
 | `GET` | `/api/recibidos/extension.zip` | La extensión de Chrome, en un ZIP para descomprimir y cargar. |
 | `GET` | `/api/recibidos/ping` | Lo que pulsa «Probar» en la extensión: el código vale y el Studio contesta. |
+| `GET` | `/api/recibidos/proyectos` | Los proyectos, para el menú «Proyecto» de la extensión (pide el código de envío). |
 | `DELETE` | `/api/recibidos/{rid}` | Lo borra, con su captura. |
+| `POST` | `/api/recibidos/{rid}/archivar` | {archivado: true|false} -> lo archiva o lo devuelve (no se borra). |
 | `GET` | `/api/recibidos/{rid}/captura` | La captura de lo que se veía al enviarlo (PNG, JPG o WEBP). |
+| `POST` | `/api/recibidos/{rid}/proyecto` | {proyecto, estilo?} -> lo anexa a ese proyecto («» lo deja sin proyecto) y al |
 | `POST` | `/api/recibidos/{rid}/usado` | Lo marca como usado (lo hace «Usar en el chat»). |
 | `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para el generador: {texto, nombre?, palabras?}. |
 | `GET` | `/api/reglas-estilo/afinar/{rid}` | Como va «Afinar con Claude», y la propuesta al terminar. |
@@ -560,6 +560,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**437 endpoints.** Escrito por `generar_api.py` desde `app.py`.
-
-**429 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**446 endpoints.** Escrito por `generar_api.py` desde `app.py`.

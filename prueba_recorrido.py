@@ -9815,6 +9815,25 @@ def enviar_al_studio(navegador, datos):
     ok(pg.p.evaluate("() => { const i = document.querySelector('.tarjeta-recibido img'); return !!i && i.complete && i.naturalWidth > 0; }"),
        "su captura se ve")
     pg.captura("recibidos_de_chrome")
+    # 11-11-2026: los filtros, anexarlo a un proyecto y archivarlo
+    ok(pg.visible(".filtros-recibidos button", "Todos · ") and pg.visible(".filtros-recibidos button", "Sin proyecto · ")
+       and pg.visible(".filtros-recibidos button", "Archivados · "), "los filtros de la bandeja, con cuántos hay")
+    opciones = pg.p.evaluate("() => [...document.querySelectorAll('.tarjeta-recibido .proyecto-recibido option')].map(o => o.value)")
+    ok(len(opciones) >= 2 and opciones[0] == "", f"cada recibido con su menú «Proyecto» ({len(opciones)} opciones)")
+    destino = opciones[1] if len(opciones) > 1 else ""
+    if destino:
+        pg.p.select_option(".tarjeta-recibido .proyecto-recibido select", destino)
+        pg.p.wait_for_timeout(1200)
+        _r, lista_ = api.get(f"/api/recibidos?filtro=proyecto&proyecto={destino}")
+        ok(any(x.get("autor") == "ana_baila" for x in (lista_ or {}).get("recibidos", [])), "anexarlo a un proyecto lo guarda")
+    pg.pulsar(".tarjeta-recibido button", "Archivar")
+    ok(pg.esperar(".recibidos-parrilla .vacio", segundos=10) or not pg.visible(".tarjeta-recibido", "@ana_baila"),
+       "archivar lo saca de la bandeja")
+    pg.pulsar(".filtros-recibidos button", "Archivados")
+    ok(pg.esperar(".tarjeta-recibido", "@ana_baila", 10), "y está en «Archivados»")
+    pg.pulsar(".tarjeta-recibido button", "Sacar del archivo")
+    pg.pulsar(".filtros-recibidos button", "Todos")
+    ok(pg.esperar(".tarjeta-recibido", "@ana_baila", 10), "«Sacar del archivo» lo devuelve")
     pg.pulsar(".tarjeta-recibido button", "Usar en el chat")
     ok(pg.esperar(".chat-parrilla", segundos=10), "«Usar en el chat» lleva al chat")
     ok(pg.p.evaluate("() => PAR.chatCapturas.length") == 1, "con la captura puesta")

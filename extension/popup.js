@@ -193,6 +193,25 @@ async function leerPestana() {
   if (leido.aviso) estado('estado', leido.aviso, 'mal');
 }
 
+/* El menú «Proyecto»: los proyectos del Studio (con el código de envío) y el
+   último elegido marcado. Si no se pueden leer, queda «Sin proyecto» y se envía
+   igual: anexarlo después se hace en el Studio (11-11-2026). */
+async function cargarProyectos() {
+  const cfg = await config();
+  if (!cfg) return;
+  const { ultimoProyecto } = await chrome.storage.local.get(['ultimoProyecto']).catch(() => ({}));
+  const r = await hablarConElStudio(cfg, 'recibidos/proyectos', 'GET', null).catch(() => ({}));
+  const sel = $('proyecto');
+  const lista = (r.bien && r.bien.proyectos) || [];
+  while (sel.options.length > 1) sel.remove(1);   // al volver a cargarlos, sin repetir
+  for (const p of lista) {
+    const o = document.createElement('option');
+    o.value = p.id; o.textContent = p.nombre || p.id;
+    sel.appendChild(o);
+  }
+  if (ultimoProyecto && lista.some(p => p.id === ultimoProyecto)) sel.value = ultimoProyecto;
+}
+
 async function enviar() {
   const cfg = await config();
   if (!cfg) { mostrarConfig(true); return; }
@@ -207,10 +226,13 @@ async function enviar() {
   const cuerpo = JSON.stringify({
     url: leido.url, titulo: leido.titulo, autor: leido.autor, texto: leido.texto, seleccion: leido.seleccion,
     nota: $('nota').value.trim(), cifras: leido.cifras || {}, imagen: leido.imagen || '', captura,
+    proyecto: $('proyecto').value,
   });
+  chrome.storage.local.set({ ultimoProyecto: $('proyecto').value }).catch(() => {});
   const r = await hablarConElStudio(cfg, 'recibidos', 'POST', cuerpo);
   if (r.bien) {
-    estado('estado', '✓ Enviado. Lo tienes en Automatizar → Recibidos de Chrome.', 'bien');
+    const nombre = $('proyecto').value ? $('proyecto').selectedOptions[0].textContent : '';
+    estado('estado', `✓ Enviado${nombre ? ` a ${nombre}` : ''}. Lo tienes en Automatizar → Recibidos de Chrome.`, 'bien');
     $('nota').value = '';
   } else {
     estado('estado', r.mal, 'mal');
@@ -264,7 +286,7 @@ async function probar() {
   const r = await hablarConElStudio(cfg, 'recibidos/ping', 'GET', null);
   if (r.bien) {
     estado('estadoConfig', '✓ Conectado con tu Studio. No hace falta volver a ponerlo: sirve en todas las pestañas de este Chrome.', 'bien');
-    setTimeout(() => { mostrarConfig(false); leerPestana(); }, 2500);
+    setTimeout(() => { mostrarConfig(false); leerPestana(); cargarProyectos(); }, 2500);
   } else estado('estadoConfig', r.mal, 'mal');
 }
 
@@ -285,6 +307,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('guardar').addEventListener('click', guardar);
   $('probar').addEventListener('click', probar);
   $('enviar').addEventListener('click', enviar);
-  if (await config()) { mostrarConfig(false); leerPestana(); }
+  if (await config()) { mostrarConfig(false); leerPestana(); cargarProyectos(); }
   else { await rellenarConfig(); mostrarConfig(true); }
 });

@@ -31645,7 +31645,9 @@ function estilosParaPasarParrilla() {
   const propios = PAR.estilos.filter(x => x.cliente === PAR.cid);
   const lista = propios.length ? propios : PAR.estilos;
   if (!PAR.estiloElegido || !lista.some(x => x.id === PAR.estiloElegido)) {
-    PAR.estiloElegido = (lista[0] || {}).id || '';
+    /* el estilo elegido en el recibido del que salió el guion, si es de este proyecto */
+    const sugerido = PAR.estiloSugerido && PAR.estiloSugerido.cid === PAR.cid ? PAR.estiloSugerido.id : '';
+    PAR.estiloElegido = (lista.find(x => x.id === sugerido) || lista[0] || {}).id || '';
   }
   return lista;
 }
@@ -33833,11 +33835,26 @@ function bloqueMejoresPublicar() {
  */
 function rutaRecibidos(resto) { return `${BASE}/api/recibidos${resto || ''}`; }
 
+/* El filtro de la bandeja (11-11-2026): «Todos» (sin los archivados), «De este
+   proyecto» (el elegido arriba en Automatizar), «Sin proyecto» o «Archivados». Se
+   empieza en «Todos»: empezar en el proyecto escondía lo recién llegado sin proyecto.
+   Es de la pantalla: no se guarda en ningún sitio. */
+function filtroRecibidos() {
+  const hayProyecto = PAR.cid && PAR.cid !== '_sin';
+  const f = PAR.recibidosFiltro || 'todos';
+  return f === 'proyecto' && !hayProyecto ? 'todos' : f;
+}
+
+function claveRecibidos() { return `${filtroRecibidos()}|${PAR.cid || ''}`; }
+
 async function cargarRecibidos() {
   if (PAR.recibidosCargando) return;
   PAR.recibidosCargando = true;
+  const clave = claveRecibidos();
   try {
-    PAR.recibidos = await pedir(rutaRecibidos());
+    const q = new URLSearchParams({ filtro: filtroRecibidos(), proyecto: PAR.cid && PAR.cid !== '_sin' ? PAR.cid : '' });
+    PAR.recibidos = await pedir(rutaRecibidos(`?${q}`));
+    PAR.recibidosClave = clave;
     PAR.recibidosError = '';
   } catch (e) {
     /* sin inventar datos: con un «sin código» de mentira, Configuración ofrecía
@@ -33871,15 +33888,16 @@ function seccionRecibidosParrilla() {
   const ahora_ = Date.now();
   const entrada = !PAR.recibidosPintadoAl || ahora_ - PAR.recibidosPintadoAl > 3000;
   PAR.recibidosPintadoAl = ahora_;
-  if ((!PAR.recibidos || entrada) && !PAR.recibidosCargando && !(PAR.recibidosError && !PAR.recibidos)) setTimeout(cargarRecibidos, 0);
+  const otraVista = PAR.recibidos && PAR.recibidosClave !== claveRecibidos();
+  if ((!PAR.recibidos || entrada || otraVista) && !PAR.recibidosCargando && !(PAR.recibidosError && !PAR.recibidos)) setTimeout(cargarRecibidos, 0);
   caja.appendChild(h('div', { clase: 'fila cab-recibidos' },
     h('h3', {}, 'Recibidos de Chrome'), h('span', { clase: 'crece' }),
     h('button', { clase: 'mini fantasma', title: 'Volver a mirar', onclick: () => { PAR.recibidos = null; cargarRecibidos(); } }, '↻ Actualizar'),
     botonGuia('enviar_al_studio', null)));
   caja.appendChild(h('div', { clase: 'pista' }, 'Lo que mandas con la extensión «Enviar al Studio» mientras ves un post en '
     + 'Instagram, TikTok, YouTube, Facebook, LinkedIn, X o cualquier web: el enlace, el texto, las cifras que se ven y '
-    + 'una captura. Con «Usar en el chat» se lo pasas a Claude para escribir un guion con esa referencia. Son de todo el '
-    + 'Studio, no de un proyecto.'));
+    + 'una captura. Con «Usar en el chat» se lo pasas a Claude para escribir un guion con esa referencia. Anéxalo a un '
+    + 'proyecto para tenerlo ordenado, y archiva lo que ya no te sirva.'));
   const datos = PAR.recibidos;
   if (!datos) { caja.appendChild(cargandoRecibidos()); return caja; }
   if (PAR.recibidosError) caja.appendChild(cajaError(PAR.recibidosError));
@@ -33888,9 +33906,12 @@ function seccionRecibidosParrilla() {
       h('span', { clase: 'crece' }, 'Todavía no has conectado la extensión: se descarga y se conecta en Configuración → Enviar al Studio.'),
       h('button', { clase: 'mini', onclick: () => abrirEnviarAlStudioConfig() }, 'Ir a Configuración')));
   }
+  caja.appendChild(filtrosRecibidos(datos.cuentas || {}));
   const lista = datos.recibidos || [];
   if (!lista.length) {
-    caja.appendChild(h('div', { clase: 'vacio' }, 'Aún no ha llegado nada. Abre un post en Chrome y pulsa el botón de la extensión.'));
+    const vacio = { proyecto: `Todavía no hay nada anexado a ${nombreProyectoParrilla() || 'este proyecto'}. Elige este proyecto en la extensión al enviar, o anéxalo desde «Sin proyecto».`,
+      sin: 'No hay nada sin proyecto.', archivados: 'No hay nada archivado.' }[filtroRecibidos()];
+    caja.appendChild(h('div', { clase: 'vacio' }, vacio || 'Aún no ha llegado nada. Abre un post en Chrome y pulsa el botón de la extensión.'));
     return caja;
   }
   const rejilla = h('div', { clase: 'rejilla-recibidos' });
@@ -33898,6 +33919,95 @@ function seccionRecibidosParrilla() {
   caja.appendChild(rejilla);
   if (datos.total > lista.length) caja.appendChild(h('div', { clase: 'meta' }, `Se ven los ${lista.length} más nuevos de ${datos.total}.`));
   return caja;
+}
+
+function filtrosRecibidos(cuentas) {
+  const hayProyecto = PAR.cid && PAR.cid !== '_sin';
+  const opciones = [
+    ['todos', 'Todos'],
+    hayProyecto ? ['proyecto', `De ${nombreProyectoParrilla() || 'este proyecto'}`] : null,
+    ['sin', 'Sin proyecto'], ['archivados', 'Archivados'],
+  ].filter(Boolean);
+  const actual = filtroRecibidos();
+  return h('div', { clase: 'fila filtros-recibidos', role: 'group', 'aria-label': 'Qué recibidos ver' },
+    ...opciones.map(([id, texto]) => h('button', {
+      type: 'button', clase: `mini${actual === id ? ' primario' : ''}`, 'aria-pressed': actual === id ? 'true' : 'false',
+      onclick: () => { PAR.recibidosFiltro = id; cargarRecibidos(); pintarModulo(); },
+    }, `${texto} · ${cuentas[id] ?? 0}`)),
+    actual === 'archivados' && cuentas.archivados ? h('span', { clase: 'crece' }) : null,
+    actual === 'archivados' && cuentas.archivados
+      ? h('button', { type: 'button', clase: 'mini fantasma peligro', onclick: () => borrarArchivados() }, 'Borrar todos los archivados')
+      : null);
+}
+
+/* Borrar a mano todo lo archivado de una vez (con su captura). Se pregunta antes. */
+async function borrarArchivados() {
+  const lista = ((PAR.recibidos || {}).recibidos || []).filter(x => x.archivado);
+  if (!lista.length) return;
+  if (!(await preguntarParrilla('Borrar los archivados', `¿Borrar los ${lista.length} recibidos archivados? Se borran su texto y su captura, y no se pueden recuperar.`,
+    'Borrar', true))) return;
+  let fallos = 0;
+  for (const r of lista) {
+    try { await pedir(rutaRecibidos(`/${r.id}`), { method: 'DELETE' }); } catch (e) { fallos += 1; }
+  }
+  toast(fallos ? `no se han podido borrar ${fallos}` : 'archivados borrados', !!fallos);
+  cargarRecibidos();
+}
+
+/* Los estilos de un proyecto (los de PAR.estilos que son suyos). */
+function estilosDelProyectoRecibido(cid) { return (PAR.estilos || []).filter(x => x.cliente === cid); }
+
+/* El menú para anexarlo a un proyecto (o dejarlo sin proyecto) y, ya en un
+   proyecto, el estilo con el que se hará su vídeo: así el guion y el piloto
+   salen con el estilo que toca. */
+function selectorProyectoRecibido(r) {
+  const proyectos = (PAR.proyectos || []).filter(p => p.id && p.id !== '_sin');
+  const sel = h('select', { clase: 'mini', 'aria-label': 'Proyecto de este recibido',
+    onchange: e => anexarRecibido(r, e.target.value) },
+  h('option', { value: '', selected: !r.proyecto ? true : null }, 'Sin proyecto'),
+  ...proyectos.map(p => h('option', { value: p.id, selected: r.proyecto === p.id ? true : null }, p.nombre || p.id)));
+  const fila = h('div', { clase: 'proyecto-recibido' },
+    h('label', { clase: 'fila' }, h('span', { clase: 'meta' }, 'Proyecto'), sel));
+  const estilos = r.proyecto ? estilosDelProyectoRecibido(r.proyecto) : [];
+  if (estilos.length) {
+    fila.appendChild(h('label', { clase: 'fila' }, h('span', { clase: 'meta' }, 'Estilo'),
+      h('select', { clase: 'mini', 'aria-label': 'Estilo con el que hacer su vídeo',
+        onchange: e => anexarRecibido(r, r.proyecto, e.target.value) },
+      h('option', { value: '', selected: !r.estilo ? true : null }, 'Elegir estilo…'),
+      ...estilos.map(x => h('option', { value: x.id, selected: r.estilo === x.id ? true : null }, x.nombre || x.id)))));
+  }
+  return fila;
+}
+
+async function anexarRecibido(r, cid, estilo) {
+  try {
+    const cuerpo = estilo === undefined ? { proyecto: cid } : { proyecto: cid, estilo };
+    await pedir(rutaRecibidos(`/${r.id}/proyecto`), { method: 'POST', cuerpo });
+    const nombre = ((PAR.proyectos || []).find(p => p.id === cid) || {}).nombre;
+    toast(estilo !== undefined ? 'estilo guardado' : (cid ? `anexado a ${nombre || cid}` : 'ahora sin proyecto'));
+  } catch (e) { toast(e.message, true); }
+  cargarRecibidos();
+}
+
+/* «✍️ Escribir el guion»: con el recibido ya en un proyecto, abre el chat de ESE
+   proyecto con la referencia y le pide a Claude UN guion con el formato de la
+   Parrilla, listo para «🤖 Hacer el vídeo completo» con el estilo elegido. */
+async function guionDesdeRecibido(r) {
+  const proyecto = ((PAR.proyectos || []).find(p => p.id === r.proyecto) || {}).nombre || 'este proyecto';
+  const estilo = (estilosDelProyectoRecibido(r.proyecto).find(x => x.id === r.estilo) || {}).nombre || '';
+  if (r.estilo) PAR.estiloSugerido = { cid: r.proyecto, id: r.estilo };
+  const pide = `Escríbeme UN guion para «${proyecto}»${estilo ? ` (el vídeo se hará con el estilo «${estilo}»)` : ''}, `
+    + 'inspirado en esta referencia pero sin copiarla: con el formato de la Parrilla (escenas con su voz y «PARA EL ENCARGO» '
+    + 'con la duración y el formato), listo para guardarlo en la Parrilla y pasarlo al piloto automático.';
+  await usarRecibidoEnChat(r, pide, true);
+}
+
+async function archivarRecibido(r, si) {
+  try {
+    await pedir(rutaRecibidos(`/${r.id}/archivar`), { method: 'POST', cuerpo: { archivado: si } });
+    toast(si ? 'archivado: lo tienes en «Archivados»' : 'devuelto a la bandeja');
+  } catch (e) { toast(e.message, true); }
+  cargarRecibidos();
 }
 
 function tarjetaRecibido(r) {
@@ -33916,14 +34026,23 @@ function tarjetaRecibido(r) {
       cifrasDeRecibido(r) ? h('div', { clase: 'meta cifras-recibido' }, cifrasDeRecibido(r)) : null,
       texto ? h('p', { clase: 'texto-recibido' }, recortar(texto, 320)) : null,
       r.nota ? h('p', { clase: 'nota-recibido' }, `Tu nota: ${r.nota}`) : null,
+      selectorProyectoRecibido(r),
       h('div', { clase: 'fila mandos-recibido' },
-        h('button', { clase: 'primario mini', onclick: () => usarRecibidoEnChat(r) }, 'Usar en el chat'),
+        r.proyecto ? h('button', { clase: 'primario mini', title: 'Claude escribe un guion de este proyecto con esta referencia',
+          onclick: () => guionDesdeRecibido(r) }, '✍️ Escribir el guion') : null,
+        h('button', { clase: `${r.proyecto ? '' : 'primario '}mini`, onclick: () => usarRecibidoEnChat(r) }, 'Usar en el chat'),
         h('a', { href: r.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver el original'),
         h('span', { clase: 'crece' }),
+        h('button', { clase: 'mini fantasma', onclick: () => archivarRecibido(r, !r.archivado) }, r.archivado ? 'Sacar del archivo' : 'Archivar'),
         h('button', { clase: 'mini fantasma peligro', onclick: () => borrarRecibido(r) }, 'Borrar'))));
 }
 
-async function usarRecibidoEnChat(r) {
+async function usarRecibidoEnChat(r, peticion, enviarYa) {
+  /* el chat es el de SU proyecto: si está anexado a otro, se cambia antes (cambiar de
+     proyecto vacía el borrador del chat, así que va lo primero) */
+  if (r.proyecto && r.proyecto !== PAR.cid && (PAR.proyectos || []).some(p => p.id === r.proyecto)) {
+    elegirProyectoParrilla(r.proyecto);
+  }
   const maximo = (PAR.chatsInfo && PAR.chatsInfo.max_capturas) || 6;
   if (r.captura && PAR.chatCapturas.length < maximo) {
     try {
@@ -33936,13 +34055,17 @@ async function usarRecibidoEnChat(r) {
     } catch (e) { toast(`la captura no se ha podido pasar (${e.message}); va el texto`, true); }
   }
   const actual = String(PAR.chatTexto || '').trim();
-  PAR.chatTexto = actual ? `${actual}\n\n${r.texto_chat}` : r.texto_chat;
+  const mensaje = peticion ? `${r.texto_chat}\n\n${peticion}` : r.texto_chat;
+  PAR.chatTexto = actual ? `${actual}\n\n${mensaje}` : mensaje;
   try {
     await pedir(rutaRecibidos(`/${r.id}/usado`), { method: 'POST', cuerpo: {} });
     r.usado = r.usado || new Date().toISOString();
   } catch (e) { /* si no se marca, no pasa nada */ }
-  toast('pasado al chat: revísalo y pulsa Enviar');
   irASeccionParrilla('chat');
+  if (enviarYa) {
+    toast('pedido a Claude: cuando conteste, «Guardar en la Parrilla» y luego «🤖 Hacer el vídeo completo»');
+    await enviarChatParrilla();
+  } else toast('pasado al chat: revísalo y pulsa Enviar');
 }
 
 async function borrarRecibido(r) {
@@ -33957,6 +34080,7 @@ async function borrarRecibido(r) {
     toast('borrado');
   } catch (e) { toast(e.message, true); }
   pintarModulo();
+  cargarRecibidos();   // las cuentas de los filtros, al día
 }
 
 function abrirEnviarAlStudioConfig() {

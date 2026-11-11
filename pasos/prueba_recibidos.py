@@ -195,6 +195,41 @@ def prueba_recibidos():
         os.path.join(raiz, "_sistema", "parrilla", "recibidos", r["captura"])), "borrar se lleva el texto y la captura")
     largo = R.guardar(raiz, {"url": "https://ejemplo.com", "texto": "x" * 9000})
     igual(len(largo["texto"]), R.MAX_TEXTO, "un texto enorme se recorta")
+    # ------ anexar a un proyecto y archivar (11-11-2026)
+    validos = {"estadoplay", "casas"}
+    ok(lanza(R.guardar, raiz, {"url": "https://ejemplo.com/p", "texto": "x", "proyecto": "no-existe"}, validos).codigo == 400,
+       "enviar a un proyecto que no existe: 400, no se guarda colgando de nada")
+    con = R.guardar(raiz, {"url": "https://ejemplo.com/p1", "texto": "de EstadoPlay", "proyecto": "estadoplay"}, validos)
+    suelto = R.guardar(raiz, {"url": "https://ejemplo.com/p2", "texto": "suelto"}, validos)
+    igual((con["proyecto"], suelto["proyecto"], con["archivado"]), ("estadoplay", "", ""), "llega con su proyecto, o sin ninguno")
+    de_ep = R.listar(raiz, filtro="proyecto", proyecto="estadoplay", proyectos_validos=validos)
+    igual([x["id"] for x in de_ep["recibidos"]], [con["id"]], "«De este proyecto»: solo los suyos")
+    ok(suelto["id"] in [x["id"] for x in R.listar(raiz, filtro="sin")["recibidos"]]
+       and con["id"] not in [x["id"] for x in R.listar(raiz, filtro="sin")["recibidos"]], "«Sin proyecto»: los sueltos")
+    R.anexar(raiz, suelto["id"], "casas", validos)
+    igual(R.leer(raiz, suelto["id"])["proyecto"], "casas", "anexar uno suelto a un proyecto")
+    ok(lanza(R.anexar, raiz, suelto["id"], "inventado", validos).codigo == 400, "a uno que no existe, no")
+    R.anexar(raiz, suelto["id"], "casas", validos, "estilo-casas_1")
+    igual(R.leer(raiz, suelto["id"])["estilo"], "estilo-casas_1", "con el estilo con el que se hará su vídeo")
+    R.anexar(raiz, suelto["id"], "estadoplay", validos)
+    igual(R.leer(raiz, suelto["id"])["estilo"], "", "cambiar de proyecto olvida el estilo del otro")
+    R.anexar(raiz, suelto["id"], "", validos)
+    igual(R.leer(raiz, suelto["id"])["proyecto"], "", "y dejarlo otra vez sin proyecto")
+    R.archivar(raiz, con["id"])
+    ok(con["id"] not in [x["id"] for x in R.listar(raiz)["recibidos"]]
+       and con["id"] in [x["id"] for x in R.listar(raiz, filtro="archivados")["recibidos"]],
+       "archivar lo saca de «Todos» y lo pone en «Archivados» (no lo borra)")
+    ok(R.listar(raiz, filtro="proyecto", proyecto="estadoplay")["cuentas"]["proyecto"] == 0,
+       "un archivado tampoco sale en su proyecto")
+    R.archivar(raiz, con["id"], False)
+    ok(con["id"] in [x["id"] for x in R.listar(raiz)["recibidos"]], "«Sacar del archivo» lo devuelve")
+    cuentas = R.listar(raiz, filtro="todos", proyecto="estadoplay", proyectos_validos=validos)["cuentas"]
+    ok(cuentas["proyecto"] == 1 and cuentas["todos"] >= 2 and cuentas["archivados"] == 0, f"las cuentas de cada filtro ({cuentas})")
+    huerfano = R.listar(raiz, filtro="sin", proyectos_validos={"casas"})
+    ok(con["id"] in [x["id"] for x in huerfano["recibidos"]], "anexado a un proyecto que se borró: cuenta como «sin proyecto»")
+    for x in (con, suelto):
+        R.borrar(raiz, x["id"])
+
     antes = R.MAX_RECIBIDOS
     R.MAX_RECIBIDOS = 3
     try:
@@ -203,6 +238,20 @@ def prueba_recibidos():
         igual(R.listar(raiz)["total"], 3, "al pasar el tope se borran los más viejos")
         archivos = os.listdir(os.path.join(raiz, "_sistema", "parrilla", "recibidos"))
         igual(len([a for a in archivos if a.endswith(".json")]), 3, "(también del disco)")
+        # al podar: primero los archivados, luego los sueltos, y lo de un proyecto lo último
+        for d in R.listar(raiz)["recibidos"]:
+            R.borrar(raiz, d["id"])
+        viejo_proyecto = R.guardar(raiz, {"url": "https://ejemplo.com/vp", "texto": "viejo de un proyecto", "proyecto": "casas"}, validos)
+        archivado = R.guardar(raiz, {"url": "https://ejemplo.com/ar", "texto": "archivado"})
+        R.archivar(raiz, archivado["id"])
+        suelto1 = R.guardar(raiz, {"url": "https://ejemplo.com/s1", "texto": "suelto"})
+        R.guardar(raiz, {"url": "https://ejemplo.com/n1", "texto": "nuevo"})
+        quedan = {d["id"] for d in R._todos(raiz)}
+        ok(viejo_proyecto["id"] in quedan and archivado["id"] not in quedan and suelto1["id"] in quedan,
+           "al pasar el tope se borra antes el archivado que lo de un proyecto, aunque este sea más viejo")
+        R.guardar(raiz, {"url": "https://ejemplo.com/n2", "texto": "nuevo 2"})
+        quedan = {d["id"] for d in R._todos(raiz)}
+        ok(viejo_proyecto["id"] in quedan and suelto1["id"] not in quedan, "y después, lo suelto")
     finally:
         R.MAX_RECIBIDOS = antes
 
@@ -454,6 +503,9 @@ def prueba_boton():
 
     def servir(ruta):
         url = ruta.request.url
+        if url.startswith("https://studio.prueba/") and url.endswith("/api/recibidos/proyectos"):
+            return ruta.fulfill(status=200, headers={"Content-Type": "application/json"}, body=json.dumps(
+                {"proyectos": [{"id": "estadoplay", "nombre": "EstadoPlay"}, {"id": "casas", "nombre": "Casas con Diseño"}]}))
         if url.startswith("https://studio.prueba/") and "/api/" in url:
             llegadas.append((ruta.request.method, url, ruta.request.headers.get("x-estudio-envio"),
                              ruta.request.post_data))
@@ -482,6 +534,10 @@ def prueba_boton():
             pagina = abrir(navegador)
             igual((pagina.inner_text("#red"), pagina.inner_text("#autor"), pagina.inner_text("#cifras")),
                   ("TikTok", "@ana", "12K me gusta"), "al abrirlo enseña lo que leyó de la pestaña")
+            pagina.wait_for_function("document.getElementById('proyecto').options.length === 3", timeout=5000)
+            igual(pagina.evaluate("[...document.getElementById('proyecto').options].map(o => o.textContent)"),
+                  ["Sin proyecto", "EstadoPlay", "Casas con Diseño"], "el menú «Proyecto» trae los del Studio (11-11)")
+            pagina.select_option("#proyecto", "casas")
             pagina.fill("#nota", "el gancho")
             pagina.click("#enviar")
             try:
@@ -493,6 +549,9 @@ def prueba_boton():
             enviado = json.loads(cuerpo)
             ok(metodo == "POST" and url == "https://studio.prueba/api/recibidos" and codigo == "env_bueno",
                "manda a <Studio>/api/recibidos con el código en su cabecera")
+            igual(enviado.get("proyecto"), "casas", "y lo envía con el proyecto elegido")
+            ok("a Casas con Diseño" in pagina.inner_text("#estado") and pagina.evaluate("window.__estado.guardado.ultimoProyecto") == "casas",
+               "dice a qué proyecto ha ido y lo recuerda para la próxima vez")
             ok(enviado["nota"] == "el gancho" and enviado["captura"].startswith("data:image/png;base64,")
                and enviado["cifras"] == {"me_gusta": "12K"}, "con la nota, la captura y las cifras")
             ok(R.guardar(os.path.join(CARPETA, "proyectos"), enviado)["cifras"] == {"me_gusta": 12000},
@@ -691,6 +750,22 @@ def prueba_studio():
            and "crearia-enviar-al-studio.zip" in z.headers.get("content-disposition", ""), "descargar la extensión")
         with zipfile.ZipFile(io.BytesIO(z.content)) as zz:
             ok("manifest.json" in zz.namelist(), "(con su manifiesto)")
+        # proyectos y archivo (11-11-2026)
+        igual(s.get(base + "/api/recibidos/proyectos").status_code, 401, "la lista de proyectos para la extensión pide el código")
+        cid = s.post(base + "/api/clientes", json={"nombre": "Proyecto de prueba"}).json()["cliente"]["id"]
+        igual([p["id"] for p in s.get(base + "/api/recibidos/proyectos", headers=cab).json()["proyectos"]], [cid],
+              "y con el código, los proyectos del Studio")
+        igual(s.post(base + f"/api/recibidos/{rid}/proyecto", json={"proyecto": "no-existe"}).status_code, 400,
+              "anexar a un proyecto que no existe: 400")
+        igual(s.post(base + f"/api/recibidos/{rid}/proyecto", json={"proyecto": cid}).json()["proyecto"], cid, "anexarlo")
+        de_este = s.get(base + "/api/recibidos", params={"filtro": "proyecto", "proyecto": cid}).json()
+        igual(([x["id"] for x in de_este["recibidos"]], de_este["cuentas"]["sin"]), ([rid], 0), "«De este proyecto»")
+        r2 = s.post(base + "/api/recibidos", json=dict(cuerpo, proyecto=cid, captura=""), headers=cab)
+        igual(r2.status_code, 201, "la extensión lo manda ya con su proyecto")
+        igual(s.post(base + f"/api/recibidos/{rid}/archivar", json={"archivado": True}).status_code, 200, "archivarlo")
+        igual(s.get(base + "/api/recibidos", params={"filtro": "archivados"}).json()["cuentas"]["archivados"], 1, "y sale en «Archivados»")
+        s.post(base + f"/api/recibidos/{rid}/archivar", json={"archivado": False})
+        s.delete(base + f"/api/recibidos/{r2.json()['id']}")
         igual(s.delete(base + f"/api/recibidos/{rid}").status_code, 200, "borrarlo")
         igual(s.get(base + "/api/recibidos").json()["total"], 0, "y ya no está")
         nuevo = s.post(base + "/api/recibidos/codigo", json={}).json()

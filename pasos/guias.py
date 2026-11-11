@@ -1720,6 +1720,8 @@ GUIAS["enviar_al_studio"] = {
         "Pega la «clave de conexión» (la dirección y el código juntos) en el primer campo de la extensión: se reparte sola.",
         "Se pone UNA vez por Chrome: después sirve en todas las pestañas sin volver a escribir nada.",
         "Si la ventanita se cierra a medias, vuelve a abrirla: lo que pegaste sigue ahí.",
+        "Elige el Proyecto al enviar (o después en la tarjeta) y su Estilo: «✍️ Escribir el guion» lo usa, y el piloto también.",
+        "Archiva lo que ya usaste: sale de la bandeja sin borrarse; en «Archivados» puedes borrarlo todo de una vez.",
         "En otro Chrome del mismo ordenador, pega la misma clave mientras se vea; en otro ordenador, crea un "
         "código nuevo y pega su clave en cada Chrome donde la uses (el de antes deja de valer).",
     ],

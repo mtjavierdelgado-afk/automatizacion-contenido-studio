@@ -14,10 +14,11 @@ Chrome**.
    `manifest.json`. Si tenías una versión anterior, pulsa **Quitar** en ella.
 3. Fíjala: pieza de puzle (arriba a la derecha) → chincheta junto a «Enviar a
    CrearIA Studio».
-4. Abre su ventanita. En el Studio pulsa **Crear el código de envío** (o «Crear
-   uno nuevo») y **Copiar la clave**: es la dirección y el código juntos.
-   Pégala en el primer campo de la ventanita y pulsa **Probar**. Chrome te
-   pedirá permiso para hablar con tu Studio: acéptalo.
+4. En el Studio pulsa **Crear el código de envío** (o «Crear uno nuevo») y
+   **Copiar la clave**: es la dirección y el código juntos. Pulsa el icono de
+   la extensión, pega la clave en el primer campo y pulsa **Probar**. Chrome te
+   pedirá permiso para hablar con tu Studio: acéptalo. Si la ventanita se
+   cierra a medias, vuelve a pulsar el icono: lo pegado sigue ahí.
 
 Se hace UNA vez por Chrome: después sirve en todas las pestañas. Lo que pegas
 se guarda solo, aunque la ventanita se cierre al ir a copiar algo.

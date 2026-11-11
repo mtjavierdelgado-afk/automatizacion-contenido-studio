@@ -1720,8 +1720,8 @@ GUIAS["enviar_al_studio"] = {
         "Pega la «clave de conexión» (la dirección y el código juntos) en el primer campo de la extensión: se reparte sola.",
         "Se pone UNA vez por Chrome: después sirve en todas las pestañas sin volver a escribir nada.",
         "Si la ventanita se cierra a medias, vuelve a abrirla: lo que pegaste sigue ahí.",
-        "En otro ordenador o Chrome, pega la MISMA clave en sus primeros 5 minutos; si creas un código nuevo, "
-        "el de antes deja de valer y hay que pegar la clave nueva en cada Chrome donde la uses.",
+        "En otro Chrome del mismo ordenador, pega la misma clave mientras se vea; en otro ordenador, crea un "
+        "código nuevo y pega su clave en cada Chrome donde la uses (el de antes deja de valer).",
     ],
     "no": [
         "Compartir el código de envío: con él cualquiera podría mandar cosas a tu Studio.",

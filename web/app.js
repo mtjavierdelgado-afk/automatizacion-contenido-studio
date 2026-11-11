@@ -34025,12 +34025,12 @@ function seccionEnviarAlStudio() {
   }
   caja.appendChild(paso(3, 'Conéctala con tu clave de conexión',
     h('ol', { clase: 'pasos-instalar' },
-      h('li', {}, 'Pulsa el icono de la extensión para abrir su ventanita.'),
-      h('li', {}, 'Aquí, crea la clave y pulsa «Copiar la clave».'),
-      h('li', {}, 'Pégala en el primer campo de la ventanita y pulsa «Probar». Se hace UNA vez: sirve en todas las pestañas de ese Chrome.')),
+      h('li', {}, 'Aquí abajo, pulsa «Crear el código de envío» (o «Crear uno nuevo») y luego «Copiar la clave».'),
+      h('li', {}, 'Pulsa el icono de la extensión (arriba a la derecha de Chrome), pega la clave en el primer campo y pulsa «Probar».'),
+      h('li', {}, 'Si la ventanita se cierra a medias, vuelve a pulsar el icono: lo que pegaste sigue ahí. Se hace UNA vez: sirve en todas las pestañas de ese Chrome.')),
     h('div', { clase: 'pista' }, 'Es lo que impide que otro mande cosas a tu Studio. Solo se guarda su huella.'),
     ...filaCodigo,
-    h('div', { clase: 'pista' }, 'La dirección de tu Studio, por si la extensión te la pide sola:'),
+    h('div', { clase: 'pista' }, 'Si la extensión te pide solo la dirección, es esta:'),
     h('div', { clase: 'fila-clave' }, direccion,
       h('button', { type: 'button', clase: 'mini', onclick: () => copiarTexto(direccion.value) }, 'Copiar'))));
   caja.appendChild(paso(4, 'Úsala', h('div', { clase: 'pista' },

@@ -1098,10 +1098,11 @@ Las piezas quedan en la sección **Gráficas** del proyecto, donde se pueden abr
 - **Enviar al Studio — la extensión de Chrome**: (1) **Descargar la
   extensión** y descomprimirla con «Extraer todo»; (2) en `chrome://extensions`,
   «Modo de desarrollador» → «Cargar extensión sin empaquetar» (la carpeta que
-  tiene `manifest.json`) y fijarla con la pieza de puzle; (3) con su ventanita
-  abierta, **Crear el código de envío** → «Copiar la clave» (la **clave de
+  tiene `manifest.json`) y fijarla con la pieza de puzle; (3) en el Studio,
+  **Crear el código de envío** → «Copiar la clave» (la **clave de
   conexión**: la dirección y el código juntos; se ve unos minutos; uno nuevo
-  deja sin valer el de antes), pegarla en el primer campo y «Probar». Se hace
+  deja sin valer el de antes), y en la ventanita de la extensión pegarla en el
+  primer campo y «Probar». Se hace
   una vez por Chrome; lo que se pega se guarda solo aunque la ventanita se cierre.
 - **Calidad de las imágenes**: el punto de partida de los vídeos nuevos.
 - **Dictado al asistente**: con OpenAI o con el del navegador.

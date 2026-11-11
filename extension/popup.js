@@ -280,7 +280,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   for (const id of ['studio', 'codigo']) {
     $(id).addEventListener('input', guardarBorrador);
     /* al entrar en un campo se selecciona entero: pegar lo REEMPLAZA en vez de añadirse detrás */
-    $(id).addEventListener('focus', e => e.target.select());
+    $(id).addEventListener('focus', e => setTimeout(() => e.target.select(), 0));   // tras soltar el ratón, o se deshace
   }
   $('guardar').addEventListener('click', guardar);
   $('probar').addEventListener('click', probar);

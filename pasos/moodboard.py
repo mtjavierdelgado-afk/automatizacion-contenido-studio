@@ -635,8 +635,7 @@ def guardar(clave, eje, png, raiz=None, ficha=None):
     carpeta = os.path.join(raiz_propuestas(raiz), clave)
     os.makedirs(carpeta, exist_ok=True)
     destino = os.path.join(carpeta, f"{eje}.png")
-    with open(destino, "wb") as fh:
-        fh.write(png)
+    medios.escribir_bytes(destino, png)      # entera o nada (rama png-seguro)
     if ficha is not None:
         medios.escribir_json(os.path.join(carpeta, "ficha.json"), ficha)
     return destino
@@ -948,8 +947,7 @@ def dibujar_desde_guia(estilo, destino, ejes=None, calidad="medium",
             png, meta = imagen.generar(prompt, refs, quality=calidad,
                                        tamano="apaisado")
             ruta = os.path.join(destino, f"{eje}.png")
-            with open(ruta, "wb") as fh:
-                fh.write(png)
+            medios.escribir_bytes(ruta, png)  # entera o nada (rama png-seguro)
             apuntar_lamina(destino, eje, huella)
             resultados[indice] = (eje, ruta, float(meta.get("coste") or 0.0))
         with candado:

@@ -133,8 +133,11 @@ def regenerar_directo(proyecto, escena_id, feedback, trazos, generales="",
     if os.path.exists(anterior):
         n = len([f for f in os.listdir(historial) if f.startswith(escena_id)])
         os.replace(anterior, os.path.join(historial, f"{escena_id}_v{n + 1}.png"))
-    with open(anterior, "wb") as fh:
+    # entera o nada (rama png-seguro, 11-11): nadie lee una imagen a medias
+    temporal = f"{anterior}.{os.getpid()}.parcial"
+    with open(temporal, "wb") as fh:
         fh.write(png)
+    os.replace(temporal, anterior)
 
     registro["prompt"] = prompt
     registro["revisiones"] = registro.get("revisiones", 0) + 1

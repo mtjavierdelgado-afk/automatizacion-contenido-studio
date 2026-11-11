@@ -1148,8 +1148,12 @@ def generar_lote(trabajos, *, concurrencia=4):
         except Exception as exc:
             return {"id": trabajo.get("id"), "error": str(exc)}
         os.makedirs(os.path.dirname(trabajo["destino"]), exist_ok=True)
-        with open(trabajo["destino"], "wb") as fh:
+        # ENTERA O NADA (rama png-seguro, 11-11): se escribe aparte y se pone
+        # en su sitio de golpe, para que nadie lea una imagen a medias
+        temporal = f"{trabajo['destino']}.{os.getpid()}.{threading.get_ident()}.parcial"
+        with open(temporal, "wb") as fh:
             fh.write(png)
+        os.replace(temporal, trabajo["destino"])
         return {"id": trabajo.get("id"), "destino": trabajo["destino"], **meta}
 
     with ThreadPoolExecutor(max_workers=concurrencia) as pool:

@@ -10,6 +10,14 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**Se acabó el «broken PNG file» que cortaba vídeos (11 de noviembre)**
+- Cada imagen se guarda entera o no se guarda: nadie (el revisor, el montaje,
+  otra tanda) puede leer una a medio escribir, que es lo que cortaba el piloto.
+- Si una imagen ya guardada está rota (en el banco o en un plano), se aparta y
+  se vuelve a producir en lugar de cortar el vídeo. «Reintentar» ya no tropieza
+  con ella.
+- Si OpenAI devuelve una imagen que no se puede leer, no se guarda y se dice.
+
 **El guion visual se pone al día solo (9 de noviembre)**
 - El bloque «Guion visual» (paso Voz o Imágenes) ya no se queda vacío si lo
   abriste antes de tener el guion: cuando terminan el guion, la voz, una

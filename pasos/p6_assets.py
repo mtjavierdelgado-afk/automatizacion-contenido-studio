@@ -3820,6 +3820,21 @@ def calidad_de_ficha(ficha, tamano="apaisado", ruta=None):
     return deducida
 
 
+def _sana_o_apartada(ruta, nombre):
+    """Si la imagen que ya hay en `ruta` se puede usar. -> bool (rama png-seguro)
+
+    Una rota (una copia a medias de antes del arreglo) no se conserva: se borra
+    y el plano se vuelve a producir --del banco si alli esta sana, y si no, se
+    dibuja--. Conservarla era cortar la tanda o el montaje cada vez que alguien
+    la leia («broken PNG file»), y «Reintentar» volvia a tropezar con ella."""
+    if medios.imagen_sana(ruta):
+        return True
+    print(f"[assets] {nombre}: la imagen {ruta} esta rota; se vuelve a producir",
+          flush=True)
+    medios.borrar(ruta)
+    return False
+
+
 def _producir_imagen(nombre, prompt, referencias, destino, p, rehacer=False,
                      tamano=None):
     """Arte adoptado -> cache -> API. Devuelve como se resolvio y el coste.
@@ -3852,10 +3867,25 @@ def _producir_imagen(nombre, prompt, referencias, destino, p, rehacer=False,
     # la adoptada por firma y la de la cache SI son de esta calidad (la calidad
     # esta en la firma); la del modo «adoptar», que casa solo por nombre, no.
     if not rehacer:
+        # UNA IMAGEN ROTA EN EL BANCO NO SE REPARTE (rama png-seguro, 11-11):
+        # una copia a medias de antes del arreglo se quedaba en el banco, que
+        # comparten todos los proyectos, y cada plano con esa firma la heredaba
+        # y cortaba el video («broken PNG file»). Rota, se aparta y se dibuja
+        # de nuevo: es una imagen que el plano necesita y que no estaba.
+        if previa and not medios.imagen_sana(previa):
+            print(f"[assets] {nombre}: la imagen guardada {previa} esta rota; "
+                  f"se dibuja de nuevo", flush=True)
+            if os.path.abspath(previa) == os.path.abspath(cacheada):
+                medios.borrar(cacheada)
+            previa = None
         if previa:
             medios.copiar(previa, destino)
             return {"origen": "adoptada", "firma": firma, "coste": 0.0,
                     "fuente": previa, "calidad": p["calidad"]}
+        if os.path.exists(cacheada) and not medios.imagen_sana(cacheada):
+            print(f"[assets] {nombre}: la imagen del banco {cacheada} esta rota; "
+                  f"se aparta y se dibuja de nuevo", flush=True)
+            medios.borrar(cacheada)
         if os.path.exists(cacheada):
             medios.copiar(cacheada, destino)
             return {"origen": "cache", "firma": firma, "coste": 0.0,
@@ -3870,9 +3900,15 @@ def _producir_imagen(nombre, prompt, referencias, destino, p, rehacer=False,
         # falta la clave); dentro de un hilo eso no lo captura nadie y el paso
         # se quedaria colgado en 'ejecutando' sin explicacion
         raise RuntimeError(f"el motor de imagen aborto: {fallo}") from fallo
-    os.makedirs(os.path.dirname(destino), exist_ok=True)
-    with open(destino, "wb") as fh:
-        fh.write(png)
+    # LO QUE LLEGA SE COMPRUEBA ANTES DE GUARDARLO (rama png-seguro): una
+    # imagen rota no entra ni en el plano ni en el banco, donde la heredaria
+    # cualquier otro video. Ya se ha pagado: se dice, y el plano se puede
+    # volver a pedir sin que la rota lo estorbe.
+    if not medios.bytes_de_imagen_sanos(png):
+        raise RuntimeError(
+            f"{nombre}: OpenAI ha devuelto una imagen que no se puede leer "
+            f"({len(png)} bytes). No se ha guardado; vuelve a pedir este plano.")
+    medios.escribir_bytes(destino, png)
     medios.copiar(destino, cacheada)
     return {"origen": "generada", "firma": firma, "coste": meta["coste"],
             "segundos": meta["segundos"], "calidad": p["calidad"]}
@@ -4158,7 +4194,7 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                 guardada_previa = medios.leer_json(ficha_json, {}) or {}
                 hecho = bool(guardada_previa) and not guardada_previa.get("png")
             else:
-                hecho = os.path.exists(destino)
+                hecho = os.path.exists(destino) and _sana_o_apartada(destino, sid)
             # UNA IMAGEN QUE YA EXISTE SE QUEDA. Solo se rehace si alguien la
             # ha pedido -- por su unidad, o con el «rehacer» de la pantalla.
             #
@@ -5467,7 +5503,8 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
                (indice + 1, len(pendientes)))
         if ficha["tipo"] == "reparto":
             destino = os.path.join(dirs["reparto"], f"{ficha['nombre']}.png")
-            if pedido(uid) or not os.path.exists(destino):
+            if pedido(uid) or not (os.path.exists(destino)
+                                   and _sana_o_apartada(destino, ficha["nombre"])):
                 prompt = _prompt_reparto(ficha, p["estilo"])
                 # a una hoja de personaje le tocan los ejes de personas: la
                 # cara y los cuerpos, que es lo que esa hoja tiene que fijar

@@ -52,6 +52,7 @@ lo que debe sellarse, y "dependencias" el mapa escena -> assets usados.
 """
 import difflib
 import hashlib
+import io
 import json
 import math
 import os
@@ -3820,17 +3821,30 @@ def calidad_de_ficha(ficha, tamano="apaisado", ruta=None):
     return deducida
 
 
-def _sana_o_apartada(ruta, nombre):
+def _sana_o_apartada(ruta, nombre, banco=None):
     """Si la imagen que ya hay en `ruta` se puede usar. -> bool (rama png-seguro)
 
-    Una rota (una copia a medias de antes del arreglo) no se conserva: se borra
-    y el plano se vuelve a producir --del banco si alli esta sana, y si no, se
-    dibuja--. Conservarla era cortar la tanda o el montaje cada vez que alguien
-    la leia («broken PNG file»), y «Reintentar» volvia a tropezar con ella."""
+    Una rota (una copia a medias de antes del arreglo) no se conserva:
+    conservarla era cortar la tanda o el montaje cada vez que alguien la leia
+    («broken PNG file»), y «Reintentar» volvia a tropezar con ella.
+
+    PRIMERO SE RECUPERA GRATIS: la ficha de al lado dice con que firma se
+    dibujo, y si el banco tiene esa imagen sana es LA MISMA que se pago (no una
+    nueva con el prompt de hoy). Solo si no esta se borra, y entonces el plano
+    cuenta como no hecho: se produce en una tanda normal, y en una dirigida a
+    otras unidades se queda pendiente (no se paga sin pedirlo)."""
     if medios.imagen_sana(ruta):
         return True
-    print(f"[assets] {nombre}: la imagen {ruta} esta rota; se vuelve a producir",
-          flush=True)
+    ficha = medios.leer_json(os.path.splitext(ruta)[0] + ".json", {}) or {}
+    firma = str(ficha.get("firma") or "") if isinstance(ficha, dict) else ""
+    guardada = os.path.join(banco, f"{firma}.png") if (banco and firma) else ""
+    if guardada and os.path.exists(guardada) and medios.imagen_sana(guardada):
+        print(f"[assets] {nombre}: la imagen {ruta} estaba rota; recuperada del banco "
+              f"(la misma, sin pagar)", flush=True)
+        medios.copiar(guardada, ruta)
+        return True
+    print(f"[assets] {nombre}: la imagen {ruta} esta rota y no esta en el banco; "
+          f"se vuelve a producir", flush=True)
     medios.borrar(ruta)
     return False
 
@@ -3908,8 +3922,11 @@ def _producir_imagen(nombre, prompt, referencias, destino, p, rehacer=False,
         raise RuntimeError(
             f"{nombre}: OpenAI ha devuelto una imagen que no se puede leer "
             f"({len(png)} bytes). No se ha guardado; vuelve a pedir este plano.")
-    medios.escribir_bytes(destino, png)
-    medios.copiar(destino, cacheada)
+    # PRIMERO AL BANCO, que no lo sirve nadie (revision de png-seguro): si
+    # colocar el plano falla (en Windows, abierto por la pantalla), lo pagado
+    # ya esta a salvo y la siguiente pasada lo coge de ahi sin pagar
+    medios.escribir_bytes(cacheada, png)
+    medios.copiar(cacheada, destino)
     return {"origen": "generada", "firma": firma, "coste": meta["coste"],
             "segundos": meta["segundos"], "calidad": p["calidad"]}
 
@@ -4194,7 +4211,8 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                 guardada_previa = medios.leer_json(ficha_json, {}) or {}
                 hecho = bool(guardada_previa) and not guardada_previa.get("png")
             else:
-                hecho = os.path.exists(destino) and _sana_o_apartada(destino, sid)
+                hecho = os.path.exists(destino) and _sana_o_apartada(
+                    destino, sid, p.get("banco_imagenes"))
             # UNA IMAGEN QUE YA EXISTE SE QUEDA. Solo se rehace si alguien la
             # ha pedido -- por su unidad, o con el «rehacer» de la pantalla.
             #
@@ -4805,8 +4823,10 @@ def _lamina_estilo(rutas, destino):
         x = (indice % columnas) * ancho + (ancho - copia.width) // 2
         y = (indice // columnas) * alto + (alto - copia.height) // 2
         hoja.paste(copia, (x, y))
-    os.makedirs(os.path.dirname(destino), exist_ok=True)
-    hoja.save(destino, "PNG")
+    # entera o nada (rama png-seguro): varios planos la piden a la vez
+    salida = io.BytesIO()
+    hoja.save(salida, "PNG")
+    medios.escribir_bytes(destino, salida.getvalue())
     return destino
 
 
@@ -4841,7 +4861,8 @@ def _referencias_estilo(p, cache, escena=None):
         # lamina, y la cache la reconstruye sola
         firma = hashlib.sha1("|".join(sorted(rutas)).encode("utf-8")).hexdigest()[:12]
         destino = os.path.join(cache, f"lamina_estilo_{firma}.png")
-        if not os.path.exists(destino):
+        # rota de una pasada de antes: se rehace (gratis, se monta aqui)
+        if not (os.path.exists(destino) and medios.imagen_sana(destino)):
             destino = _lamina_estilo(rutas, destino)
         if destino and os.path.exists(destino):
             return [{"papel": "lamina", "ruta": imagen.normalizar(destino, cache),
@@ -5504,7 +5525,8 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
         if ficha["tipo"] == "reparto":
             destino = os.path.join(dirs["reparto"], f"{ficha['nombre']}.png")
             if pedido(uid) or not (os.path.exists(destino)
-                                   and _sana_o_apartada(destino, ficha["nombre"])):
+                                   and _sana_o_apartada(destino, ficha["nombre"],
+                                                        p.get("banco_imagenes"))):
                 prompt = _prompt_reparto(ficha, p["estilo"])
                 # a una hoja de personaje le tocan los ejes de personas: la
                 # cara y los cuerpos, que es lo que esa hoja tiene que fijar

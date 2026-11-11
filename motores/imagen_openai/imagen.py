@@ -1131,6 +1131,25 @@ def _sin_saldo(respuesta):
             or "exceeded your current quota" in texto)
 
 
+def _png_entero(datos):
+    """Si los bytes son un PNG que se lee entero (rama png-seguro). Lo que no es
+    PNG no se juzga aqui."""
+    if not datos:
+        return False
+    if datos[:8] != b"\x89PNG\r\n\x1a\n":
+        return True
+    try:
+        import io                                           # noqa: PLC0415
+        from PIL import Image                               # noqa: PLC0415
+        with Image.open(io.BytesIO(datos)) as imagen:
+            imagen.verify()
+        with Image.open(io.BytesIO(datos)) as imagen:
+            imagen.load()
+        return True
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 def generar_lote(trabajos, *, concurrencia=4):
     """Ejecuta trabajos en paralelo. Cada trabajo es un dict con 'prompt',
     'referencias', 'destino' y opcionalmente 'quality'.
@@ -1150,10 +1169,20 @@ def generar_lote(trabajos, *, concurrencia=4):
         os.makedirs(os.path.dirname(trabajo["destino"]), exist_ok=True)
         # ENTERA O NADA (rama png-seguro, 11-11): se escribe aparte y se pone
         # en su sitio de golpe, para que nadie lea una imagen a medias
+        if not _png_entero(png):
+            return {"id": trabajo.get("id"), "error": "OpenAI devolvió una imagen que no "
+                                                      "se puede leer: no se ha guardado"}
         temporal = f"{trabajo['destino']}.{os.getpid()}.{threading.get_ident()}.parcial"
-        with open(temporal, "wb") as fh:
-            fh.write(png)
-        os.replace(temporal, trabajo["destino"])
+        try:
+            with open(temporal, "wb") as fh:
+                fh.write(png)
+            os.replace(temporal, trabajo["destino"])
+        except OSError as fallo:
+            try:
+                os.remove(temporal)
+            except OSError:
+                pass
+            return {"id": trabajo.get("id"), "error": f"no se ha podido guardar: {fallo}"}
         return {"id": trabajo.get("id"), "destino": trabajo["destino"], **meta}
 
     with ThreadPoolExecutor(max_workers=concurrencia) as pool:

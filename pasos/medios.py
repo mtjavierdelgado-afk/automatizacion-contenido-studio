@@ -1566,42 +1566,53 @@ def imagen_sana(ruta):
 
     `verify` mira la estructura y las sumas de cada trozo del PNG (ahi salta un
     trozo de ceros) y `load` descomprime los pixeles (ahi salta uno cortado).
-    Un fichero que no existe no esta sano. UNO QUE NO ES PNG SE DA POR SANO:
-    lo que se dibuja aqui es siempre PNG, y una imagen subida en otro formato
-    (que quiza esta Pillow no sepa abrir) no se toca --quien llama a esto puede
-    borrar lo que no este sano, y eso no puede alcanzar a lo que sube alguien."""
+    Un fichero que no existe, o vacio o solo de ceros, no esta sano.
+
+    ANTE LA DUDA, SANA: quien llama a esto puede BORRAR lo que no este sano, y
+    borrar una imagen buena es pagarla otra vez. Asi que:
+      - un fichero que no se puede abrir ahora (en Windows, el antivirus o la
+        pantalla lo tienen abierto; demasiados ficheros abiertos) no se juzga;
+      - uno que no es PNG (una imagen subida en otro formato, que quiza esta
+        Pillow no sepa abrir) no se toca;
+      - solo cuentan como rota las averias de un PNG (`bytes_de_imagen_sanos`)."""
     try:
         with open(ruta, "rb") as fh:
-            cabecera = fh.read(8)
-        if not cabecera.strip(b"\x00"):
-            return False            # vacio o solo ceros: una escritura que no llego
-        if cabecera != FIRMA_PNG:
-            return True
+            datos = fh.read()
+    except FileNotFoundError:
+        return False
     except OSError:
-        return False
-    try:
-        from PIL import Image                               # noqa: PLC0415
-        with Image.open(ruta) as imagen:
-            imagen.verify()
-        with Image.open(ruta) as imagen:
-            imagen.load()
         return True
-    except Exception:                                       # noqa: BLE001
-        return False
+    return bytes_de_imagen_sanos(datos)
 
 
 def bytes_de_imagen_sanos(datos):
-    """Como `imagen_sana`, sobre los bytes que acaban de llegar. -> bool"""
+    """Si estos bytes son una imagen PNG que se lee entera. -> bool
+
+    Mismas reglas que `imagen_sana`: vacio o solo ceros, roto; lo que no es PNG,
+    sano; y de lo que falla al descodificar, solo las averias de verdad (una
+    suma o un trozo mal, datos que se acaban, compresion rota). Un PNG con un
+    texto incrustado enorme (el limite de Pillow) o una falta de memoria no son
+    una imagen rota."""
+    import io                                               # noqa: PLC0415
+    import struct                                           # noqa: PLC0415
+    import zlib                                             # noqa: PLC0415
+    if not datos or not datos[:8].strip(b"\x00"):
+        return False
+    if datos[:8] != FIRMA_PNG:
+        return True
     try:
-        import io                                           # noqa: PLC0415
         from PIL import Image                               # noqa: PLC0415
         with Image.open(io.BytesIO(datos)) as imagen:
             imagen.verify()
         with Image.open(io.BytesIO(datos)) as imagen:
             imagen.load()
         return True
-    except Exception:                                       # noqa: BLE001
+    except (SyntaxError, EOFError, zlib.error, struct.error):
         return False
+    except OSError:                  # «image file is truncated», «broken data stream»
+        return False
+    except Exception:                                       # noqa: BLE001
+        return True
 
 
 def copiar(origen, destino):

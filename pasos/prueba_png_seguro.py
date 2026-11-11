@@ -141,6 +141,13 @@ def prueba_imagen_sana(carpeta):
     medios.escribir_bytes(vacia, b"\x00" * 200)
     ok(not medios.imagen_sana(vacia), "una que es solo ceros, no")
     ok(not medios.imagen_sana(os.path.join(carpeta, "no_existe.png")), "una que no existe, no")
+    from PIL import PngImagePlugin
+    info = PngImagePlugin.PngInfo()
+    info.add_itxt("XML:com.adobe.xmp", "x" * (3 * 1024 * 1024), zip=False)
+    grande = os.path.join(carpeta, "con_texto_enorme.png")
+    Image.new("RGB", (8, 8)).save(grande, "PNG", pnginfo=info)
+    ok(medios.imagen_sana(grande),
+       "un PNG sano con un texto incrustado enorme no se da por roto (no se borraría una buena)")
     jpg = os.path.join(carpeta, "subida.jpg")
     Image.new("RGB", (8, 8)).save(jpg, "JPEG")
     ok(medios.imagen_sana(jpg), "una JPEG subida se da por sana (nunca se borra)")
@@ -190,8 +197,42 @@ def prueba_p6(carpeta):
            "un plano con su PNG roto se aparta (se vuelve a producir)")
         ok(P6._sana_o_apartada(destino2, "S002") and os.path.exists(destino2),   # noqa: SLF001
            "y uno sano se conserva")
+        # un plano roto cuya imagen pagada SIGUE en el banco: la misma, gratis
+        buena = os.path.join(carpeta, "v", "S005.png")
+        medios.escribir_bytes(buena, png_de((9, 99, 9), 64))
+        firma5 = "f" * 16
+        medios.copiar(buena, os.path.join(banco, f"{firma5}.png"))
+        medios.escribir_json(os.path.join(carpeta, "v", "S005.json"), {"firma": firma5})
+        with open(buena, "wb") as fh:
+            fh.write(png_de((9, 99, 9), 64)[:150])
+        antes = len(pedidas)
+        ok(P6._sana_o_apartada(buena, "S005", banco) and medios.imagen_sana(buena)   # noqa: SLF001
+           and len(pedidas) == antes,
+           "un plano roto cuya imagen sigue en el banco se recupera (la misma, sin pagar)")
     finally:
         medios.motor = real
+
+
+def prueba_hojas_de_estilo(carpeta):
+    seccion("5] las hojas de estilo que se montan aquí (gratis)")
+    import moodboard as M
+    rutas = []
+    for i in range(2):
+        ruta = os.path.join(carpeta, f"lamina_{i}.png")
+        medios.escribir_bytes(ruta, png_de((i * 90, 40, 40), 64))
+        rutas.append(ruta)
+    destino = os.path.join(carpeta, "cache", "tile_a_b.png")
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    with open(destino, "wb") as fh:                               # rota, de antes
+        fh.write(png_de((1, 1, 1), 64)[:120])
+    if not medios.imagen_sana(destino):
+        M._montar(rutas, destino)                                 # noqa: SLF001
+    ok(medios.imagen_sana(destino), "una hoja de estilo rota se vuelve a montar entera")
+    lamina = os.path.join(carpeta, "cache", "lamina_estilo_x.png")
+    P6._lamina_estilo(rutas, lamina)                              # noqa: SLF001
+    ok(medios.imagen_sana(lamina), "y la lámina de estilo se escribe entera")
+    sobras = [n for n in os.listdir(os.path.join(carpeta, "cache")) if n.endswith(".parcial")]
+    ok(not sobras, "sin temporales sueltos")
 
 
 def main():
@@ -200,6 +241,7 @@ def main():
         prueba_la_carrera(carpeta)
         prueba_imagen_sana(carpeta)
         prueba_p6(carpeta)
+        prueba_hojas_de_estilo(carpeta)
     finally:
         shutil.rmtree(carpeta, ignore_errors=True)
     print()

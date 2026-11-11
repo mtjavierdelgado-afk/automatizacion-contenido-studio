@@ -8348,8 +8348,18 @@ def publicar_calendario_b_cargado(navegador, datos):
     with open(ruta, encoding="utf-8") as fh:
         guardada = json.load(fh)
     originales = guardada.get("envios", [])
+    # Un día VACÍO, no «mañana»: de noche, los envíos de otros escenarios que se
+    # programan a unas horas vista caen mañana y el día salía con «23 de 22»
+    # (revisión del servidor del 09-11). Se busca a 60 días o más un día sin
+    # nada en el calendario (preguntado a la misma ruta que pinta la pantalla).
     lima = _dt.timezone(_dt.timedelta(hours=-5))
-    manana = (_dt.datetime.now(lima) + _dt.timedelta(days=1)).date()
+    manana = (_dt.datetime.now(lima) + _dt.timedelta(days=60)).date()
+    for _ in range(60):
+        _r, cola = api.get(f"/api/publicar/cola?desde={manana}&dias=1")
+        if not any(str(e.get("cuando") or "").startswith(str(manana)) and e.get("estado") != "cancelado"
+                   for e in (cola or {}).get("envios") or []):
+            break
+        manana += _dt.timedelta(days=1)
     lunes = manana - _dt.timedelta(days=manana.weekday())
     envios = []
     for i, hora in enumerate(["07:00", "09:00", "11:00", "13:00", "15:00", "18:00", "21:00"]):
@@ -8414,7 +8424,7 @@ def publicar_calendario_b_cargado(navegador, datos):
         pg.pulsar(f"{celda} .mas-del-dia")
         ok(pg.esperar(".panel-dia-publicar .fila-dia-pub", segundos=5), "que también abre el día entero")
         pg.p.keyboard.press("Escape")
-        pg.js("PUB.vistaCal = 'agenda'; PUB.desde = ''; cargarPublicar();")
+        pg.js(f"PUB.vistaCal = 'agenda'; PUB.desde = '{lunes}'; cargarPublicar();")
         ok(pg.esperar(".agenda-pub .agenda-dia-pub", segundos=10), "y la agenda: la semana en una columna")
         pg.sin_errores("el calendario B")
         pg.cerrar()

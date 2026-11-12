@@ -687,10 +687,11 @@ CUADRO_ESTADO = (
     "landscape picture inside the tall frame.")
 
 #: Los ejes del moodboard de una imagen de referencia: sin caras ni cuerpos (es
-#: una habitacion vacia) y con dos que no son una sala amueblada, para que la
-#: lamina «interior» no sea la unica habitacion que copiar (el mueble de TV de
-#: la sala del 09-11).
-EJES_REFERENCIA = ("interior", "exterior", "objeto")
+#: una habitacion vacia) y SIN la lamina «interior», que es una sala amueblada:
+#: su mueble de TV salio en la sala de las pruebas del 09-11, 11-11 y 12-11
+#: aunque ninguna descripcion lo pedia. El exterior y el objeto dan la luz, el
+#: color y el grano, que es lo unico que se quiere del estilo aqui.
+EJES_REFERENCIA = ("exterior", "objeto")
 
 #: Lo que se cambia en un plano cuyo tramo no trae cambio (el «antes»).
 SIN_CAMBIO = ("nothing in the room itself: only what the scene description below "
@@ -781,7 +782,9 @@ PROMPT_BASE = (
     "furniture must be exactly where this description puts it, with the materials and "
     "colours it names, and nothing it does not name: {descripcion}. Before finishing, check "
     "the description item by item against the picture (what is on the left, what is on "
-    "the back wall, what is on the right, where the door is). The colours and materials "
+    "the back wall, what is on the right, where the door is). Add NOTHING the description "
+    "does not name: no television, no TV cabinet, no shelves, no extra door and no extra "
+    "window. The colours and materials "
     "named here WIN over any palette of the style (its references and its description): "
     "take only the look and the rendering from the style, never its colours or finishes. Light: {luz}. {antes}"
     "{encuadre} No people, no text, no letters.")

@@ -4961,6 +4961,17 @@ def _referencias_estilo(p, cache, escena=None):
             return [{"papel": "lamina", "ruta": imagen.normalizar(tile, cache),
                      "cuantas": len(moodboard.ejes_de_plano(escena)),
                      "moodboard": True}]
+    if escena is not None and escena.get("ejes"):
+        # UNA IMAGEN DE REFERENCIA SIN MOODBOARD (rama base-fiel, prueba real del
+        # 12-11): si las referencias del estilo son sus laminas por eje
+        # («interior_….png», «cara_….png»), fuera las que no toca; la
+        # «interior» es una sala amueblada y su mueble de TV salio en las tres
+        # pruebas. Ningun plano trae `ejes`: su lamina sale como siempre
+        fuera = [e for e in moodboard.EJES if e not in escena["ejes"]]
+        propias = [r for r in rutas
+                   if not os.path.basename(r).lower().startswith(tuple(f"{e}_" for e in fuera))]
+        if propias:
+            rutas = propias
     rutas = rutas[:MAX_REFERENCIAS_ESTILO]
 
     # Siempre que haya mas de una. No es una opcion: mandar ocho imagenes

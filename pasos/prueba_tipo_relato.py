@@ -662,7 +662,23 @@ def prueba_base_fiel():
                                + refs_estilo, est)
     ok(fijos not in otro, "y en un estado que no es de acabados tampoco")
     igual(moodboard.ejes_de_plano(ref_escena), list(T.EJES_REFERENCIA),
-          "la lámina de una referencia: interior, exterior y objeto, sin caras ni cuerpos")
+          "la lámina de una referencia: exterior y objeto, sin caras, cuerpos ni la sala amueblada")
+    import tempfile                                          # noqa: PLC0415
+    from PIL import Image                                    # noqa: PLC0415
+    carpeta_l = tempfile.mkdtemp()
+    laminas = []
+    for eje in ("cara", "cuerpos", "interior", "exterior", "objeto", "diagrama"):
+        ruta_l = os.path.join(carpeta_l, f"{eje}_ab12cd34ef.png")
+        Image.new("RGB", (64, 40), (30, 60, 90)).save(ruta_l)
+        laminas.append(ruta_l)
+    est_l = {"estilo": {"referencias": laminas, "modo": "foto"}}
+    cache_l = tempfile.mkdtemp()
+    ref_l = P6._referencias_estilo(est_l, cache_l, ref_escena)            # noqa: SLF001
+    plano_l = P6._referencias_estilo(est_l, cache_l, dict(plano))         # noqa: SLF001
+    igual(ref_l[0].get("cuantas"), 2, "sin moodboard, la referencia solo lleva las láminas exterior y objeto")
+    igual(plano_l[0].get("cuantas"), 6, "y un plano, las seis como siempre")
+    ok("no TV cabinet" in T.prompt_imagen_base({"descripcion": "a living room"}, {"modo": "recorrido"}),
+       "la base prohíbe lo que la descripción no nombra (la tele, el mueble de TV)")
     ok("cara" in moodboard.ejes_de_plano({"set": "sala"}),
        "la de un plano, como siempre")
     amb = dict(ref_escena, referencia="ambiente")

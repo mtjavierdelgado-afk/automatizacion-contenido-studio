@@ -36007,12 +36007,62 @@ function botonNuevaGrafica(cid) {
     onclick: () => abrirEditorGrafica(cid, null) }, '+ Nueva gráfica');
 }
 
+/* EL EDITOR CON CAPAS (rama graficas-2-editor, 12-11-2026): su propia página y
+   sus propios ficheros (web/graficas_editor.js y .css), que solo se cargan al
+   abrirlo. index.html los nombra en <body data-editor-js/-css> y el servidor les
+   pone el sello, así que se cachean como app.js. */
+let CARGA_EDITOR_CAPAS = null;
+
+function cargarEditorCapas() {
+  if (window.EditorCapas) return Promise.resolve(window.EditorCapas);
+  if (CARGA_EDITOR_CAPAS) return CARGA_EDITOR_CAPAS;
+  const js = document.body.dataset.editorJs || 'graficas_editor.js';
+  const css = document.body.dataset.editorCss || 'graficas_editor.css';
+  CARGA_EDITOR_CAPAS = new Promise((ok, mal) => {
+    document.head.appendChild(h('link', { rel: 'stylesheet', href: css }));
+    const guion = h('script', { src: js });
+    guion.addEventListener('load', () => (window.EditorCapas ? ok(window.EditorCapas) : mal(new Error('el editor no ha arrancado'))));
+    guion.addEventListener('error', () => mal(new Error('no se ha podido cargar el editor')));
+    document.head.appendChild(guion);
+  }).catch(e => { CARGA_EDITOR_CAPAS = null; throw e; });
+  return CARGA_EDITOR_CAPAS;
+}
+
+/* `pieza`: la ficha de la lista, o null para una nueva. Una pieza de antes solo
+   se abre en capas si sale IGUAL (la comparación del servidor): si no, se
+   queda con el editor de siempre y no se toca. */
+async function abrirEditorCapas(cid, pieza, extra) {
+  let cat, editor;
+  try {
+    [cat, editor] = await Promise.all([catalogoGraficas(), cargarEditorCapas()]);
+    if (GRAF.kits[cid] === undefined) GRAF.kits[cid] = (await pedir(apiGraficas(cid, '/kit'))).kit || null;
+    if (pieza && pieza.id && !pieza.en_capas && !pieza.nacida_en_capas) {
+      toast('Comprobando que la pieza sale igual en capas…');
+      const r = await pedir(apiGraficas(cid, `/piezas/${pieza.id}/comparar`), { method: 'POST' });
+      if (!r.igual) {
+        toast(`Esta pieza no sale idéntica en capas (cambia un ${(r.visible * 100).toFixed(2)} % de lo que se ve), así que sigue con el editor de siempre. No se ha tocado nada.`, true);
+        return;
+      }
+    }
+  } catch (e) { toast(e.message, true); return; }
+  const ficha = fichaCliente(cid);
+  editor.abrir(Object.assign({
+    cid, pieza, catalogo: cat, kit: GRAF.kits[cid] || {}, nombreCliente: ficha ? ficha.nombre : '',
+    base: BASE, api: apiGraficas, pedir, toast,
+    pases: () => (typeof cabeceraDePases === 'function' ? cabeceraDePases() : ''),
+    alCerrar: cambio => { if (cambio) { GRAF.piezas[cid] = undefined; pintarLight(); } },
+  }, extra || {}));
+}
+
 function seccionGraficasDelProyecto(cid) {
   const caja = h('div', { clase: 'seccion-graficas' });
   const lista = GRAF.piezas[cid];
   caja.appendChild(h('div', { clase: 'light-cab' },
     h('h3', {}, 'Gráficas'),
-    h('span', { clase: 'meta' }, lista ? plural(lista.length, 'pieza', 'piezas') : '')));
+    h('span', { clase: 'meta' }, lista ? plural(lista.length, 'pieza', 'piezas') : ''),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini nueva-en-capas', title: 'Un diseño libre: añade textos, fotos, logo y formas donde quieras',
+      onclick: () => abrirEditorCapas(cid, null) }, '+ Diseño en capas')));
   if (lista === undefined) {
     if (!GRAF.pidiendo[cid]) {
       GRAF.pidiendo[cid] = true;
@@ -36035,15 +36085,23 @@ function seccionGraficasDelProyecto(cid) {
   }
   caja.appendChild(h('div', { clase: 'rejilla-piezas' }, ...lista.map(p => {
     const img = h('img', { alt: `Gráfica ${p.nombre}`, loading: 'lazy' });
-    ponerImagenPublicar(img, apiGraficas(cid, `/piezas/${p.id}/fichero.jpg?v=${p.sello}`));
+    // el sello y la fecha: una pieza en capas recién guardada estrena miniatura
+    ponerImagenPublicar(img, apiGraficas(cid, `/piezas/${p.id}/fichero.jpg?v=${encodeURIComponent(`${p.sello}-${p.cambiada || ''}`)}`));
+    // lo que ya está en capas se abre SIEMPRE con el editor de capas (el de
+    // siempre no puede guardarlo sin perder la versión en capas)
+    const enCapas = !!(p.en_capas || p.nacida_en_capas);
+    const abrir = () => (enCapas ? abrirEditorCapas(cid, p) : abrirEditorGrafica(cid, p));
     return h('div', { clase: 'tarjeta-pieza' },
-      h('button', { clase: 'abrir-pieza', title: 'Abrir para cambiarla', onclick: () => abrirEditorGrafica(cid, p) }, img),
+      h('button', { clase: 'abrir-pieza', title: 'Abrir para cambiarla', onclick: abrir }, img),
       h('b', {}, p.nombre),
-      h('span', { clase: 'meta' }, p.medida),
+      h('span', { clase: 'meta' }, enCapas ? `${p.medida} · en capas` : p.medida),
       h('div', { clase: 'fila' },
         h('button', { clase: 'mini', onclick: () => descargarGrafica(cid, p.id, 'png') }, 'PNG'),
         h('button', { clase: 'mini', onclick: () => descargarGrafica(cid, p.id, 'jpg') }, 'JPG'),
-        h('button', { clase: 'mini', onclick: () => abrirEditorGrafica(cid, Object.assign({}, p, { id: '' })) }, 'Duplicar'),
+        enCapas ? null : h('button', { clase: 'mini abrir-en-capas', title: 'Moverla, añadir textos, fotos y formas donde quieras. La versión de antes se queda guardada.',
+          onclick: () => abrirEditorCapas(cid, p) }, 'Abrir en capas'),
+        h('button', { clase: 'mini', onclick: () => (enCapas ? abrirEditorCapas(cid, p, { duplicar: true })
+          : abrirEditorGrafica(cid, Object.assign({}, p, { id: '' }))) }, 'Duplicar'),
         h('button', { clase: 'mini fantasma', onclick: async () => {
           if (!window.confirm(`¿Borrar «${p.nombre}»? No se puede deshacer.`)) return;
           try {

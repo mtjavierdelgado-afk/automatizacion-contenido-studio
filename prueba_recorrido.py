@@ -10897,7 +10897,7 @@ def video_en_otro_idioma(navegador, datos):
     vistos = len(pg.dialogos)
     _r, g_antes = api.get(f"/api/proyectos/{copia}/pasos/guion")
     pg.js("APP.light.video.promptGeneral = 'más directo'; await reescribirGuionLight();")
-    pg.js("await lanzarTandaLight('guion', 'pendientes');")
+    pg.js("await lanzarTandaLight('guion', 'pendientes'); APP.light.video.promptGeneral = '';")
     pg.p.wait_for_timeout(500)
     avisos = pg.dialogos[vistos:]
     ok(len(avisos) == 2 and all("traducción al inglés" in a and "se perderá" in a for a in avisos),

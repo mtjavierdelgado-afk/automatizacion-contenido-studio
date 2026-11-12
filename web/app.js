@@ -8256,6 +8256,7 @@ async function cargarVideoLight(pid) {
       v.planos = [];
       v.firmaPlanos = '';
       v.subtitulosRotos = undefined;
+      v.traduccionDe = null;
       /* Y LOS PLANES DE CADA TANDA: son los de OTRO video. Con ellos, el aviso
          de «N imágenes en otra calidad» o el precio de regenerar eran los del
          que acababas de cerrar hasta que llegaba el de este. */
@@ -12128,8 +12129,8 @@ function seguirConGuionTraducido(que) {
   if (!t || !t.idioma) return true;
   const idioma = NOMBRES_IDIOMA_TRADUCIDO[t.idioma] || t.idioma;
   return confirm(`Ojo: este vídeo es una traducción al ${idioma}. Si Claude reescribe ${que}, `
-    + `lo escribirá en el idioma del vídeo original (no en ${idioma}) y se perderá la `
-    + `traducción.\n\nPara cambiar una frase sin perderla, edítala a mano en su bloque.`
+    + `lo escribirá en el idioma del vídeo original (no en ${idioma}) y la traducción `
+    + `se perderá o quedará mezclada con ese idioma.\n\nPara cambiar una frase sin perderla, edítala a mano en su bloque.`
     + `\n\n¿Reescribir igualmente?`);
 }
 

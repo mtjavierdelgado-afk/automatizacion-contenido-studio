@@ -72,7 +72,7 @@
   if (es('tiktok.com', 'x.com', 'twitter.com') && meta('og:url')) {
     try {
       const deOg = new URL(meta('og:url')).pathname.replace(/\/$/, '');
-      if (deOg && deOg !== location.pathname.replace(/\/$/, '')) {
+      if (deOg && deOg.toLowerCase() !== location.pathname.replace(/\/$/, '').toLowerCase()) {
         descripcion = ''; datos.imagen = ''; datos.url = location.href; datos.titulo = limpio(document.title);
       }
     } catch (e) { /* una og:url rara: se deja como está */ }
@@ -185,7 +185,8 @@
       const activo = corto_ ? (document.querySelector('ytd-reel-video-renderer[is-active]') || document) : document;
       const en = (...s) => { for (const x of s) { const el = activo.querySelector(x); if (el && limpio(el.innerText)) return limpio(el.innerText); } return ''; };
       datos.titulo = en('h1.ytd-watch-metadata', 'ytd-watch-metadata #title h1', 'h2.ytShortsVideoTitleViewModelShortsVideoTitle') || datos.titulo;
-      datos.autor = en('#owner #channel-name a', 'ytd-watch-metadata ytd-channel-name a', '.ytReelChannelBarViewModelChannelName');
+      datos.autor = en('#owner #channel-name a', 'ytd-watch-metadata ytd-channel-name a', '.ytReelChannelBarViewModelChannelName')
+        || (corto_ && activo !== document ? en('ytd-channel-name a', '#channel-name a') : '');
       /* la descripción: el texto del desplegable de debajo del vídeo (no «#description»,
          que también es el id de un dibujo de la página) */
       const desc = activo.querySelector('ytd-watch-metadata ytd-text-inline-expander #attributed-snippet-text, '

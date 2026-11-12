@@ -72,6 +72,7 @@ suites=(
   pasos/prueba_seo_canal.py
   pasos/prueba_consumo_claude.py
   pasos/prueba_piloto.py
+  pasos/prueba_pulido_recibidos_tope.py
   pasos/prueba_graficas.py
   pasos/prueba_graficas_capas.py
   pasos/prueba_choques_reglas.py

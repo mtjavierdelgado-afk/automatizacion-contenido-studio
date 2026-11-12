@@ -262,6 +262,9 @@ class Falso(http.server.BaseHTTPRequestHandler):
             if usuario == "camposraros":       # el actor cambió de nombres: cobra y no se entiende nada
                 items = [{"loQueSea": i} for i in range(6)]
                 cobrado = 0.0055
+            elif usuario == "bloqueada":           # el actor contesta con un error en el resultado
+                items = [{"url": f"https://www.tiktok.com/@{usuario}", "error": "Profile could not be loaded"}]
+                cobrado = 0.0017
             elif usuario.startswith("noexiste"):
                 items = []
                 cobrado = 0.0009
@@ -364,6 +367,9 @@ def prueba_fuentes(bases):
           "un fallo que llevaba resultados con una cifra mínima no se cree: se queda la reserva")
     igual(F._cobrado_apify({"status": "TIMED-OUT", "usageTotalUsd": 0.04}, "tiktok", 30), 0.04,
           "una cifra que cuadra, sí")
+    f = lanza(F.apify, TOKEN_APIFY, "tiktok", "bloqueada", 4, bases=bases)
+    ok(f is not None and f.motivo == "red" and "Profile could not be loaded" in str(f) and "¿existe?" not in str(f),
+       f"si el actor contesta con un error, se dice ESE error, no «¿existe?» (prueba real del 12-11): {f}")
     r = F.apify(TOKEN_APIFY, "tiktok", "cero", 4, bases=bases)
     igual((r["coste_usd"], r["coste_real"]), (F.coste_apify("tiktok", 4), False),
           "un 0 con resultados no se cree: la tabla de siempre")

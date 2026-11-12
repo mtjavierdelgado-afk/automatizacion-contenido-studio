@@ -400,6 +400,21 @@ def leer_items_apify(red, usuario, items):
             "seguidores": seguidores, "fuente": "apify", "videos": videos}
 
 
+def _error_de_items(items):
+    """El error que el actor puso en sus resultados («error», «errorMessage»,
+    «message»), en una línea y corto. "" si no trae ninguno."""
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        for clave in ("error", "errorMessage", "errorDescription", "message"):
+            valor = it.get(clave)
+            if isinstance(valor, dict):
+                valor = valor.get("message") or valor.get("type")
+            if valor:
+                return " ".join(str(valor).split())[:200]
+    return ""
+
+
 def coste_apify(red, resultados):
     """Lo que cuesta (aprox.) traer `resultados` vídeos de esa red."""
     _actor, por_mil = ACTORES.get(red, ("", 5.0))
@@ -527,6 +542,16 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
     items = datos if isinstance(datos, list) else []
     cobrado = _cobrado_apify(run, red, len(items))
     salida = leer_items_apify(red, usuario, items)
+    if not salida["videos"] and items:
+        # EL ACTOR CONTESTÓ, PERO CON UN ERROR (prueba real del 12-11: TikTok
+        # devolvía un resultado que se tiraba y se decía «¿existe?, ¿es
+        # privada?»). Se dice lo que dijo Apify y NO como «no existe», que
+        # además cortaba los demás intentos.
+        dicho = _error_de_items(items) or _tachar(str(run.get("statusMessage") or ""), token)[:200]
+        claves = sorted({k for it in items if isinstance(it, dict) for k in it})[:12]
+        raise ErrorLectura(f"Apify ha devuelto {len(items)} resultado(s) sin ningún vídeo de «{usuario}» "
+                           f"en {red}" + (f": {dicho}" if dicho else f" (campos: {', '.join(claves)})"),
+                           "red", cobrado=True, resultados=len(items), coste_usd=cobrado)
     if not salida["videos"]:
         raise ErrorLectura(f"no se ha encontrado ningún vídeo público de «{usuario}» en {red} "
                            "(¿existe?, ¿es privada?)", "no_encontrada", cobrado=bool(items) or bool(cobrado),

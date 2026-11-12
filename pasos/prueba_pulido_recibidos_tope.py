@@ -116,8 +116,8 @@ def prueba_proyectos_con_clave(servidor, raiz):
 
     hecho, fallo = enviar(secreto)
     ok(hecho is None and fallo is not None and getattr(fallo, "codigo", getattr(fallo, "status_code", 0)) == 400
-       and "proyecto" in str(getattr(fallo, "detail", fallo)),
-       f"enviar a un proyecto con clave da 400 con «proyecto» (la extensión recarga la lista) ({fallo})")
+       and "proyecto" in str(getattr(fallo, "detail", fallo)) and "clave" in str(getattr(fallo, "detail", fallo)),
+       f"enviar a un proyecto con clave da 400 y dice que tiene clave (la extensión recarga la lista) ({fallo})")
     hecho, fallo = enviar(abierto)
     ok(hecho and hecho.get("ok"), f"enviar al proyecto sin clave sigue igual ({fallo})")
 
@@ -154,6 +154,27 @@ def prueba_tope_del_revisor(servidor):
            "y se guarda lo de la portada que falta (0,90 − 0,80 − 0,05)")
     finally:
         servidor._piloto_gastado = original
+    # y el tope llega de verdad al revisor mientras el piloto dibuja
+    visto = {}
+    original_tanda = servidor._piloto_tanda
+
+    def _tanda(_avisar, ctx, _que):
+        visto.update(servidor._ajustes_revisor(ctx))
+        return {}
+    try:
+        servidor._piloto_tanda = _tanda
+        servidor._piloto_imagenes(None, _Ctx(), {"vueltas": 2, "tope_usd": 0.90}, 0.10, 0.05)
+        ok(visto.get("piloto_tope_usd") == 0.90 and visto.get("piloto_portada_usd") == 0.05,
+           f"durante la tanda, el revisor ve el tope del piloto y la portada pendiente ({visto})")
+        visto.clear()
+        servidor._piloto_imagenes(None, _Ctx(), {"vueltas": 2, "tope_usd": 0.90}, None, None)
+        ok("piloto_tope_usd" not in visto, "con «Seguir igualmente» sobre el tope, no")
+        ok("piloto_tope_usd" not in servidor._ajustes_revisor(_Ctx()), "y al acabar la tanda se quita")
+    finally:
+        servidor._piloto_tanda = original_tanda
+    import inspect                                                    # noqa: PLC0415
+    ok("_max_usd_del_revisor(ctx, revisor, ajustes)" in inspect.getsource(servidor._revisar_y_corregir),
+       "el bucle del revisor pide su tope a `_max_usd_del_revisor` en cada ronda")
 
 
 def prueba_seguir_igualmente(servidor, raiz):
@@ -171,11 +192,18 @@ def prueba_seguir_igualmente(servidor, raiz):
             ok(False, f"G01 no se tenía que parar por el tope: {parada}")
         servidor._piloto_usd_portada_pendiente = lambda _r, _v, _aj: 0.05
         try:
-            servidor._piloto_tope_antes_de_dibujar(None, raiz, "p1", aj)
-            ok(False, "con una portada de IA por pagar y el tope pasado, se tenía que parar")
+            queda, portada = servidor._piloto_tope_antes_de_dibujar(None, raiz, "p1", dict(aj, portadas="ambas"))
+            ok(queda == 0.0 and portada == 0.05,
+               "G01 con la portada de IA por hacer (lo de fábrica): tampoco para aquí; la portada mira el tope en su paso")
         except servidor._PilotoPara as parada:
-            ok("portada 0.05" in str(parada) and "ya van 0.95" in str(parada),
-               f"si falta pagar la portada, para y dice qué falta ({parada})")
+            ok(False, f"con todo dibujado no se tenía que parar por la portada: {parada}")
+        servidor._coste_previsto = lambda _ctx, _pasos: {"usd_por_generar": 0.10}
+        try:
+            servidor._piloto_tope_antes_de_dibujar(None, raiz, "p1", aj)
+            ok(False, "con imágenes por pagar y el tope pasado, se tenía que parar")
+        except servidor._PilotoPara as parada:
+            ok("imágenes 0.10" in str(parada) and "portada 0.05" in str(parada) and "ya van 0.95" in str(parada),
+               f"con imágenes por pagar, para y dice qué falta ({parada})")
         servidor._coste_previsto = lambda _ctx, _pasos: {"usd_por_generar": 0.40}
         servidor._piloto_gastado = lambda _ctx: 0.30
         servidor._piloto_usd_portada_pendiente = lambda _r, _v, _aj: 0.0
@@ -183,6 +211,31 @@ def prueba_seguir_igualmente(servidor, raiz):
         ok(abs(queda - 0.20) < 1e-9, "lo de siempre: 0,90 − 0,30 − 0,40 = 0,20 $ para el revisor")
     finally:
         (servidor._coste_previsto, servidor._piloto_gastado, servidor._piloto_usd_portada_pendiente) = originales
+    # la portada de IA no pasa el tope: si no cabe, no se hace
+    original = servidor._piloto_gastado
+    try:
+        servidor._piloto_gastado = lambda _ctx: 0.88
+        ambas = {"portadas": "ambas", "calidad_portada_ia": "low"}
+        precio = servidor._piloto_usd_portada(ambas)
+        ok(precio > 0.02 and not servidor._piloto_portada_ia_cabe(None, ambas, 0.90),
+           f"con 0,88 $ de 0,90 $, la portada de IA ({precio:.3f} $) no cabe y no se paga")
+        ok(servidor._piloto_portada_ia_cabe(None, ambas, None),
+           "con «Seguir igualmente» sobre el tope, sí se hace")
+        ok(servidor._piloto_portada_ia_cabe(None, ambas, 5.0), "con sitio en el tope, sí")
+        ok(servidor._piloto_portada_ia_cabe(None, {"portadas": "plano"}, 0.5), "sin portada de IA pedida, nada que mirar")
+    finally:
+        servidor._piloto_gastado = original
+    # el paso 0 con todo hecho: lo que FALTA es 0, no el total del vídeo
+    originales = (servidor._coste_previsto, servidor._piloto_usd_portada)
+    try:
+        servidor._coste_previsto = lambda _ctx, _pasos: {"usd_por_generar": 0.0, "usd_total": 0.93}
+        servidor._piloto_usd_portada = lambda _aj: 0.0
+        ok(servidor._piloto_previsto(None, {}) == 0.0,
+           "con todo hecho, el previsto del paso 0 es 0 (antes caía al total, 0,93 $, y volvía a parar)")
+        servidor._coste_previsto = lambda _ctx, _pasos: {"usd_por_generar": 0.78, "usd_total": 0.93}
+        ok(servidor._piloto_previsto(None, {}) == 0.78, "un vídeo por hacer, lo que falta, como siempre")
+    finally:
+        (servidor._coste_previsto, servidor._piloto_usd_portada) = originales
     # la portada de IA ya hecha no se cuenta otra vez
     P = servidor._piloto()
     carpeta = P.carpeta_portadas(raiz, "abcdef012345")

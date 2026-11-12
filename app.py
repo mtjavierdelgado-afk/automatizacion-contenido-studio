@@ -23163,7 +23163,10 @@ def _piloto_previsto(ctx, aj):
     SIGUE: un cotizador que falla daba 0 $ y el tope dejaba pasarlo todo."""
     try:
         coste = _coste_previsto(ctx, ["guion", "voz", "video", "render"])
-        total = float(coste.get("usd_por_generar") or coste.get("usd_total") or 0.0)
+        # lo que FALTA por generar; con todo hecho es 0, no el total del video
+        # (si no, «Seguir igualmente» volvia a parar aqui: tren del 12-11)
+        falta = coste.get("usd_por_generar")
+        total = float(falta if falta is not None else (coste.get("usd_total") or 0.0))
         total += _piloto_usd_portada(aj)
     except Exception as fallo:                              # noqa: BLE001
         raise _PilotoPara(f"no se ha podido calcular lo que costaría ({str(fallo)[:160]}): sin "
@@ -23384,7 +23387,15 @@ def _piloto_render_portada(diseno, rutas, destino):
     return destino
 
 
-def _piloto_portadas(avisar, ctx, raiz, vid, aj):
+def _piloto_portada_ia_cabe(ctx, aj, tope_usd):
+    """¿Cabe la portada de IA en el tope del piloto? Sin tope (o «Seguir
+    igualmente» sobre el tope: None), o sin portada de IA pedida, si."""
+    if tope_usd is None or aj.get("portadas") not in ("ambas", "ia"):
+        return True
+    return _piloto_gastado(ctx) + _piloto_usd_portada(aj) <= float(tope_usd)
+
+
+def _piloto_portadas(avisar, ctx, raiz, vid, aj, tope_usd=None):
     """Opcion C del dueño: una portada con un plano del video (gratis) y otra
     hecha con IA (se paga una imagen). Se deja puesta la primera; las dos se
     pueden elegir en la ficha del piloto."""
@@ -23435,9 +23446,16 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj):
             candidatos.append({"id": f"plano{i}", "tipo": "plano", "fichero": nombre,
                                "nombre": "Con un plano del vídeo", "coste_usd": 0.0,
                                "por_que": str(prop.get("por_que") or "")[:200], "diseno": diseno})
+    # LA DE IA NO PASA EL TOPE (tren del 12-11): si no cabe, se queda la del
+    # plano y se apunta. Con «Seguir igualmente» sobre el tope, `tope_usd` es None
+    sin_sitio = "ia" not in hechas and not _piloto_portada_ia_cabe(ctx, aj, tope_usd)
+    if sin_sitio:
+        P.apuntar_revision(raiz, vid, f"La portada con IA no se hizo: pasaría tu tope de "
+                                      f"{float(tope_usd):.2f} $. Hazla en Publicar → Portada si la quieres",
+                           "Publicar → Portada")
     if "ia" in hechas:
         candidatos.append(hechas["ia"])
-    elif aj.get("portadas") in ("ambas", "ia"):
+    elif aj.get("portadas") in ("ambas", "ia") and not sin_sitio:
         diseno = PO.normalizar(candidatos[0]["diseno"] if candidatos else base)
         try:
             avisar(0.5, "dibujando la portada con IA (se paga una imagen)", "Dibujando la portada")
@@ -23519,10 +23537,11 @@ def _piloto_tope_antes_de_dibujar(ctx, raiz, vid, aj):
         raise _PilotoPara(f"no se ha podido calcular lo que costarían las imágenes "
                           f"({str(fallo)[:160]})", "Piloto → Ajustes", "tope") from None
     gastado = _piloto_gastado(ctx)
-    # SOLO si queda algo que pagar: tras «Seguir igualmente» con todo dibujado,
-    # lo que falta (montar) es gratis y no se para (G01, tren del 12-11)
+    # SOLO si quedan imagenes que pagar: tras «Seguir igualmente» con todo
+    # dibujado, lo que falta (montar) es gratis y no se para (G01, tren del
+    # 12-11). La portada de IA mira el tope en su paso: si no cabe, no se hace
     falta = por_dibujar + portada
-    if falta > 0 and gastado + falta > aj["tope_usd"]:
+    if por_dibujar > 0 and gastado + falta > aj["tope_usd"]:
         raise _PilotoPara(f"lo que falta costaría unos {falta:.2f} $ (imágenes {por_dibujar:.2f} $"
                           + (f", portada {portada:.2f} $" if portada else "")
                           + f"), ya van {gastado:.2f} $ y tu tope es {aj['tope_usd']:.2f} $",
@@ -23587,7 +23606,8 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
         etapa("textos", "escribiendo los títulos, descripciones y hashtags de cada red")
         _piloto_textos(_piloto_tramo(avisar, "textos"), ctx, raiz, vid)
         etapa("portadas", "preparando las portadas")
-        _piloto_portadas(_piloto_tramo(avisar, "portadas"), ctx, raiz, vid, aj)
+        _piloto_portadas(_piloto_tramo(avisar, "portadas"), ctx, raiz, vid, aj,
+                         None if saltar == "tope" else aj["tope_usd"])
     except _PilotoPara as parada:
         P.cambiar(raiz, vid, coste_usd=round(_piloto_gastado(ctx), 3))
         _piloto_parar(raiz, vid, parada)
@@ -23870,7 +23890,8 @@ async def recibidos_guardar(peticion: Request):
         # a un proyecto con clave no se envia desde fuera (la extension no lleva
         # su pase): se envia sin proyecto y se le pone desde la bandeja
         if isinstance(datos, dict) and str(datos.get("proyecto") or "").strip() in _cerrados(peticion):
-            raise ErrorApi(400, "ese proyecto no existe en tu Studio")
+            raise ErrorApi(400, "ese proyecto tiene clave: envíalo sin proyecto y ponle el "
+                                "proyecto desde la bandeja, con el proyecto abierto")
         guardado = _por_recibidos(R.guardar, raiz_proyectos(), datos if isinstance(datos, dict) else {},
                                   _ids_proyectos())
         anotar_global("recibido", {"red": guardado["red"], "captura": bool(guardado["captura"]),

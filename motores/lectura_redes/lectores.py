@@ -414,7 +414,8 @@ def _error_de_items(items):
     for it in items or []:
         if not isinstance(it, dict):
             continue
-        for clave in ("error", "errorMessage", "errorDescription", "message", "note"):
+        # la frase antes que el código («errorDescription» antes que «error»)
+        for clave in ("errorDescription", "errorMessage", "message", "note", "error"):
             valor = it.get(clave)
             if isinstance(valor, dict):
                 valor = valor.get("message") or valor.get("type")
@@ -558,8 +559,14 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
         # devolvía un resultado que se tiraba y se decía «¿existe?, ¿es
         # privada?»). Se dice lo que dijo Apify y NO como «no existe», que
         # además cortaba los demás intentos.
-        dicho = _error_de_items(items) or _tachar(str(run.get("statusMessage") or ""), token)[:200]
+        dicho = _tachar(_error_de_items(items) or str(run.get("statusMessage") or ""), token)[:300]
         claves = sorted({k for it in items if isinstance(it, dict) for k in it})[:12]
+        codigos = {str(it.get("error") or "").strip().lower() for it in items if isinstance(it, dict)}
+        if codigos & {"not_found", "no_items"}:
+            # el actor dice que la cuenta no existe (Instagram): se dice así, como antes
+            raise ErrorLectura(f"no se ha encontrado ningún vídeo público de «{usuario}» en {red} "
+                               f"(¿existe?, ¿es privada?; Apify: {dicho})", "no_encontrada", cobrado=True,
+                               resultados=len(items), coste_usd=cobrado)
         raise ErrorLectura(f"Apify ha devuelto {len(items)} resultado(s) sin ningún vídeo de «{usuario}» "
                            f"en {red}" + (f": {dicho}" if dicho else f" (campos: {', '.join(claves)})"),
                            "red", cobrado=True, resultados=len(items), coste_usd=cobrado)

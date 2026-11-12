@@ -262,6 +262,9 @@ class Falso(http.server.BaseHTTPRequestHandler):
             if usuario == "camposraros":       # el actor cambió de nombres: cobra y no se entiende nada
                 items = [{"loQueSea": i} for i in range(6)]
                 cobrado = 0.0055
+            elif usuario == "noexiste_ig":         # el actor de Instagram con una cuenta que no existe
+                items = [{"error": "not_found", "errorDescription": "Profile does not exist"}]
+                cobrado = 0.0026
             elif usuario == "muro":                # lo que devolvió de verdad el 12-11 (@ikeausa)
                 items = [{"authorMeta": {"name": usuario}, "input": usuario,
                           "note": "Profile has no videos (or is behind a login wall)"}]
@@ -377,6 +380,11 @@ def prueba_fuentes(bases):
     f = lanza(F.apify, TOKEN_APIFY, "tiktok", "muro", 4, bases=bases)
     ok(f is not None and f.motivo == "red" and "le pide iniciar sesión" in str(f) and f.coste_usd == 0.005,
        f"el muro de login de TikTok (lo que pasó de verdad el 12-11) se dice claro, con lo cobrado: {f}")
+    f = lanza(F.apify, TOKEN_APIFY, "instagram", "noexiste_ig", 4, bases=bases)
+    ok(f is not None and f.motivo == "no_encontrada" and "Profile does not exist" in str(f) and "¿existe?" in str(f),
+       f"una cuenta que el actor dice que no existe se dice así, con su frase (no el código): {f}")
+    f = lanza(F.apify, TOKEN_APIFY, "tiktok", "camposraros", 4, bases=bases)
+    ok(f is not None and "campos: loQueSea" in str(f), f"sin texto de error, se dicen los nombres de los campos: {f}")
     r = F.apify(TOKEN_APIFY, "tiktok", "cero", 4, bases=bases)
     igual((r["coste_usd"], r["coste_real"]), (F.coste_apify("tiktok", 4), False),
           "un 0 con resultados no se cree: la tabla de siempre")
@@ -466,6 +474,12 @@ def prueba_orden(bases):
         ok(f is not None, "resultados que no se entienden: no hay cuenta")
         igual(round(C.gasto_del_mes(raiz) - antes, 4), 0.0055,
               "pero lo cobrado por los 6 resultados se apunta (lo que dice Apify)")
+        # el muro de login de TikTok por el camino de verdad: un solo pago, lo cobrado apuntado
+        antes, posts = C.gasto_del_mes(raiz), len([v for v in Falso.vistas if v[0] == "POST"])
+        f = lanza(C.leer, raiz, "tiktok", "muro", 10, pagar=True)
+        ok(f is not None and "iniciar sesión" in str(f), f"el muro de login llega a la pantalla dicho claro: {f}")
+        igual((round(C.gasto_del_mes(raiz) - antes, 4), len([v for v in Falso.vistas if v[0] == "POST"]) - posts),
+              (0.005, 1), "una sola ejecución de Apify, con lo que cobró de verdad")
         antes = C.gasto_del_mes(raiz)
         C.guardar_claves({"apify_token": "apify_api_malo_000000"})
         lanza(C.leer, raiz, "tiktok", "otra", 10, pagar=True)

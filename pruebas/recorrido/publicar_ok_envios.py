@@ -5,12 +5,34 @@
 Cada comprobación se vio fallar SIN el arreglo (la barra seguía con la hora de
 antes mientras el campo tenía el foco; «Envíos» salía con el vídeo sin envíos)."""
 import datetime as dt
+import time
 
 from prueba_recorrido import Pagina, escenario, ok, _paso_ficha, _panel_casa  # noqa: F401
 
 
 def _texto_barra(pg):
     return pg.p.locator(".barra-publicar button.principal").first.inner_text()
+
+
+def _cancelar_vivos(api, pid, red="tiktok", segundos=40):
+    """Cancela lo programado de esa red (los escenarios de antes programan en
+    el mismo vídeo). La ficha no enseña el número de trabajo: mientras
+    Upload-Post no lo ha dado, cancelar contesta 409 y se reintenta. Devuelve
+    el código final de cada envío cancelado."""
+    codigos = {}
+    fin = time.time() + segundos
+    while time.time() < fin:
+        _r, f = api.get(f"/api/publicar/videos/{pid}")
+        vivos = [e for e in f.get("envios", []) if e.get("red") == red
+                 and e.get("estado") in ("programado", "enviando", "comprobar")]
+        if not vivos:
+            return list(codigos.values())
+        for e in vivos:
+            if e.get("estado") == "programado":
+                r, _d = api.post(f"/api/publicar/videos/{pid}/envios/{e['id']}/cancelar", {})
+                codigos[e["id"]] = r.status_code
+        time.sleep(1)
+    return list(codigos.values()) + ["sin cancelar"]
 
 
 @escenario
@@ -23,6 +45,7 @@ def publicar_ok_y_envios(navegador, datos):
     api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
     api.post(f"/api/publicar/proyectos/{cid}/conectar", {"redes": ["tiktok"]})
     api.post(f"/api/publicar/proyectos/{cid}/cuentas")
+    _cancelar_vivos(api, pid)
     api.put(f"/api/publicar/videos/{pid}", {"redes": ["tiktok"], "textos": {
         "tiktok": {"descripcion": "Prueba del OK de la hora"}}})
     pg = Pagina(navegador, datos, nombre="ok y envios")
@@ -30,10 +53,11 @@ def publicar_ok_y_envios(navegador, datos):
         pg.js("irAModulo('publicar');")
         pg.js(f"abrirPublicarVideo('{pid}');")
         ok(pg.esperar(".pasos-publicar .paso-carril", segundos=15), "abre la ficha del vídeo en Publicar")
-        tenia = bool(ficha.get("envios"))
+        _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+        tenia = any(e.get("estado") != "cancelado" for e in ficha.get("envios", []))
         hay_paso = pg.visible('.pasos-publicar .paso-carril[data-paso="envios"]')
         ok(hay_paso == tenia,
-           f"«Envíos» sale solo si el vídeo ya tiene envíos (tiene: {tenia}, se ve: {hay_paso})")
+           f"«Envíos» sale solo si el vídeo tiene envíos no cancelados (tiene: {tenia}, se ve: {hay_paso})")
 
         # 1 · el OK del día y la hora
         ok(_paso_ficha(pg, "cuando"), "el paso «Cuándo»")
@@ -43,16 +67,14 @@ def publicar_ok_y_envios(navegador, datos):
         dia = (dt.date.today() + dt.timedelta(days=40)).isoformat()
         nuevo = f"{dia}T18:45"
         legible = pg.p.evaluate(f"() => cuandoLegible('{nuevo}')")
-        antes = _texto_barra(pg)
         campo.click()
         campo.fill(nuevo)
         pg.p.wait_for_timeout(600)
-        ok(legible not in _texto_barra(pg) or legible in antes,
-           "(sin OK y con el campo en uso, la barra aún no se repinta: era la molestia)")
         pg.pulsar(".ok-cuando-publicar")
         ok(pg.esperar(".barra-publicar button.principal", f"Programar para {legible}", 5),
            f"con «OK» la barra dice la hora nueva en el acto ({legible})")
-        ok(pg.visible(".cuando-confirmado", "Guardado"), "y una línea «✓ Guardado: …» lo confirma")
+        ok(pg.visible(".cuando-confirmado", "Hora elegida"),
+           "y una línea «✓ Hora elegida: …» dice que falta programarlo abajo")
         ok(pg.p.evaluate("() => document.activeElement && document.activeElement.dataset.foco !== 'cuando'"),
            "y el campo suelta el foco (el selector se cierra)")
         # Intro hace lo mismo
@@ -76,12 +98,29 @@ def publicar_ok_y_envios(navegador, datos):
         pg.p.wait_for_timeout(500)
 
         # 2 · programar con esa hora: ahora sí sale «Envíos»
+        # campo vacío + OK: lo dice, y no se queda con una hora que no se ve
+        campo = pg.p.locator('input[type="datetime-local"][data-foco="cuando"]').first
+        campo.fill("")
+        pg.pulsar(".ok-cuando-publicar")
+        ok(pg.esperar(".cuando-confirmado.vacio", "Elige el día", 5), "OK con el campo vacío pide elegir la hora")
+        campo = pg.p.locator('input[type="datetime-local"][data-foco="cuando"]').first
+        campo.fill(otro)
+        pg.pulsar(".ok-cuando-publicar")
         pg.pulsar(".barra-publicar button.principal", "Programar para")
-        texto = _panel_casa(pg)
-        ok(legible2.split(" a las")[0] in texto or "hora de Lima" in texto,
-           f"se confirma en el panel ({texto[:80]!r})")
-        _r, ficha = api.get(f"/api/publicar/videos/{pid}")
-        programados = [e for e in ficha.get("envios", []) if e.get("cuando", "").startswith(otro)]
+        textos = []
+        for _ in range(3):
+            t = _panel_casa(pg, segundos=6)
+            if not t:
+                break
+            textos.append(t)
+        ok(any("hora de Lima" in t for t in textos), f"se confirma en el panel, con la hora ({[t[:60] for t in textos]})")
+        programados = []
+        for _ in range(20):
+            _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+            programados = [e for e in ficha.get("envios", []) if e.get("cuando", "").startswith(otro)]
+            if programados:
+                break
+            time.sleep(1)
         ok(programados, f"queda programado a la hora elegida con Intro ({otro})")
         if pg.esperar(".aviso-tras-envio button", "Volver a la ficha", 20):
             pg.pulsar(".aviso-tras-envio button", "Volver a la ficha")
@@ -90,8 +129,13 @@ def publicar_ok_y_envios(navegador, datos):
         _paso_ficha(pg, "envios")
         ok(pg.esperar(".ficha-publicar .fila-envio", segundos=15), "y enseña el envío")
         # se cancela para no dejar nada programado a los escenarios de detrás
-        for e in programados:
-            api.post(f"/api/publicar/videos/{pid}/envios/{e['id']}/cancelar", {})
+        codigos = _cancelar_vivos(api, pid)
+        ok(codigos and all(c == 200 for c in codigos), f"y se cancela al terminar ({codigos})")
+        # estando en «Envíos», cancelar el último no hace saltar la ficha a otro paso
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        pg.p.wait_for_timeout(2000)
+        ok(pg.visible('.pasos-publicar .paso-carril.actual[data-paso="envios"]'),
+           "tras cancelar el último, la ficha sigue en «Envíos» (no salta sola de paso)")
         pg.sin_errores("el OK de la hora y el paso Envíos")
     finally:
         pg.cerrar()

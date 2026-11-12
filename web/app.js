@@ -27868,11 +27868,13 @@ function redesDeLaFichaPublicar(f) {
 }
 
 /* Los pasos que se ven: «Envíos» solo cuando el vídeo YA tiene algún envío
-   (publicado, programado, en el aire, fallido o subido a mano); antes estaba
-   vacío y confundía (pedido del dueño, 12-11). */
+   que no esté cancelado (publicado, programado, en el aire, fallido, esperando
+   tu OK o subido a mano: ahí están «Reintentar», «Quitar» y «Dar el OK»); antes
+   salía vacío y confundía (pedido del dueño, 12-11). Si se está EN el paso y
+   se cancela el último, no salta solo a otro paso. */
 function pasosFichaPublicarDe(f) {
-  const hayEnvios = ((f || {}).envios || []).length > 0;
-  return PASOS_FICHA_PUBLICAR.filter(([id]) => id !== 'envios' || hayEnvios);
+  const hayEnvios = ((f || {}).envios || []).some(e => e.estado !== 'cancelado');
+  return PASOS_FICHA_PUBLICAR.filter(([id]) => id !== 'envios' || hayEnvios || PUB.pasoFicha === 'envios');
 }
 
 function pasoFichaPublicar(f) {
@@ -28321,12 +28323,14 @@ function pasoCuandoPublicar(f) {
       h('div', { clase: 'fila' },
         h('label', { clase: 'etiqueta-campo' }, 'Día y hora', campo),
         h('button', { type: 'button', clase: 'mini ok-cuando-publicar',
-          title: 'Guarda el día y la hora elegidos', onclick: () => confirmarCuandoPublicar(campo) }, 'OK'),
+          title: 'Usa el día y la hora elegidos',
+          // sin esto el campo suelta el foco al APRETAR, la ficha se repinta y
+          // un clic largo se perdía (el botón ya era otro)
+          onmousedown: ev => ev.preventDefault(),
+          onclick: () => confirmarCuandoPublicar(campo) }, 'OK'),
         h('span', { clase: 'meta' }, 'hora de Lima')),
-      PUB.cuandoConfirmado ? h('div', { clase: 'meta cuando-confirmado', role: 'status' },
-        `✓ Guardado: ${cuandoLegible(PUB.cuandoEnvio)}`) : null,
+      lineaCuandoConfirmado(f),
       sugerenciasCuandoPublicar(f)));
-    PUB.cuandoConfirmado = false;
   } else if (elegido === 'ahora') {
     caja.appendChild(h('div', { clase: 'meta' }, '«Publicar ahora ›» lo sube en cuanto confirmes. Una vez publicado no se puede deshacer desde aquí.'));
   } else {
@@ -28340,12 +28344,32 @@ function pasoCuandoPublicar(f) {
   return caja;
 }
 
+/* «OK» solo deja la hora ELEGIDA en la ficha: lo que programa es el botón
+   de abajo. La línea lo dice así, y dura unos segundos aunque la ficha se
+   repinte sola entretanto (avisos, reloj de envíos). */
 function confirmarCuandoPublicar(campo) {
-  if (campo && campo.value) PUB.cuandoEnvio = campo.value;
+  const valor = campo ? campo.value : PUB.cuandoEnvio;
   if (campo) campo.blur();
-  PUB.cuandoConfirmado = !!PUB.cuandoEnvio;
+  if (!valor) {
+    PUB.cuandoConfirmado = { pid: PUB.pid, vacio: true, hasta: Date.now() + 5000 };
+  } else {
+    PUB.cuandoEnvio = valor;
+    PUB.cuandoConfirmado = { pid: PUB.pid, valor, hasta: Date.now() + 5000 };
+  }
   PUB.repintar = false;
   pintarModulo();
+}
+
+function lineaCuandoConfirmado(f) {
+  const c = PUB.cuandoConfirmado;
+  if (!c || c.pid !== PUB.pid || Date.now() > c.hasta) return null;
+  if (c.vacio) {
+    return h('div', { clase: 'meta cuando-confirmado vacio', role: 'status' },
+      'Elige el día y la hora primero.');
+  }
+  if (c.valor !== PUB.cuandoEnvio) return null;
+  return h('div', { clase: 'meta cuando-confirmado', role: 'status' },
+    `✓ Hora elegida: ${cuandoLegible(c.valor)}. Pulsa «Programar para…» abajo para programarlo.`);
 }
 
 /* 6 · ENVÍOS: lo mandado de este vídeo, red por red, con sus cifras. */

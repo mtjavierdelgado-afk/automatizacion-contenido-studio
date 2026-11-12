@@ -153,6 +153,9 @@
   const MAX_HIST = 150;
 
   let ED = null;          // el editor abierto (uno a la vez)
+  /** Las letras ya registradas en esta página: se cargan una vez, aunque el
+   * editor se abra y se cierre muchas veces (fid -> promesa). */
+  const LETRAS_DE_LA_PAGINA = {};
 
   /**
    * Abre el editor.
@@ -175,14 +178,16 @@
     document.body.appendChild(raiz);
     document.body.classList.add('ce-abierto');
     raiz.appendChild(el('div', { clase: 'ce-cargando' }, 'Abriendo el editor con capas…'));
+    const yo = ED;
     try {
-      await prepararDoc();
+      await prepararDoc(yo);
     } catch (e) {
-      cerrarYa(false);
+      // solo si sigue siendo este editor: otro abierto mientras tanto no se toca
+      if (ED === yo) cerrarYa(false);
       opc.toast(e.message || String(e), true);
       return;
     }
-    if (ED.cerrado) return;
+    if (ED !== yo || yo.cerrado) return;
     montarPantalla();
     cargarLogos();
     cargarFotosDelDoc();
@@ -194,33 +199,35 @@
     pedirVista();
   }
 
-  async function prepararDoc() {
-    const o = ED.opc;
-    if (ED.piezaId) {
-      const r = await o.pedir(o.api(ED.cid, `/piezas/${ED.piezaId}/capas`));
-      ED.doc = r.doc;
-      ED.convertida = r.origen === 'convertida';
+  /** Prepara el documento de ESTE editor (`E`): tras cada espera se escribe en
+   * él y no en `ED`, que puede ser ya otro (doble clic al abrir). */
+  async function prepararDoc(E) {
+    const o = E.opc;
+    if (E.piezaId) {
+      const r = await o.pedir(o.api(E.cid, `/piezas/${E.piezaId}/capas`));
+      E.doc = r.doc;
+      E.convertida = r.origen === 'convertida';
     } else {
       // una pieza nueva: la plantilla elegida (1, «Titular gigante», sin foto)
       const textos = Object.assign({}, CAMPOS_DE_MUESTRA, { marca: o.nombreCliente || 'Tu marca' });
-      const r = await o.pedir(o.api(ED.cid, '/capas/montar'), {
-        method: 'POST', cuerpo: { plantilla: o.plantilla || 1, formato: o.formato || ED.cat.formato_defecto, textos } });
-      ED.doc = r.doc;
-      ED.doc.nombre = '';
-      ED.convertida = false;
+      const r = await o.pedir(o.api(E.cid, '/capas/montar'), {
+        method: 'POST', cuerpo: { plantilla: o.plantilla || 1, formato: o.formato || E.cat.formato_defecto, textos } });
+      E.doc = r.doc;
+      E.doc.nombre = '';
+      E.convertida = false;
     }
-    ED.origen = Object.assign({}, ED.doc.origen || {});
-    ED.nacida = !!ED.origen.nacida;
+    E.origen = Object.assign({}, E.doc.origen || {});
+    E.nacida = !!E.origen.nacida;
     if (o.duplicar) {
       // «Duplicar»: el mismo diseño, que se guarda como una pieza nueva
-      ED.piezaId = '';
-      ED.convertida = false;
-      ED.origen = { plantilla: ED.origen.plantilla, sello: '', guardado: '', nacida: true };
-      ED.nacida = true;
-      ED.doc.nombre = `${ED.doc.nombre || 'Pieza'} (copia)`.slice(0, 80);
+      E.piezaId = '';
+      E.convertida = false;
+      E.origen = { plantilla: E.origen.plantilla, sello: '', guardado: '', nacida: true };
+      E.nacida = true;
+      E.doc.nombre = `${E.doc.nombre || 'Pieza'} (copia)`.slice(0, 80);
     }
-    delete ED.doc.origen;
-    for (const k of ['avisos', 'cambiada', 'medida']) delete ED.doc[k];
+    delete E.doc.origen;
+    for (const k of ['avisos', 'cambiada', 'medida']) delete E.doc[k];
   }
 
   /* ---------------------------------------------------------------- historial
@@ -288,22 +295,26 @@
    * con la Inter o la Space Grotesk que ya usa la interfaz del Studio. */
   function cargarLetra(fid) {
     if (ED.letras[fid] || !ED.cat.caras || !ED.cat.caras[fid]) return;
-    ED.letras[fid] = 'cargando';
-    const familia = `ce-${ED.cat.familias[fid]}`;
-    Promise.all(ED.cat.caras[fid].map(async cara => {
-      const r = await fetch(`${ED.opc.base}/api/graficas/tipografia/${encodeURIComponent(cara.fichero)}`);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const ff = new FontFace(familia, await r.arrayBuffer(), { weight: cara.pesos, style: cara.estilo });
-      await ff.load();
-      document.fonts.add(ff);
-    })).then(() => {
-      if (!ED) return;
-      ED.letras[fid] = 'lista';
+    const yo = ED;
+    yo.letras[fid] = 'cargando';
+    const familia = `ce-${yo.cat.familias[fid]}`;
+    if (!LETRAS_DE_LA_PAGINA[fid]) {
+      LETRAS_DE_LA_PAGINA[fid] = Promise.all(yo.cat.caras[fid].map(async cara => {
+        const r = await fetch(`${yo.opc.base}/api/graficas/tipografia/${encodeURIComponent(cara.fichero)}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const ff = new FontFace(familia, await r.arrayBuffer(), { weight: cara.pesos, style: cara.estilo });
+        await ff.load();
+        document.fonts.add(ff);
+      })).catch(e => { delete LETRAS_DE_LA_PAGINA[fid]; throw e; });
+    }
+    LETRAS_DE_LA_PAGINA[fid].then(() => {
+      if (ED !== yo) return;
+      yo.letras[fid] = 'lista';
       pintarTodo();
     }).catch(() => {
-      if (!ED) return;
-      ED.letras[fid] = 'falta';
-      avisoPantalla(`La letra ${ED.cat.familias[fid]} aún no está en el servidor: en pantalla se ve una parecida.`);
+      if (ED !== yo) return;
+      yo.letras[fid] = 'falta';
+      avisoPantalla(`La letra ${yo.cat.familias[fid]} aún no está en el servidor: en pantalla se ve una parecida.`);
     });
   }
 
@@ -335,10 +346,11 @@
 
   function cargarFoto(nombre) {
     if (!nombre || ED.fotos[nombre]) return;
-    ED.fotos[nombre] = { cargando: true };
-    comoDataUrl(ED.opc.api(ED.cid, `/imagen/${encodeURIComponent(nombre)}`))
-      .then(f => { if (ED) { ED.fotos[nombre] = f; pintarTodo(); } })
-      .catch(() => { if (ED) { ED.fotos[nombre] = { falta: true }; pintarTodo(); } });
+    const yo = ED;
+    yo.fotos[nombre] = { cargando: true };
+    comoDataUrl(yo.opc.api(yo.cid, `/imagen/${encodeURIComponent(nombre)}`))
+      .then(f => { yo.fotos[nombre] = f; if (ED === yo) pintarTodo(); })
+      .catch(() => { yo.fotos[nombre] = { falta: true }; if (ED === yo) pintarTodo(); });
   }
 
   function cargarFotosDelDoc() {
@@ -346,9 +358,10 @@
   }
 
   function cargarLogos() {
+    const yo = ED;
     for (const variante of ['normal', 'oscuro']) {
-      comoDataUrl(ED.opc.api(ED.cid, `/logo/${variante}`))
-        .then(f => { if (ED) { ED.logos[variante] = f; pintarTodo(); pintarPaneles(); } })
+      comoDataUrl(yo.opc.api(yo.cid, `/logo/${variante}`))
+        .then(f => { yo.logos[variante] = f; if (ED === yo) { pintarTodo(); pintarPaneles(); } })
         .catch(() => {});
     }
   }
@@ -486,25 +499,27 @@
     if (!ED || !ED.lienzo) return;
     const col = colores();
     const L = ED.lienzo;
-    L.textContent = '';
+    // EL TEXTO QUE SE ESTÁ ESCRIBIENDO NO SE QUITA NI SE MUEVE: quitar un nodo
+    // con el foco dispara su «blur» (acababa la edición y las teclas siguientes
+    // iban a los atajos: Retroceso borraba la capa). Se repinta alrededor.
+    const quieto = ED.editando ? nodoDe(ED.editando) : null;
+    const fijo = quieto ? (quieto.parentElement !== L ? quieto.parentElement : quieto) : null;
+    for (const n of [...L.childNodes]) if (n !== fijo) n.remove();
     L.style.background = col.oscuro;
+    let pasado = false;
     for (const c of capas()) {
+      if (fijo && c.id === ED.editando) { pasado = true; continue; }
       const n = nodoCapa(c, col);
       if (!n) continue;
-      L.appendChild(n);
+      if (fijo && !pasado) L.insertBefore(n, fijo); else L.appendChild(n);
       ajustar(n.dataset.recorte ? n.firstChild : n, c);
-    }
-    if (ED.editando) {
-      // se repintó a mitad de escribir (una letra que acaba de llegar): se vuelve a abrir
-      const id = ED.editando;
-      ED.editando = null;
-      empezarEdicionTexto(id, false);
     }
     pintarMarcas();
   }
 
   /** Solo una capa (mover, asas): mucho más barato que repintar todo. */
   function pintarCapa(id) {
+    if (ED.editando === id) return;        // el que se escribe no se rehace (ver pintarTodo)
     const c = capa(id);
     const viejo = ED.lienzo.querySelector(`[data-c="${id}"]`);
     const caja = viejo && viejo.parentElement && viejo.parentElement.dataset.recorte === id ? viejo.parentElement : viejo;
@@ -669,6 +684,7 @@
     window.addEventListener('resize', ED.ajusteVentana);
     ED.teclas = alTeclear;
     document.addEventListener('keydown', ED.teclas, true);
+    for (const tipo of ['keydown', 'keyup', 'keypress']) R.addEventListener(tipo, ev => ev.stopPropagation());
     ED.antesDeSalir = ev => { if (sinGuardar()) { ev.preventDefault(); ev.returnValue = ''; } };
     window.addEventListener('beforeunload', ED.antesDeSalir);
     medirLienzo();
@@ -831,7 +847,10 @@
 
   function renombrar(fila, c) {
     const entrada = el('input', { type: 'text', value: c.nombre || nombreDe(c), maxlength: '40', 'aria-label': 'Nombre de la capa', clase: 'ce-renombrar' });
+    let hecho = false;
     const acabar = guardarlo => {
+      if (hecho) return;              // quitar el campo dispara su «blur»: no cuenta dos veces
+      hecho = true;
       if (guardarlo) { c.nombre = entrada.value.trim().slice(0, 40); commit(); }
       pintarPaneles();
     };
@@ -1415,12 +1434,14 @@
     if (commit()) pintarPaneles();
   }
 
-  function duplicar() {
-    const elegidas = seleccion();
-    if (!elegidas.length) return;
-    if (capas().length + elegidas.length > LIMITES.capas) { avisoPantalla(`Una pieza admite hasta ${LIMITES.capas} capas.`, true); return; }
+  /** Copias de unas capas, un poco más abajo y a la derecha (con su recorte),
+   * o null si no caben (capas o fotos). Lo usan «Duplicar» y Ctrl+V. */
+  function copiasDe(lista) {
+    if (capas().length + lista.length > LIMITES.capas) { avisoPantalla(`Una pieza admite hasta ${LIMITES.capas} capas.`, true); return null; }
+    const fotos = capas().filter(c => c.tipo === 'imagen' && c.src).length + lista.filter(c => c.tipo === 'imagen' && c.src).length;
+    if (fotos > LIMITES.fotos) { avisoPantalla(`Una pieza admite hasta ${LIMITES.fotos} fotos.`, true); return null; }
     const f = formato();
-    const nuevas = elegidas.map(c => {
+    return lista.map(c => {
       const d = copia(c);
       d.id = nuevoId();
       d.x += 2; d.y += 2 * f.W / f.H;
@@ -1429,6 +1450,13 @@
       if (d.rol) d.rol = '';         // la copia es tuya: «Volver a montar» no la recoloca
       return d;
     });
+  }
+
+  function duplicar() {
+    const elegidas = seleccion();
+    if (!elegidas.length) return;
+    const nuevas = copiasDe(elegidas);
+    if (!nuevas) return;
     const lista = capas();
     const ultima = Math.max(...elegidas.map(c => lista.indexOf(c)));
     lista.splice(ultima + 1, 0, ...nuevas);
@@ -1440,7 +1468,10 @@
 
   function borrar() {
     if (!ED.sel.length) return;
-    const ids = new Set(ED.sel);
+    const bloqueadas = seleccion().filter(c => c.bloqueado);
+    if (bloqueadas.length) avisoPantalla(`${bloqueadas.length === 1 ? 'Una capa bloqueada no se borra' : 'Las capas bloqueadas no se borran'}: desbloquéala primero.`);
+    const ids = new Set(seleccion().filter(c => !c.bloqueado).map(c => c.id));
+    if (!ids.size) return;
     ED.doc.laminas[ED.lamina].capas = capas().filter(c => !ids.has(c.id));
     ED.sel = [];
     pintarTodo();
@@ -1496,11 +1527,23 @@
   }
 
   async function volverAMontar(plantilla) {
+    if (ED.montando) return;
+    terminarEdicionTexto(true);
     avisoPantalla('Montando con la plantilla…');
+    const yo = ED;
+    const antes = firmaDoc();
+    const tenia = new Set(capas().filter(c => c.tipo === 'texto' && String(c.txt || '').trim()).map(c => c.rol));
+    yo.montando = true;
     try {
-      const textos = Object.assign({}, CAMPOS_DE_MUESTRA, { marca: ED.opc.nombreCliente || 'Tu marca' });
-      const r = await ED.opc.pedir(ED.opc.api(ED.cid, '/capas/montar'), {
-        method: 'POST', cuerpo: { plantilla, formato: ED.doc.formato, doc: docParaEnviar(), textos, lamina: ED.lamina } });
+      const textos = Object.assign({}, CAMPOS_DE_MUESTRA, { marca: yo.opc.nombreCliente || 'Tu marca' });
+      const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/capas/montar'), {
+        method: 'POST', cuerpo: { plantilla, formato: yo.doc.formato, doc: docParaEnviar(), textos, lamina: yo.lamina } });
+      if (ED !== yo) return;
+      if (firmaDoc() !== antes) {
+        // se cambió algo mientras el servidor montaba: no se pisa
+        avisoPantalla('Has cambiado algo mientras se montaba: no se ha aplicado. Vuelve a pulsar «Volver a montar».', true);
+        return;
+      }
       const origen = ED.origen;
       ED.doc = r.doc;
       ED.origen = Object.assign({}, origen, { plantilla });
@@ -1511,11 +1554,19 @@
       pintarTodo();
       commit();
       pintarPaneles();
-      avisoPantalla('Recolocado con la plantilla: tus textos y lo añadido se conservan. Ctrl+Z vuelve a lo de antes.');
+      const deMuestra = capas().filter(c => c.tipo === 'texto' && G_CAMPO(c.rol) && !tenia.has(c.rol) && String(c.txt || '').trim());
+      avisoPantalla(deMuestra.length
+        ? `Recolocado. Ojo: ${deMuestra.map(c => `«${String(c.txt).trim()}»`).join(', ')} ${deMuestra.length === 1 ? 'es un texto' : 'son textos'} de muestra: cámbialos o bórralos. Ctrl+Z vuelve a lo de antes.`
+        : 'Recolocado con la plantilla: tus textos y lo añadido se conservan. Ctrl+Z vuelve a lo de antes.', deMuestra.length > 0);
     } catch (e) {
-      avisoPantalla(`No se ha podido montar: ${e.message}`, true);
+      if (ED === yo) avisoPantalla(`No se ha podido montar: ${e.message}`, true);
+    } finally {
+      yo.montando = false;
     }
   }
+
+  /** ¿Es un campo de plantilla (titulo, cta…)? */
+  function G_CAMPO(rol) { return Object.prototype.hasOwnProperty.call(CAMPOS_DE_MUESTRA, rol); }
 
   async function verVersionAnterior() {
     const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'La versión anterior' });
@@ -1557,21 +1608,25 @@
       ED.doc.nombre = t ? String(t.txt).trim().split('\n')[0].slice(0, 80) : 'Pieza en capas';
       commit();
     }
-    const doc = docParaEnviar();
     if (comoNueva) {
-      doc.origen = { plantilla: doc.origen.plantilla, sello: '', guardado: '', nacida: true };
-      doc.nombre = `${doc.nombre || 'Pieza'} (copia)`.slice(0, 80);
+      ED.doc.nombre = `${ED.doc.nombre || 'Pieza'} (copia)`.slice(0, 80);
+      commit();
     }
+    const doc = docParaEnviar();
+    if (comoNueva) doc.origen = { plantilla: doc.origen.plantilla, sello: '', guardado: '', nacida: true };
+    // LO QUE SE ENVÍA es lo que queda guardado: lo que cambie mientras el
+    // servidor pinta (unos segundos) sigue «sin guardar» y pide confirmar al cerrar
+    const enviada = firmaDoc();
+    const yo = ED;
     try {
-      const r = await ED.opc.pedir(nueva ? ED.opc.api(ED.cid, '/capas') : ED.opc.api(ED.cid, `/piezas/${ED.piezaId}/capas`),
+      const r = await yo.opc.pedir(nueva ? yo.opc.api(yo.cid, '/capas') : yo.opc.api(yo.cid, `/piezas/${yo.piezaId}/capas`),
         { method: nueva ? 'POST' : 'PUT', cuerpo: { doc } });
-      if (!ED) return;
+      if (ED !== yo) return;
       ED.piezaId = r.id;
       ED.origen = Object.assign({}, r.doc.origen);
       ED.nacida = !!ED.origen.nacida;
-      if (comoNueva) ED.doc.nombre = doc.nombre;
       ED.cambio = true;
-      ED.guardado = firmaDoc();
+      ED.guardado = enviada;
       ED.vista.avisos = (r.avisos || []).slice();
       ED.convertida = false;
       const migra = ED.raiz.querySelector('.ce-migra');
@@ -1581,11 +1636,12 @@
       const quitar = ED.raiz.querySelector('.ce-conflicto');
       if (quitar) quitar.remove();
     } catch (e) {
-      if (!ED) return;
+      if (ED !== yo) return;
       if (e.status === 409) mostrarConflicto(e.message);
       else avisoPantalla(`No se ha guardado: ${e.message}`, true);
     } finally {
-      if (ED) { ED.guardando = false; pintarEstado(); pedirVista(); }
+      yo.guardando = false;
+      if (ED === yo) { pintarEstado(); pedirVista(); }
     }
   }
 
@@ -1615,6 +1671,9 @@
     window.removeEventListener('beforeunload', e.antesDeSalir);
     document.removeEventListener('pointermove', alArrastrar);
     document.removeEventListener('pointerup', alSoltar);
+    document.removeEventListener('pointercancel', alSoltar);
+    clearTimeout(e.flechas);
+    clearTimeout(e.avisoTiempo);
     e.raiz.remove();
     document.body.classList.remove('ce-abierto');
     ED = null;
@@ -1919,8 +1978,8 @@
       c.txt = ' ';
     }
     ED.sel = [id];
-    ED.editando = id;
     pintarCapa(id);
+    ED.editando = id;
     const n = nodoDe(id);
     if (!n) { ED.editando = null; return; }
     n.textContent = String(c.txt).trim();
@@ -1933,7 +1992,7 @@
       c.txt = txt;
       pintarMarcas();
     });
-    n.addEventListener('blur', () => { if (ED && ED.editando === id) terminarEdicionTexto(true); });
+    n.addEventListener('blur', () => { if (ED && ED.editando === id && n.isConnected) terminarEdicionTexto(true); });
     n.focus();
     if (todo) {
       const rango = document.createRange();
@@ -1957,6 +2016,7 @@
         if (antes) c.txt = antes.txt;
       }
       c.txt = String(c.txt || '').replace(/^\n+|\n+$/g, '');
+      if (!c.txt.trim()) c.txt = '';       // el hueco de un texto vacío no es un cambio
     }
     pintarTodo();
     commit();
@@ -1974,6 +2034,10 @@
 
   function alTeclear(ev) {
     if (!ED || ED.cerrado) return;
+    // LOS ATAJOS DEL STUDIO NO SE ENTERAN con el editor abierto (Ctrl+S, Escape,
+    // espacio, flechas): una tecla con el foco fuera del editor se para aquí,
+    // y una de dentro, al subir (oyente de `raiz`), cuando ya la ha visto su campo
+    if (!ED.raiz.contains(ev.target)) ev.stopPropagation();
     const ctrl = ev.ctrlKey || ev.metaKey;
     const tecla = ev.key;
     if (ED.editando) {
@@ -2000,8 +2064,8 @@
     if (ctrl && (tecla === 'v' || tecla === 'V')) {
       if (!ED.portapapeles || !ED.portapapeles.length) return;
       ev.preventDefault();
-      const nuevas = ED.portapapeles.map(c => Object.assign(copia(c), { id: nuevoId(), rol: '', bloqueado: false, x: c.x + 2, y: c.y + 2 }));
-      if (capas().length + nuevas.length > LIMITES.capas) { avisoPantalla(`Una pieza admite hasta ${LIMITES.capas} capas.`, true); return; }
+      const nuevas = copiasDe(ED.portapapeles);
+      if (!nuevas) return;
       capas().push(...nuevas);
       ED.portapapeles = nuevas.map(copia);
       ED.sel = nuevas.map(c => c.id);

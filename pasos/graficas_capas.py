@@ -1162,7 +1162,8 @@ def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=Non
       Kit, toma el de la plantilla nueva, que es el que se lee sobre su fondo.
     - La primera foto de la pieza pasa a la foto de la plantilla, con su encuadre.
     - Lo que añadiste tú (capas sin papel de plantilla) y los campos que la
-      plantilla nueva no usa se quedan encima, tal cual: no se pierde nada.
+      plantilla nueva no usa se quedan encima, tal cual: no se pierde nada (si
+      no cabe todo, es un error que lo dice, nunca un recorte).
     - El resto del documento (nombre, colores, letras, las otras láminas y el
       sello para guardar sin pisar nada) no cambia.
     Solo cambia la lámina `lamina`. No escribe nada."""
@@ -1222,7 +1223,12 @@ def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=Non
         while capa["id"] in otras:
             capa["id"] = "c" + secrets.token_hex(4)
         otras.add(capa["id"])
-    doc["laminas"][lamina] = {"capas": (abajo + nuevas + sueltas)[:MAX_CAPAS]}
+    total = len(abajo) + len(nuevas) + len(sueltas)
+    if total > MAX_CAPAS:
+        # nunca se corta nada en silencio: lo añadido iría al final y sería lo perdido
+        raise ErrorGraficas(f"con esta plantilla serían {total} capas y caben {MAX_CAPAS}: "
+                            f"quita {total - MAX_CAPAS} o elige otra plantilla")
+    doc["laminas"][lamina] = {"capas": abajo + nuevas + sueltas}
     doc["formato"] = formato
     doc["origen"]["plantilla"] = plantilla
     return limpiar_doc(doc)

@@ -622,3 +622,24 @@ cachean como `app.js` (están en `ASSETS_SELLADOS`).
   repinta y elegir en la lista solo cambia clases, `marcarLista`); y el doble
   toque del iPhone se detecta a mano en `alPulsar`.
 
+### Lo que cazó el árbitro (12-11, 1.ª vuelta) y cómo quedó
+
+- **Guardar marca como guardado lo ENVIADO** (`enviada = firmaDoc()` antes de
+  esperar), no lo que haya al volver: lo añadido mientras el servidor pinta
+  sigue «sin guardar» y pide confirmar al cerrar.
+- **`montar` nunca corta en silencio**: si con la plantilla no cabe todo
+  (MAX_CAPAS), da error con cuántas sobran. Antes lo añadido iba al final y era
+  lo que se perdía.
+- **Repintar no quita el texto que se escribe** (`pintarTodo` repinta
+  alrededor del nodo con el foco): quitarlo disparaba su «blur», acababa la
+  edición y las teclas siguientes iban a los atajos (Retroceso borraba la capa).
+- **Las teclas del editor no llegan a los atajos del Studio**: se paran en
+  `#editor-capas` al subir, y las de fuera en el oyente de captura.
+- **Abrir dos veces seguidas**: `ABRIENDO_CAPAS` en app.js, y cada espera
+  del editor comprueba que sigue siendo el mismo (`ED === yo`).
+- **«Volver a montar» no pisa lo que cambies mientras el servidor monta** y
+  avisa de los textos de muestra que ha puesto en campos nuevos.
+- Menores: Ctrl+V copia como «Duplicar» (con su recorte y el tope de fotos);
+  Escape al renombrar no guarda; Supr no borra lo bloqueado; cerrar quita todos
+  los oyentes; las letras se registran una vez por página.
+

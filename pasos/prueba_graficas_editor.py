@@ -127,9 +127,19 @@ def montar(pincel, raiz, cid, foto):
         ok(False, "una lámina que no está tendría que dar error")
     except G.ErrorGraficas:
         ok(True, "una lámina que no está da error")
+    # 60 capas tuyas (sin papel de plantilla): con las de la plantilla no caben
     lleno = json.loads(json.dumps(doc))
-    lleno["laminas"][0]["capas"] += [{"tipo": "forma", "id": f"x{i}", "x": 0, "y": 0, "w": 1, "h": 1} for i in range(60 - len(_capas(lleno)))]
-    ok(len(_capas(C.montar(pincel, 7, "v45", lleno))) <= C.MAX_CAPAS, "nunca pasa del tope de capas")
+    lleno["laminas"][0]["capas"] = [{"tipo": "forma", "id": f"x{i}", "rol": "", "x": 0, "y": 0, "w": 1, "h": 1} for i in range(C.MAX_CAPAS)]
+    try:
+        C.montar(pincel, 7, "v45", lleno)
+        ok(False, "si no cabe todo, montar tendría que decirlo")
+    except G.ErrorGraficas as fallo:
+        ok("caben" in str(fallo), "si no cabe todo, montar lo dice en vez de cortar lo añadido")
+    justo = json.loads(json.dumps(doc))
+    mias = [{"tipo": "forma", "id": f"y{i}", "rol": "", "x": 0, "y": 0, "w": 1, "h": 1} for i in range(20)]
+    justo["laminas"][0]["capas"] += mias
+    salida = C.montar(pincel, 7, "v45", justo)
+    ok({f"y{i}" for i in range(20)} <= {c["id"] for c in _capas(salida)}, "con sitio, todo lo añadido sigue ahí")
     return m
 
 
@@ -182,16 +192,17 @@ def rutas(carpeta, foto):
         ok(isinstance(v.get("lineas"), dict) and v["lineas"].get(_rol(leida["doc"], "titulo")["id"]) == 1,
            "la vista dice cuántas líneas ocupa cada texto")
         # la versión anterior
-        ok(codigo(servidor.graficas_fichero, cid, pid, "jpg", _Peticion(), antes=1) == 200, "?antes=1 de una pieza de antes: su JPG")
+        ok(codigo(servidor.graficas_fichero, cid, pid, "jpg", _Peticion(), antes="1") == 200, "?antes=1 de una pieza de antes: su JPG")
+        ok(codigo(servidor.graficas_fichero, cid, pid, "jpg", _Peticion(), antes="abc") == 200, "un ?antes= raro no da 500 ni 422")
         servidor.graficas_guardar_capas(cid, pid, _Peticion(), {"doc": leida["doc"]})
         ruta_capas = G.ruta_final(raiz, cid, pid, "jpg")
         ruta_antes = G.ruta_final(raiz, cid, pid, "jpg", antes=True)
         ok(ruta_capas.endswith("capas.jpg") and ruta_antes.endswith("pieza.jpg"),
            "con versión en capas, la descarga da la de capas y ?antes=1 la de antes")
         nacida = servidor.graficas_crear_en_capas(cid, _Peticion(), {"doc": leida["doc"]})
-        ok(codigo(servidor.graficas_fichero, cid, nacida["id"], "jpg", _Peticion(), antes=1) == 404,
+        ok(codigo(servidor.graficas_fichero, cid, nacida["id"], "jpg", _Peticion(), antes="1") == 404,
            "una pieza nacida en capas no tiene versión anterior (404)")
-        ok(codigo(servidor.graficas_fichero, cid, "000000000000", "jpg", _Peticion(), antes=1) == 404, "una pieza que no está: 404")
+        ok(codigo(servidor.graficas_fichero, cid, "000000000000", "jpg", _Peticion(), antes="1") == 404, "una pieza que no está: 404")
         ok(codigo(servidor.graficas_fichero, cid, pid, "gif", _Peticion()) == 400, "un formato raro: 400")
         # el logo
         ok(codigo(servidor.graficas_logo, cid, "normal", _Peticion()) == 404, "sin logo subido, el logo da 404")

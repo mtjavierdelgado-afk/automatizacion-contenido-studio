@@ -24283,13 +24283,13 @@ def graficas_borrar_pieza(cid: str, pieza_id: str, peticion: Request):
 
 
 @app.get("/api/graficas/{cid}/piezas/{pieza_id}/fichero.{extension}")
-def graficas_fichero(cid: str, pieza_id: str, extension: str, peticion: Request, antes: int = 0):
+def graficas_fichero(cid: str, pieza_id: str, extension: str, peticion: Request, antes: str = ""):
     """El PNG o JPG de la pieza. Con `?antes=1`, la de siempre aunque haya una
     versión en capas («Ver la versión anterior»)."""
     _ficha_de_graficas(cid, peticion)
     G = _graficas()
     try:
-        ruta = G.ruta_final(raiz_proyectos(), cid, pieza_id, extension, antes=bool(antes))
+        ruta = G.ruta_final(raiz_proyectos(), cid, pieza_id, extension, antes=str(antes) not in ("", "0"))
     except G.ErrorGraficas as fallo:
         raise ErrorApi(404 if isinstance(fallo, G.ErrorNoEsta) else 400, str(fallo))
     return servir_fichero(peticion, ruta)

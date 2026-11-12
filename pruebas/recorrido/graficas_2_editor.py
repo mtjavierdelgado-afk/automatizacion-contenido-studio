@@ -69,6 +69,7 @@ def graficas_2_editor(navegador, datos):
         "textos": {"kicker": "Novedad", "titulo": "Sabor que te hace volver", "cta": "Reserva ya"}})
     ok(r.status_code in (200, 201) and pieza.get("id"), "una pieza hecha con el editor de siempre")
     pid = pieza.get("id")
+    jpg_antes = api.s.get(api.base + f"/api/graficas/{cid}/piezas/{pid}/fichero.jpg", timeout=30).content
 
     pg = Pagina(navegador, datos, ancho=1700, alto=1650, nombre="editor_capas")
     pg.js(f"elegirCliente({json.dumps(cid)});")
@@ -149,6 +150,14 @@ def graficas_2_editor(navegador, datos):
     pg.p.keyboard.press("Shift+ArrowRight")
     pg.p.wait_for_timeout(600)
     ok(abs((_por_rol(pg, "titulo")["x"] - x_antes) / 100 * 1080 - 11) < 0.05, "las flechas mueven 1 px y 10 con Mayús")
+    # las teclas del editor no llegan a los atajos del Studio (árbitro, 12-11)
+    pg.p.evaluate("() => { window.__teclasStudio = 0; document.addEventListener('keydown', () => { window.__teclasStudio++; }); }")
+    for tecla in ("ArrowLeft", "Control+s", "Escape", " "):
+        pg.p.keyboard.press(tecla)
+    pg.p.locator(".ce-der input, .ce-der textarea").first.press("Escape")
+    ok(pg.p.evaluate("() => window.__teclasStudio") == 0, "las teclas del editor no llegan a los atajos del Studio")
+    pg.p.wait_for_timeout(500)
+    pg.p.mouse.click(*_centro(pg, sel_t))
 
     # 3. ASAS: la esquina de un texto cambia la letra; el lado, el ancho
     tam0, w0 = _por_rol(pg, "titulo")["tam"], _por_rol(pg, "titulo")["w"]
@@ -180,6 +189,17 @@ def graficas_2_editor(navegador, datos):
     pg.p.keyboard.type("se descarta")
     pg.p.keyboard.press("Escape")
     ok(_por_rol(pg, "titulo")["txt"] == "Hola de nuevo", "Escape deja el texto como estaba")
+    # una letra o una foto que llega mientras se escribe repinta el lienzo: no corta la edición (árbitro, 12-11)
+    pg.p.mouse.dblclick(*_centro(pg, ".ce-marcas .ce-elegida"))
+    pg.p.keyboard.type("ABC")
+    pg.p.evaluate("() => window.dispatchEvent(new Event('resize'))")
+    pg.p.wait_for_timeout(300)
+    pg.p.keyboard.type("XYZ")
+    ok(pg.p.evaluate("() => EditorCapas._estado().editando") is not None, "repintar mientras se escribe no corta la edición")
+    pg.p.keyboard.press("Control+Enter")
+    ok(_por_rol(pg, "titulo")["txt"] == "ABCXYZ", f"y no se pierde lo escrito ({_por_rol(pg, 'titulo')['txt']!r})")
+    pg.p.keyboard.press("Control+z")
+    ok(_por_rol(pg, "titulo")["txt"] == "Hola de nuevo", "Ctrl+Z vuelve al texto de antes")
     pg.p.keyboard.press("Escape")
     ok(pg.p.locator(".ce-marcas .ce-elegida").count() == 0, "Escape quita la selección")
     ok(pg.p.locator("#editor-capas").count() == 1, "y no cierra el editor")
@@ -232,6 +252,10 @@ def graficas_2_editor(navegador, datos):
     pg.p.locator(".ce-renombrar").fill("Banda de color")
     pg.p.keyboard.press("Enter")
     ok(next(c for c in _capas(pg) if c["id"] == nuevas[0]["id"])["nombre"] == "Banda de color", "doble clic en la lista la renombra")
+    pg.p.locator(f".ce-capas [data-id='{nuevas[0]['id']}'] .ce-capa-nombre").dblclick()
+    pg.p.locator(".ce-renombrar").fill("NO GUARDAR")
+    pg.p.keyboard.press("Escape")
+    ok(next(c for c in _capas(pg) if c["id"] == nuevas[0]["id"])["nombre"] == "Banda de color", "Escape al renombrar no cambia el nombre")
 
     # 8. PROPIEDADES CON LOS COLORES DEL KIT
     pg.p.locator(f".ce-capas [data-id='{nuevas[0]['id']}'] .ce-capa-nombre").click()
@@ -270,6 +294,15 @@ def graficas_2_editor(navegador, datos):
     ok(p0.get("en_capas"), "y la pieza queda en capas")
     ok(p0.get("plantilla") == 3, "sin tocar la pieza de antes")
     ok(pg.p.locator(".ce-barra .ce-primario").is_disabled(), "sin cambios, «Guardar» se apaga")
+    jpg_despues = api.s.get(api.base + f"/api/graficas/{cid}/piezas/{pid}/fichero.jpg?antes=1", timeout=30).content
+    ok(jpg_despues == jpg_antes, "la imagen de la pieza de antes sigue idéntica")
+    # lo que se cambia MIENTRAS se guarda sigue «sin guardar» (árbitro, 12-11)
+    pg.pulsar(".ce-anadir button", "Rectángulo")
+    pg.p.evaluate("() => { document.querySelector('.ce-barra .ce-primario').click(); document.querySelector('.ce-anadir button:nth-child(2)').click(); }")
+    ok(pg.esperar(".ce-estado", "Sin guardar", 40) and _esperar_js(pg, "() => !EditorCapas._estado().guardando", 40),
+       "lo añadido mientras se guarda sigue sin guardar")
+    pg.p.locator(".ce-barra .ce-primario").click()
+    ok(pg.esperar(".ce-estado", "Guardado", 40), "y se guarda al volver a pulsar")
 
     # 12. VER LA VERSIÓN ANTERIOR
     pg.pulsar(".ce-barra button", "Ver la versión anterior")
@@ -296,6 +329,15 @@ def graficas_2_editor(navegador, datos):
     # 14. CERRAR Y LA PIEZA NUEVA EN CAPAS
     pg.pulsar(".ce-barra .ce-volver", "Volver")
     ok(pg.p.locator("#editor-capas").count() == 0, "«Volver» cierra el editor")
+    # dos clics seguidos al abrir: un solo editor (árbitro, 12-11)
+    pg.p.evaluate(f"() => {{ abrirEditorCapas({json.dumps(cid)}, null); abrirEditorCapas({json.dumps(cid)}, null); }}")
+    ok(pg.esperar("#editor-capas .ce-lienzo [data-c]", segundos=40), "abrir dos veces seguidas")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.locator("#editor-capas").count() == 1 and pg.p.evaluate("() => EditorCapas._estado().hist.length") == 1,
+       "abre un solo editor, con su historial limpio")
+    pg.pulsar(".ce-barra .ce-volver", "Volver")
+    pg.p.evaluate("() => window.dispatchEvent(new Event('resize'))")
+    pg.p.wait_for_timeout(300)
     ok(pg.esperar(".tarjeta-pieza .meta", "en capas", 15), "la lista dice qué piezas están en capas")
     pg.pulsar(".seccion-graficas .nueva-en-capas", "Diseño en capas")
     ok(pg.esperar("#editor-capas .ce-lienzo [data-c]", segundos=40), "«+ Diseño en capas» abre una pieza nueva")

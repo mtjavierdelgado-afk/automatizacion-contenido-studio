@@ -36031,7 +36031,16 @@ function cargarEditorCapas() {
 /* `pieza`: la ficha de la lista, o null para una nueva. Una pieza de antes solo
    se abre en capas si sale IGUAL (la comparación del servidor): si no, se
    queda con el editor de siempre y no se toca. */
+let ABRIENDO_CAPAS = false;
+
 async function abrirEditorCapas(cid, pieza, extra) {
+  // un segundo clic mientras se comprueba (unos segundos) no abre otro editor
+  if (ABRIENDO_CAPAS) return;
+  ABRIENDO_CAPAS = true;
+  try { await abrirEditorCapasYa(cid, pieza, extra); } finally { ABRIENDO_CAPAS = false; }
+}
+
+async function abrirEditorCapasYa(cid, pieza, extra) {
   let cat, editor;
   try {
     [cat, editor] = await Promise.all([catalogoGraficas(), cargarEditorCapas()]);

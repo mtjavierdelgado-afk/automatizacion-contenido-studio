@@ -21026,7 +21026,39 @@ def _info_para_publicar(ctx):
         "cta": (ctx.estado.params("guion") or {}).get("cta") or {},
         "guion": bloques,
         "capitulos_base": P.capitulos_base(plan.get("escenas") or [], duracion),
+        # extras-youtube: la pista de subtitulos, de lo mismo que se dibuja
+        "idioma": str(plan.get("idioma") or ""),
+        "srt": _srt_para_publicar(ctx, plan, duracion),
     }
+
+
+def _srt_para_publicar(ctx, plan, duracion):
+    """El .srt del video (extras-youtube), con lo corregido a mano de cada
+    plano igual que el subtitulo dibujado. «» si no hay plan o algo falla:
+    un envio nunca se cae por los subtitulos."""
+    escenas = plan.get("escenas") or []
+    if not escenas:
+        return ""
+    escritos = {}
+    try:
+        p7 = PASOS_MODULOS.p7_callouts if PASOS_MODULOS else None
+        p = ctx.estado.params("callouts") or {}
+        if p7 is not None:
+            for e in escenas:
+                uid = f"escena:{e.get('id')}"
+                texto = p7.texto_subtitulo_de(p, uid)
+                if texto:
+                    escritos[str(e.get("id"))] = (texto, p7.ancla_subtitulo_de(p, uid, e))
+    except Exception:                                       # noqa: BLE001
+        escritos = {}
+    try:
+        return _publicar().subtitulos_srt(escenas, idioma=plan.get("idioma"), escritos=escritos,
+                                          duracion=duracion or None)
+    except Exception as fallo:                              # noqa: BLE001
+        # se dice en la bitacora: un «» callado escondio un fallo el 12-11
+        print(f"[publicar] subtitulos_fallo {ctx.id}: {type(fallo).__name__}: {fallo}",
+              file=sys.stderr, flush=True)
+        return ""
 
 
 def _videos_para_publicar(peticion):

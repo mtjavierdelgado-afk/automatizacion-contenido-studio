@@ -9131,7 +9131,7 @@ def probar_el_piloto():
                         "alcance": "retoque"} for i in range(1, pedidos["marcadas"] + 1)],
         "sin_revisar": 0}
     servidor._piloto_textos = lambda avisar, ctx, raiz, vid: pedidos.setdefault("textos", []).append(vid)
-    servidor._piloto_portadas = lambda avisar, ctx, raiz, vid, aj: pedidos.setdefault(
+    servidor._piloto_portadas = lambda avisar, ctx, raiz, vid, aj, tope_usd=None: pedidos.setdefault(
         "portadas", []).append((vid, aj["portadas"]))
     servidor._estilos_para_parrilla = lambda peticion: [{"id": "e1", "nombre": "Estilo", "cliente": sin}]
     servidor._piloto_cupo_lleno = lambda tope: pedidos["cupo"]

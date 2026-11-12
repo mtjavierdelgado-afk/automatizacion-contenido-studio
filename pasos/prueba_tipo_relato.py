@@ -683,6 +683,9 @@ def prueba_base_fiel():
     ok("television" not in T.prompt_imagen_base({"descripcion": "a gaming room with two TVs"},
                                                 {"modo": "recorrido"}),
        "pero no la tele si la descripción la pide (una sala gamer)")
+    ok("television" not in T.prompt_imagen_base({"descripcion": "sala con televisión grande"},
+                                                {"modo": "recorrido"}),
+       "«televisión» con tilde también cuenta como pantalla")
     fotos = []
     for nombre in ("interior_salon.jpg", "interior_cocina.jpg", "exterior_fachada.jpg"):
         ruta_f = os.path.join(carpeta_l, nombre)

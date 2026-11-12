@@ -672,7 +672,9 @@ CUADRO_AMBIENTE = (
     "reference of ONE room of a home, so it is {que} from inside that room at eye height, "
     "with a wide-angle view: show this room whole, with every wall, door and window the "
     "description names for it inside the frame, and nothing of the rooms it opens onto. "
-    "Never draw black bars, borders or a landscape picture inside the tall frame.")
+    "If a side wall carries a window, a door or fixed furniture, angle the camera so that "
+    "wall is clearly seen along its side of the frame instead of moving them to the back "
+    "wall. Never draw black bars, borders or a landscape picture inside the tall frame.")
 
 
 def cuadro_referencia(modo_imagen="ilustracion", ambiente=False):
@@ -795,7 +797,7 @@ PROMPT_BASE = (
 #: producto que es una pantalla los pide (revision del arbitro).
 NADA_MAS = "Add NOTHING the description does not name: no extra furniture, door or window{tele}. "
 NADA_MAS_TELE = ", and no television or TV cabinet"
-_PANTALLAS = re.compile(r"\b(tv|tvs|television|televisions|televisor\w*|tele|screens?|monitors?|"
+_PANTALLAS = re.compile(r"\b(tv|tvs|televisi\w*|televisor\w*|tele|screens?|monitors?|"
                         r"pantallas?|displays?)\b", re.IGNORECASE)
 
 #: El encuadre de la base de siempre (el sitio principal, o el unico)
@@ -873,7 +875,8 @@ def prompt_imagen_base(espacio, relato, cabecera="", inicial="", ambiente=False)
     inicial = inicial_de(inicial or (relato or {}).get("inicial"))
     if antes and inicial and (relato or {}).get("cambia") in ("objeto", "estado"):
         antes += INICIAL.format(inicial=inicial)
-    nada_mas = NADA_MAS.format(tele="" if _PANTALLAS.search(descripcion) else NADA_MAS_TELE)
+    nada_mas = NADA_MAS.format(tele="" if _PANTALLAS.search(descripcion + " " + luz)
+                               else NADA_MAS_TELE)
     return PROMPT_BASE.format(cabecera=_texto(cabecera, 400), descripcion=descripcion,
                               luz=luz, antes=antes, nada_mas=nada_mas,
                               encuadre=ENCUADRE_AMBIENTE if ambiente else ENCUADRE_BASE).strip()

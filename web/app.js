@@ -29077,22 +29077,41 @@ function curvaRetencionPublicar(curva) {
   return svg;
 }
 
-/* Lo que TikTok dice en inglés, en español; lo que no se conoce, tal cual. */
+/* Lo que TikTok dice en inglés, en español. Llega de dos formas («New viewers»
+   y «NEW_VIEWER», «Direct Message»…): se compara en minúsculas, con «_» y «-»
+   como espacios y sin «percent» (prueba del servidor, 12-11). */
 const NOMBRES_REPARTO_TIKTOK = {
   'for you': 'Para ti', 'personal profile': 'Tu perfil', 'search': 'Búsqueda', 'follow': 'Siguiendo',
   'following': 'Siguiendo', 'sound': 'Sonido', 'hashtag': 'Hashtag', 'others': 'Otros', 'other': 'Otros',
-  'new viewers': 'Espectadores nuevos', 'returning viewers': 'Que ya lo habían visto',
-  'followers': 'Seguidores', 'non-followers': 'No seguidores',
+  'direct message': 'Mensajes directos', 'direct messages': 'Mensajes directos',
+  'video detail': 'Detalle del vídeo', 'external': 'Fuera de TikTok', 'share': 'Compartido',
+  'new viewers': 'Espectadores nuevos', 'new viewer': 'Espectadores nuevos',
+  'returning viewers': 'Que ya lo habían visto', 'returning viewer': 'Que ya lo habían visto',
+  'return viewers': 'Que ya lo habían visto', 'return viewer': 'Que ya lo habían visto',
+  'followers': 'Seguidores', 'follower': 'Seguidores',
+  'non followers': 'No seguidores', 'non follower': 'No seguidores',
 };
+
+/* El nombre de un reparto de TikTok en español. Lo que no se conoce no sale
+   en MAYÚSCULAS_CON_GUIONES: «Algo nuevo», con la inicial en mayúscula. */
+function nombreRepartoTiktok(nombre) {
+  const crudo = String(nombre || '').trim();
+  const clave = crudo.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+percent[a-z]*$/, '')
+    .replace(/\s+/g, ' ').trim();
+  if (NOMBRES_REPARTO_TIKTOK[clave]) return NOMBRES_REPARTO_TIKTOK[clave];
+  if (/^[A-Z0-9_ ]+$/.test(crudo) && clave) return clave.charAt(0).toUpperCase() + clave.slice(1);
+  return crudo;
+}
 
 /* «Más cifras» de un envío: la curva, de dónde vinieron las vistas y qué público. */
 function detalleMetricasEnvio(e) {
   const m = e.metricas || {};
   const aparte = textoMetricasAparte(m, false);
   const curva = curvaRetencionPublicar(m.curva);
-  const reparto = (lista, titulo) => (lista || []).length
+  // un 0 % no dice nada (TikTok manda «NEW_VIEWER 0» cuando no lo sabe): fuera
+  const reparto = (todos, titulo) => { const lista = (todos || []).filter(([, f]) => f > 0); return lista.length
     ? h('div', { clase: 'meta' }, `${titulo}: ${lista.map(([n, f]) =>
-      `${NOMBRES_REPARTO_TIKTOK[String(n).trim().toLowerCase()] || n} ${porcentaje(f)}`).join(' · ')}`) : null;
+      `${nombreRepartoTiktok(n)} ${porcentaje(f)}`).join(' · ')}`) : null; };
   const fuentes = reparto(m.fuentes, 'De dónde vinieron las vistas');
   const publico = reparto(m.publico, 'Quién lo vio');
   if (!aparte && !curva && !fuentes && !publico) return null;

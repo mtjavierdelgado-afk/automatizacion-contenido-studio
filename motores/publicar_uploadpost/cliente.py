@@ -549,6 +549,8 @@ class ClienteUploadPost:
     CAMPOS_FRACCION = ("full_video_watched_rate",)
     CAMPOS_PORCENTAJE = ("average_view_percentage",)
     CAMPOS_TIEMPO_MEDIO = ("average_time_watched", "average_view_duration_seconds")
+    #: Con vistas, no pueden ser 0 (ver `_cifras`)
+    SIN_CERO_CON_VISTAS = ("alcance", "impresiones", "tiempo_total_s", "media_vista", "tiempo_medio_s")
     #: Mas de 10 veces el video de media no es una cifra, es un error
     TOPE_MEDIA_VISTA = 10.0
 
@@ -615,6 +617,14 @@ class ClienteUploadPost:
         datos = cls._numeros(bruto)
         datos.update(cls._retencion(bruto))
         datos.update(cls._detalle(bruto))
+        # con vistas, un 0 de alcance, impresiones o tiempo visto es el «no lo
+        # sé» de la red, no un cero (TikTok manda `reach: 0`; prueba del
+        # servidor, 12-11). La misma lista que `publicar.SIN_CERO_CON_VISTAS`
+        vistas = datos.get("vistas")
+        if isinstance(vistas, (int, float)) and vistas > 0:
+            for k in cls.SIN_CERO_CON_VISTAS:
+                if datos.get(k) == 0:
+                    datos[k] = None
         return datos
 
     @staticmethod

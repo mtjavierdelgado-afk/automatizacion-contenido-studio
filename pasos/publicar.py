@@ -2768,7 +2768,7 @@ def _envio_publico(e):
 
 
 def _envio_publico_campos(e):
-    return {k: e.get(k) for k in (
+    return {k: (sin_ceros_imposibles(e.get(k)) if k == "metricas" else e.get(k)) for k in (
         "id", "red", "estado", "modo", "cuando", "creado", "actualizado", "url",
         "error", "lote", "perfil", "mp4_huella", "nota", "programado_para", "sin_hora",
         "metricas", "enviado", "texto_publicado", "recortado", "tipo", "portada")}
@@ -3615,6 +3615,27 @@ EXTRAS = ("alcance", "impresiones", "nuevos_seguidores", "visitas_perfil", "vist
 DETALLE = ("curva", "mitad_s", "fuentes", "publico")
 #: Todo lo que se apunta de un envio
 CAMPOS_ENVIO = METRICAS + EXTRAS + RETENCION + DETALLE
+#: Cifras que NO pueden ser 0 si el post tiene vistas: un post visto 200 veces
+#: llegó al menos a una persona y alguien lo vio algún segundo. Ese 0 es el
+#: «no lo sé» de la red (TikTok da `reach: 0`; un Short, `average_time_watched:
+#: 0`), y enseñarlo como «0 personas alcanzadas» o «0 % visto de media» era
+#: mentir (prueba del servidor, 12-11). `vista_entera` sí puede ser 0 (nadie
+#: llegó al final) y queda fuera.
+SIN_CERO_CON_VISTAS = ("alcance", "impresiones", "tiempo_total_s", "media_vista", "tiempo_medio_s")
+
+
+def sin_ceros_imposibles(m):
+    """Las cifras de un envío con los ceros que no pueden ser (ver
+    `SIN_CERO_CON_VISTAS`) en None: «no lo dice», no «cero». No cambia el
+    dict que recibe. -> dict (o lo mismo si no es un dict)"""
+    if not isinstance(m, dict):
+        return m
+    vistas = m.get("vistas")
+    if isinstance(vistas, bool) or not isinstance(vistas, (int, float)) or vistas <= 0:
+        return m
+    ceros = [k for k in SIN_CERO_CON_VISTAS
+             if isinstance(m.get(k), (int, float)) and not isinstance(m.get(k), bool) and m[k] == 0]
+    return dict(m, **{k: None for k in ceros}) if ceros else m
 LOTES_POR_VUELTA = 30
 RESPIRO_METRICAS_S = float(os.environ.get("ESTUDIO_METRICAS_RESPIRO") or 600)
 
@@ -3999,6 +4020,8 @@ def actualizar_seguidores(raiz, cid):
 
 
 def _suma(destino, metricas):
+    # lo guardado antes del arreglo puede traer esos ceros: no suman (12-11)
+    metricas = sin_ceros_imposibles(metricas)
     for k in METRICAS + EXTRAS:
         v = (metricas or {}).get(k)
         if isinstance(v, (int, float)) and not isinstance(v, bool):

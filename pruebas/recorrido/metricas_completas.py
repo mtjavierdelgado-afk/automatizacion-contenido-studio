@@ -77,6 +77,18 @@ def publicar_metricas_completas(navegador, datos):
        "y lo que dice la curva en una frase (sin «hasta el final», que podía contradecir la retención)")
     ok(pg.visible(".mas-cifras-envio[open]", "De dónde vinieron las vistas") and pg.visible(".mas-cifras-envio[open]", "Para ti"),
        "y de dónde vinieron las vistas, en español («Para ti», no «For You»)")
+    # prueba del servidor del 12-11: «Quién lo vio: NON_FOLLOWER_PERCENT 97 %…»,
+    # «Direct Message 0 %» y «0 personas alcanzadas» con 200 vistas
+    abierto = pg.p.locator(".mas-cifras-envio[open]").first.inner_text()
+    ok("Quién lo vio: No seguidores 97 % · Seguidores 3,0 %" in abierto,
+       f"«Quién lo vio» en español y sin los 0 % ({abierto[-120:]!r})")
+    ok(not any(t in abierto for t in ("NON_FOLLOWER", "FOLLOWER_PERCENT", "NEW_VIEWER", "Direct Message")),
+       "ningún nombre de TikTok sale sin traducir")
+    ok("0 personas alcanzadas" not in abierto, "un alcance de 0 con vistas no se enseña: es «no lo sé»")
+    ok(pg.p.evaluate("() => [nombreRepartoTiktok('Direct Message'), nombreRepartoTiktok('RETURN_VIEWER'), "
+                     "nombreRepartoTiktok('ALGO_NUEVO'), nombreRepartoTiktok('Live')].join('|')")
+       == "Mensajes directos|Que ya lo habían visto|Algo nuevo|Live",
+       "lo que no se conoce sale legible, sin MAYÚSCULAS_CON_GUIONES")
     pg.captura("publicar_metricas_completas_ficha")
     pg.sin_errores("las métricas completas")
     pg.cerrar()

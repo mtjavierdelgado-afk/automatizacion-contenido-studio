@@ -1980,6 +1980,27 @@ def prueba_metricas_completas():
     igual((raros["impresiones"], raros["visitas_perfil"], raros["nuevos_seguidores"], raros["vistas"]),
           (None, None, 3, None), "recuentos: ni negativos ni absurdos ni «true»; un número en texto sí")
     igual(c["publico"], [["New viewers", 0.9], ["Returning viewers", 0.1]], "y qué público")
+    # servidor, 12-11: con vistas, un 0 de alcance o de tiempo visto es «no lo sé»
+    ceros = C._cifras({"views": 200, "reach": 0, "impressions": 0, "average_time_watched": 0,
+                       "average_view_percentage": 0, "total_time_watched": 0,
+                       "full_video_watched_rate": 0, "likes": 0})
+    igual([ceros[k] for k in ("alcance", "impresiones", "tiempo_medio_s", "media_vista", "tiempo_total_s")],
+          [None] * 5, "con vistas, los ceros de alcance, impresiones y tiempo visto son None")
+    igual((ceros["vista_entera"], ceros["me_gusta"]), (0.0, 0),
+          "pero «nadie lo vio hasta el final» y «0 me gusta» sí son ceros de verdad")
+    sin_vistas = C._cifras({"views": 0, "reach": 0})
+    igual(sin_vistas["alcance"], 0, "sin vistas, un alcance 0 es un cero de verdad")
+    viejas = {"vistas": 200, "alcance": 0, "tiempo_medio_s": 0, "media_vista": 0, "vista_entera": 0}
+    limpias = P.sin_ceros_imposibles(viejas)
+    igual((limpias["alcance"], limpias["tiempo_medio_s"], limpias["media_vista"], limpias["vista_entera"]),
+          (None, None, None, 0), "lo guardado antes del arreglo se lee igual de limpio")
+    igual(viejas["alcance"], 0, "y sin tocar el dict guardado")
+    suma = {"posts": 0}
+    P._suma(suma, viejas)
+    P._suma(suma, {"vistas": 100, "media_vista": 0.6, "tiempo_medio_s": 5.0})
+    P._medias(suma)
+    igual((suma.get("media_vista"), suma.get("tiempo_medio_s"), suma.get("alcance")), (0.6, 5.0, None),
+          "un 0 imposible no baja la media («0 % visto de media» en «Esta semana»)")
     vacio = C._cifras({"views": 5})
     igual([vacio[k] for k in ("impresiones", "curva", "fuentes", "publico", "tiempo_total_s")],
           [None] * 5, "lo que la red no da se queda en None (nunca cero ni lista vacía)")

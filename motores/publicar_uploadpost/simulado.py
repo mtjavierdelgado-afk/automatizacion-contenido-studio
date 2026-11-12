@@ -277,9 +277,18 @@ class SimuladoUploadPost:
                              "impression_sources": [
                                  {"impression_source": "For You", "percentage": 0.81},
                                  {"impression_source": "Personal Profile", "percentage": 0.12},
-                                 {"impression_source": "Search", "percentage": 0.07}],
-                             "audience_types": [{"audience_type": "New viewers", "percentage": 0.9},
-                                                {"audience_type": "Returning viewers", "percentage": 0.1}]}
+                                 {"impression_source": "Search", "percentage": 0.07},
+                                 # como en el servidor (12-11): sin traducir y en 0
+                                 {"impression_source": "Direct Message", "percentage": 0.0}],
+                             # la forma que dio Upload-Post en el servidor el 12-11:
+                             # claves en mayúsculas y dos tipos en 0 («no lo sé»)
+                             "audience_types": [
+                                 {"audience_type": "NON_FOLLOWER_PERCENT", "percentage": 0.97},
+                                 {"audience_type": "FOLLOWER_PERCENT", "percentage": 0.03},
+                                 {"audience_type": "NEW_VIEWER", "percentage": 0},
+                                 {"audience_type": "RETURN_VIEWER", "percentage": 0}],
+                             # TikTok da `reach: 0` aunque tenga vistas (servidor, 12-11)
+                             "reach": 0}
                 elif r == "instagram":
                     crudo = {"impressions": base * vueltas * 2, "reach": base * vueltas,
                              "facebook_views": base // 3}

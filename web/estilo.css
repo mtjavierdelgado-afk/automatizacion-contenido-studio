@@ -5878,6 +5878,15 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .ver-publicados-piloto { align-self: flex-start; }
 .relleno-repintado { pointer-events: none; }
 
+/* ---------------- PUBLICAR · métricas completas (metricas-completas, 11-11) */
+.mas-cifras-envio { margin: 2px 0 6px; font-size: 13px; }
+.mas-cifras-envio > summary { cursor: pointer; color: var(--tenue); }
+.mas-cifras-envio > div { margin-top: 4px; }
+.curva-envio { align-items: center; gap: 10px; flex-wrap: wrap; }
+.curva-retencion { width: 240px; max-width: 100%; height: 60px; background: var(--hueco); border-radius: 6px; }
+.curva-retencion .curva-linea { fill: none; stroke: var(--acento); stroke-width: 2; }
+.cifras-aparte { margin: 2px 0 8px; }
+
 /* publicar-ok-envios: el «OK» del día y la hora, y su confirmación */
 .ok-cuando-publicar { align-self: flex-end; min-width: 48px; font-weight: 600; }
 .cuando-confirmado { color: var(--ok); margin-top: 4px; }

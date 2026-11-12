@@ -61,7 +61,7 @@ def _con_cifras(raiz, videos, cid, desde, hasta=None):
     """[(video, envio, momento, metricas)] de lo publicado con vistas."""
     salida = []
     for v, e in P._publicados(raiz, P._de_proyecto(videos, cid), desde, hasta):
-        m = e.get("metricas") or {}
+        m = P.sin_ceros_imposibles(e.get("metricas") or {})
         if isinstance(m.get("vistas"), (int, float)) and not isinstance(m.get("vistas"), bool):
             salida.append((v, e, P._leer_momento(e.get("cuando")), m))
     return salida
@@ -323,9 +323,14 @@ def resumen(inf):
                   f"{inf['dias_con_publicacion']} día(s) con publicación)"
                   + _cambio(t.get("posts"), a.get("posts"), frente))
     for k, nombre in (("vistas", "Vistas"), ("me_gusta", "Me gusta"),
-                      ("comentarios", "Comentarios"), ("compartidos", "Compartidos")):
+                      ("comentarios", "Comentarios"), ("compartidos", "Compartidos"),
+                      ("guardados", "Guardados")):
         if isinstance(t.get(k), (int, float)):
-            lineas.append(f"• {nombre}: {_num(t[k])}" + _cambio(t.get(k), a.get(k), frente))
+            # no todas las redes dan todo (YouTube no da guardados): se dice
+            n = t.get(f"{k}_posts")
+            de = (f" ({n} de {t.get('posts')} publicaciones)"
+                  if isinstance(n, int) and isinstance(t.get("posts"), int) and n < t["posts"] else "")
+            lineas.append(f"• {nombre}: {_num(t[k])}{de}" + _cambio(t.get(k), a.get(k), frente))
     if inf["por_red"]:
         lineas += ["", "Por red:"]
         for red, f in inf["por_red"].items():

@@ -29046,20 +29046,163 @@ function numeroCorto(n) {
 const NOMBRES_METRICA = {
   vistas: 'vistas', me_gusta: 'me gusta', comentarios: 'comentarios',
   compartidos: 'compartidos', guardados: 'guardados',
+  // metricas-completas: lo demás que da cada red (lo que no da no se escribe)
+  nuevos_seguidores: 'seguidores nuevos', visitas_perfil: 'visitas al perfil',
+  vistas_facebook: 'vistas en Facebook',
 };
 
-function textoMetricas(m) {
+/* «3 h 20 min», «12 min», «45 s»: el tiempo total visto de TikTok. */
+function tiempoLegible(segundos) {
+  const s = Math.round(Number(segundos) || 0);
+  if (s < 60) return `${s} s`;
+  const minutos = Math.round(s / 60);
+  if (minutos < 60) return `${minutos} min`;
+  const resto = minutos % 60;
+  return `${Math.floor(minutos / 60)} h${resto ? ` ${resto} min` : ''}`;
+}
+
+function textoMetricas(m, sumado) {
   if (!m) return '';
+  // `sumado`: la cifra junta varias publicaciones (una fila «Por red»): cada una
+  // dice de cuántas sale si no son todas (2.ª revisión, 12-11)
   return Object.keys(NOMBRES_METRICA)
     .filter(k => typeof m[k] === 'number')
-    .map(k => `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}`)
+    .map(k => { const c = sumado ? cuantasDe(m, k) : ''; return `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}${c ? ` (${c})` : ''}`; })
     .concat(textoRetencion(m) ? [textoRetencion(m)] : []).join(' · ');
+}
+
+/* Lo que va APARTE de las vistas (metricas-completas): las impresiones (veces
+   que la red lo ENSEÑÓ, no que se reprodujo), el alcance (personas distintas)
+   y el tiempo total visto. Sumados entre varios posts, el alcance cuenta dos
+   veces a quien vio dos: por eso dice «sumado». */
+function textoMetricasAparte(m, sumado) {
+  if (!m) return '';
+  // en un total, cada cifra dice de cuántas publicaciones sale si no son todas
+  // (TikTok no da impresiones; solo Instagram da lo visto en Facebook…)
+  const cuantas = k => {
+    const n = m[`${k}_posts`];
+    return sumado && typeof n === 'number' && typeof m.posts === 'number' && n < m.posts
+      ? `${n} de ${m.posts} publicaciones` : '';
+  };
+  // un solo paréntesis: «(sumado; 1 de 2 publicaciones)», nunca dos seguidos
+  const entre = (...trozos) => { const t = trozos.filter(Boolean).join('; '); return t ? ` (${t})` : ''; };
+  const partes = [];
+  if (typeof m.alcance === 'number') partes.push(`${numeroCorto(m.alcance)} personas alcanzadas${entre(sumado ? 'sumado' : '', cuantas('alcance'))}`);
+  if (typeof m.impresiones === 'number') partes.push(`${numeroCorto(m.impresiones)} impresiones${entre(cuantas('impresiones'))}`);
+  if (sumado && typeof m.vistas_facebook === 'number') partes.push(`${numeroCorto(m.vistas_facebook)} vistas de tus Reels en Facebook${entre(cuantas('vistas_facebook'))}`);
+  if (sumado && typeof m.visitas_perfil === 'number') partes.push(`${numeroCorto(m.visitas_perfil)} visitas al perfil${entre(cuantas('visitas_perfil'))}`);
+  if (typeof m.tiempo_total_s === 'number') partes.push(`${tiempoLegible(m.tiempo_total_s)} vistas en total${entre(cuantas('tiempo_total_s'))}`);
+  return partes.join(' · ');
+}
+
+/* «2 de 5» si la cifra `k` de un total no sale de todas sus publicaciones; ''. */
+function cuantasDe(total, k) {
+  const n = (total || {})[`${k}_posts`];
+  return typeof n === 'number' && typeof total.posts === 'number' && n < total.posts && k !== 'posts'
+    ? `${n} de ${total.posts}` : '';
+}
+
+/* Bajo una cifra grande de Resultados: « · 2 de 5». */
+function deCuantasPublicaciones(total, k) {
+  const c = cuantasDe(total, k);
+  return c ? ` · ${c}` : '';
+}
+
+/* La curva de retención de TikTok (qué parte sigue viendo en cada segundo),
+   dibujada en un SVG pequeño sin estilos en línea (CSP). */
+function curvaRetencionPublicar(curva) {
+  const puntos = (curva || []).filter(p => Array.isArray(p) && p.length === 2);
+  if (puntos.length < 2) return null;
+  const NS = 'http://www.w3.org/2000/svg';
+  const ancho = 240, alto = 60;
+  const ultimo = puntos[puntos.length - 1][0] || 1;
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${ancho} ${alto}`);
+  svg.setAttribute('class', 'curva-retencion');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'Qué parte sigue viendo en cada segundo');
+  const linea = document.createElementNS(NS, 'polyline');
+  linea.setAttribute('points', puntos.map(([s, f]) =>
+    `${(s / ultimo * (ancho - 4) + 2).toFixed(1)},${((1 - f) * (alto - 4) + 2).toFixed(1)}`).join(' '));
+  linea.setAttribute('class', 'curva-linea');
+  svg.appendChild(linea);
+  return svg;
+}
+
+/* Lo que TikTok dice en inglés, en español. Llega de dos formas («New viewers»
+   y «NEW_VIEWER», «Direct Message»…): se compara en minúsculas, con «_» y «-»
+   como espacios y sin «percent» (prueba del servidor, 12-11). */
+const NOMBRES_REPARTO_TIKTOK = {
+  'for you': 'Para ti', 'personal profile': 'Tu perfil', 'search': 'Búsqueda', 'follow': 'Siguiendo',
+  'following': 'Siguiendo', 'sound': 'Sonido', 'hashtag': 'Hashtag', 'others': 'Otros', 'other': 'Otros',
+  'direct message': 'Mensajes directos', 'direct messages': 'Mensajes directos',
+  'video detail': 'Detalle del vídeo', 'external': 'Fuera de TikTok', 'share': 'Compartido',
+  'new viewers': 'Espectadores nuevos', 'new viewer': 'Espectadores nuevos',
+  'returning viewers': 'Ya habían visto tus vídeos', 'returning viewer': 'Ya habían visto tus vídeos',
+  'return viewers': 'Ya habían visto tus vídeos', 'return viewer': 'Ya habían visto tus vídeos',
+  'followers': 'Seguidores', 'follower': 'Seguidores',
+  'non followers': 'No seguidores', 'non follower': 'No seguidores',
+};
+
+/* El nombre de un reparto de TikTok en español. Lo que no se conoce no sale
+   en MAYÚSCULAS_CON_GUIONES: «Algo nuevo», con la inicial en mayúscula. */
+function nombreRepartoTiktok(nombre) {
+  const crudo = String(nombre || '').trim();
+  const clave = crudo.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+percent[a-z]*$/, '')
+    .replace(/\s+/g, ' ').trim();
+  if (NOMBRES_REPARTO_TIKTOK[clave]) return NOMBRES_REPARTO_TIKTOK[clave];
+  if (/^[A-Z0-9_ ]+$/.test(crudo) && clave) return clave.charAt(0).toUpperCase() + clave.slice(1);
+  return crudo;
+}
+
+/* «Más cifras» de un envío: la curva, de dónde vinieron las vistas y qué público. */
+function detalleMetricasEnvio(e) {
+  const m = e.metricas || {};
+  const aparte = textoMetricasAparte(m, false);
+  const curva = curvaRetencionPublicar(m.curva);
+  // un 0 % no dice nada (TikTok manda «NEW_VIEWER 0» cuando no lo sabe): fuera
+  const reparto = (todos, titulo) => { const lista = (todos || []).filter(([, f]) => f > 0); return lista.length
+    ? h('div', { clase: 'meta' }, `${titulo}: ${lista.map(([n, f]) =>
+      `${nombreRepartoTiktok(n)} ${porcentaje(f)}`).join(' · ')}`) : null; };
+  const fuentes = reparto(m.fuentes, 'De dónde vinieron las vistas');
+  // TikTok mezcla DOS repartos en «público» (seguidores o no; nuevos o que
+  // vuelven): juntos sumaban 200 % y parecían uno (2.ª revisión, 12-11)
+  const deNuevos = ([n]) => /viewer/i.test(String(n));
+  const publicoSeguidores = reparto((m.publico || []).filter(p => !deNuevos(p)), 'Quién lo vio');
+  const publicoNuevos = reparto((m.publico || []).filter(deNuevos), 'Nuevos o que vuelven');
+  const publico = publicoSeguidores || publicoNuevos
+    ? h('div', {}, publicoSeguidores, publicoNuevos) : null;
+  if (!aparte && !curva && !fuentes && !publico) return null;
+  // el segundo en que se va la mitad viene calculado con la curva ENTERA
+  // (la guardada puede ir aligerada); en los envíos de antes, de la curva
+  const mitadS = typeof m.mitad_s === 'number' ? m.mitad_s
+    : ((m.curva || []).find(p => Array.isArray(p) && p[1] <= 0.5) || [])[0];
+  const mitad = typeof mitadS === 'number' ? [mitadS] : null;
+  return h('details', { clase: 'mas-cifras-envio' },
+    h('summary', {}, 'Más cifras'),
+    aparte ? h('div', { clase: 'meta' }, aparte) : null,
+    curva ? h('div', { clase: 'fila curva-envio' }, curva,
+      h('span', { clase: 'meta' }, mitad
+        ? `La mitad deja de verlo en el segundo ${Math.round(mitad[0])}.`
+        // lo último que da TikTok, no «hasta el final»: la curva puede acabar
+        // antes que el vídeo y chocar con «X % lo vio hasta el final» (12-11)
+        : `Más de la mitad sigue viéndolo en el segundo ${Math.round(((m.curva || []).slice(-1)[0] || [0])[0])}, lo último que da TikTok.`)) : null,
+    fuentes, publico);
 }
 
 /* La retención (publicar-redes-2): solo la dan TikTok y YouTube. Lo que no
    llega no se escribe (nunca «0 %»: sería mentir). */
 function porcentaje(fraccion) {
-  return `${(Number(fraccion) * 100).toFixed(Number(fraccion) < 0.1 ? 1 : 0).replace('.', ',')} %`;
+  if (typeof fraccion !== 'number' || !Number.isFinite(fraccion) || fraccion < 0) return '—';
+  const f = fraccion;
+  // por debajo del 1 %, con dos decimales (0,05 %, no «0,0 %» ni «0,1 %»);
+  // por debajo del 0,01 %, «menos de 0,01 %»; el 0, «0 %» (revisión, 12-11).
+  // Los decimales se eligen con el valor YA redondeado: 9,99 % es «10 %»
+  if (f === 0) return '0 %';
+  if (f > 0 && f < 0.0001) return 'menos de 0,01 %';
+  const p = f * 100;
+  const decimales = p >= 9.95 ? 0 : p >= 0.995 ? 1 : 2;
+  return `${p.toFixed(decimales).replace('.', ',')} %`;
 }
 
 function textoRetencion(m) {
@@ -29149,6 +29292,8 @@ function filasEnvioFicha(e) {
     filas.push(h('div', { clase: 'caja-aviso aviso-recortado' },
       `⚠ ${CORTOS_RED[e.red] || e.red}: ${e.recortado}. Mira el post y, si hace falta, pega el texto a mano.`));
   }
+  const masCifras = detalleMetricasEnvio(e);
+  if (masCifras) filas.push(masCifras);
   filas.push(loMandadoPublicar(e));
   return filas;
 }
@@ -29835,9 +29980,16 @@ function seccionResultadosPublicar() {
   const total = r.total || {};
   caja.appendChild(h('div', { clase: 'cifras-publicar cifras-grandes-publicar' },
     ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],
-      ['comentarios', 'comentarios'], ['compartidos', 'compartidos']].map(([k, t]) =>
+      ['comentarios', 'comentarios'], ['compartidos', 'compartidos'], ['guardados', 'guardados'],
+      ['nuevos_seguidores', 'seguidores nuevos']].map(([k, t]) =>
       h('div', { clase: 'cifra' }, h('b', {}, typeof total[k] === 'number' ? numeroCorto(total[k]) : '—'),
-        h('span', { clase: 'meta' }, t)))));
+        h('span', { clase: 'meta' }, typeof total[k] === 'number' ? t + deCuantasPublicaciones(total, k) : t)))));
+  // metricas-completas: lo que no son reproducciones, aparte y dicho como es
+  const aparteTotal = textoMetricasAparte(total, true);
+  if (aparteTotal) {
+    caja.appendChild(h('div', { clase: 'meta cifras-aparte', title: 'Impresiones: veces que la red lo enseñó (no que se reprodujo). '
+      + 'Alcance sumado: cuenta dos veces a quien vio dos publicaciones.' }, `Además: ${aparteTotal}`));
+  }
   if (r.sin_cifras) {
     caja.appendChild(h('div', { clase: 'meta' }, `${r.sin_cifras} publicación(es) sin cifras todavía: `
       + 'las subidas a mano no se pueden medir desde aquí, y TikTok tarda unas horas en darlas.'));
@@ -29858,7 +30010,7 @@ function seccionResultadosPublicar() {
     tabla.appendChild(h('div', { clase: 'fila fila-red' },
       h('b', { clase: 'nombre-red' }, NOMBRES_RED[red]),
       h('span', { clase: 'meta' }, `${pr.posts || 0} publicación(es)`),
-      h('span', { clase: 'crece' }, textoMetricas(pr) || ''),
+      h('span', { clase: 'crece' }, textoMetricas(pr, true) || ''),
       typeof seg.seguidores === 'number'
         ? h('span', { clase: 'pastilla' }, `${numeroCorto(seg.seguidores)} seguidores`)
         : (seg.error ? h('span', { clase: 'meta', title: seg.error }, 'sin seguidores') : null)));
@@ -33891,10 +34043,10 @@ function seccionInformePublicar() {
   const a = r.anterior || {};
   caja.appendChild(h('div', { clase: 'cifras-publicar' },
     ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],
-      ['comentarios', 'comentarios'], ['compartidos', 'compartidos']].map(([k, nombre]) => {
+      ['comentarios', 'comentarios'], ['compartidos', 'compartidos'], ['guardados', 'guardados']].map(([k, nombre]) => {
       const cambio = variacion(t[k], a[k]);
       return h('div', { clase: 'cifra' }, h('b', {}, typeof t[k] === 'number' ? numeroCorto(t[k]) : '—'),
-        h('span', { clase: 'meta' }, nombre),
+        h('span', { clase: 'meta' }, typeof t[k] === 'number' ? nombre + deCuantasPublicaciones(t, k) : nombre),
         cambio ? h('span', { clase: 'meta' }, `${cambio} vs. ${r.en_curso ? 'los mismos días del mes anterior' : 'mes anterior'}`) : null);
     })));
   caja.appendChild(h('div', { clase: 'meta' }, `${r.videos} vídeo(s) · ${r.dias_con_publicacion} día(s) con publicación`

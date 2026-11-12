@@ -1935,6 +1935,271 @@ def prueba_portada():
 
 
 
+def prueba_metricas_completas():
+    """metricas-completas (11-11-2026): lo que Upload-Post ya trae y no se guardaba."""
+    seccion("4d] métricas completas: impresiones aparte, seguidores nuevos, curva de TikTok")
+    from motores.publicar_uploadpost.cliente import ClienteUploadPost as C
+    # 1) el lector, con la forma CRUDA de Upload-Post (docs: post-analytics)
+    crudo = {"views": 1000, "likes": 50, "saves": 7, "reach": 800, "impressions": 2400,
+             "new_followers": 4, "profile_views": 31, "total_time_watched": 5321.4,
+             "full_video_watched_rate": 0.2, "average_time_watched": 9.5,
+             "retention": [{"second": "3", "percentage": 70}, {"second": "0", "percentage": 100},
+                           {"second": "6", "percentage": 45}, {"second": "x", "percentage": 10},
+                           "basura"],
+             "impression_sources": [{"impression_source": "Search", "percentage": 0.05},
+                                    {"impression_source": "For You", "percentage": 85}],
+             "audience_types": {"New viewers": 0.9, "Returning viewers": 0.1}}
+    c = C._cifras(crudo)
+    igual((c["vistas"], c["impresiones"], c["alcance"]), (1000, 2400, 800),
+          "las impresiones van APARTE de las vistas (no se mezclan)")
+    igual((c["nuevos_seguidores"], c["visitas_perfil"], c["tiempo_total_s"]), (4, 31, 5321.4),
+          "los seguidores que trajo, las visitas al perfil y el tiempo total visto")
+    igual(c["curva"], [[0.0, 1.0], [3.0, 0.7], [6.0, 0.45]],
+          "la curva, ordenada por segundo, en fracción y sin los puntos que no se entienden")
+    igual(c["mitad_s"], 6.0, "y en qué segundo se va la mitad")
+    # LA ESCALA SE DECIDE POR LISTA (revisión independiente, 11-11): en una
+    # lista 0-100, el 0,05 es 0,05 % (no 5 %) y el 1 del final de una curva es
+    # 1 % (antes se leía 100 % y la curva volvía a subir)
+    igual(c["fuentes"], [["For You", 0.85], ["Search", 0.0005]],
+          "de dónde vinieron las vistas: lista en 0-100, así que 0,05 es 0,05 %")
+    igual(C._detalle({"impression_sources": [{"source": "A", "percentage": 0.6},
+                                             {"source": "B", "percentage": 0.4}]})["fuentes"],
+          [["A", 0.6], ["B", 0.4]], "una lista que ya viene en fracciones se deja igual")
+    igual(C._detalle({"retention": [{"second": 0, "percentage": 100}, {"second": 5, "percentage": 40},
+                                    {"second": 10, "percentage": 1}]})["curva"],
+          [[0.0, 1.0], [5.0, 0.4], [10.0, 0.01]], "el 1 % del final de una curva no se lee como 100 %")
+    igual(C._detalle({"retention": [{"second": 0, "percentage": 100}, {"second": 0, "percentage": 90},
+                                    {"second": 2, "percentage": 50}]})["curva"],
+          [[0.0, 0.9], [2.0, 0.5]], "un segundo repetido: manda el último (sin tramos verticales)")
+    larga = C._detalle({"retention": [{"second": s, "percentage": max(0, 100 - s * 0.3)}
+                                      for s in range(201)]})
+    ok(len(larga["curva"]) <= C.TOPE_CURVA and larga["curva"][-1][0] == 200.0,
+       f"una curva larga se aligera por TODO el vídeo y conserva el final ({len(larga['curva'])} puntos)")
+    igual(larga["mitad_s"], 167.0, "y la mitad se calcula con la curva entera")
+    raros = C._numeros({"impressions": -5, "profile_views": 1e30, "new_followers": "3", "views": True})
+    igual((raros["impresiones"], raros["visitas_perfil"], raros["nuevos_seguidores"], raros["vistas"]),
+          (None, None, 3, None), "recuentos: ni negativos ni absurdos ni «true»; un número en texto sí")
+    igual(c["publico"], [["New viewers", 0.9], ["Returning viewers", 0.1]], "y qué público")
+    # servidor, 12-11: con vistas, un 0 de alcance o de tiempo visto es «no lo sé»
+    ceros = C._cifras({"views": 200, "reach": 0, "impressions": 0, "average_time_watched": 0,
+                       "average_view_percentage": 0, "total_time_watched": 0,
+                       "full_video_watched_rate": 0, "likes": 0})
+    igual([ceros[k] for k in ("alcance", "impresiones", "tiempo_medio_s", "media_vista", "tiempo_total_s")],
+          [None] * 5, "con vistas, los ceros de alcance, impresiones y tiempo visto son None")
+    igual((ceros["vista_entera"], ceros["me_gusta"]), (0.0, 0),
+          "pero «nadie lo vio hasta el final» y «0 me gusta» sí son ceros de verdad")
+    sin_vistas = C._cifras({"views": 0, "reach": 0})
+    igual(sin_vistas["alcance"], 0, "sin vistas, un alcance 0 es un cero de verdad")
+    viejas = {"vistas": 200, "alcance": 0, "tiempo_medio_s": 0, "media_vista": 0, "vista_entera": 0}
+    limpias = P.sin_ceros_imposibles(viejas)
+    igual((limpias["alcance"], limpias["tiempo_medio_s"], limpias["media_vista"], limpias["vista_entera"]),
+          (None, None, None, 0), "lo guardado antes del arreglo se lee igual de limpio")
+    igual(viejas["alcance"], 0, "y sin tocar el dict guardado")
+    suma = {"posts": 0}
+    P._suma(suma, viejas)
+    P._suma(suma, {"vistas": 100, "media_vista": 0.6, "tiempo_medio_s": 5.0})
+    P._medias(suma)
+    igual((suma.get("media_vista"), suma.get("tiempo_medio_s"), suma.get("alcance")), (0.6, 5.0, None),
+          "un 0 imposible no baja la media («0 % visto de media» en «Esta semana»)")
+    igual(C._cifras({"reach": 0, "views": None})["alcance"], None,
+          "sin vistas todavía (TikTok las completa en horas), un alcance 0 tampoco es un cero")
+    igual(P.sin_ceros_imposibles({"alcance": 0})["alcance"], None, "y lo mismo al leer lo guardado")
+    vacio = C._cifras({"views": 5})
+    igual([vacio[k] for k in ("impresiones", "curva", "fuentes", "publico", "tiempo_total_s")],
+          [None] * 5, "lo que la red no da se queda en None (nunca cero ni lista vacía)")
+    igual(C._cifras({"retention": "rara", "impression_sources": 3})["curva"], None,
+          "una forma rara no rompe nada: se deja fuera")
+    igual(P.METRICAS, ("vistas", "me_gusta", "comentarios", "compartidos", "guardados"),
+          "METRICAS no cambia (lo leen el informe, la Parrilla y el piloto)")
+    # 2) de punta a punta con el Upload-Post simulado
+    raiz = os.path.join(CARPETA, "completas")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_completas.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    try:
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_c")
+        cli.enlace_conectar("studio_c", ["tiktok", "instagram"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        info = dict(INFO, pid="completo", mp4=mp4, mp4_huella="h1")
+        ajustes = dict(P.AJUSTES_DEFECTO, perfil="studio_c")
+        P.guardar_ficha(raiz, "completo", {"textos": {"tiktok": {"descripcion": "T"},
+                                                      "instagram": {"descripcion": "I"}}})
+        P.enviar(raiz, info, ajustes, {"redes": ["tiktok", "instagram"], "modo": "ahora",
+                                       "confirmado": True}, en_hilo=False)
+        P.RESPIRO_CONSULTA_S = 0
+        for _ in range(3):
+            P.refrescar(raiz)
+        P.actualizar_metricas(raiz, ["completo"])          # TikTok aún sin cifras
+        P.actualizar_metricas(raiz, ["completo"], forzar=True)
+        envios = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}
+        tt, ig = envios["tiktok"]["metricas"], envios["instagram"]["metricas"]
+        ok(tt.get("nuevos_seguidores") and tt.get("visitas_perfil") and tt.get("tiempo_total_s"),
+           f"TikTok guarda seguidores nuevos, visitas al perfil y tiempo total: {tt}")
+        ok(len(tt.get("curva") or []) >= 5 and tt["curva"][0][1] == 1.0,
+           "y su curva de retención, empezando en el 100 %")
+        ok(tt.get("fuentes") and tt.get("publico"), "y de dónde vinieron las vistas y qué público")
+        ok(ig.get("impresiones") and ig.get("alcance") and ig.get("vistas_facebook") is not None,
+           f"Instagram guarda impresiones, alcance y lo visto en Facebook: {ig}")
+        ok(ig.get("curva") is None, "Instagram no trae curva: no se inventa")
+        res = P.resultados(raiz, [{"pid": "completo", "nombre": "Completo", "cliente": ""}], "")
+        t = res["total"]
+        igual(t["impresiones"], ig["impresiones"], "el total suma las impresiones, aparte")
+        igual(t["guardados"], (tt.get("guardados") or 0) + (ig.get("guardados") or 0),
+              "y los guardados")
+        igual(t["nuevos_seguidores"], tt["nuevos_seguidores"], "y los seguidores nuevos")
+        igual(t["alcance"], (tt.get("alcance") or 0) + (ig.get("alcance") or 0), "y el alcance (sumado)")
+        ok("curva" not in t and "fuentes" not in t, "la curva y los repartos no se suman")
+        igual(res["videos"][0]["impresiones"], t["impresiones"], "el vídeo trae sus impresiones")
+        # LA LECTURA GUARDADA (revisión independiente: antes la prueba pasaba
+        # aunque no se leyera nada). 1) una guardada MÁS VIEJA con otra curva no
+        # pisa la que hay; 2) una MÁS NUEVA sí la pone.
+        antes = dict(tt)
+        datos_sim = json.load(open(simulador, encoding="utf-8"))
+        for trabajo in datos_sim["trabajos"].values():
+            g = (trabajo.get("guardadas") or {}).get("tiktok")
+            if g:
+                g.update(al="2020-01-01T00:00:00+00:00", curva=[[0.0, 1.0], [9.0, 0.1]],
+                         mitad_s=9.0, nuevos_seguidores=999)
+        json.dump(datos_sim, open(simulador, "w", encoding="utf-8"))
+        r = P.leer_guardadas(raiz, ["completo"])
+        ok((r or {}).get("leidos", 0) > 0, f"la lectura guardada lee algo: {r}")
+        tt2 = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}["tiktok"]["metricas"]
+        igual((tt2["curva"], tt2["nuevos_seguidores"]), (antes["curva"], antes["nuevos_seguidores"]),
+              "una lectura guardada MÁS VIEJA no pisa la curva ni los seguidores nuevos")
+        datos_sim = json.load(open(simulador, encoding="utf-8"))
+        for trabajo in datos_sim["trabajos"].values():
+            g = (trabajo.get("guardadas") or {}).get("tiktok")
+            if g:
+                g.update(al="2099-01-01T00:00:00+00:00")
+        json.dump(datos_sim, open(simulador, "w", encoding="utf-8"))
+        P.leer_guardadas(raiz, ["completo"])
+        tt3 = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}["tiktok"]["metricas"]
+        igual((tt3["curva"], tt3["nuevos_seguidores"]), ([[0.0, 1.0], [9.0, 0.1]], 999),
+              "y una MÁS NUEVA sí las pone")
+        igual(tt3.get("mitad_s"), 9.0, "con su «mitad» (va junta con la curva)")
+        # una curva nueva que NUNCA baja del 50 %: la «mitad» de antes no se queda
+        datos_sim = json.load(open(simulador, encoding="utf-8"))
+        for trabajo in datos_sim["trabajos"].values():
+            g = (trabajo.get("guardadas") or {}).get("tiktok")
+            if g:
+                g.update(al="2099-02-01T00:00:00+00:00", curva=[[0.0, 1.0], [7.0, 0.6]], mitad_s=None)
+        json.dump(datos_sim, open(simulador, "w", encoding="utf-8"))
+        P.leer_guardadas(raiz, ["completo"])
+        tt4 = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}["tiktok"]["metricas"]
+        igual((tt4["curva"], tt4.get("mitad_s")), ([[0.0, 1.0], [7.0, 0.6]], None),
+              "una curva nueva que no baja del 50 % deja la «mitad» vacía (no la de antes)")
+        # 3.ª revisión: una guardada MÁS VIEJA con otra curva y su «mitad» no
+        # cuela la «mitad» bajo la curva que hay
+        datos_sim = json.load(open(simulador, encoding="utf-8"))
+        for trabajo in datos_sim["trabajos"].values():
+            g = (trabajo.get("guardadas") or {}).get("tiktok")
+            if g:
+                g.update(al="2020-01-01T00:00:00+00:00", curva=[[0.0, 1.0], [8.0, 0.4]], mitad_s=8.0)
+        json.dump(datos_sim, open(simulador, "w", encoding="utf-8"))
+        P.leer_guardadas(raiz, ["completo"])
+        tt5 = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}["tiktok"]["metricas"]
+        igual((tt5["curva"], tt5.get("mitad_s")), ([[0.0, 1.0], [7.0, 0.6]], None),
+              "una guardada más vieja no cuela su «mitad» bajo la curva que hay")
+        igual(C._detalle({"retention": [{"second": 0, "percentage": 1.0}, {"second": 5, "percentage": 1.02},
+                                        {"second": 10, "percentage": 0.4}]})["mitad_s"], 10.0,
+              "una fracción que se pasa un pelo de 1 no divide la lista entera entre 100")
+        # REVISIÓN DEL 12-11 (los 8 detalles): una lectura nueva SIN un campo no
+        # borra el que ya había, y el total sigue contándolo
+        envio_ig = next(e for e in P._leer_video(raiz, "completo")["envios"] if e["red"] == "instagram")
+        impresiones_antes = envio_ig["metricas"]["impresiones"]
+        P._apuntar_metricas(raiz, [("completo", envio_ig)], {"instagram": {"vistas": 5, "impresiones": None}})
+        ig2 = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}["instagram"]["metricas"]
+        igual(ig2["impresiones"], impresiones_antes, "una lectura sin impresiones no borra las que había")
+        res = P.resultados(raiz, [{"pid": "completo", "nombre": "Completo", "cliente": ""}], "")
+        igual((res["total"]["impresiones"], res["total"]["impresiones_posts"], res["total"]["posts"]),
+              (impresiones_antes, 1, 2), "y el total las sigue sumando, diciendo que salen de 1 de 2 publicaciones")
+    finally:
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+    seccion("4f] métricas completas: los 8 detalles de la revisión del 12-11")
+    # 1) cada total dice de cuántas publicaciones sale; lo que nadie da, sin clave
+    total = {"posts": 2}
+    P._suma(total, {"vistas": 5, "nuevos_seguidores": 3})
+    P._suma(total, {"vistas": 3})
+    P._medias(total)
+    igual((total["vistas_posts"], total["nuevos_seguidores"], total["nuevos_seguidores_posts"]), (2, 3, 1),
+          "los seguidores nuevos (solo TikTok) dicen que salen de 1 de 2 publicaciones")
+    ok("impresiones" not in total and "impresiones_posts" not in total,
+       "una cifra que ninguna red da no sale en el total (la pantalla pone «—», no 0)")
+    ok(not any(k.startswith("_") for k in total), "y no quedan cuentas internas en el total")
+    import publicar_informe as INF  # noqa: PLC0415
+    texto = INF.resumen({"nombre": "X", "nombre_mes": "noviembre", "en_curso": False, "videos": 1,
+                         "dias_con_publicacion": 1, "por_red": {}, "total": dict(total, guardados=4, guardados_posts=1),
+                         "anterior": {}, "mejores": [], "horario": {}, "palabras": {}, "seguidores": {},
+                         "sin_cifras": 0})
+    ok("Guardados: 4 (1 de 2 publicaciones)" in texto, f"el informe dice de cuántas salen los guardados: {texto!r}")
+    # 3) un reparto de enteros que suma más de 1,5 está en 0-100; uno solapado en fracciones, no
+    igual(C._detalle({"impression_sources": [{"source": "A", "percentage": 1}, {"source": "B", "percentage": 1}]})["fuentes"],
+          [["A", 0.01], ["B", 0.01]], "[1, 1] en un reparto es 1 % y 1 % (no 100 % y 100 %)")
+    igual(C._detalle({"audience_types": [{"audience_type": "Followers", "percentage": 0.6},
+                                         {"audience_type": "New viewers", "percentage": 0.8}]})["publico"],
+          [["New viewers", 0.8], ["Followers", 0.6]], "un público con grupos que se solapan, en fracciones, se deja igual")
+    # el público se llama «audience_type» en Upload-Post (docs, 12-11)
+    igual(C._detalle({"audience_types": [{"audience_type": "New viewers", "percentage": 0.881},
+                                         {"audience_type": "Returning viewers", "percentage": 0.119}]})["publico"],
+          [["New viewers", 0.881], ["Returning viewers", 0.119]], "el público con la clave de Upload-Post («audience_type»)")
+    # 4) formas que antes se perdían
+    igual([C._numero(x) for x in ("40%", "0,5", " 7 ", "abc", "", "0.881", "0,881", "7.425", "0.184",
+                                  "1,234.5", "1e3", "1_000", "- 5", "١٢")],
+          [40.0, 0.5, 7.0, None, None, 0.881, 0.881, 7.425, 0.184, 1234.5, None, None, None, None],
+          "los decimales con tres cifras («0.881», «7.425») son decimales; lo raro, None")
+    igual([C._numero(x, miles=True) for x in ("1,234", "1.234.567", "1.234,5", "0.881", "12")],
+          [1234.0, 1234567.0, 1234.5, 0.881, 12.0], "en los recuentos, «1,234» y «1.234.567» son miles")
+    igual(C._numeros({"views": "1,234", "likes": "1.500"})["vistas"], 1234, "un recuento en texto con miles")
+    texto_crudo = C._detalle({"retention": [{"second": "0", "percentage": "1.000"}, {"second": "3", "percentage": "0.750"}],
+                              "audience_types": [{"audience_type": "New viewers", "percentage": "0.881"},
+                                                 {"audience_type": "Returning viewers", "percentage": "0.119"}]})
+    igual((texto_crudo["curva"], texto_crudo["publico"]),
+          ([[0.0, 1.0], [3.0, 0.75]], [["New viewers", 0.881], ["Returning viewers", 0.119]]),
+          "la curva y el público en texto («1.000», «0.881») se leen bien")
+    igual(C._retencion({"full_video_watched_rate": "0.184", "average_time_watched": "7.425"}),
+          {"vista_entera": 0.184, "media_vista": None, "tiempo_medio_s": 7.4},
+          "la retención en texto no se pierde ni se multiplica por mil")
+    igual(C._detalle({"impression_sources": [{"source": "A", "percentage": "0.5%"},
+                                             {"source": "B", "percentage": "1%"}]})["fuentes"],
+          [["B", 0.01], ["A", 0.005]], "«0.5%» es medio por ciento, no la mitad")
+    igual(C._detalle({"video_views": 1000, "average_time_watched": 10, "total_time_watched": 10_000_000})["tiempo_total_s"],
+          10000.0, "el aviso de milisegundos también con las vistas en «video_views»")
+    igual(C._detalle({"views": "40,218", "average_time_watched": "7.4", "total_time_watched": "297,613"})["tiempo_total_s"],
+          297613.0, "«297,613» de tiempo total son miles (cuadra con vistas × medio), no 297 s")
+    igual(C._detalle({"views": 3, "average_time_watched": 99.2, "total_time_watched": "297,613"})["tiempo_total_s"],
+          297.6, "y si lo que cuadra es el decimal, el decimal")
+    igual(C._detalle({"total_time_watched": "297,613"})["tiempo_total_s"], 297613.0,
+          "sin vistas ni medio, una cifra grande con coma se lee como miles")
+    igual(C._detalle({"retention": [{"second": None, "time": 3, "percentage": 0.5},
+                                    {"second": 0, "percentage": 1.0}]})["curva"],
+          [[0.0, 1.0], [3.0, 0.5]], "un «second» vacío no tapa el «time» de al lado")
+    igual(C._detalle({"retention": [{"second": 0, "percentage": 1.0}, {"second": 0.04, "percentage": 0.99},
+                                    {"second": 1, "percentage": 0.8}]})["curva"],
+          [[0.0, 1.0], [0.04, 0.99], [1.0, 0.8]], "el segundo 0,04 ya no pisa el 100 % del segundo 0")
+    # 5) el tiempo total en segundos (docs); si llegara en milisegundos, se nota y se pasa
+    igual(C._detalle({"views": 40218, "average_time_watched": 7.4, "total_time_watched": 297613})["tiempo_total_s"],
+          297613.0, "el tiempo total del ejemplo de Upload-Post (segundos) se queda igual")
+    igual(C._detalle({"views": 40218, "average_time_watched": 7.4, "total_time_watched": 297613000})["tiempo_total_s"],
+          297613.0, "en milisegundos, cuadra mil veces por encima: se pasa a segundos")
+    # «Lo que mejor funcionó» tampoco enseña los ceros que son «no lo sé» (12-11, Y11)
+    raiz_y = os.path.join(CARPETA, "y11_mejor")
+    os.makedirs(raiz_y)
+    P.guardar_ficha(raiz_y, "y11", {"textos": {"youtube": {"descripcion": "x"}}})
+    with P._lock("y11"):
+        f = P._leer_video(raiz_y, "y11")
+        f["envios"] = [{"id": "e1", "red": "youtube", "estado": "publicado", "cuando": P._iso_lima(),
+                        "metricas": {"vistas": 31, "media_vista": 0, "tiempo_medio_s": 0, "alcance": 0}}]
+        P._escribir(P._ruta_video(raiz_y, "y11"), f)
+    mejor = P.lo_que_funciono(raiz_y, [{"pid": "y11", "nombre": "Y11", "cliente": ""}])
+    m = ((mejor.get("lista") or mejor.get("posts") or [{}])[0] or {}).get("metricas") or {}
+    igual((m.get("vistas"), m.get("media_vista"), m.get("tiempo_medio_s"), m.get("alcance")), (31, None, None, None),
+          "«Lo que mejor funcionó» no dice «0 % visto de media» ni «0 alcanzados» con vistas")
+    igual(P.lo_que_funciono(raiz_y, [{"pid": "y11", "nombre": "Y11", "cliente": ""}], por="media_vista")["posts"], [],
+          "y ordenado por «visto de media», un 0 que es «no lo sé» no ocupa un puesto")
+
 def prueba_subtitulos_youtube():
     """extras-youtube (12-11-2026): la pista de subtitulos que se sube a YouTube."""
     seccion("4e] subtítulos para YouTube: el .srt sale de la voz y se manda solo a YouTube")
@@ -2222,6 +2487,27 @@ def prueba_retencion_y_resumenes():
         igual(len(P.lo_que_funciono(raiz, videos, None, cuantos=1)["posts"]), 1, "y cuántos")
         igual(P.lo_que_funciono(raiz, videos, None, por="raro", cuantos="x", dias="y")["por"], "vistas",
               "lo que no se entiende vuelve a lo de siempre")
+        # servidor, 12-11: un Short guardado con media_vista 0 (el «no lo sé» de
+        # YouTube) no se le da a Claude como «visto de media 0 %» ni entra al
+        # ordenar por esa cifra
+        datos["envios"].append(dict(base, id="m_cero", red="youtube", estado="publicado",
+                                    cuando=P._iso_lima(hoy - dt.timedelta(days=2)),
+                                    metricas={"vistas": 300, "media_vista": 0, "tiempo_medio_s": 0,
+                                              "alcance": 0}))
+        datos["envios"].append(dict(base, id="m_bien", red="youtube", estado="publicado",
+                                    cuando=P._iso_lima(hoy - dt.timedelta(days=2)),
+                                    metricas={"vistas": 400, "media_vista": 0.68}))
+        P._escribir(P._ruta_video(raiz, "ret"), datos)
+        lq = P.lo_que_funciono(raiz, videos, None, dias=30)
+        cero = next(p for p in lq["posts"] if p["metricas"]["vistas"] == 300)
+        igual((cero["metricas"]["media_vista"], cero["metricas"]["tiempo_medio_s"], cero["metricas"]["alcance"]),
+              (None, None, None), "lo que se le da a Claude no lleva los ceros que son «no lo sé»")
+        igual([p["metricas"]["media_vista"] for p in P.lo_que_funciono(raiz, videos, None, por="media_vista")["posts"]],
+              [0.68], "y al ordenar por «visto de media» el 0 falso no entra")
+        from pasos import parrilla as PR
+        texto = PR.resumen_de_posts([cero])
+        ok("300" in texto and "0 %" not in texto and "0.0 s" not in texto,
+           f"ni sale «0 %» en el texto para Claude ({texto[:160]!r})")
     finally:
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 
@@ -2917,6 +3203,7 @@ def main():
     prueba_informe()
     prueba_titulo_completo()
     prueba_retencion_y_resumenes()
+    prueba_metricas_completas()
     prueba_subtitulos_youtube()
     prueba_perfiles()
     prueba_textos()

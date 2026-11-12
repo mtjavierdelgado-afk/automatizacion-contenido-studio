@@ -259,6 +259,45 @@ class SimuladoUploadPost:
                              "tiempo_medio_s": float(base % 20 + 3) if r == "tiktok" else None,
                              "url": f"https://{r}.example/{request_id[:10]}", "post_id": post_id,
                              "error": ""}
+                # METRICAS COMPLETAS: lo de mas, en la forma CRUDA de Upload-Post,
+                # leído con `_numeros`/`_detalle` y SIN el nulo de `_cifras`, a
+                # propósito: simula lo guardado antes del 12-11 (alcance 0 con
+                # vistas), que la pantalla tiene que seguir sin enseñar
+                crudo = {}
+                if r == "tiktok":
+                    duracion = 30
+                    crudo = {"new_followers": base // 90 + vueltas, "profile_views": base // 30,
+                             # como Upload-Post: segundos (vistas × tiempo medio) y
+                             # porcentajes en fracciones de 1 (docs, get-analytics)
+                             "views": salida[r].get("vistas"),
+                             "average_time_watched": salida[r].get("tiempo_medio_s"),
+                             "total_time_watched": float((salida[r].get("vistas") or base)
+                                                         * (salida[r].get("tiempo_medio_s") or 7)),
+                             "retention": [{"second": str(s), "percentage": 1.0 if s == 0 else
+                                            round(max(5, 100 - s * 3 - base % 7) / 100, 2)}
+                                           for s in range(0, duracion + 1, 3)],
+                             "impression_sources": [
+                                 {"impression_source": "For You", "percentage": 0.81},
+                                 {"impression_source": "Personal Profile", "percentage": 0.12},
+                                 {"impression_source": "Search", "percentage": 0.07},
+                                 # como en el servidor (12-11): sin traducir y en 0
+                                 {"impression_source": "Direct Message", "percentage": 0.0}],
+                             # la forma que dio Upload-Post en el servidor el 12-11:
+                             # claves en mayúsculas y dos tipos en 0 («no lo sé»)
+                             "audience_types": [
+                                 {"audience_type": "NON_FOLLOWER_PERCENT", "percentage": 0.97},
+                                 {"audience_type": "FOLLOWER_PERCENT", "percentage": 0.03},
+                                 {"audience_type": "NEW_VIEWER", "percentage": 0},
+                                 {"audience_type": "RETURN_VIEWER", "percentage": 0}],
+                             # TikTok da `reach: 0` aunque tenga vistas (servidor, 12-11)
+                             "reach": 0}
+                elif r == "instagram":
+                    crudo = {"impressions": base * vueltas * 2, "reach": base * vueltas,
+                             "facebook_views": base // 3}
+                lector = ClienteUploadPost
+                extra = {k: v for k, v in lector._numeros(crudo).items() if v is not None}
+                extra.update({k: v for k, v in lector._detalle(crudo).items() if v is not None})
+                salida[r].update(extra)
                 guardadas = trabajo.setdefault("guardadas", {})
                 guardadas[r] = dict(salida[r], al=dt.datetime.now(dt.timezone.utc).isoformat())
             self._escribir(datos)

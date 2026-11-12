@@ -1326,8 +1326,13 @@ def _resumen(g):
 
 def _nuevo_guion(texto, origen):
     texto = str(texto or "").strip()[:MAX_TEXTO_GUION]
-    return {"id": "g" + uuid.uuid4().hex[:10], "texto": texto, "leido": leer_guion(texto),
-            "estado": "pendiente", "creado": ahora(), "origen": origen}
+    g = {"id": "g" + uuid.uuid4().hex[:10], "texto": texto, "leido": leer_guion(texto),
+         "estado": "pendiente", "creado": ahora(), "origen": origen}
+    # el estilo con el que se pidió (un chat abierto desde un recibido): el piloto lo usa
+    estilo = str((origen or {}).get("estilo") or "")[:120] if isinstance(origen, dict) else ""
+    if estilo:
+        g["estilo"] = estilo
+    return g
 
 
 def listar(raiz, cid):

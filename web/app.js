@@ -31768,9 +31768,7 @@ function estilosParaPasarParrilla() {
   const propios = PAR.estilos.filter(x => x.cliente === PAR.cid);
   const lista = propios.length ? propios : PAR.estilos;
   if (!PAR.estiloElegido || !lista.some(x => x.id === PAR.estiloElegido)) {
-    /* el estilo elegido en el recibido del que salió el guion, si es de este proyecto */
-    const sugerido = PAR.estiloSugerido && PAR.estiloSugerido.cid === PAR.cid ? PAR.estiloSugerido.id : '';
-    PAR.estiloElegido = (lista.find(x => x.id === sugerido) || lista[0] || {}).id || '';
+    PAR.estiloElegido = (lista[0] || {}).id || '';
   }
   return lista;
 }
@@ -33977,6 +33975,7 @@ async function cargarRecibidos() {
   try {
     const q = new URLSearchParams({ filtro: filtroRecibidos(), proyecto: PAR.cid && PAR.cid !== '_sin' ? PAR.cid : '' });
     PAR.recibidos = await pedir(rutaRecibidos(`?${q}`));
+    PAR.recibidosMas = null;   // las páginas de «Ver más» eran de la lista de antes
     PAR.recibidosClave = clave;
     PAR.recibidosError = '';
   } catch (e) {
@@ -34030,7 +34029,7 @@ function seccionRecibidosParrilla() {
       h('button', { clase: 'mini', onclick: () => abrirEnviarAlStudioConfig() }, 'Ir a Configuración')));
   }
   caja.appendChild(filtrosRecibidos(datos.cuentas || {}));
-  const lista = datos.recibidos || [];
+  const lista = (datos.recibidos || []).concat((PAR.recibidosMas && PAR.recibidosMas.clave === claveRecibidos()) ? PAR.recibidosMas.lista : []);
   if (!lista.length) {
     const vacio = { proyecto: `Todavía no hay nada anexado a ${nombreProyectoParrilla() || 'este proyecto'}. Elige este proyecto en la extensión al enviar, o anéxalo desde «Sin proyecto».`,
       sin: 'No hay nada sin proyecto.', archivados: 'No hay nada archivado.' }[filtroRecibidos()];
@@ -34040,8 +34039,25 @@ function seccionRecibidosParrilla() {
   const rejilla = h('div', { clase: 'rejilla-recibidos' });
   lista.forEach(r => rejilla.appendChild(tarjetaRecibido(r)));
   caja.appendChild(rejilla);
-  if (datos.total > lista.length) caja.appendChild(h('div', { clase: 'meta' }, `Se ven los ${lista.length} más nuevos de ${datos.total}.`));
+  /* la cuenta es la de ESTE filtro (no el total de todo), y lo que no cabe se pide por páginas */
+  const enFiltro = (datos.cuentas || {})[filtroRecibidos()] ?? lista.length;
+  if (enFiltro > lista.length) {
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('span', { clase: 'meta' }, `Se ven los ${lista.length} más nuevos de ${enFiltro}.`),
+      h('button', { clase: 'mini', onclick: () => masRecibidos(lista.length) }, 'Ver más')));
+  }
   return caja;
+}
+
+async function masRecibidos(desde) {
+  const clave = claveRecibidos();
+  try {
+    const q = new URLSearchParams({ filtro: filtroRecibidos(), proyecto: PAR.cid && PAR.cid !== '_sin' ? PAR.cid : '', desde: String(desde) });
+    const r = await pedir(rutaRecibidos(`?${q}`));
+    const antes = PAR.recibidosMas && PAR.recibidosMas.clave === clave ? PAR.recibidosMas.lista : [];
+    PAR.recibidosMas = { clave, lista: antes.concat(r.recibidos || []) };
+  } catch (e) { toast(e.message, true); }
+  repintarParrillaSinPisar();
 }
 
 function filtrosRecibidos(cuentas) {
@@ -34065,15 +34081,15 @@ function filtrosRecibidos(cuentas) {
 
 /* Borrar a mano todo lo archivado de una vez (con su captura). Se pregunta antes. */
 async function borrarArchivados() {
-  const lista = ((PAR.recibidos || {}).recibidos || []).filter(x => x.archivado);
-  if (!lista.length) return;
-  if (!(await preguntarParrilla('Borrar los archivados', `¿Borrar los ${lista.length} recibidos archivados? Se borran su texto y su captura, y no se pueden recuperar.`,
+  const n = ((PAR.recibidos || {}).cuentas || {}).archivados || 0;
+  if (!n) return;
+  if (!(await preguntarParrilla('Borrar los archivados', `¿Borrar los ${n} recibidos archivados? Se borran su texto y su captura, y no se pueden recuperar.`,
     'Borrar', true))) return;
-  let fallos = 0;
-  for (const r of lista) {
-    try { await pedir(rutaRecibidos(`/${r.id}`), { method: 'DELETE' }); } catch (e) { fallos += 1; }
-  }
-  toast(fallos ? `no se han podido borrar ${fallos}` : 'archivados borrados', !!fallos);
+  /* los borra el servidor, mirando cuáles están archivados AHORA (no la lista de esta pantalla) */
+  try {
+    const r = await pedir(rutaRecibidos('/borrar-archivados'), { method: 'POST', cuerpo: {} });
+    toast(`${r.borrados} archivados borrados`);
+  } catch (e) { toast(e.message, true); }
   cargarRecibidos();
 }
 
@@ -34120,7 +34136,6 @@ async function anexarRecibido(r, cid, estilo) {
 async function guionDesdeRecibido(r) {
   const proyecto = ((PAR.proyectos || []).find(p => p.id === r.proyecto) || {}).nombre || 'este proyecto';
   const estilo = (estilosDelProyectoRecibido(r.proyecto).find(x => x.id === r.estilo) || {}).nombre || '';
-  if (r.estilo) PAR.estiloSugerido = { cid: r.proyecto, id: r.estilo };
   const pide = `Escríbeme UN guion para «${proyecto}»${estilo ? ` (el vídeo se hará con el estilo «${estilo}»)` : ''}, `
     + 'inspirado en esta referencia pero sin copiarla: con el formato de la Parrilla (escenas con su voz y «PARA EL ENCARGO» '
     + 'con la duración y el formato), listo para guardarlo en la Parrilla y pasarlo al piloto automático.';
@@ -34162,54 +34177,106 @@ function tarjetaRecibido(r) {
         h('button', { clase: 'mini fantasma peligro', onclick: () => borrarRecibido(r) }, 'Borrar'))));
 }
 
+/* «Usar en el chat» y «✍️ Escribir el guion». Un clic a la vez (un doble clic
+   pasaba la referencia dos veces). */
 async function usarRecibidoEnChat(r, peticion, enviarYa) {
-  /* el chat es el de SU proyecto: si está anexado a otro, se cambia antes. Cambiar de
-     proyecto vacía el borrador del chat: si hay algo a medio escribir, se pregunta. */
-  const cambiar = r.proyecto && r.proyecto !== PAR.cid && (PAR.proyectos || []).some(p => p.id === r.proyecto);
-  if (cambiar) {
-    const hayBorrador = String(PAR.chatTexto || '').trim() || PAR.chatCapturas.length;
+  if (PAR.recibidoEnviando) return;
+  PAR.recibidoEnviando = true;
+  try { await usarRecibidoEnChatYa(r, peticion, enviarYa); } finally { PAR.recibidoEnviando = false; }
+}
+
+async function capturaDeRecibido(r) {
+  const respuesta = await fetch(rutaRecibidos(`/${r.id}/captura`), { credentials: 'same-origin' });
+  if (!respuesta.ok) throw new Error(`HTTP ${respuesta.status}`);
+  const blob = await respuesta.blob();
+  const tipo = /^image\/(png|jpeg|webp)$/.test(blob.type) ? blob.type : 'image/jpeg';
+  const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[tipo];
+  return new window.File([blob], `recibido-${r.id}.${ext}`, { type: tipo });
+}
+
+async function usarRecibidoEnChatYa(r, peticion, enviarYa) {
+  /* el chat es el de SU proyecto. Si es de uno que esta pantalla no tiene (con clave
+     sin abrir, o la lista aún sin cargar), NO se manda al chat del que esté abierto:
+     el guion acabaría en la Parrilla de otro cliente (revisión del 12-11-2026). */
+  if (r.proyecto && r.proyecto !== PAR.cid) {
+    if (!(PAR.proyectos || []).some(p => p.id === r.proyecto)) {
+      toast('este recibido es de un proyecto que no está abierto aquí: ábrelo primero en el menú de proyectos de Automatizar', true);
+      return;
+    }
     const destino = ((PAR.proyectos || []).find(p => p.id === r.proyecto) || {}).nombre || r.proyecto;
-    if (hayBorrador && !(await preguntarParrilla('Cambiar de proyecto',
-      `Tienes un mensaje a medio escribir en el chat de ${nombreProyectoParrilla() || 'este proyecto'}. Al pasar a ${destino} se descarta. ¿Seguir?`,
-      'Seguir'))) return;
+    const borrador = String(PAR.chatTexto || '').trim();
+    const capturas = (PAR.chatCapturas || []).length;
+    if (borrador || capturas) {
+      /* cambiar de proyecto vacía el chat: lo escrito se copia antes al portapapeles */
+      if (!(await preguntarParrilla('Cambiar de proyecto',
+        `Tienes un mensaje a medio escribir en el chat de ${nombreProyectoParrilla() || 'este proyecto'}. Para pasar a ${destino} `
+        + `lo copio en el portapapeles (pégalo cuando vuelvas)${capturas ? '; las capturas adjuntas no se pueden copiar' : ''}. ¿Seguir?`,
+        'Seguir'))) return;
+      let copiado = false;
+      try { if (borrador) { await navigator.clipboard.writeText(borrador); copiado = true; } } catch (e) { copiado = false; }
+      if (borrador && !copiado) {
+        toast('no he podido copiarlo al portapapeles: no cambio de proyecto para no perderlo', true);
+        return;
+      }
+    }
     elegirProyectoParrilla(r.proyecto);
   }
-  /* «Escribir el guion» se manda en una conversación NUEVA y solo con la referencia y
-     el pedido: lo que tuvieras a medio escribir se aparta y vuelve después */
-  const apartado = enviarYa ? { texto: PAR.chatTexto, capturas: PAR.chatCapturas } : null;
-  if (enviarYa) { PAR.chatTexto = ''; PAR.chatCapturas = []; PAR.chat = null; }
+  if (enviarYa) { await escribirGuionDeRecibido(r, peticion); return; }
+  /* «Usar en el chat»: se añade a lo que estés escribiendo y lo revisas tú */
   const maximo = (PAR.chatsInfo && PAR.chatsInfo.max_capturas) || 6;
   if (r.captura && PAR.chatCapturas.length < maximo) {
-    try {
-      const respuesta = await fetch(rutaRecibidos(`/${r.id}/captura`), { credentials: 'same-origin' });
-      if (!respuesta.ok) throw new Error(`HTTP ${respuesta.status}`);
-      const blob = await respuesta.blob();
-      const tipo = /^image\/(png|jpeg|webp)$/.test(blob.type) ? blob.type : 'image/jpeg';
-      const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[tipo];
-      PAR.chatCapturas = PAR.chatCapturas.concat([new window.File([blob], `recibido-${r.id}.${ext}`, { type: tipo })]).slice(0, maximo);
-    } catch (e) { toast(`la captura no se ha podido pasar (${e.message}); va el texto`, true); }
+    try { PAR.chatCapturas = PAR.chatCapturas.concat([await capturaDeRecibido(r)]).slice(0, maximo); }
+    catch (e) { toast(`la captura no se ha podido pasar (${e.message}); va el texto`, true); }
   }
   const actual = String(PAR.chatTexto || '').trim();
-  const mensaje = peticion ? `${r.texto_chat}\n\n${peticion}` : r.texto_chat;
-  PAR.chatTexto = actual ? `${actual}\n\n${mensaje}` : mensaje;
+  PAR.chatTexto = actual ? `${actual}\n\n${r.texto_chat}` : r.texto_chat;
+  marcarRecibidoUsado(r);
+  irASeccionParrilla('chat');
+  toast('pasado al chat: revísalo y pulsa Enviar');
+}
+
+async function marcarRecibidoUsado(r) {
   try {
     await pedir(rutaRecibidos(`/${r.id}/usado`), { method: 'POST', cuerpo: {} });
     r.usado = r.usado || new Date().toISOString();
   } catch (e) { /* si no se marca, no pasa nada */ }
-  irASeccionParrilla('chat');
-  if (enviarYa) {
-    toast('pedido a Claude: cuando conteste, «Guardar en la Parrilla» y luego «🤖 Hacer el vídeo completo»');
-    await enviarChatParrilla();
-    /* tu borrador vuelve SUMADO a lo que haya en el campo: si el pedido no salió (un
-       fallo, otro envío en curso) o escribiste mientras se subía, nada se pierde */
-    if (apartado && (String(apartado.texto || '').trim() || apartado.capturas.length)) {
-      const queda = String(PAR.chatTexto || '').trim();
-      const tuyo = String(apartado.texto || '').trim();
-      PAR.chatTexto = [tuyo, queda].filter(Boolean).join('\n\n');
-      PAR.chatCapturas = apartado.capturas.concat(PAR.chatCapturas);
-      pintarModulo();
+}
+
+/* «✍️ Escribir el guion»: una conversación NUEVA de su proyecto, creada CON su estilo
+   (los guiones que se guarden desde ella llevan ese estilo y el piloto lo usa, aunque
+   recargues la página), y un mensaje solo con la referencia y el pedido: sin
+   «Buscar en internet» ni vidIQ (gastaría créditos sin preguntar y, con texto de una
+   página ajena, internet es justo lo que no conviene). Lo que tuvieras a medio
+   escribir en el chat no se toca. */
+async function escribirGuionDeRecibido(r, peticion) {
+  if (PAR.chatEnviando) { toast('el chat está enviando otro mensaje: espera a que salga y vuelve a pulsar', true); return; }
+  PAR.chatEnviando = true;
+  try {
+    const datos = new FormData();
+    datos.append('texto', `${r.texto_chat}\n\n${peticion}`);
+    datos.append('web', '0');
+    datos.append('resultados', '0');
+    datos.append('modelo', PAR.chatModelo || 'opus');
+    if (r.captura) {
+      try { const c = await capturaDeRecibido(r); datos.append('capturas', c, c.name); }
+      catch (e) { toast(`la captura no se ha podido pasar (${e.message}); va el texto`, true); }
     }
-  } else toast('pasado al chat: revísalo y pulsa Enviar');
+    const estilo = estilosDelProyectoRecibido(PAR.cid).some(x => x.id === r.estilo) ? r.estilo : '';
+    const chat = await pedir(rutaChatParrilla(), { method: 'POST', cuerpo: { modelo: PAR.chatModelo || 'opus', estilo } });
+    PAR.chat = await pedir(rutaChatParrilla(`/${encodeURIComponent(chat.id)}/mensajes`), { method: 'POST', cuerpo: datos });
+    PAR.chatScroll = null;
+    if (!(PAR.chats || []).some(c => c.id === PAR.chat.id)) {
+      PAR.chats = [{ id: PAR.chat.id, titulo: PAR.chat.titulo, tocada: PAR.chat.tocada }].concat(PAR.chats || []);
+    }
+    marcarRecibidoUsado(r);
+    toast('pedido a Claude: cuando conteste, «Guardar en la Parrilla» y luego «🤖 Hacer el vídeo completo»');
+  } catch (e) {
+    toast(`no se ha podido pedir el guion: ${e.message}`, true);
+  } finally {
+    PAR.chatEnviando = false;
+  }
+  irASeccionParrilla('chat');
+  vigilarChatParrilla();
 }
 
 async function borrarRecibido(r) {

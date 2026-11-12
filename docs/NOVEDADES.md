@@ -21,6 +21,7 @@ vídeos, estilos, claves y contraseña no se tocan.
   escrito leyendo la voz, «El reparto y los sitios» (en el Encargo) lo avisa
   antes de generar, con **Volver a repartir desde las líneas** (no paga ninguna
   imagen; las hechas se quedan hasta que pidas rehacerlas).
+
 **Se acabó el «broken PNG file» que cortaba vídeos (11 de noviembre)**
 - Cada imagen se guarda entera o no se guarda: nadie (el revisor, el montaje,
   otra tanda) puede leer una a medio escribir, que es lo que cortaba el piloto.
@@ -28,6 +29,7 @@ vídeos, estilos, claves y contraseña no se tocan.
   se vuelve a producir en lugar de cortar el vídeo. «Reintentar» ya no tropieza
   con ella.
 - Si OpenAI devuelve una imagen que no se puede leer, no se guarda y se dice.
+
 **La lista del piloto, ordenada y sin vídeos ya publicados (11 de noviembre)**
 - «En marcha y en cola» sale siempre arriba, y cada grupo va en el orden en que
   lanzaste los vídeos.
@@ -38,6 +40,7 @@ vídeos, estilos, claves y contraseña no se tocan.
   decidir: dice «esperando: sigue solo» y continúa en cuanto eso termina. En
   esa parada ya no sale «Seguir igualmente» (no hacía nada distinto de
   «Reintentar»).
+
 **La sesión de Claude ya no se cae por llamadas a la vez, y los menús no saltan (11 de noviembre)**
 - Dos llamadas a Claude con la misma cuenta ya no arrancan en el mismo segundo:
   la segunda espera unos segundos a que la primera renueve el acceso. Arrancar
@@ -246,6 +249,7 @@ vídeos, estilos, claves y contraseña no se tocan.
   (con la membresía) y marca lo que se explica, **sin volver a repartir los
   sitios**; los planos que cambien se ofrecen para rehacer con su precio. La «foto explicada» (cotas y flechas
   dibujadas sobre una foto) llega en una segunda vuelta.
+
 **La Parrilla dice el estado de cada escena, y sin cámara no hay encuadre al azar (3 de noviembre)**
 - En «Un espacio que cambia» con «Imágenes: guion», el guion de la Parrilla
   puede traer **«Estado: antes»** (o `despues`…) en cada ESCENA y una sección
@@ -257,6 +261,7 @@ vídeos, estilos, claves y contraseña no se tocan.
   ya no recibe un encuadre sorteado (un retrato, unas manos que metían a una
   persona aunque la línea dijera «No people in the shot»): la línea dice el
   plano. Los vídeos ya creados no cambian.
+
 **Recorrido y clase con varios ambientes; los primeros planos con su cámara (3 de noviembre)**
 - **«Recorrido» y «Clase» ya son varios ambientes de un mismo lugar** (la
   cocina, la sala y el dormitorio de una casa; la pizarra y la mesa de un
@@ -345,6 +350,7 @@ vídeos, estilos, claves y contraseña no se tocan.
   (porque la voz se regrabó después), al deshacer la insertada (S004B) el Studio
   le ponía a S004 el dibujo de S004B. Ya no: el dibujo de una imagen insertada
   solo puede ser de una imagen insertada, y S004 recupera el suyo.
+
 **Reglas del negocio y del estilo, separadas a la vista (28 de octubre)**
 - **En la pestaña «📏 Reglas» de un estilo hay dos cajas**, cada una con su
   título y su color: «Del negocio · todo el proyecto» (coral, se cambian en la
@@ -477,6 +483,7 @@ vídeos, estilos, claves y contraseña no se tocan.
   lo quitaba, y por eso el aviso volvía en cada versión.
 - Ahora cuenta lo que ya está dibujado: con las imágenes al día, montar dice
   «gratis», y si falta alguna pide solo esa.
+
 **Insertar una imagen nueva dentro de otra (26 de octubre)**
 - En **Imágenes**, «Ajustar esta imagen» → **«Insertar una imagen aquí…»**:
   pulsas la palabra de la frase donde empieza la imagen nueva y escribes en
@@ -614,6 +621,7 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   tu línea. Tampoco sale una composición «abstracta»: la línea dice lo que se ve.
 - **El precio cuenta una imagen por línea** del guion visual (antes podía
   prometer otra cifra: «8 imágenes» y salían 6).
+
 **El negocio de cada estilo (21 de octubre)**
 - **Lo de EstadoPlay ya no está escrito a mano en el Studio.** Los servicios
   (consolas, simuladores, realidad virtual, karaoke) y cómo se reconocen, las
@@ -1255,6 +1263,7 @@ estar, nada nuevo se paga y las preguntas dicen lo mismo de siempre.
 - **Usar como portada** la pinta a tamaño real y la deja como la imagen que
   se manda a las redes, igual que si la hubieras subido. El diseño se guarda
   para retocarlo otro día.
+
 **Tus notas del 19 de octubre**
 - **«Crear» abre siempre «Tus proyectos»**, desde la barra de arriba y desde
   la tarjeta de Inicio, aunque hubieras dejado un vídeo abierto. El «atrás»

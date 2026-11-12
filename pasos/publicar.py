@@ -310,6 +310,7 @@ AJUSTES_DEFECTO = {
     "emojis": "",                       # ninguno/sobrio/normal/vistoso; "" = el de fábrica
     "emojis_marca": "",                 # los emojis propios del proyecto (su firma)
     "avisar_youtube": True,             # notificar a los suscriptores
+    "subtitulos_youtube": True,         # subir la pista de subtitulos (extras-youtube)
     "privacidad_youtube": "public",
     "facebook_pagina": "",              # id de la pagina, si hay mas de una
     "cuentas": {},                      # lo ultimo que dijo Upload-Post del perfil
@@ -366,7 +367,7 @@ def _validar_ajustes(cambios):
             except RD.ErrorRedes as fallo:
                 raise ErrorPublicar(str(fallo)) from None
             continue
-        if k in ("marcar_ia", "avisar_youtube", "usar_emojis"):
+        if k in ("marcar_ia", "avisar_youtube", "usar_emojis", "subtitulos_youtube"):
             if not isinstance(v, bool):
                 raise ErrorPublicar(f"«{k}» es sí o no")
             limpios[k] = v
@@ -725,14 +726,28 @@ def es_short(info, datos_video=None):
     return encaje_de("youtube", info, datos_video).get("tipo") == "Short"
 
 
+def _origen_escenas(escenas):
+    """El segundo del plan en que EMPIEZA el MP4: el render arranca en el `t_in`
+    del primer plano (`p8_render`: desfase = escenas[0]["t_in"]), asi que todo
+    lo que se cuente en el reloj del plan se le resta para caer en el del video."""
+    for e in escenas or []:
+        if isinstance(e, dict):
+            try:
+                return max(0.0, float(e.get("t_in") or 0.0))
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
 def capitulos_base(escenas, duracion):
     """Los capítulos posibles de YouTube: un bloque del guion, uno. Se juntan los
     de menos de 10 s (YouTube los pide así) y hacen falta tres o no hay."""
     puntos = []
+    origen = _origen_escenas(escenas)
     for e in escenas or []:
         bloque = str(((e.get("origen") or {}).get("bloque")) or "")
         try:
-            t = float(e.get("t_in") or 0)
+            t = float(e.get("t_in") or 0) - origen
         except (TypeError, ValueError):
             continue
         if not puntos or (bloque and bloque != puntos[-1]["bloque"]):
@@ -2492,6 +2507,125 @@ def guardar_ficha(raiz, pid, cambios):
     return ficha
 
 
+# ------------------------------------------------- los subtitulos de YouTube
+#
+# EXTRAS DE YOUTUBE (rama `extras-youtube`, 12-11-2026). Upload-Post sube a
+# YouTube una pista de subtitulos (`youtube_subtitle_file_N`, con su idioma
+# BCP-47): YouTube la ensena con «CC», la usa para buscar y, con ella, sus
+# traducciones automaticas salen mucho mejor que desde el audio. Se sacan de lo
+# MISMO que dibuja el subtitulo del video (`subtitulos.de_escena`: las marcas
+# de tiempo de cada palabra de la voz y lo corregido a mano), asi que dicen lo
+# que se oye y cuando se oye. Un plano cuyo texto y marcas no cuadran no da
+# subtitulo (la misma guarda que el video): mejor un hueco que uno desplazado.
+
+#: El nombre que YouTube ensena para cada idioma de la pista
+NOMBRES_IDIOMA_SUBTITULOS = {"es": "Español", "en": "English", "pt": "Português",
+                             "fr": "Français", "it": "Italiano", "de": "Deutsch"}
+#: Lo minimo que dura un subtitulo en pantalla, en segundos
+MIN_SUBTITULO_S = 0.6
+
+
+def _tiempo_srt(segundos):
+    ms = int(round(max(0.0, float(segundos)) * 1000))
+    h, ms = divmod(ms, 3600000)
+    m, ms = divmod(ms, 60000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def idioma_bcp47(idioma):
+    """«es», «es-PE», «español» -> «es»; vacio -> «es» (el idioma del Estudio);
+    lo que no se entiende -> «»: sin pista, mejor que una con la etiqueta mal."""
+    crudo = str(idioma or "").split("(")[0].strip().lower().replace("_", "-")
+    if not crudo:
+        return "es"
+    if crudo in ("español", "espanol", "castellano", "spanish"):
+        return "es"
+    if crudo in ("english", "inglés", "ingles"):
+        return "en"
+    if crudo in ("português", "portugues", "portuguese"):
+        return "pt"
+    base = crudo.split("-")[0]
+    return base if re.fullmatch(r"[a-z]{2,3}", base or "") else ""
+
+
+def subtitulos_srt(escenas, idioma=None, escritos=None, duracion=None):
+    """El fichero .srt del video, de sus escenas montadas. -> str («» si nada).
+
+    `escenas`: las del plan (con `t_in`, `narracion` y `marcas`), en el reloj
+    del video. `escritos`: {id_escena: (texto, ancla)} con lo corregido a mano
+    (lo mismo que usa el subtitulo dibujado). Los subtitulos van en orden, sin
+    pisarse y sin pasar de `duracion`."""
+    import subtitulos as SUB
+    piezas = []
+    origen = _origen_escenas(escenas)
+    for e in escenas or []:
+        if not isinstance(e, dict):
+            continue
+        try:
+            t_in = float(e.get("t_in") or 0.0) - origen
+        except (TypeError, ValueError):
+            continue
+        texto, ancla = (escritos or {}).get(str(e.get("id")), ("", ""))
+        try:
+            trozos = SUB.de_escena(e, idioma=idioma, texto=texto or "", ancla=ancla or "")
+        except Exception:                                   # noqa: BLE001
+            trozos = []
+        for t in trozos:
+            # «-->» es la flecha del propio formato: dentro del texto lo rompe
+            linea = " ".join(str(t.get("texto") or "").replace("-->", "→").split())
+            if not linea:
+                continue
+            piezas.append([t_in + float(t["desde"]), t_in + float(t["hasta"]), linea])
+    piezas.sort(key=lambda x: x[0])
+    tope = float(duracion) if duracion else None
+    salida = []
+    for i, (desde, hasta, linea) in enumerate(piezas):
+        siguiente = piezas[i + 1][0] if i + 1 < len(piezas) else None
+        hasta = max(hasta, desde + MIN_SUBTITULO_S)
+        if siguiente is not None:
+            hasta = min(hasta, siguiente)
+        if tope is not None:
+            if desde >= tope:
+                break
+            hasta = min(hasta, tope)
+        if hasta <= desde:
+            continue
+        salida.append(f"{len(salida) + 1}\n{_tiempo_srt(desde)} --> {_tiempo_srt(hasta)}\n{linea}\n")
+    return "\n".join(salida)
+
+
+def ruta_subtitulos(raiz, pid, lote):
+    """El .srt que se manda con un lote (uno por lote: dos envios no se pisan)."""
+    _ruta_video(raiz, pid)                         # valida el pid
+    nombre = f"{pid}_{re.sub(r'[^a-z0-9]', '', str(lote).lower())[:16]}.srt"
+    return os.path.join(carpeta(raiz), "subtitulos", nombre)
+
+
+def campos_subtitulos(raiz, info, redes, lote, ajustes):
+    """({campos}, [ficheros]) de la pista de subtitulos de YouTube, o ({}, [])
+    si no va YouTube, el proyecto la apago o el video no da subtitulos."""
+    if "youtube" not in (redes or []) or not (ajustes or {}).get("subtitulos_youtube", True):
+        return {}, []
+    idioma = idioma_bcp47((info or {}).get("idioma"))
+    if not idioma:
+        return {}, []
+    # se calcula AQUI, al mandar, y no al abrir cada pantalla de Publicar
+    srt = (info or {}).get("srt")
+    srt = str((srt() if callable(srt) else srt) or "").strip()
+    if not srt:
+        return {}, []
+    ruta = ruta_subtitulos(raiz, info["pid"], lote)
+    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    temporal = f"{ruta}.{uuid.uuid4().hex[:6]}.tmp"
+    with open(temporal, "w", encoding="utf-8") as fh:
+        fh.write(srt + "\n")
+    os.replace(temporal, ruta)
+    return ({"youtube_subtitle_language_0": idioma,
+             "youtube_subtitle_name_0": NOMBRES_IDIOMA_SUBTITULOS.get(idioma, idioma)},
+            [("youtube_subtitle_file_0", ruta)])
+
+
 # ------------------------------------------------------------------ la portada
 #
 # Lo que cada red acepta (docs de Upload-Post, 16-10-2026):
@@ -2772,7 +2906,8 @@ def _envio_publico_campos(e):
     return {k: e.get(k) for k in (
         "id", "red", "estado", "modo", "cuando", "creado", "actualizado", "url",
         "error", "lote", "perfil", "mp4_huella", "nota", "programado_para", "sin_hora",
-        "metricas", "enviado", "texto_publicado", "recortado", "tipo", "portada")}
+        "metricas", "enviado", "texto_publicado", "recortado", "tipo", "portada",
+        "subtitulos")}
 
 
 def redes_visibles(ajustes, datos=None):
@@ -3160,11 +3295,23 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
         _log("portada_fallo", {"video": pid, "error": str(fallo)[:300]})
         extra, ficheros = {}, []
     campos.update(extra)
+    # LOS SUBTITULOS DE YOUTUBE (extras-youtube): nunca dejan un envio colgado
+    try:
+        extra_sub, ficheros_sub = campos_subtitulos(raiz, info, redes, lote, ajustes)
+    except Exception as fallo:                              # noqa: BLE001
+        _log("subtitulos_fallo", {"video": pid, "error": str(fallo)[:300]})
+        extra_sub, ficheros_sub = {}, []
+    campos.update(extra_sub)
+    ficheros = list(ficheros) + ficheros_sub
+    # «Subtítulos: …» en la ficha solo cuando Upload-Post se queda el envio
+    # (en `aplicar`); un reintento empieza sin ella
+    nombre_sub = extra_sub.get("youtube_subtitle_name_0") if ficheros_sub else ""
     # LO QUE SE MANDÓ, tal cual (solo los textos; la clave nunca va en `campos`):
     # «Ver lo que se mandó» en la ficha y la comparación con lo publicado
     enviado = textos_enviados(campos)
     _actualizar_lote(raiz, pid, lote, lambda e: e.update(
         enviado={k: v for k, v in enviado.items() if _campo_de_red(k, e["red"])},
+        subtitulos="",
         # QUÉ PORTADA SE MANDÓ (portadas-2): «» = ninguna, la puso la red
         portada=portada_mandada(e["red"], extra, ficheros)))
     cuando = envios[0]["cuando"] if envios[0].get("modo") == "programado" else None
@@ -3203,6 +3350,10 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
             for _campo, ruta in ficheros:
                 if os.path.basename(ruta).startswith(f"{pid}_fotograma_"):
                     _quitar(ruta)
+            # el .srt ya viajo dentro de la peticion (tambien la programada):
+            # un reintento lo vuelve a escribir
+            for _campo, ruta in ficheros_sub:
+                _quitar(ruta)
         resultados = r.get("resultados") or {}
 
         def aplicar(e):
@@ -3221,6 +3372,8 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
                 e["error"] = ""
             if r.get("avisos"):
                 e["nota"] = "; ".join(r["avisos"])[:500]
+            if nombre_sub and e["red"] == "youtube" and e["estado"] != "fallido":
+                e["subtitulos"] = nombre_sub
         _actualizar_lote(raiz, pid, lote, aplicar)
 
     if en_hilo:

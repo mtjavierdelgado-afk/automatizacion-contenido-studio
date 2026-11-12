@@ -29076,6 +29076,8 @@ function filasEnvioFicha(e) {
     // QUÉ PORTADA SE MANDÓ (portadas-2): los envíos de antes no lo saben
     e.portada != null ? h('span', { clase: 'meta portada-envio' },
       `Portada: ${e.portada || 'ninguna (la puso la red)'}`) : null,
+    // extras-youtube: la pista de subtítulos que se subió con el vídeo
+    e.subtitulos ? h('span', { clase: 'meta subtitulos-envio' }, `Subtítulos: ${e.subtitulos}`) : null,
     botonComprobarPublicar(e),
     e.metricas && textoMetricas(e.metricas)
       ? h('span', { clase: 'metricas-envio', title: `actualizado ${fechaCorta(e.metricas.al)}` },
@@ -29566,9 +29568,12 @@ function loFijoProyectoPublicar(p) {
   fijos.appendChild(ajusteEmojisPublicar(p, a, guardar));
   const casillas = h('div', { clase: 'fila' });
   [['marcar_ia', 'Marcar como hecho con IA'],
-    ['avisar_youtube', 'Avisar a los suscriptores de YouTube']]
+    ['avisar_youtube', 'Avisar a los suscriptores de YouTube'],
+    // extras-youtube: encendido de fábrica (un proyecto sin el ajuste guardado lo sube)
+    ['subtitulos_youtube', 'Subir los subtítulos a YouTube (YouTube los traduce a otros idiomas)']]
     .forEach(([campo, texto]) => casillas.appendChild(h('label', { clase: 'casilla-red' },
-      h('input', { type: 'checkbox', checked: !!a[campo], onchange: ev => guardar(campo, ev.target.checked) }),
+      h('input', { type: 'checkbox', checked: campo === 'subtitulos_youtube' ? a[campo] !== false : !!a[campo],
+        datos: { ajuste: campo }, onchange: ev => guardar(campo, ev.target.checked) }),
       ` ${texto}`)));
   casillas.appendChild(h('span', { clase: 'meta' }, 'La confirmación antes de enviar no se puede quitar.'));
   fijos.appendChild(casillas);

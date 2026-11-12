@@ -200,10 +200,17 @@ class Falso(http.server.BaseHTTPRequestHandler):
             run = Falso.ejecuciones.get(url.path.rsplit("/", 1)[-1])
             if not run:
                 return self._json(404, {})
+            if run.get("_caida"):                       # Apify no contesta a las preguntas
+                return self._json(500, {"error": {"message": "fallo interno"}})
             if run["_preguntas"] > 0:
                 run["_preguntas"] -= 1
+                run["usageTotalUsd"] = round((run.get("usageTotalUsd") or 0) + 0.0003, 4)
                 if not run["_preguntas"]:
                     run["status"] = run["_final"]
+                    if run.get("_cobrado") is not None:
+                        run["usageTotalUsd"] = run["_cobrado"]
+                    else:
+                        run.pop("usageTotalUsd", None)
             return self._json(200, {"data": {k: v for k, v in run.items() if not k.startswith("_")}})
         if url.path.startswith("/apify/datasets/"):     # los resultados
             if self._portador() != TOKEN_APIFY:
@@ -226,8 +233,11 @@ class Falso(http.server.BaseHTTPRequestHandler):
             run = Falso.ejecuciones.get(url.path.split("/")[3])
             if not run:
                 return self._json(404, {})
-            run.update(status="ABORTED", usageTotalUsd=run.get("_al_abortar", 0.0021), _preguntas=0)
             Falso.abortadas.append(url.path.split("/")[3])
+            if run.get("_caida"):
+                return self._json(500, {"error": {"message": "fallo interno"}})
+            # como Apify: el aborto contesta ABORTING, con lo cobrado hasta ese instante
+            run.update(status="ABORTING", usageTotalUsd=0.0021, _preguntas=0)
             return self._json(200, {"data": {k: v for k, v in run.items() if not k.startswith("_")}})
         if url.path.startswith("/apify/"):
             if self._portador() != TOKEN_APIFY:
@@ -236,15 +246,19 @@ class Falso(http.server.BaseHTTPRequestHandler):
             if usuario == "sincredito":
                 return self._json(402, {"error": {"message": "Not enough credit"}})
             # LA EJECUCIÓN (rama apify-coste-real): estado, dataset y lo cobrado
-            final, preguntas, cobrado = "SUCCEEDED", 0, 0.0042
+            final, preguntas, cobrado, caida = "SUCCEEDED", 0, 0.0042, False
             if usuario == "tarda":                 # el actor se pasa de su tiempo
                 final, cobrado = "TIMED-OUT", 0.0031
             elif usuario == "lenta":               # aún corre: tarda dos preguntas
                 preguntas = 2
             elif usuario == "nunca":               # no acaba nunca: se aborta
                 preguntas = 10 ** 6
+            elif usuario == "caida":               # arranca y Apify deja de contestar
+                preguntas, caida = 10 ** 6, True
             elif usuario == "sincifra":            # Apify no dice lo cobrado
                 cobrado = None
+            elif usuario == "cero":                # dice 0 con resultados (precio por resultado fuera)
+                cobrado = 0.0
             if usuario == "camposraros":       # el actor cambió de nombres: cobra y no se entiende nada
                 items = [{"loQueSea": i} for i in range(6)]
                 cobrado = 0.0055
@@ -260,10 +274,12 @@ class Falso(http.server.BaseHTTPRequestHandler):
                           "likesCount": 7, "commentsCount": 1}]
             rid = f"run{len(Falso.ejecuciones) + 1}"
             Falso.resultados[f"ds_{rid}"] = items
+            # como Apify: arranca RUNNING con casi nada cobrado; lo final, al terminar
             run = {"id": rid, "status": "RUNNING" if preguntas else final, "defaultDatasetId": f"ds_{rid}",
-                   "_final": final, "_preguntas": preguntas}
-            if cobrado is not None:
-                run["usageTotalUsd"] = cobrado
+                   "_final": final, "_preguntas": preguntas, "_cobrado": cobrado, "_caida": caida,
+                   "usageTotalUsd": 0.0001 if preguntas else cobrado}
+            if run["usageTotalUsd"] is None:
+                run.pop("usageTotalUsd")
             Falso.ejecuciones[rid] = run
             return self._json(201, {"data": {k: v for k, v in run.items() if not k.startswith("_")}})
         return self._json(404, {})
@@ -338,9 +354,15 @@ def prueba_fuentes(bases):
     f = lanza(F.apify, TOKEN_APIFY, "tiktok", "tarda", 4, bases=bases)
     ok(f is not None and f.cobrado and f.coste_usd == 0.0031, "el actor se pasó de su tiempo: cobrado, con su cifra")
     antes = len(Falso.abortadas)
-    f = lanza(F.apify, TOKEN_APIFY, "tiktok", "nunca", 4, bases=bases, plazo=3)
-    ok(f is not None and f.cobrado and len(Falso.abortadas) == antes + 1 and f.coste_usd == 0.0021,
-       "si no acaba en el plazo, se ABORTA (para que no siga cobrando) y se apunta lo cobrado")
+    f = lanza(F.apify, TOKEN_APIFY, "tiktok", "nunca", 4, bases=bases, plazo=8)
+    ok(f is not None and f.cobrado and len(Falso.abortadas) == antes + 1 and f.coste_usd is None,
+       "si no acaba en el plazo, se ABORTA y la cifra a medias no vale: se queda la reserva")
+    f = lanza(F.apify, TOKEN_APIFY, "tiktok", "caida", 4, bases=bases, plazo=8)
+    ok(f is not None and f.cobrado and f.coste_usd is None,
+       "si Apify deja de contestar, NUNCA se apunta 0: se queda la reserva (revisión del 12-11)")
+    r = F.apify(TOKEN_APIFY, "tiktok", "cero", 4, bases=bases)
+    igual((r["coste_usd"], r["coste_real"]), (F.coste_apify("tiktok", 4), False),
+          "un 0 con resultados no se cree: la tabla de siempre")
     ok("TOKENDEPRUEBA" not in json.dumps([v[1] for v in Falso.vistas]),
        "el token nunca va en las direcciones (va en la cabecera)")
 

@@ -410,16 +410,34 @@ def coste_apify(red, resultados):
 TERMINADOS_APIFY = ("SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED")
 #: Cuánto espera Apify cada vez que se le pregunta (su máximo es 60 s).
 ESPERA_APIFY_S = 60
+#: Por debajo de esta parte de la tabla, la cifra de Apify no se da por buena
+#: (la tabla es el precio MÁS CARO del rango: lo real suele estar entre la mitad
+#: y el total; un cuarto o menos es que el campo no trae el precio por resultado)
+MINIMO_FIABLE_APIFY = 0.25
 
 
-def _cobrado_apify(run):
+def _cobrado_apify(run, red=None, resultados=0):
     """Lo que la ejecución ha cobrado de verdad (`usageTotalUsd`: «lo que pagas»,
-    también los eventos de un actor de pago por evento), o None si no lo dice."""
-    valor = (run or {}).get("usageTotalUsd")
+    también los eventos de un actor de pago por evento), o None si no se puede
+    fiar uno de la cifra (y entonces manda la reserva o la tabla).
+
+    SOLO DE UNA EJECUCIÓN TERMINADA (revisión del 12-11): mientras corre (o se
+    está abortando) la cifra es una foto que aún va a crecer; apuntarla devolvía
+    la reserva y el tope dejaba de ver un gasto que seguía corriendo. Y una cifra
+    de 0, o muy por debajo de la tabla con resultados (en algunos actores de
+    pago por resultado ese precio puede no entrar en el campo), tampoco se toma."""
+    run = run or {}
+    if str(run.get("status") or "") not in TERMINADOS_APIFY:
+        return None
     try:
-        return round(float(valor), 4) if valor is not None else None
+        valor = round(float(run.get("usageTotalUsd")), 4)
     except (TypeError, ValueError):
         return None
+    if valor <= 0:
+        return None
+    if red and resultados and valor < MINIMO_FIABLE_APIFY * coste_apify(red, resultados):
+        return None
+    return valor
 
 
 def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_usd=None):
@@ -467,10 +485,10 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
     rid = urllib.parse.quote(str(run["id"]), safe="")
     # ESPERAR A QUE ACABE: Apify espera hasta 60 s por pregunta
     while str(run.get("status") or "") not in TERMINADOS_APIFY and time.monotonic() < limite:
-        espera = int(min(ESPERA_APIFY_S, max(1, limite - time.monotonic())))
+        espera = int(min(ESPERA_APIFY_S, max(1, limite - time.monotonic() - 5)))
         antes = time.monotonic()
         try:
-            codigo, datos = _pedir(f"{BASE_APIFY}/actor-runs/{rid}?waitForFinish={espera}", plazo=espera + 15,
+            codigo, datos = _pedir(f"{BASE_APIFY}/actor-runs/{rid}?waitForFinish={espera}", plazo=espera + 5,
                                    claves=(token,), bases=bases, cabeceras_extra=auth)
         except ErrorLectura:
             codigo, datos = 0, None
@@ -487,6 +505,7 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
                 run = datos["data"]
         except ErrorLectura:
             pass
+        # sin terminar, la cifra no vale: se queda la reserva (`_cobrado_apify`)
         raise ErrorLectura("Apify ha tardado demasiado: prueba con menos vídeos", "red", cobrado=True,
                            coste_usd=_cobrado_apify(run))
     cobrado = _cobrado_apify(run)
@@ -504,6 +523,7 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
     if codigo >= 400:
         raise ErrorLectura(f"Apify no ha dado los resultados ({codigo})", "red", cobrado=True, coste_usd=cobrado)
     items = datos if isinstance(datos, list) else []
+    cobrado = _cobrado_apify(run, red, len(items))
     salida = leer_items_apify(red, usuario, items)
     if not salida["videos"]:
         raise ErrorLectura(f"no se ha encontrado ningún vídeo público de «{usuario}» en {red} "

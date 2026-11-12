@@ -52,6 +52,7 @@ lo que debe sellarse, y "dependencias" el mapa escena -> assets usados.
 """
 import difflib
 import hashlib
+import io
 import json
 import math
 import os
@@ -1250,7 +1251,23 @@ def _asignar_cartas(escenas, p, texto=""):
     return cartas
 
 
-def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=()):
+def _lineas_del_catalogo(catalogo):
+    """El sitio y la gente de cada linea visual, si el catalogo se repartio desde
+    ellas (rama gv-sitios). -> {texto de la linea: {set, personajes}}; {} si no.
+
+    Un catalogo de antes de la rama (o de un video en modo voz) no trae
+    'desde_lineas', y entonces nada de esto aplica: sus planos se arman como
+    siempre y ninguna imagen ya pagada cambia de prompt."""
+    if not (catalogo or {}).get("desde_lineas"):
+        return {}
+    salida = {}
+    for linea in catalogo.get("lineas") or []:
+        if isinstance(linea, dict) and str(linea.get("visual") or "").strip():
+            salida.setdefault(catalogo_visual._clave_linea(linea["visual"]), linea)
+    return salida
+
+
+def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=(), por_lineas=True):
     """La camara y la gente de cada linea del guion visual (rama guion-visual).
 
     La camara de la linea va LITERAL como encuadre (el SHOT TYPE del prompt) y
@@ -1264,6 +1281,9 @@ def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=()):
     metia a una persona en primer plano aunque la linea dijera «No people in
     the shot». Una carta forzada a mano en ese plano (`forzadas`) se respeta."""
     reparto = (catalogo or {}).get("reparto") or {}
+    # con un espacio fijo o un tipo de relato puestos DESPUES de repartir desde
+    # las lineas, manda el sitio fijado: `por_lineas` llega en False
+    por_linea = _lineas_del_catalogo(catalogo) if por_lineas else {}
     for escena in escenas:
         linea = escena.get("linea_gv")
         if not linea:
@@ -1284,6 +1304,23 @@ def _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=False, forzadas=()):
             # del tramo sale de la frase de la voz, que en modo guion no manda;
             # con ella aparecia una persona en planos que nadie la pedia.
             escena["personajes"] = []
+        # REPARTIDO DESDE LAS LINEAS (rama gv-sitios): el sitio de este plano es
+        # el que el catalogo le dio a SU linea (o ninguno, si la linea describe
+        # un lugar que no es ningun sitio), no el del tramo de voz; y si la
+        # linea no dice quien sale, sale quien el catalogo ato a ella. Sin
+        # 'desde_lineas' no se entra aqui y el plano es el de siempre.
+        propia = por_linea.get(catalogo_visual._clave_linea(linea.get("visual")))
+        # un mapa o un grafico copia su imagen: ni sitio ni gente (como siempre)
+        if propia is not None and not escena.get("componente"):
+            sitio = propia.get("set")
+            escena["set"] = sitio if sitio in (catalogo.get("sets") or {}) else None
+            # la gente de la linea manda; si ninguna esta en el reparto de ahora
+            # (una linea escrita con el reparto de antes), la que el catalogo
+            # ato a esa linea
+            if not escena["personajes"]:
+                escena["personajes"] = [q for q in (propia.get("personajes") or [])
+                                        if q in reparto]
+            escena["linea_manda"] = True
 
 
 def _repartir_zoom(escenas, modo="ilustracion", servicios=None, dominio=None):
@@ -1454,7 +1491,13 @@ def planificar(proyecto, params, inventario=None, replantear=False,
             sin_sorteo = False
         forzadas = {e["id"] for e in escenas
                     if _ajustes_unidad(p, f"escena:{e['id']}").get("carta")} if sin_sorteo else set()
-        _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=sin_sorteo, forzadas=forzadas)
+        try:
+            fijado = bool(catalogo_visual.normalizar_espacio_fijo(p.get("espacio_fijo")))
+        except ValueError:
+            fijado = False
+        fijado = fijado or tipo_relato.activo(tipo_relato.resolver(p))
+        _aplicar_lineas_gv(escenas, catalogo, sin_sorteo=sin_sorteo, forzadas=forzadas,
+                           por_lineas=not fijado)
     modo = modo_de(p["estilo"])
     # EL TIPO DE RELATO (rama tipo-de-relato). Solo con un modo EXPLICITO que
     # edita: sin el, `relato_edita` es False y ningun plano cambia.
@@ -1559,6 +1602,11 @@ def planificar(proyecto, params, inventario=None, replantear=False,
         escena["luz"] = (beat.get("luz")
                          or (catalogo["sets"].get(escena["set"]) or {}).get("luz")
                          or catalogo.get("luz_por_defecto", ""))
+        if escena.get("linea_manda"):
+            # la luz es la del sitio de SU linea (rama gv-sitios): la del tramo
+            # es la de otro sitio, y «must not drift» la imponia
+            escena["luz"] = ((catalogo["sets"].get(escena["set"]) or {}).get("luz", "")
+                             if escena.get("set") else catalogo.get("luz_por_defecto", ""))
         # LA ACCION DEL TRAMO, ESCRITA EN EL PLANO. Ya viajaba dentro del
         # prompt, pero disuelta: quien lo lee despues --el agente que dirige los
         # planos-- no puede sacarla de ahi. Escrita aparte, se puede decir «esto
@@ -2318,6 +2366,9 @@ def _prompt_visual(escena, beat, catalogo, modo="ilustracion"):
         base = _con_narracion(redactado, escena)
         return (f"{base} SHOT TYPE, and this is not optional: "
                 f"{escena['encuadre']}." if _con_encuadre(escena) else base)
+    if escena.get("linea_manda") and escena.get("linea_gv") \
+            and not escena.get("abstracta") and not escena.get("componente"):
+        return _prompt_de_linea(escena, beat, catalogo, modo)
     # EN MODO GUION EL PROMPT DEL BEAT NO ENTRA (rama guion-visual-2): lo escribe
     # el catalogo desde la VOZ del tramo, y delante de la linea visual le decia
     # al dibujante lo que la voz cuenta. Sin linea, como siempre.
@@ -2413,6 +2464,32 @@ def _prompt_visual(escena, beat, catalogo, modo="ilustracion"):
         # que es la misma regla que ya rige la guia de estilo.
         base = (f"{base} SHOT TYPE, and this is not optional: "
                 f"{escena['encuadre']}.")
+    return base
+
+
+def _prompt_de_linea(escena, beat, catalogo, modo="ilustracion"):
+    """El plano de un video repartido DESDE SUS LINEAS (rama gv-sitios). -> str
+
+    La linea va PRIMERO y entera: es lo que se ve. Detras, el sitio que el
+    catalogo le dio a esa linea (o ninguno), quien sale con su hoja, la
+    expresion y el encuadre. Antes el sitio del tramo de voz iba delante y
+    ganaba: en ZV01 un backstage obligatorio delante de «el rostro serio del
+    artista en una azotea»."""
+    linea = " ".join(str(escena.get("direccion")
+                         or (escena.get("linea_gv") or {}).get("visual") or "").split())
+    base = linea
+    spec_set = (catalogo.get("sets") or {}).get(escena.get("set")) or {}
+    sitio = spec_set.get("prompt") or spec_set.get("descripcion")
+    if sitio:
+        base = _unir(base, f"Where it happens: {sitio}")
+    if escena.get("personajes"):
+        base = _unir(base, "With " + _citar_reparto(escena["personajes"], catalogo)
+                     + ", " + _expresion(_tono_de(escena, beat), modo))
+    if escena.get("primer_termino"):
+        base = _unir(base, "With " + _sujeto(escena["primer_termino"], catalogo)
+                     + " large and close in the immediate foreground")
+    if _con_encuadre(escena):
+        base = f"{base} SHOT TYPE, and this is not optional: {escena['encuadre']}."
     return base
 
 
@@ -3820,6 +3897,34 @@ def calidad_de_ficha(ficha, tamano="apaisado", ruta=None):
     return deducida
 
 
+def _sana_o_apartada(ruta, nombre, banco=None):
+    """Si la imagen que ya hay en `ruta` se puede usar. -> bool (rama png-seguro)
+
+    Una rota (una copia a medias de antes del arreglo) no se conserva:
+    conservarla era cortar la tanda o el montaje cada vez que alguien la leia
+    («broken PNG file»), y «Reintentar» volvia a tropezar con ella.
+
+    PRIMERO SE RECUPERA GRATIS: la ficha de al lado dice con que firma se
+    dibujo, y si el banco tiene esa imagen sana es LA MISMA que se pago (no una
+    nueva con el prompt de hoy). Solo si no esta se borra, y entonces el plano
+    cuenta como no hecho: se produce en una tanda normal, y en una dirigida a
+    otras unidades se queda pendiente (no se paga sin pedirlo)."""
+    if medios.imagen_sana(ruta):
+        return True
+    ficha = medios.leer_json(os.path.splitext(ruta)[0] + ".json", {}) or {}
+    firma = str(ficha.get("firma") or "") if isinstance(ficha, dict) else ""
+    guardada = os.path.join(banco, f"{firma}.png") if (banco and firma) else ""
+    if guardada and os.path.exists(guardada) and medios.imagen_sana(guardada):
+        print(f"[assets] {nombre}: la imagen {ruta} estaba rota; recuperada del banco "
+              f"(la misma, sin pagar)", flush=True)
+        medios.copiar(guardada, ruta)
+        return True
+    print(f"[assets] {nombre}: la imagen {ruta} esta rota y no esta en el banco; "
+          f"se vuelve a producir", flush=True)
+    medios.borrar(ruta)
+    return False
+
+
 def _producir_imagen(nombre, prompt, referencias, destino, p, rehacer=False,
                      tamano=None):
     """Arte adoptado -> cache -> API. Devuelve como se resolvio y el coste.
@@ -3852,10 +3957,25 @@ def _producir_imagen(nombre, prompt, referencias, destino, p, rehacer=False,
     # la adoptada por firma y la de la cache SI son de esta calidad (la calidad
     # esta en la firma); la del modo «adoptar», que casa solo por nombre, no.
     if not rehacer:
+        # UNA IMAGEN ROTA EN EL BANCO NO SE REPARTE (rama png-seguro, 11-11):
+        # una copia a medias de antes del arreglo se quedaba en el banco, que
+        # comparten todos los proyectos, y cada plano con esa firma la heredaba
+        # y cortaba el video («broken PNG file»). Rota, se aparta y se dibuja
+        # de nuevo: es una imagen que el plano necesita y que no estaba.
+        if previa and not medios.imagen_sana(previa):
+            print(f"[assets] {nombre}: la imagen guardada {previa} esta rota; "
+                  f"se dibuja de nuevo", flush=True)
+            if os.path.abspath(previa) == os.path.abspath(cacheada):
+                medios.borrar(cacheada)
+            previa = None
         if previa:
             medios.copiar(previa, destino)
             return {"origen": "adoptada", "firma": firma, "coste": 0.0,
                     "fuente": previa, "calidad": p["calidad"]}
+        if os.path.exists(cacheada) and not medios.imagen_sana(cacheada):
+            print(f"[assets] {nombre}: la imagen del banco {cacheada} esta rota; "
+                  f"se aparta y se dibuja de nuevo", flush=True)
+            medios.borrar(cacheada)
         if os.path.exists(cacheada):
             medios.copiar(cacheada, destino)
             return {"origen": "cache", "firma": firma, "coste": 0.0,
@@ -3870,10 +3990,19 @@ def _producir_imagen(nombre, prompt, referencias, destino, p, rehacer=False,
         # falta la clave); dentro de un hilo eso no lo captura nadie y el paso
         # se quedaria colgado en 'ejecutando' sin explicacion
         raise RuntimeError(f"el motor de imagen aborto: {fallo}") from fallo
-    os.makedirs(os.path.dirname(destino), exist_ok=True)
-    with open(destino, "wb") as fh:
-        fh.write(png)
-    medios.copiar(destino, cacheada)
+    # LO QUE LLEGA SE COMPRUEBA ANTES DE GUARDARLO (rama png-seguro): una
+    # imagen rota no entra ni en el plano ni en el banco, donde la heredaria
+    # cualquier otro video. Ya se ha pagado: se dice, y el plano se puede
+    # volver a pedir sin que la rota lo estorbe.
+    if not medios.bytes_de_imagen_sanos(png):
+        raise RuntimeError(
+            f"{nombre}: OpenAI ha devuelto una imagen que no se puede leer "
+            f"({len(png)} bytes). No se ha guardado; vuelve a pedir este plano.")
+    # PRIMERO AL BANCO, que no lo sirve nadie (revision de png-seguro): si
+    # colocar el plano falla (en Windows, abierto por la pantalla), lo pagado
+    # ya esta a salvo y la siguiente pasada lo coge de ahi sin pagar
+    medios.escribir_bytes(cacheada, png)
+    medios.copiar(cacheada, destino)
     return {"origen": "generada", "firma": firma, "coste": meta["coste"],
             "segundos": meta["segundos"], "calidad": p["calidad"]}
 
@@ -4158,7 +4287,8 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                 guardada_previa = medios.leer_json(ficha_json, {}) or {}
                 hecho = bool(guardada_previa) and not guardada_previa.get("png")
             else:
-                hecho = os.path.exists(destino)
+                hecho = os.path.exists(destino) and _sana_o_apartada(
+                    destino, sid, p.get("banco_imagenes"))
             # UNA IMAGEN QUE YA EXISTE SE QUEDA. Solo se rehace si alguien la
             # ha pedido -- por su unidad, o con el «rehacer» de la pantalla.
             #
@@ -4769,8 +4899,10 @@ def _lamina_estilo(rutas, destino):
         x = (indice % columnas) * ancho + (ancho - copia.width) // 2
         y = (indice // columnas) * alto + (alto - copia.height) // 2
         hoja.paste(copia, (x, y))
-    os.makedirs(os.path.dirname(destino), exist_ok=True)
-    hoja.save(destino, "PNG")
+    # entera o nada (rama png-seguro): varios planos la piden a la vez
+    salida = io.BytesIO()
+    hoja.save(salida, "PNG")
+    medios.escribir_bytes(destino, salida.getvalue())
     return destino
 
 
@@ -4805,7 +4937,8 @@ def _referencias_estilo(p, cache, escena=None):
         # lamina, y la cache la reconstruye sola
         firma = hashlib.sha1("|".join(sorted(rutas)).encode("utf-8")).hexdigest()[:12]
         destino = os.path.join(cache, f"lamina_estilo_{firma}.png")
-        if not os.path.exists(destino):
+        # rota de una pasada de antes: se rehace (gratis, se monta aqui)
+        if not (os.path.exists(destino) and medios.imagen_sana(destino)):
             destino = _lamina_estilo(rutas, destino)
         if destino and os.path.exists(destino):
             return [{"papel": "lamina", "ruta": imagen.normalizar(destino, cache),
@@ -5467,7 +5600,9 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
                (indice + 1, len(pendientes)))
         if ficha["tipo"] == "reparto":
             destino = os.path.join(dirs["reparto"], f"{ficha['nombre']}.png")
-            if pedido(uid) or not os.path.exists(destino):
+            if pedido(uid) or not (os.path.exists(destino)
+                                   and _sana_o_apartada(destino, ficha["nombre"],
+                                                        p.get("banco_imagenes"))):
                 prompt = _prompt_reparto(ficha, p["estilo"])
                 # a una hoja de personaje le tocan los ejes de personas: la
                 # cara y los cuerpos, que es lo que esa hoja tiene que fijar

@@ -269,7 +269,7 @@ def sistema():
         "para revisarlo, y ayudale a reescribirlo para que encaje con el sistema "
         "siguiendo la plantilla de esa guia (tu no puedes guardarlo: devuelvele el "
         "texto para que lo pegue). Lo que ha cambiado en el sistema esta en "
-        "docs/NOVEDADES.md, y las notas de mejoras pendientes que ha dejado la "
+        "docs/NOVEDADES.md (y lo mas reciente, en docs/novedades/), y las notas de mejoras pendientes que ha dejado la "
         "persona estan en _sistema/notas.json dentro de la carpeta de proyectos. "
         "Si la pregunta trae IMAGENES ADJUNTAS, abre cada una con Read antes de "
         "contestar y tenlas en cuenta.")
@@ -345,9 +345,21 @@ def documentos(raiz=None):
         ruta = os.path.join(raiz, *relativo.split("/"))
         try:
             with open(ruta, "r", encoding="utf-8") as fh:
-                salida.append((relativo, fh.read()))
+                texto = fh.read()
         except OSError:
             continue
+        if relativo == "docs/NOVEDADES.md":
+            # con lo que cada rama apunta en docs/novedades/, en su sitio: lo
+            # mismo que enseña Configuracion (rama ramas-sin-choques, 05-11)
+            try:
+                try:
+                    from . import novedades as _novedades  # noqa: PLC0415
+                except ImportError:  # con la carpeta pasos en sys.path
+                    import novedades as _novedades  # noqa: PLC0415
+                texto = _novedades.juntar(texto, [t for _n, t in _novedades.fragmentos(raiz)])
+            except Exception:  # noqa: BLE001 -- sin la carpeta, el fichero de siempre
+                pass
+        salida.append((relativo, texto))
     return salida
 
 

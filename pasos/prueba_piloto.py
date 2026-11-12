@@ -153,6 +153,95 @@ def probar_fichero_roto(raiz):
     igual(P.al_arrancar(raiz), 0, "al arrancar con el fichero roto no se toca nada")
 
 
+def probar_la_lista(raiz_padre):
+    """Rama piloto-lista (11-11-2026): lo que ya salió sale solo de la lista, y
+    una parada por «tiene algo en marcha» se retoma sola cuando acaba."""
+    print("\n  LA LISTA: LO QUE YA SALIÓ Y LO QUE ESPERABA (app.py)")
+    try:
+        import app as servidor                                    # noqa: PLC0415
+    except ImportError as fallo:
+        print(f"      (omitida: falta {fallo.name} en este entorno; en el servidor sí corre)")
+        return
+    from nucleo import Estado, Proyecto                           # noqa: PLC0415
+    base = os.path.join(raiz_padre, "lista")
+    os.makedirs(base)
+    servidor.fijar_raiz_proyectos(base)
+    PUB = servidor._publicar()
+    pid = Proyecto.crear(base, "y12 cuatro cambios").id
+    Estado(servidor.contexto(pid).proyecto)
+    ok(not servidor._video_salio(pid), "un vídeo sin nada en Publicar no ha salido")
+    PUB.marcar_copiado(base, pid, "tiktok")
+    ok(servidor._video_salio(pid), "copiar sus textos para publicar a mano cuenta como salido")
+    ok("tiktok" in (PUB._leer_video(base, pid).get("copiado") or {}),
+       "y se apunta en su ficha de Publicar, por red")
+    otro = Proyecto.crear(base, "y13 entrada").id
+    Estado(servidor.contexto(otro).proyecto)
+    ficha = PUB._leer_video(base, otro)
+    for estado, sale in (("espera_ok", False), ("fallido", False), ("programado", True),
+                         ("publicado", True), ("a_mano", True)):
+        ficha["envios"] = [{"id": "e1", "red": "youtube", "estado": estado}]
+        PUB._escribir(PUB._ruta_video(base, otro), ficha)
+        igual(servidor._video_salio(otro), sale, f"un envío «{estado}» {'sí' if sale else 'no'} cuenta como salido")
+    ficha["envios"] = [{"id": "e1", "red": "youtube", "estado": "comprobar"}]
+    PUB._escribir(PUB._ruta_video(base, otro), ficha)
+    ok(not servidor._video_salio(otro), "uno «comprobar» (subida cortada, hay que mirarlo) NO cuenta")
+    ficha["envios"] = [{"id": "e1", "red": "youtube", "estado": "publicado"}]
+    PUB._escribir(PUB._ruta_video(base, otro), ficha)
+    v = P.encolar(base, {"cid": "c1", "gid": "gl1", "estilo": "e1"})
+    P.cambiar(base, v["id"], estado="listo", pid=otro)
+    igual(servidor._piloto_para_pantalla(P.leer(base, v["id"])).get("salio"), True,
+          "la pantalla recibe «salio» de un vídeo listo y publicado")
+    P.cambiar(base, v["id"], estado="error")
+    ok("salio" not in servidor._piloto_para_pantalla(P.leer(base, v["id"])),
+       "uno con error no se aparta aunque esté publicado (sigue necesitándote)")
+    P.cambiar(base, v["id"], estado="listo")
+    w = P.encolar(base, {"cid": "c1", "gid": "gl2", "estilo": "e1"})
+    P.cambiar(base, w["id"], estado="trabajando", pid=pid)
+    ok("salio" not in servidor._piloto_para_pantalla(P.leer(base, w["id"])),
+       "uno trabajando no se mira (no hace falta leer Publicar cada dos segundos)")
+    # la parada por «ocupado» se retoma sola; las demás no
+    libre = Proyecto.crear(base, "y14 sin publicar").id
+    Estado(servidor.contexto(libre).proyecto)
+    P.cambiar(base, w["id"], estado="parado", tipo_parada="ocupado", porque="tiene algo en marcha",
+              pid=libre)
+    x = P.encolar(base, {"cid": "c1", "gid": "gl3", "estilo": "e1"})
+    P.cambiar(base, x["id"], estado="parado", tipo_parada="tope", pid=pid, porque="el tope")
+    real = servidor._piloto_ocupado
+    try:
+        servidor._piloto_ocupado = lambda _pid: False
+        servidor._piloto_retomar_ocupados(P, base)
+        igual(P.leer(base, w["id"])["estado"], "parado",
+              "una parada de antes de un reinicio NO se retoma sola (la decide una persona)")
+        ok(servidor._piloto_para_pantalla(P.leer(base, w["id"])).get("espera_sola") is False,
+           "y la pantalla no dice «sigue solo»")
+        servidor._PILOTO_ESPERAS.add(w["id"])          # como si se hubiera parado aquí
+        servidor._PILOTO_ESPERAS.add(x["id"])
+        ok(servidor._piloto_para_pantalla(P.leer(base, w["id"])).get("espera_sola") is True,
+           "una de este proceso sí dice «sigue solo»")
+        servidor._piloto_ocupado = lambda _pid: True
+        servidor._piloto_retomar_ocupados(P, base)
+        igual(P.leer(base, w["id"])["estado"], "parado", "mientras el vídeo sigue ocupado, espera")
+        servidor._piloto_ocupado = lambda _pid: False
+        servidor._piloto_retomar_ocupados(P, base)
+        igual(P.leer(base, w["id"])["estado"], "en_cola",
+              "en cuanto termina lo que tenía en marcha, vuelve solo a la cola")
+        ok("retomado solo" in P.leer(base, w["id"])["mensaje"], "y lo dice")
+        igual(P.leer(base, x["id"])["estado"], "parado",
+              "una parada por el tope NO se retoma sola (la decide el dueño)")
+        igual(P.preparar_reintento(base, x["id"], solo_si_tipo="ocupado"), None,
+              "y retomar «solo si sigue ocupado» no toca una parada por otra cosa")
+        y = P.encolar(base, {"cid": "c1", "gid": "gl4", "estilo": "e1"})
+        P.cambiar(base, y["id"], estado="parado", tipo_parada="ocupado", pid=otro)
+        servidor._PILOTO_ESPERAS.add(y["id"])
+        servidor._piloto_retomar_ocupados(P, base)
+        igual(P.leer(base, y["id"])["estado"], "parado",
+              "uno que ya salió en Publicar no se retoma (no se vuelve a montar ni a escribir)")
+    finally:
+        servidor._piloto_ocupado = real
+    ok(not servidor._piloto_ocupado(pid), "un vídeo sin trabajos no está ocupado")
+    ok(servidor._piloto_ocupado("no_existe_este_video"), "uno que no existe se da por ocupado (no se retoma)")
+
+
 def main():
     raiz = tempfile.mkdtemp(prefix="prueba_piloto_")
     try:
@@ -160,6 +249,7 @@ def main():
         probar_ajustes(raiz)
         probar_cola(raiz)
         probar_fichero_roto(raiz)
+        probar_la_lista(raiz)
     finally:
         shutil.rmtree(raiz, ignore_errors=True)
     print(f"\n  {_ok} comprobaciones bien, {len(_fallos)} fallos")

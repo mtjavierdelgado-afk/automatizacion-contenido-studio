@@ -10691,7 +10691,13 @@ def video_en_otro_idioma(navegador, datos):
     bloques = (c_guion.get("params") or {}).get("bloques") or {}
     ok(bloques and all(str(t).startswith("EN:") for t in bloques.values()),
        f"el guion de la copia está traducido bloque a bloque ({len(bloques)})")
-    ok(c_guion.get("estado") == "listo", f"y el guion no pide reescribirse ({c_guion.get('estado')})")
+    # el guion de la copia queda COMO EL DEL ORIGEN: la traducción entra como
+    # corrección a mano y no lo deja obsoleto (si el origen ya lo estaba por
+    # los escenarios de antes, la copia lo hereda tal cual)
+    _r, o_guion = api.get(f"/api/proyectos/{pid}/pasos/guion")
+    ok(c_guion.get("estado") == o_guion.get("estado"),
+       f"y el guion no pide reescribirse por traducirlo ({c_guion.get('estado')}, "
+       f"el origen {o_guion.get('estado')})")
     r, c_voz = api.get(f"/api/proyectos/{copia}/pasos/voz")
     ok((c_voz.get("params") or {}).get("idioma") == "en" and c_voz.get("estado") == "listo",
        f"la voz se ha grabado en inglés ({c_voz.get('estado')})")

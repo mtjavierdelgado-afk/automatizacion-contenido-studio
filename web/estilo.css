@@ -5869,5 +5869,5 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 /* publicar-ok-envios: el «OK» del día y la hora, y su confirmación */
 .ok-cuando-publicar { align-self: flex-end; min-width: 48px; font-weight: 600; }
 .cuando-confirmado { color: var(--ok); margin-top: 4px; }
-.cuando-confirmado.vacio { color: var(--aviso); }
+.cuando-confirmado.sin-hora { color: var(--aviso); }
 @media (max-width: 640px) { .ok-cuando-publicar { min-height: 44px; min-width: 56px; } }

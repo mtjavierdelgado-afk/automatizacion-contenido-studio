@@ -4528,7 +4528,7 @@ def publicar_en_redes(navegador, datos):
     # LA FICHA EN SEIS PASOS (rediseno-publicar): el carril y su barra de acción
     pasos = pg.p.locator(".pasos-publicar .paso-carril b").all_inner_texts()
     # «Envíos» solo sale cuando el vídeo ya tiene algún envío (publicar-ok-envios, 12-11)
-    sin_envios = not ficha.get("envios")
+    sin_envios = not any(e.get("estado") != "cancelado" for e in ficha.get("envios", []))
     ok([x.split(". ", 1)[-1] for x in pasos] == ["Redes", "Textos", "SEO", "Portada", "Cuándo"]
        + ([] if sin_envios else ["Envíos"]),
        f"la ficha es un carril de pasos, sin «Envíos» mientras no se haya mandado nada ({pasos})")

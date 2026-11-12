@@ -102,7 +102,8 @@ def publicar_ok_y_envios(navegador, datos):
         campo = pg.p.locator('input[type="datetime-local"][data-foco="cuando"]').first
         campo.fill("")
         pg.pulsar(".ok-cuando-publicar")
-        ok(pg.esperar(".cuando-confirmado.vacio", "Elige el día", 5), "OK con el campo vacío pide elegir la hora")
+        ok(pg.esperar(".cuando-confirmado.sin-hora", "se queda la de antes", 5),
+           "OK con el campo vacío pide elegir la hora y dice que se queda la de antes")
         campo = pg.p.locator('input[type="datetime-local"][data-foco="cuando"]').first
         campo.fill(otro)
         pg.pulsar(".ok-cuando-publicar")

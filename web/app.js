@@ -28364,8 +28364,9 @@ function lineaCuandoConfirmado(f) {
   const c = PUB.cuandoConfirmado;
   if (!c || c.pid !== PUB.pid || Date.now() > c.hasta) return null;
   if (c.vacio) {
-    return h('div', { clase: 'meta cuando-confirmado vacio', role: 'status' },
-      'Elige el día y la hora primero.');
+    const antes = PUB.cuandoEnvio ? ` Mientras, se queda la de antes: ${cuandoLegible(PUB.cuandoEnvio)}.` : '';
+    return h('div', { clase: 'meta cuando-confirmado sin-hora', role: 'status' },
+      `Elige el día y la hora primero.${antes}`);
   }
   if (c.valor !== PUB.cuandoEnvio) return null;
   return h('div', { clase: 'meta cuando-confirmado', role: 'status' },

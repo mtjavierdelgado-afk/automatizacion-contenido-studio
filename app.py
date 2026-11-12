@@ -21028,7 +21028,9 @@ def _info_para_publicar(ctx):
         "capitulos_base": P.capitulos_base(plan.get("escenas") or [], duracion),
         # extras-youtube: la pista de subtitulos, de lo mismo que se dibuja
         "idioma": str(plan.get("idioma") or ""),
-        "srt": _srt_para_publicar(ctx, plan, duracion),
+        # PEREZOSO: solo lo pide el envio (campos_subtitulos); las ~25 rutas
+        # que leen esta info no pagan el calculo
+        "srt": lambda: _srt_para_publicar(ctx, plan, duracion),
     }
 
 

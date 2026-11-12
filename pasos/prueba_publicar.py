@@ -1968,7 +1968,19 @@ def prueba_subtitulos_youtube():
         b.split("\n")[1].split(" --> ")[1] <= "00:00:04,000"
         for b in corto.split("\n\n") if b.strip()), "nada pasa del final del vídeo")
     igual([P.idioma_bcp47(x) for x in ("es", "es-PE", "Español", "en_US", "", "??")],
-          ["es", "es", "es", "en", "es", "es"], "el idioma, en el código que pide YouTube")
+          ["es", "es", "es", "en", "es", ""], "el idioma, en el código que pide YouTube")
+    # (revisión 1, ALTO) el MP4 EMPIEZA en el t_in del primer plano: todo va en
+    # el reloj del vídeo, no en el del plan
+    tarde = [escena(1, 0.35, "Hola, esto es una prueba de subtítulos."),
+             escena(2, 3.35, "Segundo plano con otra frase corta.")]
+    srt_tarde = P.subtitulos_srt(tarde, idioma="es", duracion=10)
+    igual(srt_tarde, srt, "con el primer plano en 0,35 s, el .srt sale igual (el vídeo empieza ahí)")
+    def capitulo(i, t, bloque):
+        return {"id": i, "t_in": t, "narracion": f"frase {i}", "origen": {"bloque": bloque}}
+    caps = P.capitulos_base([capitulo(1, 0.35, "a"), capitulo(2, 20.85, "b"), capitulo(3, 40.85, "c")], 60)
+    igual([c["t"] for c in caps], [0, 20, 40], "y los capítulos, en el mismo reloj")
+    flecha = P.subtitulos_srt([escena(1, 0.0, "de A --> B")], idioma="es")
+    igual(flecha.count("-->"), 1, "una «-->» dentro del texto no rompe el .srt (sale «→»)")
     # campos y fichero
     raiz = os.path.join(CARPETA, "subtitulos")
     os.makedirs(raiz)
@@ -1984,6 +1996,15 @@ def prueba_subtitulos_youtube():
           ({}, []), "con el ajuste apagado tampoco")
     igual(P.campos_subtitulos(raiz, dict(info, srt=""), ["youtube"], "lote4", dict(P.AJUSTES_DEFECTO)),
           ({}, []), "ni si el vídeo no da subtítulos")
+    igual(P.campos_subtitulos(raiz, dict(info, idioma="klingon??"), ["youtube"], "lote5",
+                              dict(P.AJUSTES_DEFECTO)), ({}, []),
+          "ni con un idioma que no se entiende (mejor sin pista que con la etiqueta mal)")
+    pedidos = []
+    perezoso = dict(info, srt=lambda: pedidos.append(1) or srt)
+    P.campos_subtitulos(raiz, perezoso, ["tiktok"], "lote6", dict(P.AJUSTES_DEFECTO))
+    igual(pedidos, [], "el .srt no se calcula si no va YouTube (llega perezoso de app.py)")
+    campos_p, _f = P.campos_subtitulos(raiz, perezoso, ["youtube"], "lote7", dict(P.AJUSTES_DEFECTO))
+    ok(pedidos == [1] and campos_p, "y se calcula una vez al mandarlo")
     ok(P.AJUSTES_DEFECTO.get("subtitulos_youtube") is True, "encendido de fábrica")
     try:
         P.guardar_ajustes(raiz, "", {"subtitulos_youtube": "sí"})
@@ -2021,6 +2042,26 @@ def prueba_subtitulos_youtube():
         ok(sin_yt, "(YouTube va en su propia subida cuando va con otras redes)")
         ok(all("youtube_subtitle_file_0" not in (t.get("imagenes") or {}) for t in sin_yt),
            "y la subida sin YouTube no lo lleva")
+        ok(not os.path.isfile(P.ruta_subtitulos(raiz, "sub1", envios["youtube"]["lote"])),
+           "el .srt se borra después de mandarlo")
+        # (revisión 1) si la subida FALLA, la ficha no dice que llevó subtítulos
+        original = P.cliente
+        class _Roto:
+            def __init__(self, real):
+                self.real = real
+            def __getattr__(self, n):
+                return getattr(self.real, n)
+            def publicar(self, *a, **k):
+                raise P.UP.ErrorUploadPost("rechazado", sin_respuesta=False)
+        P.cliente = lambda r: _Roto(original(r))
+        try:
+            P.enviar(raiz, info, ajustes, {"redes": ["youtube"], "modo": "ahora",
+                                           "confirmado": True, "repetir": True}, en_hilo=False)
+        finally:
+            P.cliente = original
+        ultimo = [e for e in P._leer_video(raiz, "sub1")["envios"] if e["red"] == "youtube"][-1]
+        ok(ultimo.get("estado") == "fallido" and not ultimo.get("subtitulos"),
+           f"una subida rechazada no apunta «Subtítulos» ({ultimo.get('estado')}, {ultimo.get('subtitulos')!r})")
     finally:
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 

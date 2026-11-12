@@ -148,7 +148,7 @@
          (li, ul) no cuenta: es de otras personas. */
       const fueraDeComentarios = e => !e.closest('li, ul');
       const BOTONES = ['Comentario', 'Comment', 'Comentar'].map(x => `svg[aria-label="${x}"]`).join(', ');
-      const codigosEn = c => [...c.querySelectorAll('a[href]')].map(a => ((a.getAttribute('href') || '').match(/\/(?:reels?|p|tv)\/([A-Za-z0-9_-]+)/) || [])[1]).filter(Boolean);
+      const codigosEn = c => [...c.querySelectorAll('a[href]')].map(a => ((a.getAttribute('href') || '').match(/\/(?:reels?|p|tv)\/(?!audio\/)([A-Za-z0-9_-]+)/) || [])[1]).filter(Boolean);
       if (codigoIg) {
         caja = cajaDelVideoQueSeVe(BOTONES, c => [...c.querySelectorAll(BOTONES)].some(fueraDeComentarios));
         if (caja) { const cs = codigosEn(caja); if (cs.length && !cs.includes(codigoIg)) caja = null; }

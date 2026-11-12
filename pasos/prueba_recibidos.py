@@ -335,7 +335,8 @@ PAGINAS = {
       </div>
       <div style="position:absolute;top:10px;left:0;width:400px">
         <div><video style="width:400px;height:700px;display:block"></video></div>
-        <a href="/ana.fiestas/">ana.fiestas</a><span>Seguir</span>
+        <a href="/ana.fiestas/">ana.fiestas</a><span>Seguir</span><a href="/explore/locations/7371/">Lima</a>
+        <a href="/reels/audio/28439169115674808/"><span dir="auto">ana.fiestas · Audio original</span></a>
         <div dir="auto">Así se ve una fiesta gamer de verdad 🎮</div>
         <div><div><div role="button"><svg aria-label="Me gusta"></svg></div><div><span>1x</span> <span>1.4K</span> <span>VPH</span></div></div><span>719</span></div>
         <div><div role="button"><svg aria-label="Comentario"></svg></div><span>60</span></div>
@@ -585,6 +586,13 @@ HOSTILES = {
         "<div style='position:absolute;top:0'><video style='display:block;width:300px;height:700px'></video>"
         "<a href='https://www.tiktok.com/@beto/video/222'><h3 data-e2e='video-author-uniqueid'>beto</h3></a>"
         "<div data-e2e='video-desc'>el que se ve</div><strong data-e2e='like-count'>5</strong></div></body>",
+    # el inicio de TikTok de verdad (medido en el Chrome del dueño el 12-11): una sola capa con las
+    # cifras y la descripción del vídeo que suena, aparte de la lista
+    "https://www.tiktok.com/": "<body><main><article>vacío</article><div data-e2e='anchoring-chrome-host'>"
+        "<strong data-e2e='like-count'>229K</strong><strong data-e2e='comment-count'>380</strong>"
+        "<strong data-e2e='favorite-count'>35.8K</strong><strong data-e2e='share-count'>16.3K</strong>"
+        "<a href='/@btwsecret_?lang=es-419'><span data-e2e='video-author-avatar'></span></a>"
+        "<div data-e2e='video-desc'>Lol #basquetbol</div></div></main></body>",
     "https://x.com/ana/status/1": _og("https://x.com/ana/status/1") + "<body>"
         "<article data-testid='tweet'><div data-testid='User-Name'>Ana @ana</div><a href='/ana/status/1'><time>1h</time></a>"
         "<div role='link'><div data-testid='User-Name'>Troll @troll</div><a href='/troll/status/10'><time>2h</time></a>"
@@ -686,6 +694,10 @@ def prueba_lector_hostil():
     igual((tf["autor"], tf["texto"], tf["cifras"], tf["url"]),
           ("beto", "el que se ve", {"me_gusta": "5"}, "https://www.tiktok.com/@beto/video/222"),
           "TikTok: en el muro, el vídeo que se ve y su enlace")
+    ti = res["https://www.tiktok.com/"]
+    ok((ti["autor"], ti["texto"], ti["cifras"]) == ("btwsecret_", "Lol #basquetbol",
+       {"me_gusta": "229K", "comentarios": "380", "compartidos": "16.3K", "guardados": "35.8K"}) and "enlace es el del inicio" in ti.get("aviso", ""),
+       "TikTok: el inicio de ahora, con su capa del vídeo que suena (y avisa de que el enlace es el del inicio)")
     x = res["https://x.com/ana/status/1"]
     igual((x["autor"], x["texto"], x["cifras"]), ("ana", "", {"comentarios": "3", "compartidos": "1", "me_gusta": "20"}),
           "X: un tuit sin texto que cita otro no se lleva el texto del citado")

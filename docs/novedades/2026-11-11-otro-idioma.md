@@ -16,6 +16,10 @@
 - Se puede elegir la voz: la misma de ahora (habla los dos idiomas) o una
   nativa de ese idioma.
 - El vídeo de origen no cambia en nada.
+- **En el vídeo traducido, pedirle a Claude que reescriba el guion o un bloque
+  avisa antes**: lo escribiría en el idioma del vídeo original y se perdería la
+  traducción. Para cambiar una frase sin perderla, edítala a mano en su bloque
+  (eso no avisa, y tampoco grabar tu texto).
 - Cuándo no se ofrece: si la voz o las imágenes del vídeo tienen cambios sin
   generar (ponlas al día antes), o si tiene imágenes **insertadas o quitadas a
   mano** (se reconocen por su frase en español; en otro idioma cambiarían los

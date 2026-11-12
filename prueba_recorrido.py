@@ -10891,6 +10891,26 @@ def video_en_otro_idioma(navegador, datos):
       .filter(i => i.complete && i.getAttribute('src') && !i.naturalWidth).map(i => i.getAttribute('src'))""")
     ok(not rotas, f"el vídeo nuevo se ve con sus imágenes (rotas: {rotas[:3]})")
     pg.captura("otro_idioma_copia_montada", entera=False)
+    # REESCRIBIR CON CLAUDE EN LA COPIA AVISA ANTES: lo devolvería al idioma de
+    # origen. Se dice que no y no se escribe ni se lanza nada
+    pg.aceptar = False
+    vistos = len(pg.dialogos)
+    _r, g_antes = api.get(f"/api/proyectos/{copia}/pasos/guion")
+    pg.js("APP.light.video.promptGeneral = 'más directo'; await reescribirGuionLight();")
+    pg.js("await lanzarTandaLight('guion', 'pendientes');")
+    pg.p.wait_for_timeout(500)
+    avisos = pg.dialogos[vistos:]
+    ok(len(avisos) == 2 and all("traducción al inglés" in a and "se perderá" in a for a in avisos),
+       f"en la copia, reescribir el guion con Claude avisa antes ({len(avisos)}: {avisos[:1]})")
+    _r, g_despues = api.get(f"/api/proyectos/{copia}/pasos/guion")
+    ok(not ((g_despues.get("params") or {}).get("instruccion_vuelta"))
+       and g_despues.get("params") == g_antes.get("params")
+       and not [t for t in api.get(f"/api/proyectos/{copia}")[1].get("trabajos") or []],
+       "y al decir que no, no escribe ni lanza nada")
+    pg.js(f"await abrirVideoLight('{pid}');")
+    sin_aviso = pg.p.evaluate("() => seguirConGuionTraducido('el guion')")
+    ok(sin_aviso is True and len(pg.dialogos) == vistos + 2, "en el vídeo original no avisa")
+    pg.aceptar = True
     pg.sin_errores("el vídeo en otro idioma")
     pg.cerrar()
     ok(_foto_del_estado(datos, pid) == antes, "el vídeo de origen no ha cambiado en nada (params, firmas, versiones)")

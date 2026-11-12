@@ -8265,6 +8265,7 @@ async function cargarVideoLight(pid) {
     v.pid = pid;
     v.nombre = (proyecto.proyecto || {}).nombre || pid;
     v.estilo = ((proyecto.proyecto || {}).config || {}).estilo_light || '';
+    v.traduccionDe = ((proyecto.proyecto || {}).config || {}).traduccion_de || null;
     v.fichas = {};
     for (const ficha of (proyecto.pasos || [])) v.fichas[ficha.id] = ficha;
     alDiaConElMontaje(pid);
@@ -11053,10 +11054,13 @@ async function rehacerSubtitulosLight() {
   }
 }
 
-async function lanzarTandaLight(tanda, modo) {
+async function lanzarTandaLight(tanda, modo, avisado) {
   const v = APP.light.video;
   if (!v.pid) return;
   const pid = v.pid;
+  // escribir el guion con Claude en un vídeo traducido lo devuelve al idioma
+  // de origen: cualquier botón que lance esa tanda avisa antes
+  if (tanda === 'guion' && !avisado && !seguirConGuionTraducido('el guion')) return;
   /* UN DOBLE CLIC NO LANZA DOS TANDAS (y las de pago se pagarían dos veces si
      el servidor no frenara la segunda): mientras la primera no contesta, los
      botones de la barra se apagan (`botonDeBarra`) y esta no sale. */
@@ -12111,10 +12115,29 @@ function promptGeneralLight() {
       + (v.audio ? ' (la voz queda por regrabar).' : '.')));
 }
 
+/* UN VÍDEO TRADUCIDO («🌐 Hacer este vídeo en otro idioma», pasos/otro_idioma.py):
+   su guion es una traducción puesta como corrección a mano, y el redactor
+   escribe en el idioma del vídeo de origen. Pedirle a Claude que reescriba el
+   guion o un bloque lo devolvería a ese idioma y se perdería la traducción:
+   antes de hacerlo, se avisa. Editar a mano o grabar tu texto no avisa. */
+const NOMBRES_IDIOMA_TRADUCIDO = {
+  es: 'español', en: 'inglés', pt: 'portugués', fr: 'francés', it: 'italiano', de: 'alemán',
+};
+function seguirConGuionTraducido(que) {
+  const t = (APP.light.video || {}).traduccionDe;
+  if (!t || !t.idioma) return true;
+  const idioma = NOMBRES_IDIOMA_TRADUCIDO[t.idioma] || t.idioma;
+  return confirm(`Ojo: este vídeo es una traducción al ${idioma}. Si Claude reescribe ${que}, `
+    + `lo escribirá en el idioma del vídeo original (no en ${idioma}) y se perderá la `
+    + `traducción.\n\nPara cambiar una frase sin perderla, edítala a mano en su bloque.`
+    + `\n\n¿Reescribir igualmente?`);
+}
+
 async function reescribirGuionLight() {
   const v = APP.light.video;
   const texto = String(v.promptGeneral || '').trim();
   if (!texto) { toast('escribe qué cambiarías', true); return; }
+  if (!seguirConGuionTraducido('el guion')) return;
   try {
     /* EN SU PROPIO CAJÓN, no en `prompt_general`: ahí viven las indicaciones
        del Encargo (ENSEÑA, ÁNGULO…), y escribir aquí las borraba (17-10-2026).
@@ -12127,7 +12150,7 @@ async function reescribirGuionLight() {
     // prompt general deja el guion obsoleto —es un param suyo—, así que ya
     // entra; el material sigue al día y se salta. Con 'todo'
     // esto volvería a salir a internet seis minutos para reescribir una frase.
-    await lanzarTandaLight('guion', 'pendientes');
+    await lanzarTandaLight('guion', 'pendientes', true);
   } catch (err) { toast(`no se ha podido: ${err.message}`, true); }
 }
 
@@ -12710,6 +12733,7 @@ async function cambiarBloqueLight(bloque, sec, soloGrabar) {
     toast('escribe qué cambiarías de este bloque', true);
     return;
   }
+  if (!soloGrabar && !seguirConGuionTraducido('este bloque')) return;
   limpiarError(CLAVE_VIDEO_LIGHT);
   try {
     await guardarBloquesPendientesLight();

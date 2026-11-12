@@ -4085,6 +4085,11 @@ def _apuntar_guardadas(raiz, envios, indice):
                             nuevas["mitad_s"] = post.get("mitad_s")
                 if retencion_nueva and nuevas.get("guardada_al") != _iso_lima(cuando):
                     nuevas["guardada_al"] = _iso_lima(cuando)
+                # un 0 que la limpieza vuelve a quitar no es un cambio (árbitro, 12-11)
+                if tocado and all(sin_ceros_imposibles(nuevas).get(k) == viejas.get(k)
+                                  for k in CAMPOS_ENVIO):
+                    tocado = False
+                    nuevas = dict(nuevas, **{k: viejas.get(k) for k in CAMPOS_ENVIO})
                 if not tocado:
                     if nuevas != viejas:
                         e["metricas"] = nuevas      # solo el reloj: sin contarlo

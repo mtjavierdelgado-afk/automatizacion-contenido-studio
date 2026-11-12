@@ -663,9 +663,19 @@ CUADRO_REFERENCIA = (
 CUADRO_QUE = {"foto": "an architectural interior photograph taken",
               "ilustracion": "a wide interior view drawn in the style of the references, seen"}
 
+#: El cuadro vertical de la base de un AMBIENTE SECUNDARIO: este ambiente solo,
+#: con la camara dentro (ver `ENCUADRE_AMBIENTE`)
+CUADRO_AMBIENTE = (
+    "The frame is PORTRAIT (9:16, vertical, for a phone screen). This picture is the "
+    "reference of ONE room of a home, so it is {que} from inside that room at eye height, "
+    "with a wide-angle view: show this room whole, with every wall, door and window the "
+    "description names for it inside the frame, and nothing of the rooms it opens onto. "
+    "Never draw black bars, borders or a landscape picture inside the tall frame.")
 
-def cuadro_referencia(modo_imagen="ilustracion"):
-    return CUADRO_REFERENCIA.format(que=CUADRO_QUE.get(modo_imagen, CUADRO_QUE["ilustracion"]))
+
+def cuadro_referencia(modo_imagen="ilustracion", ambiente=False):
+    que = CUADRO_QUE.get(modo_imagen, CUADRO_QUE["ilustracion"])
+    return (CUADRO_AMBIENTE if ambiente else CUADRO_REFERENCIA).format(que=que)
 
 
 #: El cuadro de la imagen de un ESTADO: es una EDICION de la base, asi que ni
@@ -773,10 +783,22 @@ PROMPT_BASE = (
     "the description item by item against the picture (what is on the left, what is on "
     "the back wall, what is on the right, where the door is). The colours and materials "
     "named here WIN over any palette of the style (its references and its description): "
-    "take only the look and the rendering from the style, never its colours or finishes. Light: {luz}. {antes}Frame "
-    "it as a clear, level, eye-height view from the entrance that shows the whole layout, "
-    "as the reference shot every other shot of this place will be edited from. No people, "
-    "no text, no letters.")
+    "take only the look and the rendering from the style, never its colours or finishes. Light: {luz}. {antes}"
+    "{encuadre} No people, no text, no letters.")
+
+#: El encuadre de la base de siempre (el sitio principal, o el unico)
+ENCUADRE_BASE = ("Frame it as a clear, level, eye-height view from the entrance that shows the "
+                 "whole layout, as the reference shot every other shot of this place will be "
+                 "edited from.")
+
+#: EL DE UN AMBIENTE SECUNDARIO de un recorrido o una clase (rama base-fiel,
+#: prueba real del 11-11): «desde la entrada» ponia la camara en la sala, que
+#: es por donde se entra a una cocina abierta, y la cocina salia dos veces con
+#: el sofa, la mesa y el mueble de TV delante. La camara va DENTRO del ambiente.
+ENCUADRE_AMBIENTE = ("Frame it as a clear, level, eye-height view taken from INSIDE this room, "
+                     "facing its main wall, that shows only this room: if it opens onto another "
+                     "room, that other room stays behind the camera and out of the frame. It is "
+                     "the reference shot every other shot of this room will be drawn from.")
 
 ANTES = {
     "objeto": "Show it in its INITIAL state, before anything changes. ",
@@ -828,7 +850,7 @@ def nota_base(nota):
     return NOTA_BASE.format(nota=nota) if nota else ""
 
 
-def prompt_imagen_base(espacio, relato, cabecera="", inicial=""):
+def prompt_imagen_base(espacio, relato, cabecera="", inicial="", ambiente=False):
     """El prompt de la imagen base generada de un sitio (vacio, estado inicial).
 
     `inicial` (o el de `relato`): como esta y donde lo que luego cambia."""
@@ -840,4 +862,5 @@ def prompt_imagen_base(espacio, relato, cabecera="", inicial=""):
     if antes and inicial and (relato or {}).get("cambia") in ("objeto", "estado"):
         antes += INICIAL.format(inicial=inicial)
     return PROMPT_BASE.format(cabecera=_texto(cabecera, 400), descripcion=descripcion,
-                              luz=luz, antes=antes).strip()
+                              luz=luz, antes=antes,
+                              encuadre=ENCUADRE_AMBIENTE if ambiente else ENCUADRE_BASE).strip()

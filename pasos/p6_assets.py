@@ -2262,7 +2262,10 @@ CAMARA_DE_CERCA = re.compile(
     r"\bplano (?:corto|cerrado)\b|\binserto\b",
     re.IGNORECASE)
 #: «medium close-up» y «plano medio corto» enseñan el sitio: no son de cerca.
-CAMARA_MEDIA = re.compile(r"\bmedium close|\bplano medio\b|\bmcu\b", re.IGNORECASE)
+CAMARA_MEDIA = re.compile(r"\bmedium close|\bplano medio\b|\bmcu\b|"
+                          # rama base-fiel (X01, 12-11): «medium shot from the shower side»
+                          r"\bmedium(?:[- ]wide)? shot\b|\bmid[- ]?shot\b|\bplano americano\b",
+                          re.IGNORECASE)
 
 
 def _familia_del_plano(escena, modo):
@@ -2271,21 +2274,27 @@ def _familia_del_plano(escena, modo):
     es «cerca» y no edita la base -- editar fija la camara de la base, y el
     detalle pedido salia como el plano general de siempre (prueba real del
     23-10) --; cualquier otra camara escrita es un plano del sitio y la edita.
-    Sin linea o sin camara, la de su carta, como siempre."""
+    Sin linea o sin camara, la de su carta, como siempre.
+
+    UN PLANO MEDIO TAMBIEN RESPETA SU CAMARA (rama base-fiel, decision del
+    dueño del 12-11): editar la imagen del estado fija su camara y el FINAL
+    CHECK dice «keep exactly its camera»; en X01, «medium shot from the shower
+    side» y «medium close-up of the mirror» salian iguales a la imagen del
+    estado. Ahora es «cerca»: lleva esa imagen de referencia y su angulo manda."""
     camara = str(((escena.get("linea_gv") or {}).get("camara")) or "")
     if camara.strip():
         llano = unicodedata.normalize("NFKD", camara.lower())
         llano = "".join(c for c in llano if not unicodedata.combining(c))
-        if CAMARA_MEDIA.search(llano):
-            return "lejos"
-        return "cerca" if CAMARA_DE_CERCA.search(llano) else "lejos"
+        if CAMARA_MEDIA.search(llano) or CAMARA_DE_CERCA.search(llano):
+            return "cerca"
+        return "lejos"
     linea = escena.get("linea_gv") or {}
     if linea and not escena.get("carta"):
         # SIN CAMARA Y SIN CARTA (videos nuevos de la Parrilla, rama
         # parrilla-estados): lo dice la propia linea («Close-up of the mirror»)
         llano = unicodedata.normalize("NFKD", str(linea.get("visual") or "").lower())
         llano = "".join(c for c in llano if not unicodedata.combining(c))
-        if CAMARA_DE_CERCA.search(llano) and not CAMARA_MEDIA.search(llano):
+        if CAMARA_DE_CERCA.search(llano) or CAMARA_MEDIA.search(llano):
             return "cerca"
         return ""
     return _familia_de_carta(escena.get("carta"), modo)
@@ -3311,7 +3320,7 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
         # LA IMAGEN DE REFERENCIA de un sitio (rama base-fiel): la habitacion
         # entera, sin recortar los lados; los planos siguen con la de abajo
         lineas.append(tipo_relato.CUADRO_ESTADO if escena.get("referencia") == "estado"
-                      else tipo_relato.cuadro_referencia(modo))
+                      else tipo_relato.cuadro_referencia(modo, escena.get("referencia") == "ambiente"))
     elif p2_brief.comun.normalizar_formato(formato) == "vertical":
         # EL CUADRO ES VERTICAL, y hay que decirlo: las referencias de estilo
         # son apaisadas y sin esta linea el generador compone un plano apaisado
@@ -6118,7 +6127,9 @@ def prompt_y_refs_de_base(proyecto, params, cache, sitio=None, nota=""):
     p = _con_defectos(params)
     principal, espacio = espacio_del_relato(proyecto, params)
     casa = []
-    if sitio and sitio != principal:
+    # UN AMBIENTE SECUNDARIO (rama base-fiel): la camara dentro de el
+    secundario = bool(sitio and sitio != principal)
+    if secundario:
         ambiente = next((a for a in ambientes_del_relato(proyecto, params)
                          if a["sitio"] == sitio), None)
         if not ambiente:
@@ -6137,12 +6148,12 @@ def prompt_y_refs_de_base(proyecto, params, cache, sitio=None, nota=""):
     relato = tipo_relato.resolver(params)
     catalogo = _catalogo_de(p, proyecto) if proyecto is not None else (p.get("catalogo") or {})
     inicial = ((catalogo or {}).get("relato") or {}).get("inicial") or ""
-    texto = tipo_relato.prompt_imagen_base(espacio, relato, inicial=inicial)
+    texto = tipo_relato.prompt_imagen_base(espacio, relato, inicial=inicial, ambiente=secundario)
     # LA NOTA DE ESTA VEZ (rama relato-sin-cortes): «Otra imagen base» con una
     # corrección que no se guarda en ningún sitio, solo para este intento
     texto = (texto + " " + tipo_relato.nota_base(nota)).strip() if nota else texto
     escena = {"id": "BASE", "prompt": texto, "personajes": [], "set": sitio,
-              "narracion": "", "referencia": "base",
+              "narracion": "", "referencia": "ambiente" if secundario else "base",
               "ejes": list(tipo_relato.EJES_REFERENCIA)}
     refs = list(_referencias_estilo(p, cache, escena))
     if not refs:

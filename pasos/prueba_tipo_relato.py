@@ -512,8 +512,10 @@ def prueba_ambientes_y_camara():
           "cerca", "un primer plano pedido no edita la base")
     igual(P6._familia_del_plano({"linea_gv": {"camara": "wide shot from the doorway"}}, "foto"),  # noqa: SLF001
           "lejos", "un plano general la edita")
-    igual(P6._familia_del_plano({"linea_gv": {"camara": "medium shot, detailed tiles"}}, "foto"),  # noqa: SLF001
+    igual(P6._familia_del_plano({"linea_gv": {"camara": "wide shot, detailed tiles"}}, "foto"),  # noqa: SLF001
           "lejos", "«detailed» no es un detalle")
+    igual(P6._familia_del_plano({"linea_gv": {"camara": "medium shot, detailed tiles"}}, "foto"),  # noqa: SLF001
+          "cerca", "un plano medio respeta su cámara (decisión del 12-11)")
     igual(P6._familia_del_plano({"carta": "detalle"}, "ilustracion"), "cerca",  # noqa: SLF001
           "sin línea, la familia de su carta, como siempre")
     rel = T.resolver({"tipo_relato": {"modo": "espacio_que_cambia", "cambia": "objeto"}})
@@ -534,8 +536,8 @@ def prueba_revision_03_11():
     seccion("15] lo que encontró la revisión del 03-11")
     for camara, esperada in (("detalle de la bisagra", "cerca"), ("tight shot of the handle", "cerca"),
                              ("insert of the key", "cerca"), ("ECU of the hinge", "cerca"),
-                             ("plano corto del grifo", "cerca"), ("medium close-up of Ana in the kitchen", "lejos"),
-                             ("plano medio de la cocina", "lejos"), ("wide shot from the door", "lejos")):
+                             ("plano corto del grifo", "cerca"), ("medium close-up of Ana in the kitchen", "cerca"),
+                             ("plano medio de la cocina", "cerca"), ("medium shot from the shower side", "cerca"), ("wide shot from the door", "lejos")):
         igual(P6._familia_del_plano({"linea_gv": {"camara": camara}}, "foto"), esperada,  # noqa: SLF001
               f"la cámara «{camara}» es {esperada}")
     # el principal de un recorrido es el primero que declaró Claude, aunque otro tenga más tramos
@@ -648,6 +650,15 @@ def prueba_base_fiel():
           "la lámina de una referencia: interior, exterior y objeto, sin caras ni cuerpos")
     ok("cara" in moodboard.ejes_de_plano({"set": "sala"}),
        "la de un plano, como siempre")
+    amb = dict(ref_escena, referencia="ambiente")
+    t_amb = P6._prompt_completo(amb, refs_estilo, est, formato="vertical")  # noqa: SLF001
+    ok(T.cuadro_referencia("foto", True) in t_amb and "from the entrance" not in t_amb,
+       "un ambiente secundario: la cámara dentro de él, no en la entrada (la cocina abierta)")
+    igual(T.prompt_imagen_base({"descripcion": "a kitchen"}, {"modo": "recorrido"}).count(T.ENCUADRE_BASE), 1,
+          "la base de siempre conserva su encuadre")
+    ok(T.ENCUADRE_AMBIENTE in T.prompt_imagen_base({"descripcion": "a kitchen"}, {"modo": "recorrido"},
+                                                   ambiente=True),
+       "y la de un ambiente secundario lleva el suyo")
     ok("nota" in inspect.signature(P6.generar_imagen_estado).parameters
        and "nota" in inspect.signature(P6.prompt_y_refs_de_estado).parameters,
        "la imagen de un estado acepta la corrección de esta vez")

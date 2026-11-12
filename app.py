@@ -3125,7 +3125,8 @@ def describir_voz(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(400, "hace falta describir cómo quieres que suene la voz")
     idioma = str(datos.get("idioma") or "").strip().lower()
     if not idioma and PASOS_MODULOS is not None:
-        idioma = PASOS_MODULOS.p4_voz.idioma_de_salida(ctx.proyecto) or "es"
+        idioma = (_idioma_traducido(ctx)
+                  or PASOS_MODULOS.p4_voz.idioma_de_salida(ctx.proyecto) or "es")
     por_fase = CLI_CLAUDE.por_defecto_de("voz_descrita")
     ajuste = _ajuste_cli(datos, por_fase["modelo"], por_fase["esfuerzo"])
     trabajo_id = ctx.gestor.lanzar("voz_descrita", _correr_voz_descrita, ctx,
@@ -4507,7 +4508,7 @@ def _correr_tono(avisar, ctx, urls, ajuste):
                          modelo=(ajuste or {}).get("modelo"),
                          esfuerzo=(ajuste or {}).get("esfuerzo"),
                          avisar=avisar, proyecto_id=ctx.proyecto.id,
-                         idioma=_idioma_de_brief(brief))
+                         idioma=_idioma_traducido(ctx) or _idioma_de_brief(brief))
     # LAS TRANSCRIPCIONES SE QUEDAN PUESTAS, y esto SI escribe params -- al
     # contrario que las instrucciones, que se devuelven para que una persona
     # decida. No es una contradiccion: lo que se decide leyendo es el PARRAFO,
@@ -21418,11 +21419,19 @@ def _info_para_publicar(ctx):
 
 
 def _idioma_traducido(ctx):
-    """El idioma al que se tradujo esta COPIA («» en cualquier otro vídeo)."""
+    """El idioma al que se tradujo esta COPIA («» en cualquier otro vídeo).
+
+    Primero `traduccion_de` del proyecto; si no está, `callouts.idioma`, que
+    solo escribe `otro_idioma.preparar_copia` y que SÍ viaja con un «Duplicar»
+    de la copia (el config no: `Proyecto.crear` lo escribe nuevo)."""
     try:
         traduccion = (ctx.proyecto.config or {}).get("traduccion_de") or {}
-        return str(traduccion.get("idioma") or "").strip().lower() if isinstance(
-            traduccion, dict) else ""
+        if isinstance(traduccion, dict) and traduccion.get("idioma"):
+            return str(traduccion["idioma"]).strip().lower()
+    except Exception:                                       # noqa: BLE001
+        pass
+    try:
+        return str((ctx.estado.params("callouts") or {}).get("idioma") or "").strip().lower()
     except Exception:                                       # noqa: BLE001
         return ""
 

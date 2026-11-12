@@ -4956,6 +4956,12 @@ def _otro_idioma_publicar_y_nombre(servidor, pid):
     igual(servidor._idioma_para_publicar(falso, plan), "en",
           "con la voz en inglés, la pista de subtítulos dice inglés aunque el brief diga español")
     igual(servidor._idioma_traducido(falso), "en", "y la copia dice a qué idioma se tradujo")
+    duplicado = types.SimpleNamespace(
+        id=ctx.id, estado=types.SimpleNamespace(
+            params=lambda paso: {"callouts": {"idioma": "en"}}.get(paso)),
+        proyecto=types.SimpleNamespace(config={"copia_de": "x"}))
+    igual(servidor._idioma_traducido(duplicado), "en",
+          "un «Duplicar» de la copia (sin traduccion_de) sigue sabiendo su idioma")
     ok(servidor._idioma_del_video(falso).endswith("(en)"),
        f"las cartelas y el redactor de la copia escriben en inglés: {servidor._idioma_del_video(falso)}")
     pedidos = []

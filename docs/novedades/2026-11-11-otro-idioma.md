@@ -34,10 +34,14 @@
   mano** (se reconocen por su frase en español; en otro idioma cambiarían los
   planos y alguna se volvería a dibujar). Deshazlas antes.
 - Lo que no se traduce, y lo dice antes: el texto dibujado DENTRO de una imagen
-  (cambiarlo es redibujarla con una nota, y eso sí se paga) y los textos de
+  (cambiarlo es redibujarla con una nota, y eso sí se paga; y si en la copia se
+  rehace un plano, el texto que la imagen lleve dibujado sigue saliendo en el
+  idioma del original: escríbelo en la nota del plano) y los textos de
   Publicar (tienen su botón). Las flechas y rótulos puestos a mano sobre una
   palabra no pasan a la copia (esa palabra ya no se dice). El idioma del
   «Encargo» de la copia sigue diciendo el de origen: no cambia nada del vídeo.
+  Las búsquedas de SEO y vidIQ de la copia siguen el país e idioma del
+  proyecto (los del original).
 - De paso: la lista «Cómo se pronuncia» (escrita con sonidos del español) ya
   solo se aplica a una voz en español; a una en inglés le hacía leer
   «Pléi Estéishon».

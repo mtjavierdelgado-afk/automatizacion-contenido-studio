@@ -1581,6 +1581,10 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # Lo que hace falta para rotular con criterio y no en cada plano: en que
     # plano se ENTRA en un sitio, y en cual sale alguien por primera vez.
     set_anterior, presentados = None, set()
+    # TODAS las etiquetas del espacio (tambien las que son la base tal cual),
+    # para casar un estado abreviado de una linea (rama piloto-al-dia)
+    todos_los_estados = list(tipo_relato.estados_fijos(catalogo)) if principal else []
+    estados_sin_casar = []
     for indice, (escena, beat) in enumerate(zip(escenas, beats)):
         if escena.get("sigue_a"):
             # La segunda mitad de un plano que dura mas (una cartela sobre
@@ -1625,7 +1629,13 @@ def planificar(proyecto, params, inventario=None, replantear=False,
             escena["direccion"] = linea["visual"]
             beat = dict(beat, **guion_visual.estado_de_linea(
                 linea, tipo_relato.estados_del_catalogo(catalogo, principal)
-                if principal else {}))
+                if principal else {}, todos_los_estados))
+            # UN ESTADO QUE NO ES NINGUNO DEL ESPACIO (piloto-al-dia, Y05): se
+            # apunta y `ejecutar` para la tanda ANTES de pagar
+            if principal and todos_los_estados and linea.get("estado") and not beat.get("estado") \
+                    and guion_visual.estados_sin_casar([linea], todos_los_estados):
+                estados_sin_casar.append({"plano": escena["id"], "estado": linea["estado"],
+                                          "opciones": sorted(todos_los_estados)})
         if relato_edita:
             _marcar_edicion(escena, beat, relato, principal, modo, bases_rel)
         escena["prompt"] = _prompt_visual(escena, beat, catalogo, modo=modo)
@@ -1658,7 +1668,11 @@ def planificar(proyecto, params, inventario=None, replantear=False,
         if nueva.get("linea_gv"):
             beat = dict(beat, **guion_visual.estado_de_linea(
                 nueva["linea_gv"], tipo_relato.estados_del_catalogo(catalogo, principal)
-                if principal else {}))
+                if principal else {}, todos_los_estados))
+            if principal and todos_los_estados and nueva["linea_gv"].get("estado") and not beat.get("estado") \
+                    and guion_visual.estados_sin_casar([nueva["linea_gv"]], todos_los_estados):
+                estados_sin_casar.append({"plano": nueva["id"], "estado": nueva["linea_gv"]["estado"],
+                                          "opciones": sorted(todos_los_estados)})
         # el encuadre lo dice su direccion: la carta del plano partido no es suya
         nueva.pop("encuadre", None)
         # «DIRIGIR» SOBRE LA INSERTADA (28-10): su direccion o su parrafo
@@ -1741,6 +1755,10 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     if guion_visual.modo_de(p) == "guion":
         # si el guion visual aprobado cortó este plan (lo mira `ejecutar` antes de pagar)
         plan["guion_visual_ok"] = guion_ok
+    if estados_sin_casar:
+        # las lineas con un estado que no es ninguno del espacio (piloto-al-dia):
+        # `ejecutar` no paga esos planos hasta que se corrijan
+        plan["estados_sin_casar"] = estados_sin_casar
     plan["assets"] = _assets_necesarios(plan, catalogo, p)
     plan["dependencias"] = {f"escena:{e['id']}": _assets_de_escena(e)
                             for e in escenas}
@@ -5537,6 +5555,17 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
                 + ": ve al paso «Imágenes» (bloque «La imagen base») o al Encargo "
                   "(«El tipo de relato»), genérala o usa la imagen subida del espacio "
                   "fijo, y apruébala (y la de cada estado) antes de generar los planos")
+        # UN ESTADO QUE NO ES NINGUNO DEL ESPACIO NO SE PAGA (rama piloto-al-dia,
+        # Y05: «frio» no era «blanco_frio», el plano editaba la base sin cambio
+        # y salia igual que otro). Se para ANTES de gastar y se dice cual es.
+        sin_estado = planos_sin_estado(plan, dirs, unidades=unidades, rehacer=rehacer)
+        if sin_estado:
+            raise RuntimeError(
+                "en el guion visual hay planos con un estado que no es ninguno de los del espacio: "
+                + "; ".join(f"{x['plano']} pide «{x['estado']}»" for x in sin_estado[:6])
+                + (f" (y {len(sin_estado) - 6} más)" if len(sin_estado) > 6 else "")
+                + ". Los estados son: " + ", ".join(f"«{e}»" for e in sin_estado[0]["opciones"])
+                + ". Corrige el estado de esas líneas en «Guion visual» (paso Imágenes) antes de generar los planos")
 
     # REHACER UNA COSA REHACE ESA COSA. Aqui habia siete lineas de CASCADA:
     # pedir un asset metia detras todas las escenas que lo usan, asi que pulsar
@@ -6227,6 +6256,29 @@ def generar_imagen_estado(proyecto, params, estado, rehacer=False):
     return {"sitio": sitio, "estado": estado, "cambio": cambio,
             "imagen": f"espacio_fijo/{huella}.png", "coste": meta.get("coste", 0.0),
             "origen": meta.get("origen"), "calidad": p["calidad"]}
+
+
+def planos_sin_estado(plan, dirs, unidades=None, rehacer=False):
+    """Los planos que esta pasada va a DIBUJAR con un estado que no es ninguno del
+    espacio (rama piloto-al-dia). -> [{plano, estado, opciones}]
+
+    Solo cuenta lo que se paga ahora, igual que `planos_sin_base`: un plano hecho
+    que se conserva no bloquea volver a montar."""
+    sueltos = (plan or {}).get("estados_sin_casar") or []
+    if not sueltos:
+        return []
+    pedidas = set(unidades) if unidades is not None else None
+    salida = []
+    for x in sueltos:
+        uid = f"escena:{x['plano']}"
+        if pedidas is not None:
+            va = uid in pedidas
+        else:
+            hecho = os.path.exists(os.path.join((dirs or {}).get("escenas") or "", f"{x['plano']}.png"))
+            va = bool(rehacer) or not hecho
+        if va:
+            salida.append(dict(x, opciones=x.get("opciones") or []))
+    return salida
 
 
 def planos_sin_base(plan, dirs, unidades=None, rehacer=False):

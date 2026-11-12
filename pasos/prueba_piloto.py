@@ -238,6 +238,41 @@ def probar_la_lista(raiz_padre):
               "uno que ya salió en Publicar no se retoma (no se vuelve a montar ni a escribir)")
     finally:
         servidor._piloto_ocupado = real
+    # TERMINADO A MANO (rama piloto-al-dia, X01 e Y05 del 12-11): falló antes del
+    # montaje, alguien lo arregló y lo montó; la tarjeta lo dice y no pide «Reintentar»
+    igual(servidor._piloto_render_al_dia(libre), False, "un vídeo sin montar no tiene el montaje al día")
+    igual(servidor._piloto_render_al_dia("no_existe_este_video"), False, "uno que no existe, tampoco")
+    t = P.encolar(base, {"cid": "c1", "gid": "gl5", "estilo": "e1"})
+    P.cambiar(base, t["id"], estado="error", etapa="imagenes", pid=libre,
+              porque="dos o mas planos han acabado con la MISMA imagen")
+    real_al_dia = servidor._piloto_render_al_dia
+    try:
+        servidor._piloto_render_al_dia = lambda _pid: False
+        ok("terminado_a_mano" not in servidor._piloto_para_pantalla(P.leer(base, t["id"])),
+           "falló y su vídeo NO está montado: sigue en «Falló»")
+        servidor._piloto_render_al_dia = lambda _pid: True
+        pantalla = servidor._piloto_para_pantalla(P.leer(base, t["id"]))
+        ok(pantalla.get("terminado_a_mano") is True and pantalla.get("salio") is False,
+           "falló en las imágenes y su vídeo ya está montado al día: «Terminado a mano», por publicar")
+        igual(P.leer(base, t["id"])["estado"], "error", "(y la ficha del piloto no se toca: solo se lee)")
+        P.cambiar(base, t["id"], etapa="portadas")
+        ok("terminado_a_mano" not in servidor._piloto_para_pantalla(P.leer(base, t["id"])),
+           "uno que falló DESPUÉS del montaje (portadas) no es «terminado a mano»: le falta eso")
+        P.cambiar(base, t["id"], estado="parado", etapa="vistos", tipo_parada="tope")
+        ok(servidor._piloto_para_pantalla(P.leer(base, t["id"])).get("terminado_a_mano") is True,
+           "una parada antes del montaje y luego montado a mano, también")
+        P.cambiar(base, t["id"], estado="cancelado")
+        ok("terminado_a_mano" not in servidor._piloto_para_pantalla(P.leer(base, t["id"])),
+           "uno parado por ti se queda como lo dejaste")
+        P.cambiar(base, t["id"], estado="error", etapa="imagenes")
+        peticion = type("Pet", (), {"headers": {}})()
+        servidor._piloto_render_al_dia = lambda _pid: _pid == libre
+        con_mano = servidor.piloto_estado(peticion)["a_revisar"]
+        servidor._piloto_render_al_dia = lambda _pid: False
+        sin_mano = servidor.piloto_estado(peticion)["a_revisar"]
+        igual(sin_mano - con_mano, 1, "y no cuenta en «N para revisar»")
+    finally:
+        servidor._piloto_render_al_dia = real_al_dia
     ok(not servidor._piloto_ocupado(pid), "un vídeo sin trabajos no está ocupado")
     ok(servidor._piloto_ocupado("no_existe_este_video"), "uno que no existe se da por ocupado (no se retoma)")
 

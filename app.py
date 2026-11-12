@@ -6182,7 +6182,18 @@ def _ficha_guion_visual(ctx):
     if comprobacion.get("huella") != gv.huella(guardado.get("planos")):
         comprobacion = {}
     estilo = params.get("estilo") if isinstance(params.get("estilo"), dict) else {}
+    # LINEAS CON UN ESTADO QUE NO ES NINGUNO DEL ESPACIO (rama piloto-al-dia, Y05):
+    # se avisan aqui, y `p6_assets.ejecutar` no las paga. Solo lee.
+    sin_casar = []
+    if estados:
+        try:
+            p6 = PASOS_MODULOS.p6_assets
+            todos = list(_tipo_relato().estados_fijos(p6._catalogo_de(p6._con_defectos(params), ctx.proyecto)))
+            sin_casar = gv.estados_sin_casar(guardado.get("planos") or propuesta or _planos_ef, todos)
+        except Exception:                                   # noqa: BLE001
+            sin_casar = []
     return {"modo": gv.modo_de(params),
+            "estados_sin_casar": sin_casar,
             "del_video": params.get("imagenes") or "",
             "del_estilo": estilo.get("imagenes") or "",
             "modos": [{"clave": k, "nombre": v} for k, v in gv.MODOS.items()],
@@ -23526,6 +23537,36 @@ def _piloto_vivo(ficha):
             "segundos": t.get("segundos"), "cancelando": t.get("cancelando")}
 
 
+#: pid -> (marca de su estado.json, ¿montaje al dia?) (rama piloto-al-dia)
+_PILOTO_RENDER = {}
+#: las etapas hasta el montaje: si el piloto se paro en una de estas y el video
+#: ya esta montado, alguien lo termino a mano. Uno que fallo DESPUES (titulos,
+#: portadas) tiene su montaje hecho por el propio piloto: eso no es terminarlo.
+_PILOTO_ANTES_DEL_MONTAJE = ("crear", "guion", "voz", "vistos", "imagenes", "decidir", "montaje")
+
+
+def _piloto_render_al_dia(pid):
+    """¿El video tiene su montaje al dia (render «listo» y nada en marcha)? Solo
+    LEE el estado del video (regla 1); se recuerda mientras su estado.json no
+    cambie, para no abrirlo en cada vuelta de la lista."""
+    try:
+        marca = os.stat(os.path.join(raiz_proyectos(), str(pid), "estado.json")).st_mtime_ns
+    except (OSError, ValueError):
+        return False
+    guardado = _PILOTO_RENDER.get(pid)
+    if guardado and guardado[0] == marca:
+        return guardado[1]
+    try:
+        ctx = contexto(pid)
+        al_dia = ctx.estado.estado_de("render") == "listo" and not ctx.gestor.listar(activos=True)
+    except Exception:                                       # noqa: BLE001
+        return False
+    _PILOTO_RENDER[pid] = (marca, al_dia)
+    while len(_PILOTO_RENDER) > 2000:
+        _PILOTO_RENDER.pop(next(iter(_PILOTO_RENDER)))
+    return al_dia
+
+
 def _piloto_para_pantalla(ficha):
     salida = {k: v for k, v in ficha.items() if k != "portadas"}
     salida["portadas"] = [{k: v for k, v in c.items() if k != "diseno"}
@@ -23540,6 +23581,15 @@ def _piloto_para_pantalla(ficha):
     # una de antes de un reinicio espera a «Reintentar», como todas
     if ficha.get("estado") == "parado" and ficha.get("tipo_parada") == "ocupado":
         salida["espera_sola"] = ficha.get("id") in _PILOTO_ESPERAS
+    # TERMINADO A MANO (rama piloto-al-dia, X01 e Y05 del 12-11): fallo o se paro
+    # antes del montaje, alguien lo arreglo y lo monto, y la tarjeta seguia
+    # diciendo «Falló» (y ofrecia «Reintentar», que puede volver a pagar el
+    # revisor). Se mira al pintar la lista; la ficha del piloto no se toca.
+    if (ficha.get("pid") and ficha.get("estado") in ("error", "parado", "interrumpido")
+            and (ficha.get("etapa") or "crear") in _PILOTO_ANTES_DEL_MONTAJE
+            and not salida.get("espera_sola") and _piloto_render_al_dia(ficha["pid"])):
+        salida["terminado_a_mano"] = True
+        salida["salio"] = _video_salio(ficha["pid"])
     return salida
 
 
@@ -23555,7 +23605,7 @@ def piloto_estado(peticion: Request):
     # el aviso «N para revisar» sin lo que ya salio ni lo que espera solo
     resumen["a_revisar"] = sum(1 for v in resumen["videos"]
                                if v.get("estado") in P.A_REVISAR and not v.get("salio")
-                               and not v.get("espera_sola"))
+                               and not v.get("espera_sola") and not v.get("terminado_a_mano"))
     resumen["cupo"] = _piloto_cupo_lleno(resumen["ajustes"]["cupo_max_pct"])
     return resumen
 

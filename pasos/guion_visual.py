@@ -405,12 +405,74 @@ def fuera_de_la_voz(planos, bloques):
     return sorted({p["bloque"] for p in planos or [] if p.get("bloque") not in validos})
 
 
-def estado_de_linea(plano, estados):
-    """{cambio, estado} con que se edita el plano: el de su linea, o la base."""
+def _trozos(etiqueta):
+    return [t for t in re.split(r"[_\s-]+", _llano(etiqueta)) if t]
+
+
+def casar_estado(nombre, todos):
+    """El estado del espacio que nombra una linea. -> la etiqueta de `todos`, o ""
+
+    Rama piloto-al-dia (12-11-2026, Y05): las lineas de la Parrilla traian
+    «frio» y «calido» y los estados del espacio se llamaban «blanco_frio» y
+    «blanco_calido»; sin casar, el plano editaba la base sin cambio y salia
+    igual que otro (el guardian `_planos_repetidos` tumbo la tanda). Casa:
+      1. igual (sin mayusculas, tildes ni separadores);
+      2. si no, el UNICO estado cuyas palabras contienen todas las de la linea
+         (o al reves): con dos candidatos no se adivina."""
+    nombre = str(nombre or "").strip()
+    todos = [str(t) for t in (todos or []) if str(t).strip()]
+    if not nombre or not todos:
+        return ""
+    if nombre in todos:
+        return nombre
+    llano = "_".join(_trozos(nombre))
+    iguales = [t for t in todos if "_".join(_trozos(t)) == llano]
+    if len(iguales) == 1:
+        return iguales[0]
+    mios = set(_trozos(nombre))
+    if not mios:
+        return ""
+    candidatos = [t for t in todos if mios <= set(_trozos(t)) or (set(_trozos(t)) and set(_trozos(t)) <= mios)]
+    return candidatos[0] if len(candidatos) == 1 else ""
+
+
+def estado_de_linea(plano, estados, todos=None):
+    """{cambio, estado} con que se edita el plano: el de su linea, o la base.
+
+    `estados` son los que llevan cambio ({estado: cambio}); `todos`, TODAS las
+    etiquetas del espacio, tambien las que son la base tal cual («antes»).
+    Solo con `todos` se casa un nombre abreviado (`casar_estado`): sin saber
+    cuales son la base, «antes» podria casar con «antes_de_pintar». Una linea
+    que ya casaba exacta da lo mismo que antes (mismo prompt, misma firma)."""
     estado = (plano or {}).get("estado") or ""
-    if estado and estado in (estados or {}):
+    estados = estados or {}
+    if estado and estado in estados:
         return {"cambio": estados[estado], "estado": estado}
+    if estado and todos:
+        casado = casar_estado(estado, todos)
+        if casado and casado in estados:
+            return {"cambio": estados[casado], "estado": casado}
     return {"cambio": "", "estado": ""}
+
+
+def estados_sin_casar(planos, todos):
+    """Las lineas cuyo estado no es ninguno del espacio. -> [{plano, estado, opciones}]
+
+    Solo si se saben TODAS las etiquetas (los ESTADOS DEL ESPACIO de la
+    Parrilla): sin ellas no hay con que comparar. Un estado vacio o que dice
+    «la base» no cuenta. Es lo que para la tanda ANTES de pagar."""
+    todos = [str(t) for t in (todos or []) if str(t).strip()]
+    if not todos:
+        return []
+    salida = []
+    for i, p in enumerate(planos or []):
+        estado = str((p or {}).get("estado") or "").strip()
+        if not estado or sin_cambio(estado) or _llano(estado).strip() in ("base", "la_base"):
+            continue
+        if not casar_estado(estado, todos):
+            salida.append({"plano": (p or {}).get("id") or f"V{i + 1:03d}", "estado": estado,
+                           "opciones": sorted(todos)})
+    return salida
 
 
 # ------------------------------------------------------------ Claude: proponer

@@ -181,6 +181,11 @@ def anexos_del_turno(web, resultados_texto, imagenes, cuenta_texto="", vidiq=Fal
                       "di que activen «Buscar en internet» o que te peguen capturas.]")
     if vidiq:
         partes.append(AVISO_VIDIQ)
+        if isinstance(vidiq, str) and vidiq.strip():
+            # vidiq-2: dónde se busca en este proyecto («SEO de este proyecto»)
+            partes.append(f"[EL PÚBLICO DE ESTE PROYECTO ES {vidiq.strip()[:80].upper()}: en vidIQ "
+                          "pide las palabras clave y los títulos para ese sitio y en su idioma "
+                          "(sin país = la cifra mundial).]")
     if resultados_texto:
         partes.append("[MIS VÍDEOS QUE MEJOR FUNCIONARON, con cifras reales guardadas]\n"
                       + resultados_texto)
@@ -351,6 +356,7 @@ class Chat:
         self._avance = None
         self.borrada = False
         self.marca_al = ""
+        self.estilo = ""          # el estilo con el que se harán sus guiones («Escribir el guion» de un recibido)
 
     # -- disco
     def ruta(self):
@@ -370,7 +376,7 @@ class Chat:
                     return
                 datos = {"id": self.id, "proyecto": self.cid, "modelo": self.modelo,
                          "session_id": self.session_id, "creada": self.creada,
-                         "tocada": self.tocada, "marca_al": self.marca_al,
+                         "tocada": self.tocada, "marca_al": self.marca_al, "estilo": self.estilo,
                          "turnos": [json.loads(json.dumps(t)) for t in self.turnos]}
             try:
                 P.escribir_json(self.ruta(), datos)
@@ -386,6 +392,7 @@ class Chat:
         chat.creada = float(datos.get("creada") or time.time())
         chat.tocada = float(datos.get("tocada") or chat.creada)
         chat.marca_al = str(datos.get("marca_al") or "")
+        chat.estilo = str(datos.get("estilo") or "")[:120]
         chat.turnos = [dict(t) for t in datos.get("turnos") or [] if isinstance(t, dict)]
         # un turno que se quedó «pensando» es de un servicio que se reinició a mitad
         if chat.turnos and chat.turnos[-1].get("estado") == "pensando":
@@ -411,7 +418,7 @@ class Chat:
 
     def ver(self):
         with self._lock:
-            return dict(self.resumen(), proyecto=self.cid, reanuda=bool(self.session_id),
+            return dict(self.resumen(), proyecto=self.cid, reanuda=bool(self.session_id), estilo=self.estilo,
                         turnos=[dict(t) for t in self.turnos])
 
     def _anadir(self, quien, texto, estado="listo", **extra):
@@ -461,7 +468,8 @@ class Chat:
             sesion = self.session_id
         self.guardar()
         args = (texto or "Mira estas capturas.", bool(web), resultados_texto, rutas, respuesta,
-                avance, historia, sesion, cuenta_texto, bool(vidiq))
+                avance, historia, sesion, cuenta_texto,
+                vidiq if isinstance(vidiq, str) and vidiq.strip() else bool(vidiq))
         if en_hilo:
             threading.Thread(target=self._correr, args=args, daemon=True,
                              name=f"guionista-{self.id}").start()
@@ -577,7 +585,8 @@ class Chat:
         try:
             mid, gids = P._anadir_textos(self.raiz, self.cid, matriz or "",
                                          nombre or f"Conversación: {self.titulo()[:60]}", textos,
-                                         {"tipo": "chat", "chat": self.id}, crear_si_falta=True)
+                                         dict({"tipo": "chat", "chat": self.id}, **({"estilo": self.estilo} if self.estilo else {})),
+                                         crear_si_falta=True)
         except Exception:
             with self._lock:
                 guardados = dict(turno.get("guardados") or {})
@@ -621,9 +630,10 @@ def _barrer():
                 _CHATS.pop(clave, None)
 
 
-def nueva(raiz, cid, modelo=None):
+def nueva(raiz, cid, modelo=None, estilo=""):
     _barrer()
     chat = Chat(raiz, cid, modelo=modelo)
+    chat.estilo = re.sub(r"[^\w.\-]", "", str(estilo or ""))[:120]
     with _LOCK:
         _CHATS[(chat.cid, chat.id)] = chat
     return chat

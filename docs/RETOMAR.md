@@ -504,3 +504,74 @@ En la rama, sin unir a `main`. `estilo.modo` = "ilustracion" | "foto".
   se sustituyeron con `ESTUDIO_FUENTES` y el navegador fue Chromium con
   `--no-sandbox` en `ESTUDIO_EDGE`. `prueba_login` falla aqui porque el CLI de
   la sesion entra por token y no por suscripcion; en el VPS no aplica.
+
+## 11. Gráficas en capas: la base (11-11-2026, rama `graficas-2-capas`)
+
+Una pieza de Gráficas puede guardarse como **documento en capas** (versión 2):
+láminas, y en cada una capas sueltas de texto, foto, logo o forma. Lo hace
+`pasos/graficas_capas.py`; el editor de pantalla llega en `graficas-2-editor`.
+
+- **La pieza de siempre no se toca.** Lo nuevo va en `capas.json`, `capas.png`
+  y `capas.jpg`, al lado de `pieza.*`. `capas.json` apunta el `sello` del
+  `pieza.json` del que salió: si alguien vuelve a guardar con el editor de
+  antes, el sello cambia y la versión en capas deja de valer
+  (`graficas.capas_vigentes`). Una pieza nacida en capas lleva una ficha mínima
+  y una copia en `pieza.png`/`pieza.jpg` para que `main` la liste y la descargue.
+- **Convertir** pinta la plantilla con colores «testigo» únicos para saber qué
+  color del Kit usa cada parte (`html_de(..., _testigos=)`), quita un instante
+  los giros para leer las cajas sin girar, y recorre los elementos en el orden
+  en que el navegador los pinta (`_Convertidor.pintar_grupo`).
+
+### Trampas de esta parte (las 112 combinaciones salieron iguales al final)
+
+- **El navegador mide en 1/64 de píxel y redondea hacia abajo.** Con 4
+  decimales en % una posición caía 1/64 a la izquierda y cambiaba el suavizado
+  de las letras. Ahora: 6 decimales y + 0,002 px en cada posición.
+- **Los bordes se redondean hacia abajo a píxeles enteros**: 7 px guardados
+  como 0,648148 cqmin salían de 6. Se pintan con + 0,01 px.
+- **La holgura del ancho de un texto** (para que se parta en las mismas líneas)
+  es de 2/64 px y va hacia donde no mueve las letras (izquierda, centro,
+  derecha). Con 0,1 px se movían los textos centrados y el punto de giro.
+- **Un texto girado dentro de una caja girada** (el sello de la plantilla 7) no
+  se suaviza igual que girado suelto aunque caiga en el mismo sitio: medido en
+  aislado, 0,4 % de píxeles distintos. Por eso la comparación mira también la
+  «diferencia visible» (`diferencia_visible`, que perdona el medio píxel de los
+  bordes) y la prueba comprueba que caza un cambio de verdad.
+- **Una casilla que corta lo que se sale** (plantilla 8 con un texto movido con
+  el editor de antes): la capa se lleva su `recorte`, o se vería entera.
+- **La foto se pinta con `object-fit` y `object-view-box`**, como las
+  plantillas; `encaje()` hace la misma cuenta con posición y tamaño para la
+  pantalla del editor (que puede no ser Chromium).
+
+### Lo que cazaron las dos revisiones independientes (11-11)
+
+- **Guardar sin pisar lo más nuevo.** Un doc en capas lleva `origen.sello`
+  (el de `pieza.json`) y `origen.guardado` (el número del último guardado en
+  capas, en `capas.sello.json`). `guardar` los compara bajo
+  `graficas.cerrojo_pieza` justo antes de escribir y, si no cuadran, lanza
+  `ErrorConflicto` (409): lo cazaba un guardado con el editor de antes, otra
+  pestaña en capas o un guardado que llega mientras se pinta. Cada guardado
+  estrena número; en una nacida, también sello (renueva la miniatura).
+- **Una pieza nacida en capas** tiene una ficha mínima (plantilla 2 vacía). Si
+  su versión en capas no se puede leer, `leer` da error: convertirla daría una
+  plantilla vacía y guardarla borraría el diseño. El editor de antes no puede
+  guardarla ni duplicarla. **Pero el `main` de antes de esta rama no sabe
+  nada de esto**: si se vuelve a `main` y alguien abre una nacida con su editor
+  y guarda, la deja vacía (el diseño queda solo en `capas.json`). No se vuelve
+  a `main` con piezas nacidas en capas en uso.
+- **La comparación también mira los textos** (cuáles hay y qué dicen): sin una
+  marca de 4 letras la diferencia en píxeles no llegaba al tope.
+- **Lo oculto con el editor de antes** se rescata con todo lo que cuelga de
+  ello (los textos del sello) y en su sitio: las dos pasadas se casan por el
+  índice del elemento, que no cambia al ocultar.
+- **`capas.json` manda sobre la ficha pequeña** (una sola regla para todos: `graficas.capas_que_valen`) cuando su `origen.sello`
+  coincide con el de la pieza (`graficas_capas._estado`): se escribe antes, así
+  que si el proceso muere entre los dos, la pieza sigue abriéndose y
+  guardándose con su número de verdad (3.ª revisión: una nacida se quedaba
+  bloqueada para siempre).
+- **El editor de antes no descarta en silencio una versión en capas**:
+  `guardar_pieza` sobre una pieza con capas vigentes da error salvo con
+  `descartar_capas: true` (decisión prudente del 11-11, a confirmar con el
+  dueño en `graficas-2-editor`: la pantalla tendrá que ofrecer «Abrir en capas»
+  o «Descartar la versión en capas»). También vuelve a comprobar la pieza
+  dentro del cerrojo: un «Borrar» durante el pintado ya no la resucita.

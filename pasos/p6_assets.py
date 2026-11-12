@@ -1586,6 +1586,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     todos_los_estados = etiquetas_del_espacio(catalogo, principal) if principal else []
     # las de OTROS sitios del catalogo: una linea alli con su estado no se para
     estados_ajenos = set(etiquetas_ajenas(catalogo, principal)) if principal else set()
+    otro_sitio = bloques_de_otro_sitio(catalogo, principal, [b.get("id") for b in meta.get("bloques") or []]) \
+        if principal else set()
     estados_sin_casar = []
     for indice, (escena, beat) in enumerate(zip(escenas, beats)):
         if escena.get("sigue_a"):
@@ -1634,10 +1636,11 @@ def planificar(proyecto, params, inventario=None, replantear=False,
                 if principal else {}, todos_los_estados))
             # UN ESTADO QUE NO ES NINGUNO DEL ESPACIO (piloto-al-dia, Y05): se
             # apunta y `ejecutar` para la tanda ANTES de pagar
-            # solo los planos DEL ESPACIO: uno de otro sitio no edita la base y su
-            # estado no para el video (punto B del tren del 12-11)
+            # solo las lineas DEL ESPACIO: una de un bloque que el catalogo pone
+            # entero en otro sitio no para el video (punto B del tren del 12-11;
+            # la misma regla que la ficha, `bloques_de_otro_sitio`)
             if principal and todos_los_estados and linea.get("estado") and not beat.get("estado") \
-                    and escena.get("set") == principal \
+                    and str(linea.get("bloque") or "").strip().upper() not in otro_sitio \
                     and linea["estado"] not in estados_ajenos \
                     and guion_visual.estados_sin_casar([linea], todos_los_estados):
                 estados_sin_casar.append({"plano": escena["id"], "linea": linea.get("id") or "",
@@ -1677,7 +1680,7 @@ def planificar(proyecto, params, inventario=None, replantear=False,
                 nueva["linea_gv"], tipo_relato.estados_del_catalogo(catalogo, principal)
                 if principal else {}, todos_los_estados))
             if principal and todos_los_estados and nueva["linea_gv"].get("estado") and not beat.get("estado") \
-                    and (nueva.get("set") or partida.get("set")) == principal \
+                    and str(nueva["linea_gv"].get("bloque") or "").strip().upper() not in otro_sitio \
                     and nueva["linea_gv"]["estado"] not in estados_ajenos \
                     and guion_visual.estados_sin_casar([nueva["linea_gv"]], todos_los_estados):
                 estados_sin_casar.append({"plano": nueva["id"], "linea": nueva["linea_gv"].get("id") or "",
@@ -6293,14 +6296,31 @@ def etiquetas_del_espacio(catalogo, sitio=None):
     return salida
 
 
-def lineas_de_otro_sitio(catalogo, sitio):
-    """Los textos de las lineas visuales que el catalogo puso en OTRO sitio (rama
-    gv-sitios, `_lineas_del_catalogo`). -> set de claves de linea. Con ellas la
-    ficha calla lo mismo que `planificar`, que mira el sitio del plano."""
+def bloques_de_otro_sitio(catalogo, sitio, orden_bloques):
+    """Los bloques de la voz que el catalogo pone ENTEROS en otro sitio: todos
+    los tramos que los cubren llevan un sitio, y ninguno es el del espacio.
+    -> set de ids de bloque
+
+    Es la MISMA regla en el plan y en la ficha del guion visual (revision del
+    12-11): una linea de esos bloques es de otro sitio y su estado no para el
+    video. Un bloque con algun tramo del espacio, o sin sitio, cuenta como del
+    espacio (mejor parar antes de pagar que dibujar mal)."""
     if not sitio:
         return set()
-    return {clave for clave, linea in _lineas_del_catalogo(catalogo).items()
-            if linea.get("set") and linea.get("set") != sitio}
+    orden = [str(b).strip().upper() for b in (orden_bloques or [])]
+    posicion = {b: i for i, b in enumerate(orden)}
+    sitios = {}
+    beats = (catalogo.get("beats") or []) if isinstance(catalogo, dict) else []
+    for beat in beats:
+        if not isinstance(beat, dict):
+            continue
+        desde = posicion.get(str(beat.get("desde") or "").strip().upper())
+        if desde is None:
+            continue
+        hasta = posicion.get(str(beat.get("hasta") or "").strip().upper(), desde)
+        for k in range(desde, max(desde, hasta) + 1):
+            sitios.setdefault(orden[k], set()).add(beat.get("set") or "")
+    return {b for b, sets in sitios.items() if "" not in sets and sitio not in sets}
 
 
 def etiquetas_ajenas(catalogo, sitio):

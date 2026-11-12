@@ -5148,19 +5148,25 @@ def _imagenes_del_relato_por_pagar(ctx):
         bases = _tipo_relato_guardado(ctx).get("bases") or {}
         subida = (params.get("espacio_fijo") or {}).get("imagen") \
             if isinstance(params.get("espacio_fijo"), dict) else None
+
+        def en_disco(ficha):
+            # una base apuntada cuyo fichero no esta (una copia de antes del
+            # 12-11) hay que volver a pagarla
+            relativa = str((ficha or {}).get("imagen") or "")
+            try:
+                return bool(relativa) and os.path.exists(ctx.proyecto.ruta(*relativa.split("/")))
+            except ValueError:
+                return False
+
         sitio, _espacio = p6.espacio_del_relato(ctx.proyecto, params)
         n = 0
-        if not (sitio and sitio in bases) and not subida:
+        if not (sitio and en_disco(bases.get(sitio))) and not subida:
             n += 1
-        try:
-            otros = [a["sitio"] for a in p6.ambientes_del_relato(ctx.proyecto, params)][1:]
-        except Exception:                                   # noqa: BLE001
-            otros = []
-        n += sum(1 for a in otros if a not in bases)
         sitio_e, pedidos = p6.estados_del_relato(ctx.proyecto, params)
         hechos = ((bases.get(sitio_e) or {}).get("estados") or {}) if sitio_e else {}
         n += sum(1 for est, cambio in pedidos.items()
-                 if not (hechos.get(est) and tr.mismo_cambio((hechos.get(est) or {}).get("cambio"), cambio)))
+                 if not (en_disco(hechos.get(est))
+                         and tr.mismo_cambio((hechos.get(est) or {}).get("cambio"), cambio)))
         return n
     except Exception:                                       # noqa: BLE001
         return 0
@@ -6227,11 +6233,11 @@ def _ficha_guion_visual(ctx):
             todos = p6.etiquetas_del_espacio(catalogo_e, sitio_e)
             ajenos = set(p6.etiquetas_ajenas(catalogo_e, sitio_e))
             planos_ver = guardado.get("planos") or propuesta or _planos_ef
-            otro_sitio = p6.lineas_de_otro_sitio(catalogo_e, sitio_e)
-            claves = {p.get("id"): _catalogo_visual()._clave_linea(p.get("visual"))
-                      for p in planos_ver or [] if isinstance(p, dict)}
+            otro_sitio = p6.bloques_de_otro_sitio(catalogo_e, sitio_e, [b["id"] for b in bloques])
+            bloque_de = {p.get("id"): str(p.get("bloque") or "").strip().upper()
+                         for p in planos_ver or [] if isinstance(p, dict)}
             sin_casar = [x for x in gv.estados_sin_casar(planos_ver, todos)
-                         if x["estado"] not in ajenos and claves.get(x["plano"]) not in otro_sitio]
+                         if x["estado"] not in ajenos and bloque_de.get(x["plano"]) not in otro_sitio]
             casados = gv.estados_casados(planos_ver, todos)
     except Exception:                                       # noqa: BLE001
         sin_casar, casados = [], []
@@ -18851,12 +18857,7 @@ def _coste_previsto(ctx, pestanas, modo="pendientes"):
     hojas, hojas_hechas = (_hojas_de_reparto(ctx, rehara) if "video" in pestanas
                            else (0, 0))
     imagenes += hojas
-    # Y LA IMAGEN BASE Y LA DE CADA ESTADO del tipo de relato, que se pagan antes
-    # de los planos (G01, tren del 12-11: se previeron 0,54 $ y costaron 0,93 $,
-    # entre otras cosas por la base y el estado, que no se contaban). Solo las
-    # que FALTAN: se cuentan como imagenes por hacer.
-    relato_por_pagar = _imagenes_del_relato_por_pagar(ctx) if "video" in pestanas else 0
-    usd_imagenes = round((imagenes + relato_por_pagar) * usd_imagen, 3)
+    usd_imagenes = round(imagenes * usd_imagen, 3)
     usd_tts = round(caracteres * usd_caracter, 4)
     # la voz ya grabada y al dia no se vuelve a pagar en una tanda «pendientes»;
     # en una 'todo' se graba otra vez entera, y se paga entera
@@ -18869,13 +18870,12 @@ def _coste_previsto(ctx, pestanas, modo="pendientes"):
     # en el otro: uno asusta al que retoma, el otro promete barato de mas.
     hechas = (_imagenes_ya_generadas(ctx, planos, rehara) + hojas_hechas) if imagenes else 0
     hechas = min(hechas, imagenes)
-    por_generar = max(0, imagenes - hechas) + relato_por_pagar
-    imagenes += relato_por_pagar
+    por_generar = max(0, imagenes - hechas)
     precio = AJUSTES.precio_por_imagen(calidad, modo=modo_imagen)
     ficha = {"imagenes": imagenes, "calidad": calidad,
              "usd_por_imagen": usd_imagen, "usd_imagenes": usd_imagenes,
              "precio_de": precio.get("fuente"),
-             "hojas_reparto": hojas, "imagenes_relato": relato_por_pagar,
+             "hojas_reparto": hojas,
              "imagenes_hechas": hechas, "imagenes_por_generar": por_generar,
              "usd_por_generar": round(por_generar * usd_imagen + usd_tts_por_generar, 3),
              "caracteres": caracteres, "usd_tts": usd_tts,
@@ -23259,6 +23259,11 @@ def _piloto_previsto(ctx, aj):
         # (si no, «Seguir igualmente» volvia a parar aqui: tren del 12-11)
         falta = coste.get("usd_por_generar")
         total = float(falta if falta is not None else (coste.get("usd_total") or 0.0))
+        # Y LA IMAGEN BASE Y LA DE CADA ESTADO que el piloto dibuja antes de los
+        # planos (G01: 0,54 $ previstos de imagenes y 0,93 $ pagados, entre otras
+        # cosas porque no se contaban). Solo aqui: una tanda de la pantalla no las
+        # dibuja (`planos_sin_base` la para), y contarlas alli prometia de mas
+        total += _imagenes_del_relato_por_pagar(ctx) * float(coste.get("usd_por_imagen") or 0.0)
         total += _piloto_usd_portada(aj)
     except Exception as fallo:                              # noqa: BLE001
         raise _PilotoPara(f"no se ha podido calcular lo que costaría ({str(fallo)[:160]}): sin "
@@ -23432,7 +23437,7 @@ def _piloto_decidir(ctx, raiz, vid, aj, forzar):
         P.apuntar_revision(raiz, vid, f"{resumen['sin_revisar']} imágenes no se pudieron revisar "
                                       "(Claude no contestó): míralas tú", "Imágenes")
     if forzar and decision == "parar":
-        return "seguir", "lo has mirado tú: se monta igual"
+        return "seguir", "pulsaste «Seguir igualmente»: se monta igual y las marcadas quedan para revisar"
     return decision, porque
 
 
@@ -23627,7 +23632,10 @@ PILOTO_SALTA_INTERRUPTOR = ("interruptor", "tope")
 def _piloto_tope_inicial(ctx, aj, previsto):
     """El paso 0: lo que falta por generar, MAS lo ya gastado si es un reintento
     (punto D del tren del 12-11), contra el tope. Lanza `_PilotoPara`."""
-    if not previsto or previsto <= 0:
+    # sin la portada: se mira en su paso, y si no cabe queda la del plano (como C).
+    # Con nada mas que pagar, no se para (G01: «Seguir» con todo dibujado)
+    previsto = round(float(previsto or 0.0) - _piloto_usd_portada(aj), 3)
+    if previsto <= 0:
         return
     ya = _piloto_gastado(ctx)
     if ya + previsto > aj["tope_usd"]:

@@ -82,7 +82,11 @@ def prueba_cotizador(servidor, carpeta):
     ctx.estado.set_params("assets", params)
     n = servidor._imagenes_del_relato_por_pagar(ctx)
     ok(n == 3, f"sin nada hecho: la base y los dos estados (blanco_frio y blanco_calido) = 3 ({n})")
-    # la base hecha y el estado frío hecho con su cambio de ahora
+    # la base hecha y el estado frío hecho con su cambio de ahora (con su fichero)
+    for nombre in ("0123456789abcdef.png", "fedcba9876543210.png"):
+        os.makedirs(proyecto.ruta("espacio_fijo"), exist_ok=True)
+        with open(proyecto.ruta("espacio_fijo", nombre), "wb") as fh:
+            fh.write(b"png")
     hechos = dict(params)
     hechos["tipo_relato"] = dict(params["tipo_relato"], bases={"bano": {
         "imagen": "espacio_fijo/0123456789abcdef.png", "aprobada": True,
@@ -91,16 +95,27 @@ def prueba_cotizador(servidor, carpeta):
     ctx.estado.set_params("assets", hechos)
     n = servidor._imagenes_del_relato_por_pagar(ctx)
     ok(n == 1, f"con la base y «blanco_frio» hechos, solo falta «blanco_calido» ({n})")
+    os.remove(proyecto.ruta("espacio_fijo", "0123456789abcdef.png"))
+    n = servidor._imagenes_del_relato_por_pagar(ctx)
+    ok(n == 2, f"una base apuntada cuyo fichero no está (copia de antes) se vuelve a contar ({n})")
     ctx.estado.set_params("assets", dict(params, tipo_relato={}))
     ok(servidor._imagenes_del_relato_por_pagar(ctx) == 0, "sin tipo de relato, nada (como antes)")
     ctx.estado.set_params("assets", params)
+    # el previsto del PILOTO las suma; el cotizador de la pantalla no (no las dibuja)
+    original = servidor._coste_previsto
+    try:
+        servidor._coste_previsto = lambda _ctx, _pasos: {"usd_por_generar": 0.50, "usd_por_imagen": 0.07}
+        previsto = servidor._piloto_previsto(ctx, {"portadas": "plano"})
+        ok(abs(previsto - (0.50 + 3 * 0.07)) < 1e-6,
+           f"el previsto del piloto suma la base y los dos estados ({previsto}; antes 0,50)")
+    finally:
+        servidor._coste_previsto = original
     try:
         coste = servidor._coste_previsto(ctx, ["video"])
+        ok("imagenes_relato" not in coste,
+           "el cotizador de la pantalla no las promete (una tanda de la pantalla no las dibuja)")
     except Exception as fallo:                                    # noqa: BLE001
         print(f"  (cotizador entero omitido aquí: {str(fallo)[:80]})")
-        return
-    ok(coste.get("imagenes_relato") == 3 and coste["imagenes_por_generar"] >= 3,
-       f"y el cotizador las suma a lo que falta ({coste.get('imagenes_relato')} de {coste['imagenes_por_generar']})")
 
 
 def prueba_tope(servidor, raiz):
@@ -131,6 +146,13 @@ def prueba_tope(servidor, raiz):
             ok(False, "D: 0,50 gastados + 0,45 por hacer pasan de 0,90: se tenía que parar")
         except servidor._PilotoPara as parada:
             ok("ya gastados" in str(parada), f"D: al reintentar, lo ya gastado cuenta ({parada})")
+        servidor._piloto_gastado = lambda _ctx: 0.95
+        portada = servidor._piloto_usd_portada(aj)
+        try:
+            servidor._piloto_tope_inicial(None, aj, portada)
+            ok(True, "D: con todo dibujado y solo la portada por hacer, no para (la portada mira en su paso)")
+        except servidor._PilotoPara as parada:
+            ok(False, f"D: no se tenía que parar solo por la portada: {parada}")
         servidor._piloto_gastado = lambda _ctx: 0.0
         try:
             servidor._piloto_tope_inicial(None, aj, 0.80)
@@ -145,6 +167,8 @@ def prueba_tope(servidor, raiz):
     import inspect                                                    # noqa: PLC0415
     ok("saltar in PILOTO_SALTA_INTERRUPTOR" in inspect.getsource(servidor._piloto_cadena),
        "E: y la cadena del piloto lo usa al decidir")
+    ok("lo has mirado tú" not in inspect.getsource(servidor._piloto_decidir),
+       "E: y el aviso ya no dice «lo has mirado tú» (puede que nadie lo haya mirado)")
 
 
 def prueba_otro_sitio(carpeta):
@@ -163,12 +187,32 @@ def prueba_otro_sitio(carpeta):
     params["catalogo"] = Y._catalogo_y05()
     sueltos = [x["estado"] for x in Y.P6.planificar(proyecto, params).get("estados_sin_casar") or []]
     ok(sueltos == ["rojo"], f"en un plano del baño, sí ({sueltos})")
-    con_lineas = dict(cat, desde_lineas=True, lineas=[{"visual": Y.LINEAS[3]["visual"], "set": "tienda"},
-                                                      {"visual": Y.LINEAS[0]["visual"], "set": "bano"}])
-    claves = Y.P6.lineas_de_otro_sitio(con_lineas, "bano")
-    import catalogo_visual as CV                                      # noqa: PLC0415
-    ok(CV._clave_linea(Y.LINEAS[3]["visual"]) in claves and CV._clave_linea(Y.LINEAS[0]["visual"]) not in claves,
-       "la ficha sabe qué líneas puso el catálogo en otro sitio")
+
+
+def prueba_ficha_igual_que_plan(servidor, carpeta):
+    seccion("4b] la ficha del guion visual dice lo mismo que el plan (revisión del 12-11)")
+    proyecto = Y._proyecto(os.path.join(carpeta, "ficha"))
+    servidor.fijar_raiz_proyectos(os.path.join(carpeta, "ficha"))
+    ctx = servidor.contexto(proyecto.id)
+    casos = []
+    tienda = Y._catalogo_y05()
+    tienda["sets"]["tienda"] = {"descripcion": "a small shop", "luz": "warm", "palabras": ["tienda"], "rotulo": ""}
+    tienda["beats"][2]["hasta"] = "B003"
+    tienda["beats"].append({"set": "tienda", "desde": "B004", "hasta": "B004", "personajes": [], "tono": "neutro",
+                            "accion": "the shop", "palabras": []})
+    casos.append(("B004 entero en la tienda", tienda))
+    viejo = copy.deepcopy(Y._catalogo_y05())
+    viejo["sets"]["tienda"] = {"descripcion": "a small shop", "luz": "warm", "palabras": ["tienda"], "rotulo": ""}
+    viejo.update(desde_lineas=True, lineas=[{"visual": Y.LINEAS[3]["visual"], "set": "tienda"}])
+    casos.append(("catálogo viejo con la línea en la tienda y el tramo en el baño", viejo))
+    casos.append(("todo en el baño", Y._catalogo_y05()))
+    for nombre, cat in casos:
+        params = Y._params(Y.LINEAS, estados={})
+        params["catalogo"] = cat
+        plan = [x["estado"] for x in Y.P6.planificar(proyecto, params).get("estados_sin_casar") or []]
+        ctx.estado.set_params("assets", params)
+        ficha = [x["estado"] for x in servidor._ficha_guion_visual(ctx).get("estados_sin_casar") or []]
+        ok(sorted(plan) == sorted(ficha), f"{nombre}: plan {plan} = ficha {ficha}")
 
 
 def main():
@@ -178,6 +222,7 @@ def main():
         servidor = _servidor()
         if servidor is not None:
             prueba_cotizador(servidor, CARPETA)
+            prueba_ficha_igual_que_plan(servidor, CARPETA)
             prueba_tope(servidor, os.path.join(CARPETA, "proyectos"))
     finally:
         shutil.rmtree(CARPETA, ignore_errors=True)
@@ -192,5 +237,4 @@ def main():
 
 
 if __name__ == "__main__":
-    del copy
     sys.exit(main())

@@ -4394,7 +4394,9 @@ def lo_que_funciono(raiz, videos, cid=None, dias=30, red=None, por="vistas", cua
     for v, e in _publicados(raiz, _de_proyecto(videos, cid), desde):
         if red and e["red"] != red:
             continue
-        # sin los ceros que son «no lo sé»: esto se le da a Claude como ejemplo
+        # los ceros que son «no lo sé» (12-11) no ordenan ni se enseñan: un Short
+        # con «0 % visto de media» guardado antes no entra en ese ranking, y
+        # esto se le da a Claude como ejemplo
         m = sin_ceros_imposibles(e.get("metricas") or {})
         vistas = m.get("vistas")
         if not isinstance(vistas, (int, float)):
@@ -4417,7 +4419,6 @@ def lo_que_funciono(raiz, videos, cid=None, dias=30, red=None, por="vistas", cua
             "hora": momento.strftime("%H:%M"), "url": e.get("url") or "",
             "titulo": str(texto.get("titulo") or "")[:200],
             "descripcion": str(texto.get("descripcion") or "")[:600],
-            # los ceros que son «no lo sé» tampoco salen en «Lo que mejor funcionó» (12-11)
             "metricas": {k: m.get(k) for k in METRICAS + EXTRAS + RETENCION},
             "interaccion": interaccion, "mirado": m.get("al") or ""}))
     filas.sort(key=lambda x: x[0], reverse=True)

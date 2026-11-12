@@ -2197,6 +2197,8 @@ def prueba_metricas_completas():
     m = ((mejor.get("lista") or mejor.get("posts") or [{}])[0] or {}).get("metricas") or {}
     igual((m.get("vistas"), m.get("media_vista"), m.get("tiempo_medio_s"), m.get("alcance")), (31, None, None, None),
           "«Lo que mejor funcionó» no dice «0 % visto de media» ni «0 alcanzados» con vistas")
+    igual(P.lo_que_funciono(raiz_y, [{"pid": "y11", "nombre": "Y11", "cliente": ""}], por="media_vista")["posts"], [],
+          "y ordenado por «visto de media», un 0 que es «no lo sé» no ocupa un puesto")
 
 def prueba_subtitulos_youtube():
     """extras-youtube (12-11-2026): la pista de subtitulos que se sube a YouTube."""

@@ -2071,7 +2071,7 @@ def _investigar(raiz, info, ajustes, videos, cid):
             # lo del canal es un añadido: si falla, se dice y se investiga igual
             avisos_canal.append(f"tu canal: {str(fallo)[:200]}")
     real = SR.investigar(info, ajustes, datos, raiz, posts=posts, clave_yt=clave_youtube(),
-                         del_canal=filas, enriquecer=_enriquecer(raiz, filas))
+                         del_canal=filas, enriquecer=_enriquecer(raiz, filas, SR.publico_de(ajustes)))
     real["avisos"] = avisos_canal + list(real.get("avisos") or [])
     real["con_canal"] = bool(filas)
     real["ganchos"] = aprendido_de_resultados(raiz, videos, cid)
@@ -2083,14 +2083,15 @@ def _investigar(raiz, info, ajustes, videos, cid):
                              "youtube": real["con_youtube"]})
 
 
-def _enriquecer(raiz, filas):
+def _enriquecer(raiz, filas, publico=None):
     """Lo de la fase 3 sobre las candidatas: el canal (sus búsquedas ya suman a
-    «Tu historial») y Google Trends para las cinco mejores (sube o baja)."""
+    «Tu historial») y Google Trends para las cinco mejores (sube o baja), en el
+    país del proyecto (`publico`, vidiq-2; None es Perú)."""
     def hecho(candidatas, avisos):
         for c in candidatas:
             SC.con_el_canal(c, filas)
         mejores = sorted(candidatas, key=lambda c: -(c.get("puntuacion") or 0))[:5]
-        t = SC.tendencias([c["frase"] for c in mejores], raiz)
+        t = SC.tendencias([c["frase"] for c in mejores], raiz, publico)
         if t.get("error"):
             avisos.append(f"Google Trends (experimental): {t['error']}; la tendencia queda sin dato")
         for c in mejores:
@@ -2141,14 +2142,14 @@ def lanzar_investigar(raiz, info, ajustes, videos, cid, en_hilo=True):
                 lambda: _investigar(raiz, info, ajustes, videos, cid), en_hilo)
 
 
-def sugerencias_de_busqueda(frase, plazo=4):
+def sugerencias_de_busqueda(frase, plazo=4, publico=None):
     """Lo que YouTube sugiere al escribir la frase, o None si el servidor no
     puede salir a internet (se dice, no se inventa)."""
     if _simular_todo():
         return [f"{frase} precio", f"{frase} cerca de mi"]
-    # el mismo autocompletado que «Investigar búsquedas» (Perú, en español)
+    # el mismo autocompletado que «Investigar búsquedas» (el país del proyecto)
     try:
-        lista = SR.sugerencias(frase, "youtube", None)
+        lista = SR.sugerencias(frase, "youtube", None, publico)
     except Exception:                                       # noqa: BLE001
         return None
     return None if lista is None else [str(x) for x in lista][:8]
@@ -2169,7 +2170,7 @@ def _proponer_palabras(raiz, cid, nombre, marca, contexto, proyecto, cwd):
     propuesta = SEO.normalizar_palabras(comun.extraer_json(respuesta, "las palabras clave"))
     con_internet = True
     for item in [propuesta["principal"]] + propuesta["secundarias"]:
-        sug = sugerencias_de_busqueda(item["frase"])
+        sug = sugerencias_de_busqueda(item["frase"], publico=SR.publico_de(ajustes))
         if sug is None:
             con_internet = False
             break
@@ -2871,6 +2872,8 @@ def ficha(raiz, info, ajustes):
             # rama seo-real: la última investigación de búsquedas y si la
             # palabra del proyecto se ha dejado fuera por no ser de este vídeo
             "real": real or {},
+            # vidiq-2: dónde se miden las búsquedas de este proyecto ahora
+            "publico": SR.vista_publico(SR.publico_de(ajustes)),
             "palabra_origen": origen,
             "proyecto_fuera": bool(ajustes.get("palabra_clave") and not datos.get("palabra_clave")
                                    and origen != "proyecto"),

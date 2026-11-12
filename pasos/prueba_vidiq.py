@@ -7,6 +7,7 @@ fichero MCP, la lista blanca, los vetos) y lo que se hace con lo que vuelve.
     python pasos/prueba_vidiq.py
 """
 import json
+import re
 import os
 import shutil
 import stat
@@ -243,6 +244,22 @@ def prueba_titulo():
         ok("country «PE»" in ins and "language «es»" in ins and "regionCode «PE»" in ins,
            "vidIQ consulta para Perú y en español (no en inglés)")
         ok("type «long»" in ins and "TAL CUAL" in ins, "un vídeo largo se puntúa como largo y sus títulos van tal cual")
+        ok("country «PE» (el público es de Perú)" in ins and "language «es», regionCode «PE», type" in ins,
+           "vidiq-2: sin elegir, la instrucción de Perú sale igual que antes")
+        ok("en español" in ins and "se descartan" in ins, "y descarta las relacionadas de otros idiomas")
+        igual(v["donde"], "Perú", "queda dicho dónde se midió")
+        v = V.lanzar_titulo(raiz, "v7", dict(datos, publico=("", "es")), en_hilo=False)
+        ins = doble.llamadas[-1]["instruccion"]
+        ok("SIN country" in ins and "SIN regionCode" in ins and "country «" not in ins and "regionCode «" not in ins,
+           "«todo el mundo hispano»: sin país ni región")
+        igual(v["donde"], "todo el mundo hispano", "y se guarda dónde")
+        V.lanzar_titulo(raiz, "v8", dict(datos, publico=["mx", "es"]), en_hilo=False)
+        ins = doble.llamadas[-1]["instruccion"]
+        ok("country «MX» (el público es de México)" in ins and "regionCode «MX»" in ins, "México, para México")
+        V.lanzar_titulo(raiz, "v8", dict(datos, publico="raro"), en_hilo=False)
+        ok("country «PE»" in doble.llamadas[-1]["instruccion"], "algo raro en `publico` es Perú")
+        ok(not any(re.search(r"\{[a-z_]+\}", x["instruccion"]) for x in doble.llamadas),
+           "ningún hueco de la instrucción se queda sin rellenar")
         V.lanzar_titulo(raiz, "v6", dict(datos, formato="short"), en_hilo=False)
         ok("type «short»" in doble.llamadas[-1]["instruccion"], "un corto se puntúa como Short")
         igual(V.normalizar_titulo({"palabra": {"frase": "x", "volumen": None,
@@ -309,6 +326,10 @@ def prueba_parrilla():
     ok(G.AVISO_VIDIQ in G.anexos_del_turno(False, "", [], "", True), "Claude sabe que tiene vidIQ y su límite")
     ok("como mucho 3" in G.AVISO_VIDIQ and "⚠ dato de vidIQ" in G.AVISO_VIDIQ, "con el tope y el aviso ⚠")
     ok(G.AVISO_VIDIQ not in G.anexos_del_turno(False, "", []), "sin pedirlo, no se le dice")
+    con_sitio = G.anexos_del_turno(False, "", [], "", "todo el mundo hispano")
+    ok(G.AVISO_VIDIQ in con_sitio and "TODO EL MUNDO HISPANO" in con_sitio,
+       "vidiq-2: el chat sabe para qué público busca")
+    ok("EL PÚBLICO" not in G.anexos_del_turno(False, "", [], "", True), "y sin decirlo, el aviso de siempre")
 
     raiz = os.path.join(CARPETA, "parrilla")
     os.makedirs(raiz)

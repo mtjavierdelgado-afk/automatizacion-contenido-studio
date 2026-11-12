@@ -30282,6 +30282,8 @@ function bloqueSeoProyecto(p) {
   caja.appendChild(h('div', { clase: 'fila campos-seo' },
     campoTexto('palabra_clave', 'Palabra clave principal', { ejemplo: 'alquiler de consolas en Lima' }),
     campoTexto('zona', 'Zona', { ejemplo: 'Lima, Perú (Miraflores, Surco…)' })));
+  // vidiq-2: dónde se mide lo que busca la gente (búsquedas reales, Trends y vidIQ)
+  caja.appendChild(selectorPaisBusquedas(p, a, op, guardar));
   caja.appendChild(campoTexto('secundarias', 'Palabras clave secundarias (separadas por comas, de 2 a 8)',
     { ejemplo: 'fiestas infantiles, eventos corporativos, simulador de carreras', area: true }));
   caja.appendChild(campoTexto('evitar', 'Palabras a evitar (opcional)', { ejemplo: 'barato, gratis' }));
@@ -30448,6 +30450,7 @@ function bloqueBusquedasSeo() {
       title: 'Pregunta al buscador qué frases de este vídeo se buscan de verdad. Gratis y sin Claude.',
       onclick: () => investigarBusquedasPublicar() }, trabajando ? 'Investigando…' : (real.al ? 'Volver a investigar' : 'Investigar búsquedas'))));
   if ((seo.errores || {}).investigar) caja.appendChild(cajaError(seo.errores.investigar));
+  caja.appendChild(lineaPublicoBusquedas(f, real));
   // lo de la palabra del proyecto ya lo dice el bloque de arriba
   (real.avisos || []).filter(a => !(seo.proyecto_fuera && a.includes('(del proyecto)')))
     .forEach(a => caja.appendChild(h('div', { clase: 'meta aviso-busquedas' }, a)));
@@ -30480,7 +30483,7 @@ function bloqueBusquedasSeo() {
     })));
   caja.appendChild(h('div', { clase: 'tabla-desliza' }, tabla));
   caja.appendChild(h('div', { clase: 'meta' }, 'Del vídeo: cuánto de la frase sale en el guion o el material. '
-    + 'Tendencia: si se busca más o menos que hace 3 meses en Perú (Google Trends, experimental). '
+    + `Tendencia: si se busca más o menos que hace 3 meses en ${textoPublicoBusquedas((real.publico || seo.publico || {}).texto)} (Google Trends, experimental). `
     + 'Tu historial: las vistas de tus publicaciones con esa frase frente a lo normal de tu cuenta (1× = tu media) '
     + 'o, con tu canal conectado, las vistas que ya te trae esa búsqueda en YouTube. '
     + 'Total: lo que pesan las tres partes con dato.'));
@@ -35005,6 +35008,7 @@ function bloqueVidiqSeo(f) {
     h('div', { clase: 'meta' }, `Investiga la palabra clave de este vídeo, puntúa su título y propone 3 títulos con `
       + `emojis. Gasta ${aprox} créditos de vidIQ y algo de uso de tu membresía de Claude. No cambia nada hasta que pulses «Usar».`),
     saldoVidiq());
+  caja.appendChild(lineaDondeVidiq(f, v));
   if (v.error) caja.appendChild(cajaError(v.error));
   if (!r) return caja;
   if (v.palabra && plano(v.palabra) !== plano((f.seo || {}).palabra)) {
@@ -36223,4 +36227,58 @@ async function abrirEditorGrafica(cid, pieza) {
   pintarForm();
   pintarRejilla();
   pedirVistas();
+}
+
+/* ============================================================ VIDIQ-2 · PÚBLICO
+ * Rama `vidiq-2` (12-11-2026): dónde se mide lo que busca la gente, por
+ * proyecto. Se elige en «SEO de este proyecto» (`pais_busquedas`; el idioma es
+ * el del título de YouTube) y lo usan «Investigar búsquedas», Google Trends,
+ * «Mejorar con vidIQ» y «📈 Ideas con vidIQ». Sin elegir es Perú, como antes.
+ * Es un ajuste de Publicar: no entra en ningún param ni firma.
+ */
+function textoPublicoBusquedas(texto) {
+  return String(texto || '').trim() || 'Perú';
+}
+
+function selectorPaisBusquedas(p, a, op, guardar) {
+  const paises = op.paises || [['pe', 'Perú']];
+  const actual = a.pais_busquedas || 'pe';
+  return h('div', { clase: 'publico-busquedas' },
+    h('label', { clase: 'etiqueta-campo' }, 'Dónde se mide lo que busca la gente',
+      h('select', { datos: { foco: `seo-pais_busquedas-${p.id}`, seo: 'pais_busquedas' },
+        onchange: ev => { a.pais_busquedas = ev.target.value; guardar('pais_busquedas', ev.target.value); } },
+      ...paises.map(([v, t]) => h('option', { value: v, selected: String(actual) === String(v) }, t)))),
+    h('div', { clase: 'meta' }, 'Lo usan «Investigar búsquedas», la tendencia de Google Trends y vidIQ. '
+      + 'Elige el país de tus clientes, o «Todo el mundo» si vendes a cualquier país de tu idioma '
+      + '(el idioma es el del título de YouTube, más abajo). Cambiarlo no toca ningún vídeo: '
+      + 'vuelve a investigar para ver las cifras del sitio nuevo.'));
+}
+
+function lineaPublicoBusquedas(f, real) {
+  const seo = f.seo || {};
+  const ahora = textoPublicoBusquedas((seo.publico || {}).texto);
+  const medido = (real.publico || {}).texto;
+  const cambiar = h('a', { href: '#', clase: 'enlace-publico', datos: { accion: 'cambiar-publico' },
+    onclick: ev => { ev.preventDefault(); abrirPublicoBusquedas(f.cliente || '_sin'); } }, 'Cambiar');
+  if (real.al && medido && medido !== ahora) {
+    return h('div', { clase: 'caja-aviso publico-linea' },
+      `Esto se investigó en ${medido}; este proyecto ahora mide en ${ahora}. Vuelve a investigar para ver sus cifras. `, cambiar);
+  }
+  return h('div', { clase: 'meta publico-linea' }, `Búsquedas medidas en ${ahora}. `, cambiar);
+}
+
+function lineaDondeVidiq(f, v) {
+  const ahora = textoPublicoBusquedas(((f.seo || {}).publico || {}).texto);
+  if (v && v.resultado && v.donde && v.donde !== ahora) {
+    return h('div', { clase: 'caja-aviso publico-linea' },
+      `Esto se consultó para ${v.donde}; este proyecto ahora mide en ${ahora}. Vuelve a consultar si quieres lo de ese sitio.`);
+  }
+  return h('div', { clase: 'meta publico-linea' }, `Para el público de ${ahora}.`);
+}
+
+/* Lleva a «Ajustes → <proyecto> → SEO» con el selector a la vista. */
+function abrirPublicoBusquedas(cid) {
+  PUB.ajSel = cid;
+  PUB.ajTab = 'seo';
+  return abrirSeoProyectoPublicar(cid, 'pais_busquedas');
 }

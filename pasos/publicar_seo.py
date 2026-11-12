@@ -61,6 +61,9 @@ AJUSTES_SEO = {
     "hashtags_nicho": "",
     "hashtags_locales": "",
     "optimizar_al_escribir": False,
+    # vidiq-2: dónde se miden las búsquedas (SR.PAISES_BUSQUEDA); se lee, no
+    # se escribe: sin elegir es Perú, como siempre
+    "pais_busquedas": "pe",
 }
 BOOLEANOS = ("tt_ubicacion_puede", "tt_comentarios_puede", "yt_para_ninos",
              "optimizar_al_escribir")
@@ -197,6 +200,8 @@ def validar(k, v):
                        "de Facebook (solo cifras; pulsa «Guía» para ver cómo encontrarlo)")
     if k == "yt_categoria" and v not in {c for c, _n in CATEGORIAS_YOUTUBE}:
         raise ErrorSeo("esa categoría de YouTube no existe")
+    if k == "pais_busquedas" and v not in SR.NOMBRE_PAIS:
+        raise ErrorSeo("ese sitio de búsquedas no está en la lista")
     if k == "yt_idioma" and v not in {c for c, _n in IDIOMAS}:
         raise ErrorSeo("ese idioma no está en la lista")
     if k == "yt_idioma_audio":

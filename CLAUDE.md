@@ -104,8 +104,10 @@ la quita.
 **`v2-fase-3` (vídeos sin voz) está EN PAUSA desde el 14-10-2026, por decisión
 del dueño.** Sus ficheros no están reservados (`arreglos-voz`, que los tomó, ya está unida).
 Quien la retome hace antes `git merge origin/main` (la voz habrá cambiado) y la
-vuelve a apuntar en la tabla. Mientras siga en pausa, `v2-fase-4b` sigue
-esperando, porque depende de ella.
+vuelve a apuntar en la tabla. **Desde el 12-11-2026 `v2-fase-4b` ya NO la
+espera** (decisión del dueño): solo dependía de ella por compartir ficheros.
+Informe y plan auditado en el Proyecto: `estado/informe_fase3_sin_voz_2026-11-12.md`.
+Si se retoma, solo para vídeos NUEVOS (no convertir vídeos hechos).
 
 ### Cola de unión (decisión del dueño, 22-10-2026; reordenada el 22-10 por choques medidos)
 
@@ -165,10 +167,10 @@ segunda salía de la primera). Lo de abajo es el plan de fondo.
      reservado es enchufar el motor nuevo en `p6_assets.py`, y eso espera a que
      la Etapa Foto A esté unida. El prompt lo sigue armando `p6_assets.py`; la
      base solo decide a quién se le manda.
-   - `v2-fase-4b` — ElevenLabs y la música por IA. Empieza cuando la V2.0 fase 3
-     esté unida: las dos tocan la voz (`p4_voz.py`, `p5_revision_audio.py`,
-     `marcas_tts.py`) y la música (`sonido.py`), y en un vídeo sin voz es
-     probable que la música pase a marcar el ritmo.
+   - `v2-fase-4b` — ElevenLabs y la música por IA. Ya no espera a la fase 3
+     (en pausa; decisión del dueño, 12-11-2026): puede abrirse cuando se quiera,
+     apuntando sus zonas de `p4_voz.py`, `p5_revision_audio.py`, `marcas_tts.py`
+     y `sonido.py`.
 3. **La Etapa Foto B** va después de la A. Añade imágenes de producto a cada
    plano, así que todo motor de imágenes de la base de 4a tiene que aceptar
    VARIAS imágenes de referencia por llamada (hoy se adjuntan estilo, reparto y

@@ -7,3 +7,4 @@
 - En el total salen también las **vistas de tus Reels en Facebook** y las **visitas al perfil**.
 - La frase de la curva ya no dice «hasta el final» cuando la curva de TikTok se corta antes: dice en qué segundo sigue viéndolo más de la mitad.
 - Los porcentajes pequeños se leen bien («0,05 %», no «0,0 %»), y el **público** de TikTok («Espectadores nuevos», «Que ya lo habían visto») sale con lo que manda de verdad Upload-Post.
+- En **Por red**, cada cifra dice también de cuántas publicaciones sale («3 seguidores nuevos (1 de 2)»).

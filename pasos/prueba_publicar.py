@@ -2143,6 +2143,12 @@ def prueba_metricas_completas():
           [["B", 0.01], ["A", 0.005]], "«0.5%» es medio por ciento, no la mitad")
     igual(C._detalle({"video_views": 1000, "average_time_watched": 10, "total_time_watched": 10_000_000})["tiempo_total_s"],
           10000.0, "el aviso de milisegundos también con las vistas en «video_views»")
+    igual(C._detalle({"views": "40,218", "average_time_watched": "7.4", "total_time_watched": "297,613"})["tiempo_total_s"],
+          297613.0, "«297,613» de tiempo total son miles (cuadra con vistas × medio), no 297 s")
+    igual(C._detalle({"views": 3, "average_time_watched": 99.2, "total_time_watched": "297,613"})["tiempo_total_s"],
+          297.6, "y si lo que cuadra es el decimal, el decimal")
+    igual(C._detalle({"total_time_watched": "297,613"})["tiempo_total_s"], 297613.0,
+          "sin vistas ni medio, una cifra grande con coma se lee como miles")
     igual(C._detalle({"retention": [{"second": None, "time": 3, "percentage": 0.5},
                                     {"second": 0, "percentage": 1.0}]})["curva"],
           [[0.0, 1.0], [3.0, 0.5]], "un «second» vacío no tapa el «time» de al lado")

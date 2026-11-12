@@ -668,8 +668,20 @@ class ClienteUploadPost:
         -> {"tiempo_total_s", "curva", "mitad_s", "fuentes", "publico"}"""
         bruto = bruto if isinstance(bruto, dict) else {}
         total = None
+        vistas = next((x for x in (cls._numero(bruto.get(k), miles=True)
+                                   for k in cls.CAMPOS_METRICAS["vistas"]) if x), None)
+        medio = cls._numero(cls._primero(bruto, cls.CAMPOS_TIEMPO_MEDIO))
+        if medio is not None and not 0 <= medio < 86400:
+            medio = None                     # el mismo filtro que en _retencion
         for suyo in cls.CAMPOS_TIEMPO_TOTAL:
-            v = cls._numero(bruto.get(suyo))
+            # en texto, «297,613» puede ser miles o decimales: se lee de las
+            # dos formas y manda la que cuadra con vistas × tiempo medio; sin
+            # eso, miles (es una cifra grande) (3.ª revisión, 12-11)
+            a, b = cls._numero(bruto.get(suyo)), cls._numero(bruto.get(suyo), miles=True)
+            v = b if b is not None else a
+            if a is not None and b is not None and a != b and vistas and medio:
+                esperado = vistas * medio
+                v = min((a, b), key=lambda x: abs(x - esperado))
             if v is not None and 0 <= v < 10 ** 10:
                 total = round(v, 1)
                 break
@@ -677,11 +689,6 @@ class ClienteUploadPost:
         # 40.218 vistas × 7,4 s de media = 297.613). Si un día llegara en
         # milisegundos, cuadraría mil veces por encima de vistas × tiempo medio:
         # se pasa a segundos en vez de enseñar «mil veces más».
-        vistas = next((x for x in (cls._numero(bruto.get(k), miles=True)
-                                   for k in cls.CAMPOS_METRICAS["vistas"]) if x), None)
-        medio = cls._numero(cls._primero(bruto, cls.CAMPOS_TIEMPO_MEDIO))
-        if medio is not None and not 0 <= medio < 86400:
-            medio = None                     # el mismo filtro que en _retencion
         if total and vistas and medio and vistas > 0 and medio > 0 \
                 and total > 100 * vistas * medio:
             total = round(total / 1000, 1)

@@ -29015,7 +29015,7 @@ function textoMetricas(m, sumado) {
   // dice de cuántas sale si no son todas (2.ª revisión, 12-11)
   return Object.keys(NOMBRES_METRICA)
     .filter(k => typeof m[k] === 'number')
-    .map(k => `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}${sumado ? deCuantasPublicaciones(m, k).replace(' · ', ' (') + (deCuantasPublicaciones(m, k) ? ')' : '') : ''}`)
+    .map(k => { const c = sumado ? cuantasDe(m, k) : ''; return `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}${c ? ` (${c})` : ''}`; })
     .concat(textoRetencion(m) ? [textoRetencion(m)] : []).join(' · ');
 }
 
@@ -29043,11 +29043,17 @@ function textoMetricasAparte(m, sumado) {
   return partes.join(' · ');
 }
 
-/* Bajo una cifra grande de Resultados: «2 de 5» si no todas la dan. */
-function deCuantasPublicaciones(total, k) {
+/* «2 de 5» si la cifra `k` de un total no sale de todas sus publicaciones; ''. */
+function cuantasDe(total, k) {
   const n = (total || {})[`${k}_posts`];
   return typeof n === 'number' && typeof total.posts === 'number' && n < total.posts && k !== 'posts'
-    ? ` · ${n} de ${total.posts}` : '';
+    ? `${n} de ${total.posts}` : '';
+}
+
+/* Bajo una cifra grande de Resultados: « · 2 de 5». */
+function deCuantasPublicaciones(total, k) {
+  const c = cuantasDe(total, k);
+  return c ? ` · ${c}` : '';
 }
 
 /* La curva de retención de TikTok (qué parte sigue viendo en cada segundo),
@@ -29114,7 +29120,8 @@ function porcentaje(fraccion) {
   // por debajo del 1 %, con dos decimales (0,05 %, no «0,0 %» ni «0,1 %»);
   // por debajo del 0,01 %, «menos de 0,01 %»; el 0, «0 %» (revisión, 12-11).
   // Los decimales se eligen con el valor YA redondeado: 9,99 % es «10 %»
-  if (!f) return '0 %';
+  if (!Number.isFinite(f)) return '—';
+  if (f === 0) return '0 %';
   if (f > 0 && f < 0.0001) return 'menos de 0,01 %';
   const p = f * 100;
   const decimales = p >= 9.95 ? 0 : p >= 0.995 ? 1 : 2;

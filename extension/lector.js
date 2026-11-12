@@ -40,17 +40,25 @@
   const numeroEn = (caja, ...s) => { const t = cortoEn(caja, ...s); return /\d/.test(t) ? t : ''; };
   const enMedio = e => { const r = e.getBoundingClientRect(); return r.height > 0 && r.width > 0 && r.top < innerHeight / 2 && r.bottom > innerHeight / 2; };
   /* la caja del vídeo que cruza la mitad de la pantalla: el primer antepasado que trae `dentro` */
+  /* la caja del vídeo que cruza la mitad de la pantalla: el primer antepasado que trae `dentro`;
+     si para encontrarlo hay que subir hasta donde hay OTRO vídeo, es la lista entera: no vale */
   const cajaDelVideoQueSeVe = (dentro, vale = () => true) => {
     let c = [...document.querySelectorAll('video')].find(enMedio) || null;
-    while (c && c !== document.body && !(c.querySelector(dentro) && vale(c))) c = c.parentElement;
-    return c && c !== document.body && c !== document.documentElement ? c : null;
+    while (c && c !== document.body && !(c.querySelector(dentro) && vale(c))) {
+      if (c.querySelectorAll('video').length > 1) return null;
+      c = c.parentElement;
+    }
+    if (!c || c === document.body || c === document.documentElement || c.querySelectorAll('video').length > 1) return null;
+    return c;
   };
+  /* a la vista de verdad: con tamaño y sin un antepasado oculto */
+  const seVe = e => { const r = e.getBoundingClientRect(); return r.height > 0 && r.width > 0 && (!e.checkVisibility || e.checkVisibility()); };
 
   /* «12 respuestas, 34 reposts, 560 Me gusta, 89 mil visualizaciones» → cifras. */
   const PALABRAS = [
-    ['vistas', /(visualizaciones|reproducciones|vistas|views|plays|visualizações)/],
+    ['vistas', /(visualizaci(?:ones|ón)|reproducci(?:ones|ón)|vistas?|views?|plays?|visualizaç(?:ões|ão))/],
     ['me_gusta', /(me gusta|likes?|reacciones|reactions|curtidas)/],
-    ['comentarios', /(comentarios?|comments?|respuestas|replies)/],
+    ['comentarios', /(comentarios?|comments?|respuestas?|replies|reply)/],
     ['compartidos', /(compartid[oa]s?|veces compartido|shares?|reposts?|retweets?|republicaciones)/],
     ['guardados', /(guardad[oa]s?|bookmarks?|saves?)/],
   ];
@@ -91,18 +99,28 @@
 
   /* 1) ¿Las etiquetas og: son de ESTA dirección? */
   const ogUrl = meta('og:url');
-  const codigoIg = red === 'instagram' ? ((location.pathname.match(/\/(?:reels?|p|tv)\/([A-Za-z0-9_-]+)/) || [])[1] || '') : '';
+  const codigoIg = red === 'instagram' ? ((location.pathname.match(/\/(?:reels?|p|tv)\/(?!audio\/)([A-Za-z0-9_-]+)/) || [])[1] || '') : '';
   const vid = red === 'youtube'
     ? (new URLSearchParams(location.search).get('v') || (location.pathname.match(/^\/shorts\/([A-Za-z0-9_-]+)/) || [])[1]
       || (host === 'youtu.be' ? location.pathname.slice(1) : '') || '') : '';
   /* las portadas y los muros: ahí la barra no dice qué post es */
-  const esMuro = !vid && !codigoIg && /^(|\/home|\/feed|\/foryou|\/following|\/explore|\/reels|\/shorts|\/watch)$/.test(aqui || '');
+  const vidFb = red === 'facebook' ? (new URLSearchParams(location.search).get('v') || '') : '';
+  const esMuro = !vid && !codigoIg && !vidFb && /^(|\/home|\/feed|\/foryou|\/following|\/explore|\/reels|\/shorts|\/watch)$/.test(aqui || '');
+  /* la misma página: la misma ruta, sin contar la barra final ni la versión AMP */
+  const sinAmp = r => (r || '').replace(/(^|\/)amp(\/|$)/g, '$1').replace(/\.amp$/, '').replace(/\/+$/, '');
+  const mismaPagina = u => { const r = ruta(u); return r !== null && sinAmp(r) === sinAmp(aqui); };
+  const canonico = (document.querySelector('link[rel="canonical"]') || {}).href || '';
   let ogVale;
-  if (red === 'web') ogVale = true;
+  if (red === 'web') {
+    /* una web normal se recarga en cada página, salvo los diarios con «scroll infinito», que cambian
+       la barra al bajar y dejan las etiquetas de la primera noticia: entonces no valen */
+    const deOtra = u => u && ruta(u) !== '' && !mismaPagina(u) && (() => { try { return new URL(u, location.href).hostname === location.hostname; } catch (e) { return false; } })();
+    ogVale = !(deOtra(ogUrl) || deOtra(canonico));
+  }
   else if (!ogUrl) ogVale = false;
   else if (codigoIg) ogVale = new RegExp('/' + codigoIg + '(?:/|$|\\?)').test(ogUrl);
   else if (vid) ogVale = ogUrl.includes('v=' + vid) || ogUrl.includes('/shorts/' + vid) || ogUrl.includes('youtu.be/' + vid);
-  else ogVale = ruta(ogUrl) === aqui;
+  else if (red !== 'web') ogVale = ruta(ogUrl) === aqui;
   if (ogVale && esMuro && red !== 'web') ogVale = false;   // la og: de la portada no es la de ningún post
 
   const datos = {
@@ -113,12 +131,17 @@
     cifras: {}, red, lector: red === 'web' || red === 'threads' || red === 'pinterest' ? 'generico' : red,
   };
   if (red === 'web') {
-    /* una web normal se recarga en cada página: su canónico vale, salvo que sea la portada u otra web */
-    const canon = (document.querySelector('link[rel="canonical"]') || {}).href || ogUrl;
+    /* el canónico solo si es esta misma página (quita lo que sobra de la dirección) */
+    const canon = canonico || ogUrl;
     try {
       const c = new URL(canon, location.href);
-      if (canon && c.hostname === location.hostname && !(c.pathname === '/' && location.pathname !== '/')) datos.url = c.href;
+      if (canon && ogVale && c.hostname === location.hostname && mismaPagina(canon)) datos.url = c.href;
     } catch (e) { /* se queda la barra */ }
+    if (!ogVale) {
+      /* el título de la pestaña también puede ser el de la primera noticia */
+      datos.titulo = '';
+      datos.aviso = 'esta página cambió de dirección sin recargarse: va el enlace de la barra y la captura';
+    }
   } else if (ogVale && ogUrl) {
     try { if (new URL(ogUrl).hostname.replace(/^www\./, '') === host.replace(/^www\./, '')) datos.url = ogUrl; } catch (e) { /* la barra */ }
   }
@@ -151,7 +174,7 @@
       const codigosEn = c => [...c.querySelectorAll('a[href]')].map(a => ((a.getAttribute('href') || '').match(/\/(?:reels?|p|tv)\/(?!audio\/)([A-Za-z0-9_-]+)/) || [])[1]).filter(Boolean);
       if (codigoIg) {
         caja = cajaDelVideoQueSeVe(BOTONES, c => [...c.querySelectorAll(BOTONES)].some(fueraDeComentarios));
-        if (caja) { const cs = codigosEn(caja); if (cs.length && !cs.includes(codigoIg)) caja = null; }
+        if (caja && !codigosEn(caja).every(c => c === codigoIg)) caja = null;
       }
       if (caja) {
         if (!ogVale) datos.lector = 'instagram-reel';
@@ -202,14 +225,23 @@
       const CUENTAS = '[data-e2e="browse-like-count"], [data-e2e="like-count"]';
       if (idVideo) {
         /* la página (o la ventana) de UN vídeo: su caja es la que lleva su descripción y sus cifras */
-        let c = document.querySelector('[data-e2e="browse-video-desc"], [data-e2e="browse-username"], [data-e2e="video-desc"]');
-        while (c && c !== document.documentElement && !c.querySelector(CUENTAS)) c = c.parentElement;
-        caja = c && c !== document.documentElement ? c : null;
+        /* primero la ventana a la vista que trae las cifras del vídeo (browse-*); si no la hay, solo
+           si en toda la página hay UN vídeo con su descripción y sus cifras (si no, el de detrás
+           podría ser otro: el inicio, el «Para ti») */
+        const DESC = '[data-e2e="browse-video-desc"], [data-e2e="video-desc"]';
+        const ventana = [...document.querySelectorAll('div[role="dialog"]')].filter(seVe)
+          .find(d => d.querySelector('[data-e2e="browse-like-count"]'));
+        if (ventana) caja = ventana;
+        else if (document.querySelectorAll(DESC).length === 1 && document.querySelectorAll(CUENTAS).length === 1) {
+          let c = document.querySelector(DESC);
+          while (c && c !== document.documentElement && !c.querySelector(CUENTAS)) c = c.parentElement;
+          caja = c && c !== document.documentElement && !c.closest('[data-e2e="anchoring-chrome-host"]') ? c : null;
+        }
       }
       /* el reproductor nuevo (medido el 12-11 en el inicio): UNA sola capa con las cifras y la
          descripción del vídeo que suena, aparte de la lista de vídeos */
       const capas = document.querySelectorAll('[data-e2e="anchoring-chrome-host"]');
-      if (!caja && capas.length === 1 && capas[0].querySelector(CUENTAS)) caja = capas[0];
+      if (!caja && esMuro && capas.length === 1 && seVe(capas[0]) && capas[0].querySelector(CUENTAS)) caja = capas[0];
       if (!caja && esMuro) {
         /* «Para ti» de antes: la barra no cambia; vale el vídeo que se ve, y su enlace si lo trae */
         caja = cajaDelVideoQueSeVe(CUENTAS);
@@ -246,7 +278,7 @@
       if (vid && short) {
         const reels = [...document.querySelectorAll('ytd-shorts:not([hidden]) ytd-reel-video-renderer')];
         caja = reels.find(r => [...r.querySelectorAll('a[href*="/shorts/"]')].some(a => (a.getAttribute('href') || '').includes('/shorts/' + vid)))
-          || reels.find(r => r.hasAttribute('is-active') && enMedio(r)) || null;
+          || reels.find(r => r.hasAttribute('is-active') && enMedio(r) && ![...r.querySelectorAll('a[href*="/shorts/"]')].length) || null;
       }
       if (!ogVale) datos.imagen = vid ? `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` : '';
       if (!ogVale) datos.titulo = limpio(document.title).replace(/^\(\d+\)\s*/, '').replace(/\s*-\s*YouTube$/, '');
@@ -306,16 +338,28 @@
         datos.autor = cortoEn(caja, '.update-components-actor__title span[aria-hidden="true"]', '.update-components-actor__name', '.feed-shared-actor__name');
         datos.texto = textoEn(caja, '.update-components-text', '.feed-shared-update-v2__description', '.feed-shared-text');
         datos.cifras.me_gusta = numeroEn(caja, '.social-details-social-counts__reactions-count', '.social-details-social-counts__social-proof-fallback-number');
-        const sociales = cortoEn(caja, '.social-details-social-counts');
+        /* trozo a trozo («77» y «5 comentarios» pegados no son 775) */
+        const bloque = caja.querySelector('.social-details-social-counts');
+        const sociales = bloque ? [...bloque.querySelectorAll('*')].filter(e => !e.children.length).map(e => limpio(textoDe(e))).filter(Boolean).join(' · ') : '';
         if (sociales) cifrasDeFrase(sociales, datos.cifras);
       }
     } else if (red === 'facebook') {
       /* solo en la página de UN post (o la ventana que lo abre): su ventana a la vista o, en su
          página, la parte principal. En el inicio no se sabe cuál es. */
-      const esPost = /\/(posts|permalink|photo|photos|videos|reel|watch|story\.php|permalink\.php)(\/|\.|$|\?)/.test(location.pathname + '/');
+      /* «watch» a secas es el muro de vídeos: solo con ?v= es un vídeo */
+      const esPost = /\/(posts|permalink|photo|photos|videos|reel|story\.php|permalink\.php)(\/|\.|$|\?)/.test(location.pathname + '/')
+        || (/^\/watch\/?$/.test(location.pathname) && !!vidFb);
       if (esPost) {
-        caja = [...document.querySelectorAll('div[role="dialog"]')].filter(d => d.getBoundingClientRect().height > 0).pop()
-          || document.querySelector('div[role="main"]');
+        /* la ventana del post (la que trae su texto), a la vista; si la hay pero aún no se ve, no se
+           adivina; un chat de Messenger encima (otra ventana sin texto de post) no cuenta */
+        const MENSAJE = '[data-ad-preview="message"], [data-ad-comet-preview="message"]';
+        const ventanas = [...document.querySelectorAll('div[role="dialog"]')].filter(d => d.querySelector(MENSAJE));
+        const visibles = ventanas.filter(seVe);
+        if (visibles.length === 1) caja = visibles[0];
+        else if (!ventanas.length) {
+          const principal = document.querySelector('div[role="main"]');
+          caja = principal && principal.querySelectorAll(MENSAJE).length === 1 ? principal : null;
+        }
       }
       if (caja) {
         datos.texto = textoEn(caja, '[data-ad-preview="message"]', '[data-ad-comet-preview="message"]', 'div[role="dialog"] [dir="auto"]');
@@ -342,7 +386,7 @@
   if (red !== 'web' && !caja && !ogVale && !datos.aviso) {
     datos.aviso = esMuro
       ? 'en el inicio no se sabe qué post es: ábrelo (pulsa en su fecha o en él) y vuelve a enviar; va el enlace y la captura'
-      : 'no se ha podido leer este post; va el enlace y la captura';
+      : 'no se ha podido leer con seguridad lo de esta página; va el enlace y la captura';
   }
   if (red !== 'web' && caja && esMuro && ruta(datos.url) === aqui && !datos.aviso) {
     datos.aviso = 'el enlace es el del inicio, no el del vídeo: si lo quieres guardar, ábrelo y vuelve a enviar';

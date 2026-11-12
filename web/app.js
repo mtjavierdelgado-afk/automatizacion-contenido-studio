@@ -34269,7 +34269,8 @@ async function escribirGuionDeRecibido(r, peticion) {
       PAR.chats = [{ id: PAR.chat.id, titulo: PAR.chat.titulo, tocada: PAR.chat.tocada }].concat(PAR.chats || []);
     }
     marcarRecibidoUsado(r);
-    toast('pedido a Claude: cuando conteste, «Guardar en la Parrilla» y luego «🤖 Hacer el vídeo completo»');
+    toast('pedido a Claude en una conversación nueva: cuando conteste, «Guardar en la Parrilla» y luego «🤖 Hacer el vídeo completo»'
+      + (String(PAR.chatTexto || '').trim() ? '. Lo que tenías escrito sigue en el campo, para esta conversación' : ''));
   } catch (e) {
     toast(`no se ha podido pedir el guion: ${e.message}`, true);
   } finally {

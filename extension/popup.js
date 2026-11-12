@@ -59,7 +59,7 @@ function repartirClave(texto) {
    haya añadido detrás de lo que ya había (se busca la ÚLTIMA clave entera). Un
    código a medio escribir («env») no es una dirección: solo se mueve lo que
    empieza por http. */
-const CLAVE_ENTERA = /https?:\/\/(?:(?!https?:\/\/)[^\s#"'«»])+#env_[A-Za-z0-9_-]+(?=\s|$)/g;
+const CLAVE_ENTERA = /https?:\/\/(?:(?!https?:\/\/)[^\s#"'«»])+#env_[A-Za-z0-9_-]+(?=[\s.,;:!?»"')\]]|$)/g;
 
 function repartirCampos() {
   const claves = ($('studio').value + ' ' + $('codigo').value).match(CLAVE_ENTERA);
@@ -134,7 +134,7 @@ function mostrarConfig(mostrar) {
 
 async function enviarDirecto(cfg, ruta, metodo, cuerpo) {
   const r = await fetch(cfg.api + ruta, {
-    method: metodo, credentials: 'include', redirect: 'manual',
+    method: metodo, credentials: 'include', redirect: 'manual', signal: AbortSignal.timeout(30000),
     headers: Object.assign({ 'X-Estudio-Envio': cfg.codigo }, cuerpo ? { 'Content-Type': 'application/json' } : {}),
     body: cuerpo || undefined,
   });
@@ -159,14 +159,15 @@ async function enviarDesdeElStudio(cfg, ruta, metodo, cuerpo) {
     target: { tabId: pestana.id },
     args: [cfg.api + ruta, metodo, cfg.codigo, cuerpo || null],
     func: async (url, metodo_, codigo, cuerpo_) => {
+      /* sin seguir redirecciones: el código va en la cabecera y no sale de esta web */
       const r = await fetch(url, {
-        method: metodo_, credentials: 'same-origin',
+        method: metodo_, credentials: 'same-origin', redirect: 'manual', signal: AbortSignal.timeout(30000),
         headers: Object.assign({ 'X-Estudio-Envio': codigo }, cuerpo_ ? { 'Content-Type': 'application/json' } : {}),
         body: cuerpo_ || undefined,
       });
       let datos = null;
       try { datos = await r.json(); } catch (e) { datos = null; }
-      return { status: r.status, datos, redirigida: r.redirected && /\/login/.test(r.url) };
+      return { status: r.status, datos, redirigida: r.type === 'opaqueredirect' };
     },
   });
   const v = res && res.result;
@@ -252,7 +253,7 @@ async function cargarProyectos() {
   /* sin la lista se puede enviar igual, pero que se sepa que irá sin proyecto */
   const pista = $('pistaProyecto');
   pista.hidden = proyectosCargados;
-  pista.textContent = proyectosCargados ? '' : `No he podido leer tus proyectos: se enviará sin proyecto y lo puedes anexar en el Studio. (${r.mal || 'sin respuesta'})`;
+  pista.textContent = proyectosCargados ? '' : 'No he podido leer tus proyectos: se enviará sin proyecto y lo puedes anexar después en el Studio.';
   while (sel.options.length > 1) sel.remove(1);   // al volver a cargarlos, sin repetir
   for (const p of lista) {
     const o = document.createElement('option');
@@ -267,7 +268,12 @@ async function enviar() {
   if (enviando || !leido) return;
   enviando = true;
   $('enviar').disabled = true;
-  try { await enviarYa(); } finally { enviando = false; }
+  try { await enviarYa(); }
+  catch (e) {
+    /* algo de Chrome que falla (el almacén, la captura): que se diga y se pueda volver a pulsar */
+    estado('estado', 'No se ha podido enviar por un fallo de Chrome. Cierra la ventanita, ábrela otra vez y vuelve a pulsar.', 'mal');
+    $('enviar').disabled = false;
+  } finally { enviando = false; }
 }
 
 async function enviarYa() {
@@ -319,7 +325,8 @@ async function esUnStudio(n) {
     if (r.type === 'opaqueredirect') {
       for (const login of [n.base + 'login', n.origen + '/login']) {
         const l = await fetch(login, { credentials: 'include', redirect: 'manual' }).catch(() => null);
-        if (l && l.status === 200 && /CrearIA/.test(await l.text().catch(() => ''))) return true;
+        /* la página de acceso del Studio, con su título exacto: «CrearIA» a secas lo tiene cualquier web de la marca */
+        if (l && l.status === 200 && /<title>\s*Acceso · CrearIA Studio\s*<\/title>/.test(await l.text().catch(() => ''))) return true;
       }
       return false;
     }
@@ -340,8 +347,10 @@ async function guardar() {
   /* el permiso para hablar con TU Studio, y solo con él */
   const ok = await chrome.permissions.request({ origins: [n.origen + '/*'] }).catch(() => false);
   if (!ok) { estado('estadoConfig', 'Sin ese permiso la extensión no puede mandar nada a tu Studio.', 'mal'); return false; }
-  estado('estadoConfig', 'comprobando la dirección…');
+  estado('estadoConfig', 'Comprobando la dirección…');
   if (!(await esUnStudio(n))) {
+    /* el permiso para esa web no hace falta: se devuelve */
+    try { chrome.permissions.remove({ origins: [n.origen + '/*'] }).catch(() => {}); } catch (e) { /* no estorba */ }
     estado('estadoConfig', 'En esa dirección no contesta un CrearIA Studio. Cópiala de Configuración → Enviar al Studio.', 'mal');
     return false;
   }
@@ -355,7 +364,7 @@ async function probar() {
   if (!(await guardar())) return;
   const cfg = await config();
   if (!cfg) return;
-  estado('estadoConfig', 'probando…');
+  estado('estadoConfig', 'Probando…');
   const r = await hablarConElStudio(cfg, 'recibidos/ping', 'GET', null);
   if (r.bien && !ES_STUDIO(r.bien)) {
     estado('estadoConfig', 'En esa dirección no contesta un CrearIA Studio. Cópiala de Configuración → Enviar al Studio.', 'mal');

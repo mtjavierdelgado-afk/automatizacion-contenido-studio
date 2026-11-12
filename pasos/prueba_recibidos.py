@@ -522,7 +522,7 @@ def prueba_lector():
     igual((mg["autor"], mg["cifras"]), ("bea", {"me_gusta": "2.300", "comentarios": "40"}),
           "un reel que ya te gusta («Ya no me gusta») conserva sus me gusta; el autor con su enlace /bea/reels/")
     sv = resultados["https://www.instagram.com/reels/Dsinvideo/"]
-    ok(not sv["cifras"] and "no se ha podido leer este post" in sv.get("aviso", ""),
+    ok(not sv["cifras"] and "no se ha podido leer" in sv.get("aviso", ""),
        "sin reel a la vista y con etiquetas de otro: ni cifras ajenas, y lo dice")
     y = resultados["https://www.youtube.com/watch?v=abc"]
     igual((y["red"], y["titulo"], y["autor"], y["cifras"].get("vistas"), y["cifras"].get("me_gusta")),
@@ -659,6 +659,66 @@ HOSTILES = {
     "https://www.threads.net/@beto/post/BBB": _og("https://www.threads.net/@ana/post/AAA", "texto del post de ana", "Ana en Threads")
         + "<body>post de beto</body>",
     "https://www.pinterest.com/pin/555/": _og("https://www.pinterest.com/pin/444/", "pin de otro", "Otro pin") + "<body></body>",
+    # --- ronda 2 del revisor (12-11) ---
+    "https://www.tiktok.com/@beto/video/222": "<body><div class='feed'><div><h3 data-e2e='video-author-uniqueid'>ana</h3>"
+        "<div data-e2e='video-desc'>vídeo de ana del feed</div><strong data-e2e='like-count'>1M</strong></div></div>"
+        "<div role='dialog'><span data-e2e='browse-username'>beto</span><h1 data-e2e='browse-video-desc'>vídeo de beto</h1>"
+        "<strong data-e2e='browse-like-count'>7</strong></div></body>",
+    "https://www.tiktok.com/@beto/video/333": "<body><main><div data-e2e='anchoring-chrome-host'>"
+        "<strong data-e2e='like-count'>229K</strong><div data-e2e='video-desc'>vídeo de ana del inicio</div></div></main>"
+        "<div><span data-e2e='browse-username'>beto</span><h1 data-e2e='browse-video-desc'>vídeo de beto</h1></div></body>",
+    "https://www.tiktok.com/explore": "<body><div style='display:none'><div data-e2e='anchoring-chrome-host'>"
+        "<strong data-e2e='like-count'>229K</strong><div data-e2e='video-desc'>vídeo de ana del inicio</div></div></div></body>",
+    "https://www.tiktok.com/@beto": "<body><div style='display:none'><div data-e2e='anchoring-chrome-host'>"
+        "<strong data-e2e='like-count'>229K</strong><div data-e2e='video-desc'>vídeo de ana del inicio</div></div></div>"
+        "<h1 data-e2e='user-title'>beto</h1></body>",
+    "https://www.tiktok.com/following?2": "<body><div class='lista'>"
+        "<section style='position:absolute;top:-800px'><video style='display:block;width:300px;height:700px'></video>"
+        "<a href='/@ana/video/1'><h3 data-e2e='video-author-uniqueid'>ana</h3></a><div data-e2e='video-desc'>vídeo de ana pasado</div>"
+        "<strong data-e2e='like-count'>1M</strong></section>"
+        "<section style='position:absolute;top:0'><video style='display:block;width:300px;height:700px'></video><h3>beto</h3></section></div></body>",
+    "https://www.instagram.com/reels/BBB222/": "<body><div class='lista'>"
+        "<div style='position:absolute;top:-800px;width:400px'><video style='display:block;width:300px;height:700px'></video>"
+        "<a href='/ana/'>ana</a><div dir='auto'>pie de ana</div><div><svg aria-label='Me gusta' width='24' height='24'></svg><span>5.555</span></div>"
+        "<div><svg aria-label='Comentario' width='24' height='24'></svg><span>66</span></div></div>"
+        "<div style='position:absolute;top:0;width:400px'><video style='display:block;width:300px;height:700px'></video><a href='/beto/'>beto</a></div></div></body>",
+    "https://www.instagram.com/p/CCC333/": "<body><div><div><a href='/reel/OTRO99/'><div style='position:absolute;top:0;width:400px'>"
+        "<video style='display:block;width:300px;height:700px'></video></div><span>99 mil reproducciones</span></a></div>"
+        "<div role='dialog' style='position:absolute;top:0;left:500px;width:400px;height:600px'><a href='/beto/'>beto</a>"
+        "<a href='/p/CCC333/'><time>2 h</time></a><div><svg aria-label='Comentario' width='24' height='24'></svg></div></div></div></body>",
+    "https://www.instagram.com/reels/audio/123456/": _og("https://www.instagram.com/reel/AAA111/", "1 Me gusta - ana el 1 de octubre: &quot;x&quot;")
+        + "<body><div style='position:absolute;top:0;width:400px'><video style='display:block;width:300px;height:700px'></video>"
+        "<a href='/ana/'>ana</a><div dir='auto'>pie de un reel de la rejilla</div><div><svg aria-label='Comentario'></svg><span>4</span></div></div></body>",
+    "https://www.facebook.com/watch/": "<body><div role='main'><div data-ad-preview='message'>vídeo A de arriba</div>"
+        "<span aria-label='900 reacciones'></span><div data-ad-preview='message'>vídeo B</div></div></body>",
+    "https://www.facebook.com/watch/?v=777": "<body><div role='main'><div data-ad-preview='message'>vídeo A de arriba</div>"
+        "<span aria-label='900 reacciones'></span><div data-ad-preview='message'>vídeo B</div></div></body>",
+    "https://www.facebook.com/beto/posts/pfbid0abc": "<body><div role='main'><div data-ad-preview='message'>post A del inicio</div>"
+        "<span aria-label='900 reacciones'></span></div><div role='dialog' style='height:0;overflow:hidden'>"
+        "<div data-ad-preview='message'>post de beto</div></div></body>",
+    "https://www.facebook.com/beto/posts/124": "<body><div role='main'><h2><strong><a>beto</a></strong></h2>"
+        "<div data-ad-preview='message'>post de beto</div><span aria-label='12 reacciones'></span></div>"
+        "<div role='dialog' style='height:300px'><div dir='auto'>hola, ¿me pasas el precio?</div>"
+        "<span aria-label='3 comentarios nuevos'></span></div></body>",
+    "https://diario.ejemplo.pe/noticia-2-consolas": _og("https://diario.ejemplo.pe/noticia-1-elecciones", "Resumen de la noticia 1",
+        "Noticia 1: elecciones") + "<link rel='canonical' href='https://diario.ejemplo.pe/noticia-1-elecciones'>"
+        "<title>Noticia 1: elecciones</title><body><article>noticia 1</article><article>noticia 2</article></body>",
+    "https://diario.ejemplo.pe/amp/noticia-3": _og("https://diario.ejemplo.pe/noticia-3", "Resumen de la 3", "Noticia 3")
+        + "<link rel='canonical' href='https://diario.ejemplo.pe/noticia-3'><body></body>",
+    "https://x.com/ana/status/5": "<body><article data-testid='tweet'><div data-testid='User-Name'>Ana @ana</div>"
+        "<a href='/ana/status/5'><time>1h</time></a><div data-testid='tweetText'>hola</div>"
+        "<div role='group' aria-label='1 respuesta, 1 repost, 1 Me gusta, 1 visualización'></div></article></body>",
+    "https://www.linkedin.com/posts/empresa_eventos-activity-7123456789012345678-AbCd/": "<body>"
+        "<div data-urn='urn:li:activity:7123456789012345678'><span class='update-components-actor__name'>Empresa</span>"
+        "<div class='update-components-text'>Texto del post</div><div class='social-details-social-counts'>"
+        "<span class='social-details-social-counts__reactions-count'>77</span><span>5 comentarios</span></div></div></body>",
+    "https://www.youtube.com/shorts/NUEVONUEVO1": "<title>YouTube</title><body><ytd-shorts>"
+        "<ytd-reel-video-renderer is-active style='display:block;height:700px'><a class='ytp-title-link' href='https://www.youtube.com/shorts/VIEJOVIEJO1'>t</a>"
+        "<yt-shorts-video-title-view-model><h1>Short VIEJO</h1></yt-shorts-video-title-view-model>"
+        "<div class='ytReelChannelBarViewModelChannelName'>@viejo</div></ytd-reel-video-renderer></ytd-shorts></body>",
+    # el MISMO vídeo, con su página oculta (el reproductor pequeño): no se lee
+    "https://www.youtube.com/watch?v=OCULTO12345": "<title>YouTube</title><body><ytd-watch-flexy hidden video-id='OCULTO12345'>"
+        "<h1 class='ytd-watch-metadata'>Título viejo</h1><span id='view-count' aria-label='5 vistas'></span></ytd-watch-flexy></body>",
     "https://blog.ejemplo.com/largo": "<body><div id='p'>" + ("palabra " * 200_000) + "</div></body>",
 }
 
@@ -713,6 +773,20 @@ def prueba_lector_hostil():
         ("https://www.linkedin.com/feed/", ("post de Ana", '"Ana"'), "LinkedIn: el inicio"),
         ("https://www.threads.net/@beto/post/BBB", ("@ana", "post de ana", "Ana en Threads"), "Threads: etiquetas de otro post"),
         ("https://www.pinterest.com/pin/555/", ("444", "pin de otro", "Otro pin"), "Pinterest: etiquetas de otro pin"),
+        ("https://www.tiktok.com/@beto/video/333", ("ana", "229K"), "TikTok: un vídeo sin su ventana, con la capa del inicio delante"),
+        ("https://www.tiktok.com/@beto", ("ana", "229K"), "TikTok: un perfil con la capa del inicio oculta"),
+        ("https://www.tiktok.com/explore", ("ana", "229K"), "TikTok: en Explorar, la capa del inicio oculta no vale"),
+        ("https://www.tiktok.com/following?2", ("ana", "1M", "/video/1"), "TikTok: el vídeo que se ve aún sin cifras no presta las del vecino"),
+        ("https://www.instagram.com/reels/BBB222/", ("ana", "5.555", "66"), "Instagram: el reel que se ve sin botones no presta los del vecino"),
+        ("https://www.instagram.com/p/CCC333/", ("99 mil", "Reel de"), "Instagram: una foto abierta sobre Explorar"),
+        ("https://www.instagram.com/reels/audio/123456/", ("pie de un reel", "AAA111"), "Instagram: la página de un audio"),
+        ("https://www.facebook.com/watch/", ("vídeo A", "900"), "Facebook Watch: el muro de vídeos"),
+        ("https://www.facebook.com/watch/?v=777", ("vídeo A", "900", "del inicio"), "Facebook Watch: un vídeo sin saber cuál es su caja"),
+        ("https://www.facebook.com/beto/posts/pfbid0abc", ("post A", "900"), "Facebook: la ventana del post aún cargando"),
+        ("https://diario.ejemplo.pe/noticia-2-consolas", ("noticia-1", "Noticia 1", "Resumen de la noticia 1"),
+         "una web con «scroll infinito»: la barra en la noticia 2 y las etiquetas en la 1"),
+        ("https://www.youtube.com/shorts/NUEVONUEVO1", ("VIEJO", "viejo"), "YouTube Shorts: el reproductor aún en el Short anterior"),
+        ("https://www.youtube.com/watch?v=OCULTO12345", ("Título viejo", '"5"'), "YouTube: la página del MISMO vídeo, oculta"),
     ):
         d, limpio_ = nada_de(url, *ajenos)
         ok(limpio_ and d["url"] == url and d.get("aviso"), f"{que}: nada del otro post, la dirección de la barra y un aviso")
@@ -751,6 +825,19 @@ def prueba_lector_hostil():
     fb = res["https://www.facebook.com/estadoplay/posts/123"]
     igual(fb["cifras"], {}, "Facebook: las cifras nunca salen del texto del post")
     igual(len(res["https://blog.ejemplo.com/largo"]["seleccion"]), 5000, "una selección enorme se recorta a 5.000 letras")
+    tv = res["https://www.tiktok.com/@beto/video/222"]
+    igual((tv["autor"], tv["texto"], tv["cifras"]), ("beto", "vídeo de beto", {"me_gusta": "7"}),
+          "TikTok: la ventana del vídeo, no el «Para ti» de detrás")
+    fc = res["https://www.facebook.com/beto/posts/124"]
+    ok(fc["texto"] == "post de beto" and "precio" not in json.dumps(fc) and "comentarios" not in fc["cifras"],
+       "Facebook: un chat de Messenger encima no se lee como el post")
+    am = res["https://diario.ejemplo.pe/amp/noticia-3"]
+    ok(am["titulo"] == "Noticia 3" and am["url"] == "https://diario.ejemplo.pe/noticia-3" and not am.get("aviso"),
+       "la versión AMP de una noticia sí vale con su canónico")
+    igual(res["https://x.com/ana/status/5"]["cifras"], {"comentarios": "1", "compartidos": "1", "me_gusta": "1", "vistas": "1"},
+          "las cifras en singular («1 respuesta», «1 visualización») también cuentan")
+    igual(res["https://www.linkedin.com/posts/empresa_eventos-activity-7123456789012345678-AbCd/"]["cifras"],
+          {"me_gusta": "77", "comentarios": "5"}, "LinkedIn: dos cifras pegadas no se leen como una («77» y «5 comentarios»)")
     igual((R.numero_visto("2,5 mi"), R.numero_visto("140 mil")), (2_500_000, 140_000), "«2,5 mi» (portugués) son 2,5 millones")
 
 
@@ -776,7 +863,8 @@ window.chrome = {
     ? [{ result: { url: 'https://www.tiktok.com/@ana/video/1', red: 'tiktok', autor: 'ana', titulo: 'Ana',
                    texto: 'Así quedó la fiesta', cifras: { me_gusta: '12K' } } }]
     : [{ result: await o.func(...o.args) }] },
-  permissions: { request: async () => true, contains: async () => window.__estado.conPermiso !== false },
+  permissions: { request: async () => true, contains: async () => window.__estado.conPermiso !== false,
+                 remove: async o => { (window.__estado.quitados = window.__estado.quitados || []).push(...o.origins); return true; } },
 };
 """
 
@@ -799,11 +887,15 @@ def prueba_boton():
             llegadas.append((ruta.request.method, url, ruta.request.headers.get("x-estudio-envio"), None))
             if url.endswith("/login"):
                 return ruta.fulfill(status=200, headers={"Content-Type": "text/html"}, body="<h1>Entra en tu WordPress</h1>")
+            if url.startswith("https://otra.web/marca/") and not url.endswith("/login"):   # otra web de la MISMA marca
+                return ruta.fulfill(status=302, headers={"Location": "https://otra.web/marca/login"}, body="")
+            if url == "https://otra.web/marca/login":
+                return ruta.fulfill(status=200, headers={"Content-Type": "text/html"}, body="<title>CrearIA – agencia</title>")
             if url.startswith("https://otra.web/wp/"):   # un WordPress que añade la barra o cambia de idioma
                 return ruta.fulfill(status=301, headers={"Location": "https://otra.web/es/"}, body="")
             return ruta.fulfill(status=200, headers={"Content-Type": "application/json"}, body='{"hola": 1}')
         if url in ("https://studio.prueba/login", "https://studio.prueba/v2/login"):
-            return ruta.fulfill(status=200, headers={"Content-Type": "text/html"}, body="<title>CrearIA Studio</title>acceso")
+            return ruta.fulfill(status=200, headers={"Content-Type": "text/html"}, body="<title>Acceso · CrearIA Studio</title>acceso")
         if url.startswith("https://studio.prueba/") and url.endswith("/api/recibidos/proyectos"):
             if proyectos_mal:
                 proyectos_mal.pop(0)
@@ -913,7 +1005,11 @@ def prueba_boton():
             ok("no contesta un CrearIA Studio" in texto and not any(l[2] for l in llegadas if "otra.web" in l[1])
                and pg.evaluate("window.__estado.guardado.studio") is None,
                "una dirección que redirige a otra web no se da por Studio ni le llega el código")
+            ok("https://otra.web/*" in (pg.evaluate("window.__estado.quitados") or []), "y el permiso para esa web se devuelve")
             # una web que contesta 200 con cualquier JSON tampoco
+            texto = probar_con(pg, "https://otra.web/marca/")
+            ok("no contesta un CrearIA Studio" in texto and not any(l[2] for l in llegadas if "otra.web" in l[1]),
+               "otra web de la marca CrearIA (su /login dice «CrearIA») tampoco es un Studio")
             texto = probar_con(pg, "https://otra.web/hola/")
             ok("no contesta un CrearIA Studio" in texto, "una web que contesta {«hola»: 1} no es un Studio")
             # el Studio de verdad sin sesión: su login lo manda a /login de la MISMA web, con la página de CrearIA

@@ -87,8 +87,15 @@ def publicar_metricas_completas(navegador, datos):
     ok("0 personas alcanzadas" not in abierto, "un alcance de 0 con vistas no se enseña: es «no lo sé»")
     ok(pg.p.evaluate("() => [nombreRepartoTiktok('Direct Message'), nombreRepartoTiktok('RETURN_VIEWER'), "
                      "nombreRepartoTiktok('ALGO_NUEVO'), nombreRepartoTiktok('Live')].join('|')")
-       == "Mensajes directos|Que ya lo habían visto|Algo nuevo|Live",
+       == "Mensajes directos|Ya habían visto tus vídeos|Algo nuevo|Live",
        "lo que no se conoce sale legible, sin MAYÚSCULAS_CON_GUIONES")
+    dos = pg.p.evaluate("""() => detalleMetricasEnvio({metricas: {publico: [['NON_FOLLOWER_PERCENT', 0.97],
+        ['FOLLOWER_PERCENT', 0.03], ['NEW_VIEWER', 0.9], ['RETURN_VIEWER', 0.1]]}}).innerText
+        || detalleMetricasEnvio({metricas: {publico: [['NON_FOLLOWER_PERCENT', 0.97],
+        ['FOLLOWER_PERCENT', 0.03], ['NEW_VIEWER', 0.9], ['RETURN_VIEWER', 0.1]]}}).textContent""")
+    ok("Quién lo vio: No seguidores 97 % · Seguidores 3,0 %" in dos
+       and "Nuevos o que vuelven: Espectadores nuevos 90 % · Ya habían visto tus vídeos 10 %" in dos,
+       f"los dos repartos del público de TikTok, cada uno en su línea ({dos!r})")
     pg.captura("publicar_metricas_completas_ficha")
     pg.sin_errores("las métricas completas")
     pg.cerrar()

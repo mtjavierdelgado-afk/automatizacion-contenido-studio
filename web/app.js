@@ -29086,8 +29086,8 @@ const NOMBRES_REPARTO_TIKTOK = {
   'direct message': 'Mensajes directos', 'direct messages': 'Mensajes directos',
   'video detail': 'Detalle del vídeo', 'external': 'Fuera de TikTok', 'share': 'Compartido',
   'new viewers': 'Espectadores nuevos', 'new viewer': 'Espectadores nuevos',
-  'returning viewers': 'Que ya lo habían visto', 'returning viewer': 'Que ya lo habían visto',
-  'return viewers': 'Que ya lo habían visto', 'return viewer': 'Que ya lo habían visto',
+  'returning viewers': 'Ya habían visto tus vídeos', 'returning viewer': 'Ya habían visto tus vídeos',
+  'return viewers': 'Ya habían visto tus vídeos', 'return viewer': 'Ya habían visto tus vídeos',
   'followers': 'Seguidores', 'follower': 'Seguidores',
   'non followers': 'No seguidores', 'non follower': 'No seguidores',
 };
@@ -29113,7 +29113,13 @@ function detalleMetricasEnvio(e) {
     ? h('div', { clase: 'meta' }, `${titulo}: ${lista.map(([n, f]) =>
       `${nombreRepartoTiktok(n)} ${porcentaje(f)}`).join(' · ')}`) : null; };
   const fuentes = reparto(m.fuentes, 'De dónde vinieron las vistas');
-  const publico = reparto(m.publico, 'Quién lo vio');
+  // TikTok mezcla DOS repartos en «público» (seguidores o no; nuevos o que
+  // vuelven): juntos sumaban 200 % y parecían uno (2.ª revisión, 12-11)
+  const deNuevos = ([n]) => /viewer/i.test(String(n));
+  const publicoSeguidores = reparto((m.publico || []).filter(p => !deNuevos(p)), 'Quién lo vio');
+  const publicoNuevos = reparto((m.publico || []).filter(deNuevos), 'Nuevos o que vuelven');
+  const publico = publicoSeguidores || publicoNuevos
+    ? h('div', {}, publicoSeguidores, publicoNuevos) : null;
   if (!aparte && !curva && !fuentes && !publico) return null;
   // el segundo en que se va la mitad viene calculado con la curva ENTERA
   // (la guardada puede ir aligerada); en los envíos de antes, de la curva

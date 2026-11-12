@@ -6,7 +6,8 @@
 - Cada total dice **de cuántas publicaciones sale** cuando no todas las redes dan esa cifra (por ejemplo «seguidores nuevos · 1 de 2»: solo TikTok los da). En el **Informe del mes**, igual con los guardados (YouTube no los da).
 - En el total salen también las **vistas de tus Reels en Facebook** y las **visitas al perfil**.
 - La frase de la curva ya no dice «hasta el final» cuando la curva de TikTok se corta antes: dice en qué segundo sigue viéndolo más de la mitad.
-- Los porcentajes pequeños se leen bien («0,05 %», no «0,0 %»), y el **público** de TikTok («Espectadores nuevos», «Que ya lo habían visto») sale con lo que manda de verdad Upload-Post.
+- Los porcentajes pequeños se leen bien («0,05 %», no «0,0 %»), y el **público** de TikTok («Espectadores nuevos», «Ya habían visto tus vídeos») sale con lo que manda de verdad Upload-Post.
 - En **Por red**, cada cifra dice también de cuántas publicaciones sale («3 seguidores nuevos (1 de 2)»).
 - «Más cifras» de TikTok ya no enseña nombres en inglés («NON_FOLLOWER_PERCENT», «Direct Message»): dice «No seguidores», «Seguidores», «Mensajes directos»… y deja fuera lo que viene en 0 %, que es TikTok diciendo que no lo sabe.
 - Con vistas, un **0** de personas alcanzadas, impresiones o tiempo visto no se enseña ni entra en las medias: es la red diciendo «no lo sé». Ya no sale «0 personas alcanzadas» con 200 vistas ni «0 % visto de media» en «Esta semana» por un Short sin dato.
+- «Quién lo vio» separa los dos repartos que manda TikTok: **seguidores o no** por un lado y **nuevos o que vuelven** por otro (juntos sumaban 200 %). Y lo que se le pasa a Claude como «lo que mejor funcionó» ya no lleva esos ceros falsos.

@@ -2001,6 +2001,9 @@ def prueba_metricas_completas():
     P._medias(suma)
     igual((suma.get("media_vista"), suma.get("tiempo_medio_s"), suma.get("alcance")), (0.6, 5.0, None),
           "un 0 imposible no baja la media («0 % visto de media» en «Esta semana»)")
+    igual(C._cifras({"reach": 0, "views": None})["alcance"], None,
+          "sin vistas todavía (TikTok las completa en horas), un alcance 0 tampoco es un cero")
+    igual(P.sin_ceros_imposibles({"alcance": 0})["alcance"], None, "y lo mismo al leer lo guardado")
     vacio = C._cifras({"views": 5})
     igual([vacio[k] for k in ("impresiones", "curva", "fuentes", "publico", "tiempo_total_s")],
           [None] * 5, "lo que la red no da se queda en None (nunca cero ni lista vacía)")
@@ -2339,6 +2342,27 @@ def prueba_retencion_y_resumenes():
         igual(len(P.lo_que_funciono(raiz, videos, None, cuantos=1)["posts"]), 1, "y cuántos")
         igual(P.lo_que_funciono(raiz, videos, None, por="raro", cuantos="x", dias="y")["por"], "vistas",
               "lo que no se entiende vuelve a lo de siempre")
+        # servidor, 12-11: un Short guardado con media_vista 0 (el «no lo sé» de
+        # YouTube) no se le da a Claude como «visto de media 0 %» ni entra al
+        # ordenar por esa cifra
+        datos["envios"].append(dict(base, id="m_cero", red="youtube", estado="publicado",
+                                    cuando=P._iso_lima(hoy - dt.timedelta(days=2)),
+                                    metricas={"vistas": 300, "media_vista": 0, "tiempo_medio_s": 0,
+                                              "alcance": 0}))
+        datos["envios"].append(dict(base, id="m_bien", red="youtube", estado="publicado",
+                                    cuando=P._iso_lima(hoy - dt.timedelta(days=2)),
+                                    metricas={"vistas": 400, "media_vista": 0.68}))
+        P._escribir(P._ruta_video(raiz, "ret"), datos)
+        lq = P.lo_que_funciono(raiz, videos, None, dias=30)
+        cero = next(p for p in lq["posts"] if p["metricas"]["vistas"] == 300)
+        igual((cero["metricas"]["media_vista"], cero["metricas"]["tiempo_medio_s"], cero["metricas"]["alcance"]),
+              (None, None, None), "lo que se le da a Claude no lleva los ceros que son «no lo sé»")
+        igual([p["metricas"]["media_vista"] for p in P.lo_que_funciono(raiz, videos, None, por="media_vista")["posts"]],
+              [0.68], "y al ordenar por «visto de media» el 0 falso no entra")
+        from pasos import parrilla as PR
+        texto = PR.resumen_de_posts([cero])
+        ok("300" in texto and "0 %" not in texto and "0.0 s" not in texto,
+           f"ni sale «0 %» en el texto para Claude ({texto[:160]!r})")
     finally:
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 

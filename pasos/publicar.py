@@ -3616,7 +3616,8 @@ DETALLE = ("curva", "mitad_s", "fuentes", "publico")
 #: Todo lo que se apunta de un envio
 CAMPOS_ENVIO = METRICAS + EXTRAS + RETENCION + DETALLE
 #: Cifras que NO pueden ser 0 si el post tiene vistas: un post visto 200 veces
-#: llegó al menos a una persona y alguien lo vio algún segundo. Ese 0 es el
+#: llegó al menos a una persona y alguien lo vio algún segundo. Y sin vistas
+#: todavía (TikTok las completa en horas), un 0 suelto tampoco dice nada. Ese 0 es el
 #: «no lo sé» de la red (TikTok da `reach: 0`; un Short, `average_time_watched:
 #: 0`), y enseñarlo como «0 personas alcanzadas» o «0 % visto de media» era
 #: mentir (prueba del servidor, 12-11). `vista_entera` sí puede ser 0 (nadie
@@ -3631,7 +3632,8 @@ def sin_ceros_imposibles(m):
     if not isinstance(m, dict):
         return m
     vistas = m.get("vistas")
-    if isinstance(vistas, bool) or not isinstance(vistas, (int, float)) or vistas <= 0:
+    # solo con «0 vistas» de verdad un 0 de alcance es un cero (2.ª revisión, 12-11)
+    if isinstance(vistas, (int, float)) and not isinstance(vistas, bool) and vistas <= 0:
         return m
     ceros = [k for k in SIN_CERO_CON_VISTAS
              if isinstance(m.get(k), (int, float)) and not isinstance(m.get(k), bool) and m[k] == 0]
@@ -3783,7 +3785,8 @@ def _apuntar_metricas(raiz, envios, cifras, error=""):
                 for k in ("guardada_al", "guardada"):
                     if k in viejas:
                         nuevas[k] = viejas[k]
-                e["metricas"] = nuevas
+                # los ceros que no pueden ser, fuera también de lo ya guardado
+                e["metricas"] = sin_ceros_imposibles(nuevas)
                 if propias.get("url") and not e.get("url"):
                     e["url"] = propias["url"]
                 if propias.get("post_id"):
@@ -3935,7 +3938,7 @@ def _apuntar_guardadas(raiz, envios, indice):
                     nuevas["al"] = _iso_lima(cuando)
                     nuevas["error"] = ""
                 nuevas["guardada"] = True
-                e["metricas"] = nuevas
+                e["metricas"] = sin_ceros_imposibles(nuevas)
                 if post.get("post_id") and not e.get("post_id"):
                     e["post_id"] = post["post_id"]
                 cambio = True
@@ -4235,7 +4238,8 @@ def lo_que_funciono(raiz, videos, cid=None, dias=30, red=None, por="vistas", cua
     for v, e in _publicados(raiz, _de_proyecto(videos, cid), desde):
         if red and e["red"] != red:
             continue
-        m = e.get("metricas") or {}
+        # sin los ceros que son «no lo sé»: esto se le da a Claude como ejemplo
+        m = sin_ceros_imposibles(e.get("metricas") or {})
         vistas = m.get("vistas")
         if not isinstance(vistas, (int, float)):
             continue

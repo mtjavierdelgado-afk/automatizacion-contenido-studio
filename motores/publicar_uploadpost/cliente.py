@@ -620,8 +620,10 @@ class ClienteUploadPost:
         # con vistas, un 0 de alcance, impresiones o tiempo visto es el «no lo
         # sé» de la red, no un cero (TikTok manda `reach: 0`; prueba del
         # servidor, 12-11). La misma lista que `publicar.SIN_CERO_CON_VISTAS`
+        # solo con «0 vistas» de verdad un 0 de alcance es un cero; sin vistas
+        # todavía (TikTok las completa en horas), tampoco (2.ª revisión, 12-11)
         vistas = datos.get("vistas")
-        if isinstance(vistas, (int, float)) and vistas > 0:
+        if not (isinstance(vistas, (int, float)) and vistas <= 0):
             for k in cls.SIN_CERO_CON_VISTAS:
                 if datos.get(k) == 0:
                     datos[k] = None

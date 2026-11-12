@@ -61,7 +61,7 @@ def _con_cifras(raiz, videos, cid, desde, hasta=None):
     """[(video, envio, momento, metricas)] de lo publicado con vistas."""
     salida = []
     for v, e in P._publicados(raiz, P._de_proyecto(videos, cid), desde, hasta):
-        m = e.get("metricas") or {}
+        m = P.sin_ceros_imposibles(e.get("metricas") or {})
         if isinstance(m.get("vistas"), (int, float)) and not isinstance(m.get("vistas"), bool):
             salida.append((v, e, P._leer_momento(e.get("cuando")), m))
     return salida

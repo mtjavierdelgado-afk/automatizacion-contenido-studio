@@ -1855,26 +1855,42 @@ def _correr_otro_idioma(avisar, ctx, idioma, voz_id, nombre, visto=None):
             if not lanzado:
                 if copia is not None:
                     _a_la_papelera_sin_ruido(copia.id)
-                elif not existia:
+                elif not existia and _es_copia_de(carpeta, ctx.id):
                     _a_la_papelera_sin_ruido(carpeta=carpeta)
-        _registrar_trabajo(tanda, copia.id)
-        # el proyecto (cliente) del original, si se lo asignaron a mano
+        # LO DE DESPUÉS NO TUMBA LO HECHO: la copia ya corre sola; un fallo al
+        # apuntarlo no puede dejar este trabajo en error
         try:
+            _registrar_trabajo(tanda, copia.id)
+            # el proyecto (cliente) del original, si se lo asignaron a mano
             propio = CLIENTES._leer(raiz_proyectos()).get("videos", {}).get(ctx.id)
             if propio:
                 CLIENTES.asignar_video(raiz_proyectos(), copia.id, propio)
         except Exception:                                        # noqa: BLE001
             pass
-        copia.bitacora.anotar("otro_idioma_creado", None,
-                              {"de": ctx.id, "idioma": idioma, **resumen})
-        ctx.bitacora.anotar("otro_idioma_hecho", None,
-                            {"a": copia.id, "idioma": idioma, **resumen})
+        try:
+            copia.bitacora.anotar("otro_idioma_creado", None,
+                                  {"de": ctx.id, "idioma": idioma, **resumen})
+            ctx.bitacora.anotar("otro_idioma_hecho", None,
+                                {"a": copia.id, "idioma": idioma, **resumen})
+        except Exception:                                        # noqa: BLE001
+            pass
         avisar(1.0, "hecho", "Hecho")
         return {"copia": copia.id, "nombre": nombre, "idioma": idioma,
                 "tanda": tanda, "aviso": "", **resumen}
     finally:
         with _LOCK:
             _OTRO_IDIOMA_EN_MARCHA.discard(ctx.id)
+
+
+def _es_copia_de(carpeta, origen):
+    """Si `carpeta` es una copia recién hecha de `origen` (y no otra cosa con
+    el mismo nombre): solo esas se apartan cuando `duplicar` falla a medias."""
+    try:
+        with open(os.path.join(carpeta, "proyecto.json"), encoding="utf-8") as fh:
+            return (json.load(fh) or {}).get("copia_de") == origen
+    except (OSError, ValueError):
+        # sin proyecto.json no aparece en ningún sitio: es la carpeta a medias
+        return os.path.isdir(carpeta)
 
 
 def _no_mas_de_lo_visto(datos, visto):
@@ -1945,9 +1961,8 @@ def _correr_copia_en_idioma(avisar, copia, datos, esperadas=None):
         resumen = _tanda_de_la_copia(avisar, copia, ["video", "render"], 0.65, 1.0,
                                      max_imagenes=len(datos.get("sin_dibujo") or []))
     except BaseException as fallo:
-        if type(fallo).__name__ == "Cancelado":
-            raise
-        motivo = getattr(fallo, "mensaje", None) or str(fallo)
+        cancelado = type(fallo).__name__ == "Cancelado"
+        motivo = "parado a mano" if cancelado else (getattr(fallo, "mensaje", None) or str(fallo))
         copia.bitacora.anotar("otro_idioma_parado", None, {"motivo": motivo})
         try:
             config = copia.proyecto.config.get(OTRO_IDIOMA.CONFIG_TRADUCCION) or {}

@@ -1124,6 +1124,116 @@ def comparar(pincel, pieza, kit=None, imagen=None, logo=None, logo_oscuro=None, 
             "movidos": movidos, "doc": doc, "png_antes": antes, "png_capas": despues}
 
 
+# ====================================================================== editor
+# (rama graficas-2-editor, 12-11-2026). Lo que necesita el editor con capas
+# libres además de leer, pintar y guardar. Nada de esto escribe en disco.
+
+#: Cuántas líneas ocupa cada texto en la vista final (por id de capa): el
+#: editor lo compara con lo que pinta la pantalla y avisa si un salto cambia.
+_LINEAS_POR_CAPA = r"""(() => {
+  const salida = {};
+  for (const e of document.querySelectorAll('[data-c]')) {
+    let texto = ''; for (const n of e.childNodes) if (n.nodeType === 3) texto += n.textContent;
+    if (!texto.trim() || !e.getClientRects().length) continue;
+    const rg = document.createRange(); rg.selectNodeContents(e);
+    salida[e.dataset.c] = new Set([...rg.getClientRects()].map(q => Math.round(q.top))).size;
+  }
+  return salida;
+})()"""
+
+
+def contar_lineas(pincel):
+    """-> {id de capa: líneas} de la página que el pincel tiene abierta."""
+    lineas = pincel.evaluar(_LINEAS_POR_CAPA) or {}
+    return {str(k): int(v) for k, v in lineas.items() if _RE_ID.fullmatch(str(k)) and isinstance(v, (int, float))}
+
+
+#: los roles que pone la conversión a lo que sale de una plantilla
+_ROLES_DE_PLANTILLA = frozenset(G.CAMPOS) | {"deco", "fondo", "foto", "logo"}
+
+
+def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=None, logo_oscuro=None, lamina=0):
+    """«Volver a montar» y «Empezar de»: la plantilla `plantilla` en el tamaño
+    `formato`, convertida en capas, con los textos y colores de `doc`.
+
+    - Cada campo de la plantilla lleva el texto que tenía en la pieza (con sus
+      saltos de línea) o, si no lo tenía, el de `textos` (lo que propone el
+      editor). Si su color era uno propio (#RRGGBB) lo conserva; si era del
+      Kit, toma el de la plantilla nueva, que es el que se lee sobre su fondo.
+    - La primera foto de la pieza pasa a la foto de la plantilla, con su encuadre.
+    - Lo que añadiste tú (capas sin papel de plantilla) y los campos que la
+      plantilla nueva no usa se quedan encima, tal cual: no se pierde nada (si
+      no cabe todo, es un error que lo dice, nunca un recorte).
+    - El resto del documento (nombre, colores, letras, las otras láminas y el
+      sello para guardar sin pisar nada) no cambia.
+    Solo cambia la lámina `lamina`. No escribe nada."""
+    if type(plantilla) is not int or plantilla not in G._PL.PLANTILLAS:
+        raise ErrorGraficas("esa plantilla no existe")
+    G.formato(formato if isinstance(formato, str) else "")
+    doc = limpiar_doc(doc) if doc is not None else limpiar_doc(
+        {"formato": formato, "laminas": [{"capas": []}]})
+    if type(lamina) is not int or not 0 <= lamina < len(doc["laminas"]):
+        raise ErrorGraficas("esa lámina no está")
+    textos = textos if isinstance(textos, dict) else {}
+    capas = doc["laminas"][lamina]["capas"]
+    de_la_pieza = {}
+    for capa in capas:
+        if capa["tipo"] == "texto" and capa["rol"] in G.CAMPOS and capa["txt"].strip():
+            de_la_pieza.setdefault(capa["rol"], capa)
+    # la foto de la plantilla; si no hay, la primera que añadiste tú
+    foto = (next((c for c in capas if c["tipo"] == "imagen" and c["src"] and c["rol"] == "foto"), None)
+            or next((c for c in capas if c["tipo"] == "imagen" and c["src"]), None))
+    pieza_textos = {}
+    for campo, (_, largo) in G.CAMPOS.items():
+        crudo = de_la_pieza[campo]["txt"] if campo in de_la_pieza else str(textos.get(campo) or "")
+        if crudo.strip():
+            pieza_textos[campo] = crudo
+    pieza = {"plantilla": plantilla, "formato": formato, "textos": pieza_textos,
+             "imagen": foto["src"] if foto else "", "encuadre": dict(foto["encuadre"]) if foto else {},
+             "colores": doc["colores"], "fuente_titulos": doc["fuente_titulos"],
+             "fuente_texto": doc["fuente_texto"], "nombre": doc["nombre"]}
+    nuevo = convertir(pincel, pieza, kit, logo, logo_oscuro)
+    nuevas = nuevo["laminas"][0]["capas"]
+    usados = set()
+    for capa in nuevas:
+        if capa["tipo"] == "texto" and capa["rol"] in G.CAMPOS:
+            usados.add(capa["rol"])
+            original = de_la_pieza.get(capa["rol"])
+            crudo = original["txt"] if original else str(textos.get(capa["rol"]) or "")
+            if crudo.strip():
+                # el texto entero, con sus saltos (la plantilla lo midió en una línea)
+                capa["txt"] = crudo
+            if original and original["color"].startswith("#"):
+                # un color propio (elegido a mano) se conserva; uno del Kit no:
+                # el de la plantilla nueva es el que se lee sobre su fondo
+                capa["color"], capa["alfa"] = original["color"], original["alfa"]
+    sueltas = [c for c in capas if c["rol"] not in _ROLES_DE_PLANTILLA
+               or (c["rol"] in G.CAMPOS and c["rol"] not in usados and c["tipo"] == "texto")]
+    # una plantilla sin foto: la foto no se pierde; queda abajo del todo y
+    # oculta (a sangre taparía la plantilla entera), lista para enseñarla
+    con_foto = any(c["tipo"] == "imagen" for c in nuevas)
+    abajo = [dict(foto, oculto=True)] if foto and not con_foto and foto["rol"] == "foto" else []
+    if con_foto and foto is not None:
+        # la foto que ha pasado a la plantilla no se queda también suelta
+        sueltas = [c for c in sueltas if c is not foto]
+    # ids únicos en todo el documento: las capas nuevas estrenan los suyos
+    otras = {c["id"] for i, l in enumerate(doc["laminas"]) if i != lamina for c in l["capas"]}
+    otras |= {c["id"] for c in sueltas + abajo}
+    for capa in nuevas:
+        while capa["id"] in otras:
+            capa["id"] = "c" + secrets.token_hex(4)
+        otras.add(capa["id"])
+    total = len(abajo) + len(nuevas) + len(sueltas)
+    if total > MAX_CAPAS:
+        # nunca se corta nada en silencio: lo añadido iría al final y sería lo perdido
+        raise ErrorGraficas(f"con esta plantilla serían {total} capas y caben {MAX_CAPAS}: "
+                            f"quita {total - MAX_CAPAS} o elige otra plantilla")
+    doc["laminas"][lamina] = {"capas": abajo + nuevas + sueltas}
+    doc["formato"] = formato
+    doc["origen"]["plantilla"] = plantilla
+    return limpiar_doc(doc)
+
+
 # ====================================================================== guardar
 
 class ErrorConflicto(ErrorGraficas):

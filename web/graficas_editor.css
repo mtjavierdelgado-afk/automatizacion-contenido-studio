@@ -1,0 +1,227 @@
+/* CrearIA Studio — el editor con capas de Gráficas (rama graficas-2-editor).
+   Solo se carga al abrir el editor (graficas_editor.js). Todo color sale de las
+   variables de estilo.css: así sigue a las cuatro paletas y al tema claro. */
+
+body.ce-abierto { overflow: hidden; }
+
+.ce {
+  position: fixed; inset: 0; z-index: 900;
+  display: flex; flex-direction: column;
+  background: var(--bg); color: var(--texto);
+  padding-top: env(safe-area-inset-top, 0px);
+  font-size: 14px;
+}
+.ce-cargando { padding: 24px; color: var(--tenue); }
+/* las etiquetas del Studio van en versalitas pequeñas: aquí, letra normal */
+.ce label { text-transform: none; letter-spacing: normal; font-size: inherit; color: inherit; margin: 0; }
+
+/* ---------------------------------------------------------------- la barra */
+.ce-barra {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 8px max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
+  background: var(--panel); border-bottom: 1px solid var(--linea);
+}
+.ce-titulo { font-weight: 700; max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ce-estado { color: var(--tenue); font-size: 12px; }
+.ce-estado.pendiente { color: var(--aviso); }
+.ce-crece { flex: 1 1 auto; }
+.ce-sep { width: 1px; align-self: stretch; background: var(--linea); margin: 0 2px; }
+
+.ce-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-height: 32px; padding: 4px 10px; border-radius: var(--radio-control, 10px);
+  border: 1px solid var(--linea-fuerte); background: var(--boton); color: var(--texto);
+  font: inherit; cursor: pointer; user-select: none; white-space: nowrap;
+}
+.ce-btn:hover:not(:disabled) { background: var(--hover); }
+.ce-btn:focus-visible, .ce-mini:focus-visible, .ce-muestra:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+.ce-btn:disabled { opacity: .45; cursor: default; }
+.ce-btn[aria-pressed="true"] { background: var(--marcado); border-color: var(--acento); }
+.ce-primario { background: var(--relleno); color: var(--sobre-acento); border-color: transparent; font-weight: 700; }
+.ce-primario:hover:not(:disabled) { background: var(--acento-relleno); }
+.ce-peligro { color: var(--malo); }
+.ce-ancho { width: 100%; }
+.ce-volver { font-weight: 600; }
+.ce-oculto { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+.ce-mini {
+  min-width: 30px; min-height: 30px; padding: 2px 6px; border-radius: 8px;
+  border: 1px solid var(--linea); background: var(--hueco); color: var(--texto); font: inherit; cursor: pointer;
+}
+.ce-mini[aria-pressed="true"] { background: var(--marcado); border-color: var(--acento); }
+
+/* ---------------------------------------------------------------- avisos */
+.ce-aviso {
+  position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%) translateY(20px);
+  max-width: min(92vw, 640px); padding: 10px 16px; border-radius: 12px; z-index: 950;
+  background: var(--info-fondo); border: 1px solid var(--acento-borde); color: var(--texto);
+  box-shadow: var(--sombra); opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s;
+}
+.ce-aviso.ver { opacity: 1; transform: translateX(-50%) translateY(0); }
+.ce-aviso.malo { background: var(--malo-fondo); border-color: var(--malo-borde); color: var(--malo-texto); }
+.ce-migra, .ce-conflicto {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 8px max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
+  background: var(--aviso-fondo); color: var(--aviso-texto); border-bottom: 1px solid var(--aviso-borde);
+}
+.ce-migra span { flex: 1 1 320px; }
+.ce-conflicto { background: var(--malo-fondo); color: var(--malo-texto); border-color: var(--malo-borde); }
+.ce-conflicto p { margin: 0; flex: 1 1 320px; }
+
+/* ---------------------------------------------------------------- la zona */
+.ce-zona { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 250px minmax(0, 1fr) 300px; }
+.ce-panel { min-width: 0; overflow-y: auto; padding: 12px; background: var(--panel); }
+.ce-izq { border-right: 1px solid var(--linea); }
+.ce-der { border-left: 1px solid var(--linea); }
+.ce-panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--tenue); margin: 6px 0 8px; }
+.ce-panel h3 { font-size: 13px; margin: 0 0 8px; color: var(--texto); }
+
+.ce-anadir { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 14px; }
+.ce-anadir .ce-btn { justify-content: flex-start; }
+
+.ce-capas { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ce-capa { display: flex; align-items: center; gap: 4px; border-radius: 8px; padding: 2px; }
+.ce-capa.elegida { background: var(--marcado); }
+.ce-capa.oculta .ce-capa-nombre { opacity: .5; }
+.ce-capa-nombre {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; text-align: left;
+  background: none; border: 0; color: var(--texto); font: inherit; padding: 6px; border-radius: 6px; cursor: pointer;
+}
+.ce-capa-nombre:hover { background: var(--hover); }
+.ce-icono { width: 18px; text-align: center; color: var(--tenue); flex: none; }
+.ce-nombre { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ce-renombrar { flex: 1 1 auto; min-width: 0; }
+.ce-orden { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+/* ---------------------------------------------------------------- el escenario */
+.ce-escenario {
+  position: relative; min-width: 0; min-height: 0; overflow: auto;
+  /* flex y margin:auto (no grid centrado): con zoom, lo que no cabe se
+     alcanza desplazando también hacia la izquierda y hacia arriba */
+  display: flex; padding: 40px 24px 24px;
+  background: var(--hueco);
+  /* el dedo mueve la página fuera del lienzo; dentro, mueve las capas */
+}
+.ce-marco { position: relative; flex: none; margin: auto; box-shadow: var(--sombra); }
+.ce-lienzo {
+  position: absolute; inset: 0; overflow: hidden; container-type: size;
+  font-family: 'ce-Poppins', 'Poppins', sans-serif; touch-action: none; user-select: none;
+}
+.ce-lienzo *, .ce-lienzo *::before, .ce-lienzo *::after { box-sizing: border-box; }
+.ce-lienzo img { user-select: none; -webkit-user-drag: none; pointer-events: none; }
+.ce-lienzo [data-c] { cursor: move; }
+.ce-lienzo [data-bloqueado] { cursor: default; }
+.ce-lienzo .ce-escribiendo { cursor: text; user-select: text; outline: 2px dashed var(--acento); outline-offset: 2px; }
+.ce-texto-vacio, .ce-sin-logo {
+  display: grid; place-items: center; border: 1px dashed var(--tenue); color: var(--tenue); font: 12px/1.2 sans-serif;
+}
+.ce-cargando-foto { animation: ce-latido 1.2s ease-in-out infinite; }
+@keyframes ce-latido { 50% { opacity: .6; } }
+
+.ce-marcas { position: absolute; inset: 0; pointer-events: none; }
+.ce-elegida {
+  position: absolute; box-sizing: border-box; border: 1.5px solid var(--acento);
+  pointer-events: auto; cursor: move; touch-action: none;
+}
+.ce-elegida.bloqueada { border-style: dashed; cursor: default; }
+.ce-elegida.varias { border-width: 1px; }
+.ce-grupo { position: absolute; border: 1px dashed var(--acento); pointer-events: none; }
+.ce-asa {
+  position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 3px;
+  background: var(--blanco); border: 1.5px solid var(--acento-relleno); touch-action: none;
+}
+.ce-asa-nw { left: 0; top: 0; cursor: nwse-resize; }
+.ce-asa-n { left: 50%; top: 0; cursor: ns-resize; }
+.ce-asa-ne { left: 100%; top: 0; cursor: nesw-resize; }
+.ce-asa-e { left: 100%; top: 50%; cursor: ew-resize; }
+.ce-asa-se { left: 100%; top: 100%; cursor: nwse-resize; }
+.ce-asa-s { left: 50%; top: 100%; cursor: ns-resize; }
+.ce-asa-sw { left: 0; top: 100%; cursor: nesw-resize; }
+.ce-asa-w { left: 0; top: 50%; cursor: ew-resize; }
+.ce-asa-e, .ce-asa-w { width: 8px; height: 18px; margin: -9px 0 0 -4px; }
+.ce-asa-n, .ce-asa-s { width: 18px; height: 8px; margin: -4px 0 0 -9px; }
+.ce-girar {
+  position: absolute; left: 50%; top: -34px; width: 22px; height: 22px; margin-left: -11px;
+  display: grid; place-items: center; border-radius: 50%; font-size: 13px; line-height: 1;
+  background: var(--blanco); color: var(--acento-relleno); border: 1.5px solid var(--acento-relleno); cursor: grab; touch-action: none;
+}
+.ce-guia { position: absolute; background: var(--acento2); }
+.ce-guia.v { width: 1px; }
+.ce-guia.h { height: 1px; }
+.ce-recuadro { position: absolute; border: 1px solid var(--acento); background: var(--anillo); }
+.ce-medida {
+  position: absolute; padding: 2px 6px; border-radius: 6px; white-space: nowrap; font-size: 11px;
+  background: var(--acento-relleno); color: var(--sobre-acento);
+}
+.ce-tapa { position: absolute; background: color-mix(in srgb, var(--malo) 30%, transparent); }
+.ce-margen { position: absolute; border: 1px dashed var(--aviso); }
+
+/* ---------------------------------------------------------------- propiedades */
+.ce-grupo-props { border-top: 1px solid var(--linea-suave); padding: 12px 0; display: flex; flex-direction: column; gap: 8px; }
+.ce-campo { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ce-campo > span:first-child { font-size: 12px; color: var(--tenue); }
+.ce-campo input[type="text"], .ce-campo input[type="number"], .ce-campo select, .ce-campo textarea, .ce-panel > label > input[type="text"] {
+  width: 100%; min-width: 0; box-sizing: border-box; padding: 6px 8px; border-radius: 8px;
+  border: 1px solid var(--linea); background: var(--hueco); color: var(--texto); font: inherit;
+}
+.ce-campo textarea { resize: vertical; min-height: 64px; }
+.ce-con-unidad { display: flex; align-items: center; gap: 4px; }
+.ce-con-unidad i { font-style: normal; color: var(--tenue); font-size: 12px; }
+.ce-dos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ce-deslizador { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 8px; }
+.ce-deslizador > span:first-child { grid-column: 1 / -1; }
+.ce-deslizador input { width: 100%; accent-color: var(--acento-relleno); }
+.ce-deslizador output { font-size: 12px; color: var(--tenue); min-width: 5ch; text-align: right; }
+.ce-casilla { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.ce-casilla input { accent-color: var(--acento-relleno); width: 16px; height: 16px; }
+.ce-botonera { display: flex; flex-wrap: wrap; gap: 4px; }
+.ce-muestras { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ce-muestra {
+  width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--linea-fuerte); cursor: pointer;
+  font: 700 10px/1 sans-serif; padding: 0;
+}
+.ce-muestra[aria-pressed="true"] { border-color: var(--texto); box-shadow: 0 0 0 2px var(--acento); }
+.ce-muestras input[type="color"], .ce-color-rol input[type="color"] {
+  width: 32px; height: 28px; padding: 0; border: 1px solid var(--linea); border-radius: 8px; background: none; cursor: pointer;
+}
+.ce-colores-pieza { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.ce-color-rol { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--tenue); }
+.ce-color-rol.propio span { color: var(--acento); font-weight: 700; }
+.ce-pista { color: var(--tenue); font-size: 12px; line-height: 1.4; }
+.ce-pista.malo { color: var(--malo); }
+.ce-nota { font-size: 12px; padding: 8px; border-radius: 8px; background: var(--hueco); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ce-atajos { margin: 0; padding-left: 18px; color: var(--tenue); font-size: 12px; line-height: 1.7; }
+.ce-atajos kbd { font-family: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--linea-fuerte); border-radius: 4px; background: var(--hueco); color: var(--texto); }
+.ce-vista-img { width: 100%; border-radius: 8px; border: 1px solid var(--linea); display: block; }
+.ce-avisos { margin: 0; padding-left: 18px; color: var(--aviso); font-size: 12px; line-height: 1.5; }
+
+/* ---------------------------------------------------------------- la versión anterior */
+.ce-modal { position: fixed; inset: 0; z-index: 960; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--bg) 80%, transparent); }
+.ce-modal-cuerpo {
+  max-width: min(560px, 100%); max-height: 92vh; overflow: auto; padding: 16px; border-radius: var(--radio, 14px);
+  background: var(--panel); border: 1px solid var(--linea); display: flex; flex-direction: column; gap: 10px;
+}
+.ce-modal-cuerpo h2 { margin: 0; font-size: 18px; }
+.ce-anterior { max-width: 100%; max-height: 64vh; object-fit: contain; border-radius: 8px; }
+
+/* ---------------------------------------------------------------- tableta y móvil */
+@media (max-width: 1100px) {
+  .ce-zona { grid-template-columns: 210px minmax(0, 1fr) 260px; }
+}
+@media (max-width: 820px) {
+  /* una columna: la barra, el lienzo y debajo los paneles; la página se
+     desplaza tocando fuera del lienzo */
+  .ce { overflow-y: auto; }
+  .ce-zona { display: flex; flex-direction: column; flex: none; }
+  .ce-escenario { order: 1; min-height: 62vh; height: 62vh; padding: 12px; }
+  .ce-der { order: 2; border: 0; border-top: 1px solid var(--linea); overflow: visible; }
+  .ce-izq { order: 3; border: 0; border-top: 1px solid var(--linea); overflow: visible; }
+  .ce-titulo { max-width: 40vw; }
+}
+@media (pointer: coarse) {
+  .ce-asa { width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 6px; }
+  .ce-asa-e, .ce-asa-w { width: 14px; height: 30px; margin: -15px 0 0 -7px; }
+  .ce-asa-n, .ce-asa-s { width: 30px; height: 14px; margin: -7px 0 0 -15px; }
+  .ce-girar { width: 32px; height: 32px; margin-left: -16px; top: -46px; font-size: 16px; }
+  .ce-btn, .ce-mini { min-height: 40px; }
+}

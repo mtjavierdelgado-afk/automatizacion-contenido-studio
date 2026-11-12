@@ -575,3 +575,71 @@ láminas, y en cada una capas sueltas de texto, foto, logo o forma. Lo hace
   dueño en `graficas-2-editor`: la pantalla tendrá que ofrecer «Abrir en capas»
   o «Descartar la versión en capas»). También vuelve a comprobar la pieza
   dentro del cerrojo: un «Borrar» durante el pintado ya no la resucita.
+
+## 12. Gráficas: el editor con capas (12-11-2026, rama `graficas-2-editor`)
+
+El editor tipo Canva sobre el documento en capas de la sección 11. Vive en **sus
+propios ficheros**, `web/graficas_editor.js` y `web/graficas_editor.css`, que
+`app.js` carga al abrirlo (`cargarEditorCapas`): `index.html` los nombra en
+`<body data-editor-js/-css>` y `_portada_sellada` les pone el sello, así que se
+cachean como `app.js` (están en `ASSETS_SELLADOS`).
+
+- **La pantalla pinta con el MISMO CSS que el servidor.** `nodoCapa` es un
+  espejo de `graficas_capas._html_capa` (medidas en cqw/cqh/cqmin, las mismas
+  holguras de 1/64 px); `prueba_graficas_editor` compara con Node 400 capas al
+  azar, cadena a cadena, y el recorrido compara la pantalla a zoom 100 % con el
+  PNG del servidor (0,15 % de lo visible, el suavizado de las letras). **Si
+  cambias una cuenta de `_css_*` en Python, cámbiala también en el editor**:
+  la suite lo canta. La foto va con `encaje()` (posición y tamaño), no con
+  `object-view-box`, porque la pantalla puede no ser Chromium.
+- **Las letras las sirve el Studio** (`/api/graficas/tipografia/<fichero>`,
+  solo nombres de `graficas.FUENTES`) y el editor las registra como «ce-<familia>»
+  con `FontFace`: así no se mezclan con la Inter o la Space Grotesk de la
+  interfaz. Imágenes, logo y versión anterior se piden con la cabecera de las
+  claves y se pintan como `data:` (la CSP no deja `blob:` en `<img>`).
+- **El historial no guarda el `origen`** (sello y número del último guardado):
+  deshacer hasta antes de un guardado no puede traer un sello viejo, o el
+  siguiente «Guardar» daría un 409 sin motivo. El `origen` vive aparte
+  (`ED.origen`) y se pone al enviar (`docParaEnviar`).
+- **«Volver a montar»** (`graficas_capas.montar`, `POST /capas/montar`) convierte
+  la plantilla en el tamaño de ahora con los textos de la pieza (enteros, con
+  sus saltos), la primera foto y su encuadre, los colores propios (#RRGGBB) de
+  cada campo y todo lo añadido encima. Un color del Kit toma el de la plantilla
+  nueva (el que se lee sobre su fondo). Si la plantilla no tiene foto, la foto
+  queda abajo y oculta. Las demás láminas y el sello no cambian. No escribe.
+- **La vista final** (`POST /capas/vista`) devuelve también `lineas` (cuántas
+  ocupa cada texto, por id de capa): el editor avisa si en pantalla salen otras.
+- **Una pieza de antes solo se abre en capas si `comparar` dice «igual»**; si
+  no, se queda con el editor de siempre y no se toca. Lo que ya está en capas
+  (o nació en capas) se abre siempre con este editor, también al duplicar: así
+  el editor de antes nunca llega a la situación de `descartar_capas`, y no hay
+  botón para descartar (la versión de antes se ve con «Ver la versión
+  anterior», `fichero.<ext>?antes=1`).
+- **Trampas de la pantalla:** el escenario captura el puntero al pulsar, así
+  que el doble clic le llega a él (se busca la capa por el punto,
+  `elementsFromPoint`); repintar el recuadro o la lista entre los dos clics de
+  un doble clic hace que el navegador no lo avise (por eso soltar sin mover no
+  repinta y elegir en la lista solo cambia clases, `marcarLista`); y el doble
+  toque del iPhone se detecta a mano en `alPulsar`.
+
+### Lo que cazó el árbitro (12-11, 1.ª vuelta) y cómo quedó
+
+- **Guardar marca como guardado lo ENVIADO** (`enviada = firmaDoc()` antes de
+  esperar), no lo que haya al volver: lo añadido mientras el servidor pinta
+  sigue «sin guardar» y pide confirmar al cerrar.
+- **`montar` nunca corta en silencio**: si con la plantilla no cabe todo
+  (MAX_CAPAS), da error con cuántas sobran. Antes lo añadido iba al final y era
+  lo que se perdía.
+- **Repintar no quita el texto que se escribe** (`pintarTodo` repinta
+  alrededor del nodo con el foco): quitarlo disparaba su «blur», acababa la
+  edición y las teclas siguientes iban a los atajos (Retroceso borraba la capa).
+- **Las teclas del editor no llegan a los atajos del Studio**: se paran en
+  `#editor-capas` al subir, y las de fuera en el oyente de captura.
+- **Abrir dos veces seguidas**: `ABRIENDO_CAPAS` en app.js, y cada espera
+  del editor comprueba que sigue siendo el mismo (`ED === yo`).
+- **«Volver a montar» no pisa lo que cambies mientras el servidor monta** y
+  avisa de los textos de muestra que ha puesto en campos nuevos.
+- Menores: Ctrl+V copia como «Duplicar» (con su recorte y el tope de fotos);
+  Escape al renombrar no guarda; Supr no borra lo bloqueado; cerrar quita todos
+  los oyentes; las letras se registran una vez por página.
+

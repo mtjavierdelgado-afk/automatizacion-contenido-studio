@@ -20258,7 +20258,9 @@ MODOS_EN_LA_URL = ("light", "editor")
 
 #: Los assets del front que se sellan en la portada. Son los dos unicos ficheros
 #: que index.html enlaza.
-ASSETS_SELLADOS = ("estilo.css", "app.js")
+#: graficas_editor.*: el editor con capas, que solo se carga al abrirlo (rama
+#: graficas-2-editor); index.html los nombra en un atributo de <body>.
+ASSETS_SELLADOS = ("estilo.css", "app.js", "graficas_editor.js", "graficas_editor.css")
 
 
 def _sello_asset(nombre):
@@ -24281,9 +24283,15 @@ def graficas_borrar_pieza(cid: str, pieza_id: str, peticion: Request):
 
 
 @app.get("/api/graficas/{cid}/piezas/{pieza_id}/fichero.{extension}")
-def graficas_fichero(cid: str, pieza_id: str, extension: str, peticion: Request):
+def graficas_fichero(cid: str, pieza_id: str, extension: str, peticion: Request, antes: str = ""):
+    """El PNG o JPG de la pieza. Con `?antes=1`, la de siempre aunque haya una
+    versión en capas («Ver la versión anterior»)."""
     _ficha_de_graficas(cid, peticion)
-    ruta = _por_graficas(_graficas().ruta_final, raiz_proyectos(), cid, pieza_id, extension)
+    G = _graficas()
+    try:
+        ruta = G.ruta_final(raiz_proyectos(), cid, pieza_id, extension, antes=str(antes).lower() in ("1", "si", "sí", "true"))
+    except G.ErrorGraficas as fallo:
+        raise ErrorApi(404 if isinstance(fallo, G.ErrorNoEsta) else 400, str(fallo))
     return servir_fichero(peticion, ruta)
 
 
@@ -24356,9 +24364,13 @@ def graficas_vista_capas(cid: str, peticion: Request, cuerpo: dict = Body(defaul
     lamina = cuerpo.get("lamina", 0)
     if not isinstance(lamina, int) or isinstance(lamina, bool):
         raise ErrorApi(400, "esa lámina no está")
-    png, avisos, _ = _por_capas(G._con_turno, lambda p: C.pintar(
-        p, cuerpo.get("doc"), kit, lambda n: G.ruta_imagen(raiz, cid, n), logo, oscuro, lamina))
-    return {"img": G._uri_jpg(G.a_jpg(png, 1080, 88)), "avisos": avisos}
+
+    def pintar_y_contar(p):
+        png, avisos, _ = C.pintar(p, cuerpo.get("doc"), kit, lambda n: G.ruta_imagen(raiz, cid, n), logo, oscuro, lamina)
+        return png, avisos, C.contar_lineas(p)
+    png, avisos, lineas = _por_capas(G._con_turno, pintar_y_contar)
+    # «lineas»: cuántas ocupa cada texto aquí; el editor avisa si en su pantalla salen otras
+    return {"img": G._uri_jpg(G.a_jpg(png, 1080, 88)), "avisos": avisos, "lineas": lineas}
 
 
 @app.put("/api/graficas/{cid}/piezas/{pieza_id}/capas")
@@ -24373,6 +24385,43 @@ def graficas_crear_en_capas(cid: str, peticion: Request, cuerpo: dict = Body(def
     """Una pieza nueva que nace en capas."""
     _G, C, raiz, _kit, logo, oscuro = _contexto_capas(cid, peticion)
     return _por_capas(C.guardar, raiz, cid, (cuerpo or {}).get("doc"), None, logo, oscuro)
+
+
+# --- El editor con capas libres (rama graficas-2-editor, 12-11-2026;
+# web/graficas_editor.js). Ninguna de estas rutas escribe nada ni llama a una IA.
+
+@app.get("/api/graficas/tipografia/{fichero}")
+def graficas_tipografia(fichero: str, peticion: Request):
+    """Una letra de la lista, para que el editor escriba con la misma que el PNG."""
+    ruta = _graficas().ruta_tipografia(str(fichero or ""))
+    if not ruta:
+        raise ErrorApi(404, "esa letra no está (o aún no ha bajado)")
+    return FileResponse(ruta, media_type="font/ttf", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.post("/api/graficas/{cid}/capas/montar")
+def graficas_montar_capas(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Volver a montar» y «Empezar de»: la plantilla en el tamaño pedido, en
+    capas, con los textos, colores y lo añadido de la pieza. No guarda nada."""
+    G, C, raiz, kit, logo, oscuro = _contexto_capas(cid, peticion)
+    cuerpo = cuerpo or {}
+    plantilla, formato, lamina = cuerpo.get("plantilla"), cuerpo.get("formato"), cuerpo.get("lamina", 0)
+    doc = _por_capas(G._con_turno, lambda p: C.montar(
+        p, plantilla, formato, cuerpo.get("doc"), cuerpo.get("textos"), kit, logo, oscuro, lamina))
+    return {"doc": doc}
+
+
+@app.get("/api/graficas/{cid}/logo/{variante}")
+def graficas_logo(cid: str, variante: str, peticion: Request):
+    """El logo del proyecto («normal») o el de fondo oscuro del Kit («oscuro»),
+    para que el editor lo pinte igual que el PNG (también con clave)."""
+    G, _C, _raiz, _kit, logo, oscuro = _contexto_capas(cid, peticion)
+    if variante not in ("normal", "oscuro"):
+        raise ErrorApi(404, "ese logo no está")
+    ruta = logo if variante == "normal" else oscuro
+    if not ruta or not os.path.isfile(ruta):
+        raise ErrorApi(404, "ese logo no está")
+    return servir_fichero(peticion, ruta)
 
 
 def main():

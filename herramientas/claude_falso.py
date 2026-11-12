@@ -128,6 +128,15 @@ def responder(entrada):
         # texto con «ES:» delante, para que la pantalla enseñe que es la traducción
         textos = re.findall(r'<t id="([^"]+)">(.*?)</t>', _entre(entrada, "traducir_al_espanol"), re.S)
         return {"traducciones": {tid: "ES: " + texto.strip() for tid, texto in textos}}
+    if "<traducir_video>" in entrada:
+        # el vídeo en otro idioma (rama otro-idioma): cada parte con «EN:»
+        # delante, las mismas partes; las cartelas igual
+        bloque = _entre(entrada, "traducir_video")
+        trozos = {tid: ["EN: " + p.strip() for p in re.findall(r"<p>(.*?)</p>", cuerpo, re.S)]
+                  for tid, cuerpo in re.findall(r'<t id="([^"]+)">(.*?)</t>', bloque, re.S)}
+        cartelas = {cid: "EN: " + texto.strip()
+                    for cid, texto in re.findall(r'<c id="([^"]+)">(.*?)</c>', bloque, re.S)}
+        return {"trozos": trozos, "cartelas": cartelas}
     if "<imagen_nueva>" in entrada:
         # lo que se ve en una imagen insertada (rama insertar-imagen): «EN:» y el
         # español; «ROMPER» en el texto, sin respuesta

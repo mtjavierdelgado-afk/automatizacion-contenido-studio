@@ -100,8 +100,16 @@ def validar(lista):
     return limpia
 
 
-def cargar():
-    """La lista guardada, o la de partida si nunca se guardo ninguna."""
+def cargar(idioma=None):
+    """La lista guardada, o la de partida si nunca se guardo ninguna.
+
+    SOLO PARA UNA VOZ EN ESPAÑOL (rama otro-idioma, 11-11-2026): la lista
+    escribe el sonido con ortografia castellana («Pléi Estéishon»), y a una voz
+    en ingles o en portugues eso le haria leer castellano donde ponia
+    «PlayStation». Con otro `idioma` no hay lista; sin `idioma`, la de siempre.
+    """
+    if idioma and str(idioma).strip().lower() not in ("es",):
+        return []
     try:
         with open(ruta(), "r", encoding="utf-8") as fh:
             datos = json.load(fh)

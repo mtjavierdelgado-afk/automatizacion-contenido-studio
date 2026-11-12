@@ -567,6 +567,14 @@ def campos_extra(red, textos_red, ajustes, datos_video, info, palabra):
         # tal cual: lo traduce a la forma de Upload-Post `campos_para_enviar`,
         # por donde pasa toda subida
         campos["defaultAudioLanguage"] = str(ajustes.get("yt_idioma_audio") or "es-US")
+        # UNA COPIA TRADUCIDA (otro-idioma, árbitro 12-11) hereda el proyecto,
+        # y sus ajustes dicen el idioma del original: en ella manda el de la
+        # traducción («en» -> «en-US» lo hace `campos_para_enviar`). En
+        # cualquier otro vídeo `idioma_traducido` no viene y nada cambia.
+        traducido = str((info or {}).get("idioma_traducido") or "").strip().lower()
+        if traducido and traducido.split("-")[0] != campos["defaultLanguage"].split("-")[0].lower():
+            campos["defaultLanguage"] = traducido
+            campos["defaultAudioLanguage"] = traducido
         campos["selfDeclaredMadeForKids"] = bool(ajustes.get("yt_para_ninos"))
     elif red == "tiktok":
         if ajustes.get("tt_ubicacion_id"):

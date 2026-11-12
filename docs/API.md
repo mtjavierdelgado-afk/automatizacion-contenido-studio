@@ -59,6 +59,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/ortografia/descartar` | Lo que se deja SIN marcar al aplicar: {rid, ids: [...]}. Esos textos se |
 | `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
 | `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
+| `GET` | `/api/proyectos/{pid}/otro_idioma` | Lo que hace falta para elegir: idiomas, de qué idioma sale, avisos y, con |
+| `POST` | `/api/proyectos/{pid}/otro_idioma` | {idioma, voz_id?, nombre?, confirmado: true} -> el trabajo que lo hace. |
 | `POST` | `/api/proyectos/{pid}/planos/describir` | Pide a Claude, en un hilo, la descripción en español de los planos que |
 | `GET` | `/api/proyectos/{pid}/planos/descripciones` | Lo que se pidió dibujar en cada plano, en español. -> la ficha |
 | `POST` | `/api/proyectos/{pid}/planos/devolver` | Deshace «Quitar esta imagen». {narracion: lo que decía la imagen quitada} |
@@ -571,3 +573,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 ---
 
 **456 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**455 endpoints.** Escrito por `generar_api.py` desde `app.py`.

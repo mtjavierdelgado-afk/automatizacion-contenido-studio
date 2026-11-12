@@ -849,6 +849,7 @@ function nombreDe(id) {
   // el agente de capturas y la guia de estilo no son pasos del grafo pero si
   // lanzan trabajos, y salen por su nombre en avisos y en el faro
   if (/^exportar_/.test(String(id))) return 'Descarga por partes';
+  if (/^otro_idioma_/.test(String(id))) return 'El vídeo en otro idioma';
   if (/^efectos_/.test(String(id))) return 'Efectos';
   return NOMBRES_FUERA_DEL_GRAFO[id] || pasoDe(id).nombre || id;
 }
@@ -8255,6 +8256,7 @@ async function cargarVideoLight(pid) {
       v.planos = [];
       v.firmaPlanos = '';
       v.subtitulosRotos = undefined;
+      v.traduccionDe = null;
       /* Y LOS PLANES DE CADA TANDA: son los de OTRO video. Con ellos, el aviso
          de «N imágenes en otra calidad» o el precio de regenerar eran los del
          que acababas de cerrar hasta que llegaba el de este. */
@@ -8264,6 +8266,7 @@ async function cargarVideoLight(pid) {
     v.pid = pid;
     v.nombre = (proyecto.proyecto || {}).nombre || pid;
     v.estilo = ((proyecto.proyecto || {}).config || {}).estilo_light || '';
+    v.traduccionDe = ((proyecto.proyecto || {}).config || {}).traduccion_de || null;
     v.fichas = {};
     for (const ficha of (proyecto.pasos || [])) v.fichas[ficha.id] = ficha;
     alDiaConElMontaje(pid);
@@ -11052,10 +11055,13 @@ async function rehacerSubtitulosLight() {
   }
 }
 
-async function lanzarTandaLight(tanda, modo) {
+async function lanzarTandaLight(tanda, modo, avisado) {
   const v = APP.light.video;
   if (!v.pid) return;
   const pid = v.pid;
+  // escribir el guion con Claude en un vídeo traducido lo devuelve al idioma
+  // de origen: cualquier botón que lance esa tanda avisa antes
+  if (tanda === 'guion' && !avisado && !seguirConGuionTraducido('el guion')) return;
   /* UN DOBLE CLIC NO LANZA DOS TANDAS (y las de pago se pagarían dos veces si
      el servidor no frenara la segunda): mientras la primera no contesta, los
      botones de la barra se apagan (`botonDeBarra`) y esta no sale. */
@@ -11775,6 +11781,214 @@ function abrirDescargaPorPartes(pid) {
   pintar();
 }
 
+/* EL VÍDEO EN OTRO IDIOMA (11-11-2026, rama otro-idioma): duplica el vídeo,
+   traduce el MISMO guion plano a plano, graba la voz en ese idioma y monta con
+   las MISMAS imágenes. Primero se ve lo que cuesta y nada se hace sin el OK.
+   El vídeo de origen no se toca: todo va a la copia (`/otro_idioma`,
+   pasos/otro_idioma.py). */
+const OTRO_IDIOMA = {};
+
+function bloqueOtroIdioma(v) {
+  if (!v || !v.pid) return null;
+  return h('div', { clase: 'caja-video otro-idioma-video' },
+    h('h3', {}, 'En otro idioma'),
+    h('div', { clase: 'fila' },
+      conAyuda('Crea un vídeo nuevo con este mismo guion traducido, la voz en el otro idioma y las mismas imágenes (no se vuelven a pagar). Antes te dice lo que cuesta y espera tu OK. Este vídeo no cambia.',
+        h('button', { clase: 'mini', onclick: () => abrirOtroIdioma(v.pid) },
+          '🌐 Hacer este vídeo en otro idioma'))),
+    h('div', { clase: 'meta' }, 'inglés, portugués, francés… con las mismas imágenes; solo se paga la voz'));
+}
+
+function dolaresOtroIdioma(valor) {
+  if (valor == null) return '—';
+  const n = Number(valor) || 0;
+  return n < 0.01 && n > 0 ? 'menos de 0,01 $' : `${n.toFixed(2).replace('.', ',')} $`;
+}
+
+function abrirOtroIdioma(pid) {
+  if (!pid) return;
+  const est = OTRO_IDIOMA[pid] = { pid, info: null, idioma: '', estimacion: null, voces: null,
+    vozId: '', nombre: '', cargando: true, error: '', lanzando: false, trabajo: null };
+  const viejo = document.getElementById('coste-video');
+  if (viejo) viejo.remove();
+  const cuerpo = h('div', { clase: 'cuerpo otro-idioma' });
+  /* Mientras corre se puede cerrar: el trabajo sigue en el servidor (y su
+     barra en la cabecera); al acabar avisa igual */
+  const cerrar = () => { if (!est.lanzando || est.trabajo) capa.remove(); };
+  const capa = h('div', { id: 'coste-video', onclick: ev => { if (ev.target === capa) cerrar(); } },
+    h('div', { clase: 'cuadro' },
+      h('div', { clase: 'cab' }, h('b', {}, 'Hacer este vídeo en otro idioma'),
+        h('span', { clase: 'meta' }, 'el original no cambia'),
+        h('span', { clase: 'crece' }),
+        h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: () => cerrar() }, '×')),
+      cuerpo));
+  document.body.appendChild(capa);
+
+  const elegir = async idioma => {
+    est.idioma = idioma;
+    est.estimacion = null;
+    est.voces = null;
+    est.vozId = '';
+    est.error = '';
+    est.cargando = true;
+    pintar();
+    try {
+      const [info, voces] = await Promise.all([
+        pedir(`${API.proyecto(pid)}/otro_idioma?idioma=${encodeURIComponent(idioma)}`),
+        // SIN CLAVE DE CARTESIA no hay catálogo: se ofrece la misma voz y ya
+        pedir(`${BASE}/api/voces?idioma=${encodeURIComponent(idioma)}&nativas=1`).catch(() => ({ voces: [] })),
+      ]);
+      if (est.idioma !== idioma) return;
+      est.estimacion = info.estimacion || null;
+      est.nombre = info.nombre_sugerido || '';
+      est.voces = (voces.voces || []).slice(0, 60);
+    } catch (e) {
+      est.error = e.message;
+    }
+    est.cargando = false;
+    pintar();
+  };
+
+  const lanzar = async () => {
+    if (est.lanzando) return;
+    est.lanzando = true;
+    est.error = '';
+    pintar();
+    try {
+      const r = await pedir(`${API.proyecto(pid)}/otro_idioma`, { method: 'POST', cuerpo: {
+        idioma: est.idioma, voz_id: est.vozId, nombre: est.nombre, confirmado: true,
+        visto: { a_dibujar: (est.estimacion && est.estimacion.imagenes || {}).a_dibujar,
+          usd: est.estimacion ? est.estimacion.usd_total : null } } });
+      est.trabajo = { id: r.trabajo_id, progreso: 0, mensaje: 'empezando…' };
+      pintar();
+      seguirTrabajo(`otro_idioma_${pid}`, r.trabajo_id, async t => {
+        est.lanzando = false;
+        if (t.estado === 'listo' && t.resultado && t.resultado.copia) {
+          est.trabajo = null;
+          const res = t.resultado;
+          if (res.aviso) toast(res.aviso, true);
+          else toast(`«${res.nombre}» creado: grabando la voz y montando`);
+          const abierto = document.body.contains(capa);
+          capa.remove();
+          if (!abierto) return;
+          await cargarGaleriaLight(true).catch(() => null);
+          try {
+            await abrirVideoLight(res.copia);
+          } catch (e) {
+            toast(`«${res.nombre}» está creado, pero no se ha podido abrir: búscalo en tus vídeos (${e.message})`, true);
+          }
+          return;
+        }
+        est.trabajo = null;
+        est.error = t.error || (t.estado === 'cancelado' ? 'cancelado' : 'no se ha podido hacer');
+        if (!document.body.contains(capa)) toast(`El vídeo en otro idioma: ${est.error}`, true);
+        pintar();
+      }, t => {
+        if (est.trabajo) {
+          est.trabajo.progreso = Number(t.progreso) || 0;
+          est.trabajo.mensaje = t.publico || t.mensaje || '';
+        }
+        pintar();
+      });
+    } catch (e) {
+      est.lanzando = false;
+      est.error = e.message;
+      pintar();
+    }
+  };
+
+  function pintar() {
+    if (!document.body.contains(capa)) return;
+    vaciar(cuerpo);
+    if (est.error) cuerpo.appendChild(cajaError(est.error));
+    if (est.trabajo) {
+      const pct = Math.round((Number(est.trabajo.progreso) || 0) * 100);
+      cuerpo.appendChild(h('div', { clase: 'caja-info trabajo-laminas' },
+        h('div', {}, `${est.trabajo.mensaje || 'trabajando…'} · ${pct} %`),
+        h('progress', { max: 100, value: pct }),
+        h('div', { clase: 'meta' }, 'Al acabar se abre el vídeo nuevo y sigue solo con la voz y el montaje. Puedes cerrar esto: sigue en el servidor.'),
+        h('div', { clase: 'fila' },
+          h('button', { clase: 'mini', onclick: async ev => {
+            if (!confirm('¿Parar? Todavía no se ha grabado nada: no se pierde dinero.')) return;
+            ev.target.disabled = true;
+            try { await pedir(API.cancelar(est.trabajo.id), { method: 'POST' }); }
+            catch (e) { toast(e.message, true); ev.target.disabled = false; }
+          } }, 'Parar'),
+          h('button', { clase: 'mini fantasma', onclick: () => cerrar() }, 'Cerrar (sigue solo)'))));
+      return;
+    }
+    if (!est.info) {
+      cuerpo.appendChild(h('div', { clase: 'cargando' }, 'mirando el vídeo…'));
+      return;
+    }
+    const info = est.info;
+    cuerpo.appendChild(h('h2', {}, `Sale del ${info.nombre_origen}. ¿A qué idioma?`));
+    cuerpo.appendChild(h('div', { clase: 'herramientas otro-idioma-idiomas' },
+      ...(info.idiomas || []).map(i => h('button', {
+        clase: 'mini' + (est.idioma === i.id ? ' activo' : ''), disabled: est.lanzando,
+        onclick: () => { if (est.idioma !== i.id) elegir(i.id); } }, i.nombre))));
+    if (!est.idioma) {
+      cuerpo.appendChild(h('div', { clase: 'meta' },
+        `${info.planos} planos y ${info.palabras} palabras. Elige el idioma y te digo lo que cuesta antes de hacer nada.`));
+      return;
+    }
+    if (est.cargando) {
+      cuerpo.appendChild(h('div', { clase: 'cargando' }, 'calculando lo que cuesta…'));
+      return;
+    }
+    const e = est.estimacion;
+    if (!e) return;
+    const nombreIdioma = e.nombre_idioma;
+    cuerpo.appendChild(h('h2', {}, 'Lo que se hace'));
+    cuerpo.appendChild(h('ol', { clase: 'otro-idioma-pasos' },
+      h('li', {}, 'Se crea un vídeo nuevo: ',
+        h('input', { type: 'text', clase: 'otro-idioma-nombre', value: est.nombre, maxlength: 80,
+          disabled: est.lanzando, oninput: ev => { est.nombre = ev.target.value; } })),
+      h('li', {}, `Claude traduce el guion al ${nombreIdioma}, plano a plano y sin reescribirlo (${e.claude.palabras} palabras${info.cartelas ? `, y ${info.cartelas} texto(s) de cartela` : ''}).`),
+      h('li', {}, `Se graba la voz en ${nombreIdioma}, con subtítulos en ${nombreIdioma}.`),
+      h('li', {}, `Se monta con las mismas ${e.imagenes.reutilizadas} imágenes, sin volver a dibujarlas. Si con la voz nueva no salieran los mismos planos, se para antes de montar y no dibuja nada.`)));
+    const voces = est.voces || [];
+    cuerpo.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'La voz'),
+      h('select', { disabled: est.lanzando, onchange: ev => { est.vozId = ev.target.value; } },
+        h('option', { value: '', selected: !est.vozId }, 'La misma voz de ahora (habla los dos idiomas)'),
+        ...voces.map(voz => h('option', { value: voz.id, selected: est.vozId === voz.id },
+          voz.nombre || voz.name || voz.id)))));
+    cuerpo.appendChild(h('h2', {}, 'Lo que cuesta'));
+    const filas = [
+      ['La voz', e.voz.usd == null
+        ? `unos ${e.voz.caracteres} caracteres (el precio por carácter no está puesto en Configuración)`
+        : `unos ${e.voz.caracteres} caracteres · ≈ ${dolaresOtroIdioma(e.voz.usd)}`],
+      ['Claude', `0 $ · va con tu suscripción (${e.claude.llamadas} llamada${e.claude.llamadas === 1 ? '' : 's'})`],
+      ['Las imágenes', e.imagenes.a_dibujar
+        ? `${e.imagenes.reutilizadas} reutilizadas (0 $) · ${e.imagenes.a_dibujar} sin dibujar todavía: ≈ ${dolaresOtroIdioma(e.imagenes.usd)}`
+        : `${e.imagenes.reutilizadas} reutilizadas · 0 $`],
+    ];
+    cuerpo.appendChild(h('table', { clase: 'tabla otro-idioma-coste' },
+      ...filas.map(([a, b]) => h('tr', {}, h('th', {}, a), h('td', {}, b))),
+      h('tr', { clase: 'total' }, h('th', {}, 'En total'),
+        h('td', {}, e.usd_total != null ? `≈ ${dolaresOtroIdioma(e.usd_total)}`
+          : (e.imagenes.usd ? `≈ ${dolaresOtroIdioma(e.imagenes.usd)} de imágenes, más la voz (sin precio puesto)`
+            : 'lo de la voz (sin precio puesto)')))));
+    const avisos = (info.avisos || []).concat([
+      'El texto que vaya dibujado DENTRO de una imagen (un cartel, una pizarra) se queda como está: cambiarlo es redibujar esa imagen con una nota, y eso sí se paga.',
+      'Los textos de Publicar (título, descripción, hashtags) no se traducen aquí: tienen su propio botón.',
+    ]);
+    cuerpo.appendChild(h('ul', { clase: 'otro-idioma-avisos meta' }, ...avisos.map(a => h('li', {}, a))));
+    cuerpo.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', disabled: est.lanzando, onclick: lanzar },
+        est.lanzando ? 'Empezando…'
+          : `Sí, hacerlo${e.usd_total == null ? '' : ` (≈ ${dolaresOtroIdioma(e.usd_total)})`}`),
+      h('button', { clase: 'mini fantasma', disabled: est.lanzando, onclick: () => cerrar() }, 'Ahora no')));
+  }
+
+  pintar();
+  pedir(`${API.proyecto(pid)}/otro_idioma`).then(info => {
+    est.info = info;
+    est.cargando = false;
+    pintar();
+  }).catch(e => { est.error = e.message; est.cargando = false; pintar(); });
+}
+
 /* --------------------------------------------------------------- el guion */
 
 function vistaGuionLight() {
@@ -11902,10 +12116,29 @@ function promptGeneralLight() {
       + (v.audio ? ' (la voz queda por regrabar).' : '.')));
 }
 
+/* UN VÍDEO TRADUCIDO («🌐 Hacer este vídeo en otro idioma», pasos/otro_idioma.py):
+   su guion es una traducción puesta como corrección a mano, y el redactor
+   escribe en el idioma del vídeo de origen. Pedirle a Claude que reescriba el
+   guion o un bloque lo devolvería a ese idioma y se perdería la traducción:
+   antes de hacerlo, se avisa. Editar a mano o grabar tu texto no avisa. */
+const NOMBRES_IDIOMA_TRADUCIDO = {
+  es: 'español', en: 'inglés', pt: 'portugués', fr: 'francés', it: 'italiano', de: 'alemán',
+};
+function seguirConGuionTraducido(que) {
+  const t = (APP.light.video || {}).traduccionDe;
+  if (!t || !t.idioma) return true;
+  const idioma = NOMBRES_IDIOMA_TRADUCIDO[t.idioma] || t.idioma;
+  return confirm(`Ojo: este vídeo es una traducción al ${idioma}. Si Claude reescribe ${que}, `
+    + `lo escribirá en el idioma del vídeo original (no en ${idioma}) y la traducción `
+    + `se perderá o quedará mezclada con ese idioma.\n\nPara cambiar una frase sin perderla, edítala a mano en su bloque.`
+    + `\n\n¿Reescribir igualmente?`);
+}
+
 async function reescribirGuionLight() {
   const v = APP.light.video;
   const texto = String(v.promptGeneral || '').trim();
   if (!texto) { toast('escribe qué cambiarías', true); return; }
+  if (!seguirConGuionTraducido('el guion')) return;
   try {
     /* EN SU PROPIO CAJÓN, no en `prompt_general`: ahí viven las indicaciones
        del Encargo (ENSEÑA, ÁNGULO…), y escribir aquí las borraba (17-10-2026).
@@ -11918,7 +12151,7 @@ async function reescribirGuionLight() {
     // prompt general deja el guion obsoleto —es un param suyo—, así que ya
     // entra; el material sigue al día y se salta. Con 'todo'
     // esto volvería a salir a internet seis minutos para reescribir una frase.
-    await lanzarTandaLight('guion', 'pendientes');
+    await lanzarTandaLight('guion', 'pendientes', true);
   } catch (err) { toast(`no se ha podido: ${err.message}`, true); }
 }
 
@@ -12501,6 +12734,7 @@ async function cambiarBloqueLight(bloque, sec, soloGrabar) {
     toast('escribe qué cambiarías de este bloque', true);
     return;
   }
+  if (!soloGrabar && !seguirConGuionTraducido('este bloque')) return;
   limpiarError(CLAVE_VIDEO_LIGHT);
   try {
     await guardarBloquesPendientesLight();
@@ -15356,6 +15590,7 @@ function vistaVideoLight() {
       h('div', { clase: 'meta' }, 'el MP4 tal y como está ahora mismo, o sin música, sin efectos, sin subtítulos… gratis'));
     caja.appendChild(apagadoSiMonta(h('div', { clase: 'rejilla-video' }, descargar,
       bloquePublicarEnVideo(v) || h('span', {}))));  // Publicar en redes (rama publicar-redes-1)
+    caja.appendChild(apagadoSiMonta(bloqueOtroIdioma(v)));  // en otro idioma (rama otro-idioma)
   }
   ponerBarra(barraDelVideo);
   return caja;

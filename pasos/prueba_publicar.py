@@ -2562,6 +2562,19 @@ def prueba_seo():
     c = P.componer("youtube", textos, ajustes, dict(INFO, formato="horizontal", duracion_s=300), None, {})["campos"]
     igual((c.get("categoryId"), c.get("defaultLanguage"), c.get("defaultAudioLanguage"),
            c.get("selfDeclaredMadeForKids")), ("24", "es", "es-US", False), "YouTube: categoría, idiomas, no niños")
+    # otro-idioma (árbitro, 12-11): una copia traducida al inglés no se declara
+    # en español aunque los ajustes del proyecto (los del original) lo digan
+    c = P.componer("youtube", textos, ajustes, dict(INFO, formato="horizontal", duracion_s=300,
+                                                    idioma_traducido="en"), None, {})["campos"]
+    igual((c.get("defaultLanguage"), c.get("defaultAudioLanguage"), c.get("categoryId")),
+          ("en", "en", "24"), "YouTube: la copia en inglés se declara en inglés (lo demás, igual)")
+    from motores.publicar_uploadpost.cliente import campos_para_enviar as _para_enviar
+    igual(_para_enviar({"defaultAudioLanguage": "en"}).get("defaultAudioLanguage"), "en-US",
+          "y su audio sale con la forma que acepta Upload-Post")
+    c = P.componer("youtube", textos, ajustes, dict(INFO, formato="horizontal", duracion_s=300,
+                                                    idioma_traducido="es"), None, {})["campos"]
+    igual((c.get("defaultLanguage"), c.get("defaultAudioLanguage")), ("es", "es-US"),
+          "una copia al mismo idioma de los ajustes los deja como estaban")
     ok(c.get("tags[]", [None])[0] == "alquiler de consolas en Lima" and "fiestas infantiles" in c["tags[]"],
        f"YouTube: las etiquetas empiezan por la palabra clave: {c.get('tags[]')}")
     r = P.componer("tiktok", textos, ajustes, INFO, None, {})

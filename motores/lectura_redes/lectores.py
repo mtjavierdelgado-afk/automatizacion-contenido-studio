@@ -410,9 +410,9 @@ def coste_apify(red, resultados):
 TERMINADOS_APIFY = ("SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED")
 #: Cuánto espera Apify cada vez que se le pregunta (su máximo es 60 s).
 ESPERA_APIFY_S = 60
-#: Por debajo de esta parte de la tabla, la cifra de Apify no se da por buena
-#: (la tabla es el precio MÁS CARO del rango: lo real suele estar entre la mitad
-#: y el total; un cuarto o menos es que el campo no trae el precio por resultado)
+#: Por debajo de esta parte de la tabla, la cifra de Apify no se da por buena:
+#: un cuarto o menos de lo que la tabla dice para esos resultados es que el
+#: campo no trae el precio por resultado (y se queda la reserva o la tabla)
 MINIMO_FIABLE_APIFY = 0.25
 
 
@@ -507,8 +507,10 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
             pass
         # sin terminar, la cifra no vale: se queda la reserva (`_cobrado_apify`)
         raise ErrorLectura("Apify ha tardado demasiado: prueba con menos vídeos", "red", cobrado=True,
-                           coste_usd=_cobrado_apify(run))
-    cobrado = _cobrado_apify(run)
+                           coste_usd=_cobrado_apify(run, red, cuantos))
+    # en los fallos se mide contra lo pedido (`cuantos`): una cifra por debajo de
+    # un cuarto de la tabla no se cree y se queda la reserva (revisión del 12-11)
+    cobrado = _cobrado_apify(run, red, cuantos)
     if run.get("status") != "SUCCEEDED":
         motivo = "Apify ha tardado demasiado: prueba con menos vídeos" \
             if run.get("status") == "TIMED-OUT" else f"la ejecución de Apify ha acabado en {run.get('status')}"

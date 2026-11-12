@@ -248,7 +248,7 @@ class Falso(http.server.BaseHTTPRequestHandler):
             # LA EJECUCIÓN (rama apify-coste-real): estado, dataset y lo cobrado
             final, preguntas, cobrado, caida = "SUCCEEDED", 0, 0.0042, False
             if usuario == "tarda":                 # el actor se pasa de su tiempo
-                final, cobrado = "TIMED-OUT", 0.0031
+                final, cobrado = "TIMED-OUT", 0.009
             elif usuario == "lenta":               # aún corre: tarda dos preguntas
                 preguntas = 2
             elif usuario == "nunca":               # no acaba nunca: se aborta
@@ -352,7 +352,7 @@ def prueba_fuentes(bases):
     igual((r["coste_usd"], r["coste_real"]), (F.coste_apify("tiktok", 4), False),
           "si Apify no dice lo cobrado, la tabla de siempre (y se sabe que es estimado)")
     f = lanza(F.apify, TOKEN_APIFY, "tiktok", "tarda", 4, bases=bases)
-    ok(f is not None and f.cobrado and f.coste_usd == 0.0031, "el actor se pasó de su tiempo: cobrado, con su cifra")
+    ok(f is not None and f.cobrado and f.coste_usd == 0.009, "el actor se pasó de su tiempo: cobrado, con su cifra")
     antes = len(Falso.abortadas)
     f = lanza(F.apify, TOKEN_APIFY, "tiktok", "nunca", 4, bases=bases, plazo=8)
     ok(f is not None and f.cobrado and len(Falso.abortadas) == antes + 1 and f.coste_usd is None,
@@ -360,6 +360,10 @@ def prueba_fuentes(bases):
     f = lanza(F.apify, TOKEN_APIFY, "tiktok", "caida", 4, bases=bases, plazo=8)
     ok(f is not None and f.cobrado and f.coste_usd is None,
        "si Apify deja de contestar, NUNCA se apunta 0: se queda la reserva (revisión del 12-11)")
+    igual(F._cobrado_apify({"status": "TIMED-OUT", "usageTotalUsd": 0.0003}, "tiktok", 30), None,
+          "un fallo que llevaba resultados con una cifra mínima no se cree: se queda la reserva")
+    igual(F._cobrado_apify({"status": "TIMED-OUT", "usageTotalUsd": 0.04}, "tiktok", 30), 0.04,
+          "una cifra que cuadra, sí")
     r = F.apify(TOKEN_APIFY, "tiktok", "cero", 4, bases=bases)
     igual((r["coste_usd"], r["coste_real"]), (F.coste_apify("tiktok", 4), False),
           "un 0 con resultados no se cree: la tabla de siempre")
@@ -442,7 +446,7 @@ def prueba_orden(bases):
         # lo que Apify cobra aunque falle también cuenta para el tope
         antes = C.gasto_del_mes(raiz)
         lanza(C.leer, raiz, "tiktok", "tarda", 10, pagar=True)
-        igual(round(C.gasto_del_mes(raiz) - antes, 4), 0.0031,
+        igual(round(C.gasto_del_mes(raiz) - antes, 4), 0.009,
               "un actor que se pasa de tiempo: se apunta lo que Apify cobró de verdad")
         antes = C.gasto_del_mes(raiz)
         f = lanza(C.leer, raiz, "tiktok", "camposraros", 10, pagar=True)

@@ -1497,6 +1497,12 @@ def guardar_guion(raiz, cid, gid, cambios):
                 for k in ("usado_al", "video", "video_nombre", "huella", "estilo",
                           "publicado_a_mano"):
                     g.pop(k, None)
+                # pero el estilo con el que se PIDIO (un recibido) sigue siendo
+                # suyo: es el que vuelve a sugerir el piloto (tren del 12-11)
+                origen = g.get("origen")
+                estilo = str(origen.get("estilo") or "")[:120] if isinstance(origen, dict) else ""
+                if estilo:
+                    g["estilo"] = estilo
             elif estado == "publicado":
                 g["publicado_a_mano"] = not g.get("video")
                 g.setdefault("usado_al", ahora())

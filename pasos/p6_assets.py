@@ -1581,6 +1581,14 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # Lo que hace falta para rotular con criterio y no en cada plano: en que
     # plano se ENTRA en un sitio, y en cual sale alguien por primera vez.
     set_anterior, presentados = None, set()
+    # TODAS las etiquetas del espacio (tambien las que son la base tal cual),
+    # para casar un estado abreviado de una linea (rama piloto-al-dia)
+    todos_los_estados = etiquetas_del_espacio(catalogo, principal) if principal else []
+    # las de OTROS sitios del catalogo: una linea alli con su estado no se para
+    estados_ajenos = set(etiquetas_ajenas(catalogo, principal)) if principal else set()
+    otro_sitio = bloques_de_otro_sitio(catalogo, principal, [b.get("id") for b in meta.get("bloques") or []]) \
+        if principal else set()
+    estados_sin_casar = []
     for indice, (escena, beat) in enumerate(zip(escenas, beats)):
         if escena.get("sigue_a"):
             # La segunda mitad de un plano que dura mas (una cartela sobre
@@ -1625,7 +1633,19 @@ def planificar(proyecto, params, inventario=None, replantear=False,
             escena["direccion"] = linea["visual"]
             beat = dict(beat, **guion_visual.estado_de_linea(
                 linea, tipo_relato.estados_del_catalogo(catalogo, principal)
-                if principal else {}))
+                if principal else {}, todos_los_estados))
+            # UN ESTADO QUE NO ES NINGUNO DEL ESPACIO (piloto-al-dia, Y05): se
+            # apunta y `ejecutar` para la tanda ANTES de pagar
+            # solo las lineas DEL ESPACIO: una de un bloque que el catalogo pone
+            # entero en otro sitio no para el video (punto B del tren del 12-11;
+            # la misma regla que la ficha, `bloques_de_otro_sitio`)
+            if principal and todos_los_estados and linea.get("estado") and not beat.get("estado") \
+                    and str(linea.get("bloque") or "").strip().upper() not in otro_sitio \
+                    and linea["estado"] not in estados_ajenos \
+                    and guion_visual.estados_sin_casar([linea], todos_los_estados):
+                estados_sin_casar.append({"plano": escena["id"], "linea": linea.get("id") or "",
+                                          "estado": linea["estado"],
+                                          "opciones": guion_visual.opciones_legibles(todos_los_estados)})
         if relato_edita:
             _marcar_edicion(escena, beat, relato, principal, modo, bases_rel)
         escena["prompt"] = _prompt_visual(escena, beat, catalogo, modo=modo)
@@ -1658,7 +1678,14 @@ def planificar(proyecto, params, inventario=None, replantear=False,
         if nueva.get("linea_gv"):
             beat = dict(beat, **guion_visual.estado_de_linea(
                 nueva["linea_gv"], tipo_relato.estados_del_catalogo(catalogo, principal)
-                if principal else {}))
+                if principal else {}, todos_los_estados))
+            if principal and todos_los_estados and nueva["linea_gv"].get("estado") and not beat.get("estado") \
+                    and str(nueva["linea_gv"].get("bloque") or "").strip().upper() not in otro_sitio \
+                    and nueva["linea_gv"]["estado"] not in estados_ajenos \
+                    and guion_visual.estados_sin_casar([nueva["linea_gv"]], todos_los_estados):
+                estados_sin_casar.append({"plano": nueva["id"], "linea": nueva["linea_gv"].get("id") or "",
+                                          "estado": nueva["linea_gv"]["estado"],
+                                          "opciones": guion_visual.opciones_legibles(todos_los_estados)})
         # el encuadre lo dice su direccion: la carta del plano partido no es suya
         nueva.pop("encuadre", None)
         # «DIRIGIR» SOBRE LA INSERTADA (28-10): su direccion o su parrafo
@@ -1741,6 +1768,10 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     if guion_visual.modo_de(p) == "guion":
         # si el guion visual aprobado cortó este plan (lo mira `ejecutar` antes de pagar)
         plan["guion_visual_ok"] = guion_ok
+    if estados_sin_casar:
+        # las lineas con un estado que no es ninguno del espacio (piloto-al-dia):
+        # `ejecutar` no paga esos planos hasta que se corrijan
+        plan["estados_sin_casar"] = estados_sin_casar
     plan["assets"] = _assets_necesarios(plan, catalogo, p)
     plan["dependencias"] = {f"escena:{e['id']}": _assets_de_escena(e)
                             for e in escenas}
@@ -5528,6 +5559,20 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
                                "no está aprobado o ya no casa con la voz: revísalo y "
                                "apruébalo en «Guion visual» (paso Imágenes) antes de "
                                "generar los planos")
+        # UN ESTADO QUE NO ES NINGUNO DEL ESPACIO NO SE PAGA (rama piloto-al-dia,
+        # Y05: «frio» no era «blanco_frio», el plano editaba la base sin cambio
+        # y salia igual que otro). Se para ANTES de gastar y se dice cual es.
+        sin_estado = planos_sin_estado(plan, dirs, unidades=unidades, rehacer=rehacer)
+        if sin_estado:
+            raise RuntimeError(
+                "en el guion visual hay planos con un estado que no es ninguno de los del espacio: "
+                + "; ".join(f"{x['plano']}" + (f" (línea {x['linea']})" if x.get("linea") else "") + f" pide «{x['estado']}»"
+                         for x in sin_estado[:6])
+                + (f" (y {len(sin_estado) - 6} más)" if len(sin_estado) > 6 else "")
+                + (". Los estados son: " + ", ".join(f"«{e}»" for e in sin_estado[0]["opciones"])
+                   if sin_estado[0]["opciones"] else
+                   ". Este espacio no tiene estados con nombre: deja la línea sin estado (la base)")
+                + ". Corrige el estado de esas líneas en «Guion visual» (paso Imágenes) antes de generar los planos")
         faltan = planos_sin_base(plan, dirs, unidades=unidades, rehacer=rehacer)
         if faltan:
             raise RuntimeError(
@@ -6227,6 +6272,95 @@ def generar_imagen_estado(proyecto, params, estado, rehacer=False):
     return {"sitio": sitio, "estado": estado, "cambio": cambio,
             "imagen": f"espacio_fijo/{huella}.png", "coste": meta.get("coste", 0.0),
             "origen": meta.get("origen"), "calidad": p["calidad"]}
+
+
+def etiquetas_del_espacio(catalogo, sitio=None):
+    """TODAS las etiquetas de estado del espacio, tambien las que son la base tal
+    cual («antes»). -> [etiqueta] (rama piloto-al-dia)
+
+    Con los ESTADOS DEL ESPACIO de la Parrilla (`estados_fijos`), esos. Sin ellos
+    (Y05, prueba del 12-11: `guion_visual.estados` vacio) los estados salen de
+    los tramos del catalogo, como en `tipo_relato.estados_del_catalogo`: los que
+    llevan cambio y las etiquetas de los que no. Solo lee el catalogo."""
+    fijos = tipo_relato.estados_fijos(catalogo)
+    if fijos:
+        return list(fijos)
+    salida = []
+    beats = (catalogo.get("beats") or []) if isinstance(catalogo, dict) else []
+    for beat in beats:
+        if not isinstance(beat, dict) or (sitio and beat.get("set") not in (None, "", sitio)):
+            continue
+        etiqueta = tipo_relato.estado_de(beat) or tipo_relato._etiqueta(beat.get("estado"))
+        if etiqueta and etiqueta not in salida:
+            salida.append(etiqueta)
+    return salida
+
+
+def bloques_de_otro_sitio(catalogo, sitio, orden_bloques):
+    """Los bloques de la voz que el catalogo pone ENTEROS en otro sitio: todos
+    los tramos que los cubren llevan un sitio, y ninguno es el del espacio.
+    -> set de ids de bloque
+
+    Es la MISMA regla en el plan y en la ficha del guion visual (revision del
+    12-11): una linea de esos bloques es de otro sitio y su estado no para el
+    video. Un bloque con algun tramo del espacio, o sin sitio, cuenta como del
+    espacio (mejor parar antes de pagar que dibujar mal)."""
+    if not sitio:
+        return set()
+    orden = [str(b).strip().upper() for b in (orden_bloques or [])]
+    posicion = {b: i for i, b in enumerate(orden)}
+    sitios = {}
+    beats = (catalogo.get("beats") or []) if isinstance(catalogo, dict) else []
+    for beat in beats:
+        if not isinstance(beat, dict):
+            continue
+        desde = posicion.get(str(beat.get("desde") or "").strip().upper())
+        if desde is None:
+            continue
+        hasta = posicion.get(str(beat.get("hasta") or "").strip().upper(), desde)
+        for k in range(desde, max(desde, hasta) + 1):
+            sitios.setdefault(orden[k], set()).add(beat.get("set") or "")
+    return {b for b, sets in sitios.items() if "" not in sets and sitio not in sets}
+
+
+def etiquetas_ajenas(catalogo, sitio):
+    """Las etiquetas de estado de los tramos de OTROS sitios (no las del espacio).
+    Una linea de esos sitios con su estado no es un estado inventado."""
+    if not sitio:
+        return []
+    beats = (catalogo.get("beats") or []) if isinstance(catalogo, dict) else []
+    propias = set(etiquetas_del_espacio(catalogo, sitio))
+    salida = []
+    for beat in beats:
+        if not isinstance(beat, dict) or beat.get("set") in (None, "", sitio):
+            continue
+        etiqueta = tipo_relato.estado_de(beat) or tipo_relato._etiqueta(beat.get("estado"))
+        if etiqueta and etiqueta not in propias and etiqueta not in salida:
+            salida.append(etiqueta)
+    return salida
+
+
+def planos_sin_estado(plan, dirs, unidades=None, rehacer=False):
+    """Los planos que esta pasada va a DIBUJAR con un estado que no es ninguno del
+    espacio (rama piloto-al-dia). -> [{plano, estado, opciones}]
+
+    Solo cuenta lo que se paga ahora, igual que `planos_sin_base`: un plano hecho
+    que se conserva no bloquea volver a montar."""
+    sueltos = (plan or {}).get("estados_sin_casar") or []
+    if not sueltos:
+        return []
+    pedidas = set(unidades) if unidades is not None else None
+    salida = []
+    for x in sueltos:
+        uid = f"escena:{x['plano']}"
+        if pedidas is not None:
+            va = uid in pedidas
+        else:
+            hecho = os.path.exists(os.path.join((dirs or {}).get("escenas") or "", f"{x['plano']}.png"))
+            va = bool(rehacer) or not hecho
+        if va:
+            salida.append(dict(x, opciones=x.get("opciones") or []))
+    return salida
 
 
 def planos_sin_base(plan, dirs, unidades=None, rehacer=False):

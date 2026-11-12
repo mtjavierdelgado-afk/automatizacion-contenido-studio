@@ -405,12 +405,139 @@ def fuera_de_la_voz(planos, bloques):
     return sorted({p["bloque"] for p in planos or [] if p.get("bloque") not in validos})
 
 
-def estado_de_linea(plano, estados):
-    """{cambio, estado} con que se edita el plano: el de su linea, o la base."""
+#: Palabras que cambian el sentido de un estado: si son lo que sobra entre el
+#: nombre de la linea y el del espacio, no es el mismo estado («muebles» no es
+#: «sin_muebles», «pintar» no es «antes_de_pintar»). Revision del 12-11.
+#: Raíces de palabras que cambian el sentido de un estado: si una de las palabras
+#: que sobran entre el nombre de la linea y el del espacio empieza asi, no es el
+#: mismo estado («muebles» no es «sin_muebles» ni «muebles_retirados»; «en_obra»
+#: no es «obra_terminada»). Revisiones del 12-11: mejor parar y preguntar que
+#: pagar el estado contrario.
+_NO_CASAN = ("sin", "no", "non", "not", "without", "antes", "before", "pre", "ex", "casi", "medi", "semi",
+             "quit", "retir", "sac", "apag", "fuera", "nada", "falt", "vaci", "empty", "remov", "less",
+             "termin", "acab", "final", "complet", "rot", "sucio", "nuev", "viej", "off", "on",
+             "restaur", "reform", "renov", "repar", "arregl")
+#: Palabras que no dicen nada del estado: se quitan de los dos lados antes de comparar
+#: («con_muebles» es «muebles», «despues_de_pintar» contiene «despues»).
+_RELLENO = {"de", "del", "la", "el", "los", "las", "y", "o", "of", "the", "and", "or", "con", "with", "un", "una"}
+
+
+def _cambia_sentido(palabras):
+    return any(p == r or (len(r) >= 3 and p.startswith(r)) for p in palabras for r in _NO_CASAN)
+
+
+#: Lo que en una linea quiere decir «la base» aunque no sea un estado del espacio.
+_PALABRAS_BASE = {"antes", "inicial", "inicio", "original", "before", "initial", "start"}
+#: La etiqueta que `tipo_relato.estado_de` saca de un cambio sin nombre.
+_RE_ETIQUETA_SACADA = re.compile(r"^c[0-9a-f]{8}$")
+
+
+def _trozos(etiqueta):
+    return [t for t in re.split(r"[_\s-]+", _llano(etiqueta)) if t]
+
+
+def casar_estado(nombre, todos):
+    """El estado del espacio que nombra una linea. -> la etiqueta de `todos`, o ""
+
+    Rama piloto-al-dia (12-11-2026, Y05): las lineas de la Parrilla traian
+    «frio» y «calido» y los estados del espacio se llamaban «blanco_frio» y
+    «blanco_calido»; sin casar, el plano editaba la base sin cambio y salia
+    igual que otro (el guardian `_planos_repetidos` tumbo la tanda). Casa:
+      1. igual (sin mayusculas, tildes ni separadores);
+      2. si no, el UNICO estado cuyas palabras contienen todas las de la linea
+         (o al reves): con dos candidatos no se adivina."""
+    nombre = str(nombre or "").strip()
+    todos = [str(t) for t in (todos or []) if str(t).strip()]
+    if not nombre or not todos:
+        return ""
+    if nombre in todos:
+        return nombre
+    llano = "_".join(_trozos(nombre))
+    iguales = [t for t in todos if "_".join(_trozos(t)) == llano]
+    if len(iguales) == 1:
+        return iguales[0]
+    mios = set(_trozos(nombre)) - _RELLENO
+    if not mios:
+        return ""
+    candidatos = []
+    for t in todos:
+        suyos = set(_trozos(t)) - _RELLENO
+        if suyos and (mios <= suyos or suyos <= mios) and not _cambia_sentido(mios ^ suyos):
+            candidatos.append(t)
+    return candidatos[0] if len(candidatos) == 1 else ""
+
+
+def estados_casados(planos, todos):
+    """Las lineas cuyo estado se ha casado con OTRO nombre del espacio («frio» →
+    «blanco_frio»). -> [{plano, estado, casa_con}]. La pantalla lo enseña antes de
+    pagar, para que una casacion mala se vea."""
+    todos = [str(t) for t in (todos or []) if str(t).strip()]
+    salida = []
+    for i, p in enumerate(planos or []):
+        estado = str((p or {}).get("estado") or "").strip()
+        if not estado or estado in todos or sin_cambio(estado.replace("_", " ")):
+            continue
+        casado = casar_estado(estado, todos)
+        if casado:
+            salida.append({"plano": (p or {}).get("id") or f"V{i + 1:03d}", "estado": estado, "casa_con": casado})
+    return salida
+
+
+def estado_de_linea(plano, estados, todos=None):
+    """{cambio, estado} con que se edita el plano: el de su linea, o la base.
+
+    `estados` son los que llevan cambio ({estado: cambio}); `todos`, TODAS las
+    etiquetas del espacio, tambien las que son la base tal cual («antes»).
+    Solo con `todos` se casa un nombre abreviado (`casar_estado`): sin saber
+    cuales son la base, «antes» podria casar con «antes_de_pintar». Una linea
+    que ya casaba exacta da lo mismo que antes (mismo prompt, misma firma)."""
     estado = (plano or {}).get("estado") or ""
-    if estado and estado in (estados or {}):
+    estados = estados or {}
+    if estado and estado in estados:
         return {"cambio": estados[estado], "estado": estado}
+    if estado and todos:
+        casado = casar_estado(estado, todos)
+        if casado and casado in estados:
+            return {"cambio": estados[casado], "estado": casado}
     return {"cambio": "", "estado": ""}
+
+
+def estados_sin_casar(planos, todos):
+    """Las lineas cuyo estado no es ninguno del espacio. -> [{plano, estado, opciones}]
+
+    Solo si se saben TODAS las etiquetas (los ESTADOS DEL ESPACIO de la
+    Parrilla): sin ellas no hay con que comparar. Un estado vacio o que dice
+    «la base» no cuenta. Es lo que para la tanda ANTES de pagar."""
+    todos = [str(t) for t in (todos or []) if str(t).strip()]
+    if not todos:
+        return []
+    salida = []
+    for i, p in enumerate(planos or []):
+        estado = str((p or {}).get("estado") or "").strip()
+        if not estado:
+            continue
+        if casar_estado(estado, todos):
+            continue
+        # palabras que solo dicen «la base» o niegan no cuentan como parecido («sin_cambios» no se parece a «sin_muebles»)
+        neutras = _RELLENO | {"sin", "base", "imagen", "igual", "que", "cambio", "cambios", "tal", "cual", "no", "nada"}
+        parecidos = [t for t in todos if (set(_trozos(estado)) - neutras) & (set(_trozos(t)) - neutras)]
+        if sin_cambio(estado.replace("_", " ")) and not parecidos:
+            continue
+        # «antes», «inicial», «original»: la base, aunque ningun tramo se llame
+        # asi (sin los estados de la Parrilla las etiquetas las pone Claude, y la
+        # base puede no salir entre ellas: revision del 12-11)
+        propias = set(_trozos(estado)) - neutras
+        if propias and propias <= _PALABRAS_BASE and not parecidos:
+            continue
+        salida.append({"plano": (p or {}).get("id") or f"V{i + 1:03d}", "estado": estado,
+                       "opciones": opciones_legibles(todos)})
+    return salida
+
+
+def opciones_legibles(todos):
+    """Las etiquetas que se le pueden ofrecer a una persona: sin las sacadas del
+    propio cambio («c1a2b3c4d»), que nadie puede escribir a mano."""
+    return sorted(t for t in (todos or []) if not _RE_ETIQUETA_SACADA.match(str(t)))
 
 
 # ------------------------------------------------------------ Claude: proponer

@@ -18423,8 +18423,29 @@ function editorGuionVisual() {
     caja.appendChild(h('div', { clase: 'caja-aviso' }, `El guion cambió: los bloques ${f.fuera_de_la_voz.join(', ')} `
       + 'ya no están en la voz. Corrige esos planos (o pide otro guion visual) y vuelve a aprobarlo.'));
   }
+  /* UN ESTADO QUE NO ES NINGUNO DEL ESPACIO (rama piloto-al-dia, Y05): sin esto
+     el plano editaba la base sin cambio y salía igual que otro. Las imágenes no
+     se pagan hasta corregirlo. */
+  const sinCasar = f.estados_sin_casar || [];
+  if (sinCasar.length) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      `${sinCasar.length === 1 ? 'Un plano pide' : `${sinCasar.length} planos piden`} un estado que no es ninguno de los del espacio: `
+      + sinCasar.slice(0, 6).map(x => `${x.plano} («${x.estado}»)`).join(', ') + (sinCasar.length > 6 ? '…' : '')
+      + ((sinCasar[0].opciones || []).length
+        ? `. Los estados son: ${sinCasar[0].opciones.map(e => `«${e}»`).join(', ')}. `
+        : '. Este espacio no tiene estados con nombre: deja la línea sin estado (la base). ')
+      + 'Corrige el estado de esas líneas («Usar estas líneas» si vienen de la Parrilla): hasta entonces no se dibujan.'));
+  }
+  /* las que se han casado con OTRO nombre («frio» → «blanco_frio»): que se vean antes de pagar */
+  const casados = f.estados_casados || [];
+  if (casados.length) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Estados que se dibujan con el nombre del espacio: '
+      + casados.slice(0, 8).map(x => `${x.plano} «${x.estado}» → «${x.casa_con}»`).join(', ')
+      + (casados.length > 8 ? '…' : '') + '. Si alguno no es el que querías, cambia el estado de esa línea.'));
+  }
   const avisoDe = {};
   (f.comprobacion || []).forEach(a => { avisoDe[a.plano] = a.que; });
+  sinCasar.forEach(x => { avisoDe[x.plano] = `pide el estado «${x.estado}», que no es ninguno de los del espacio`; });
   est.copia.forEach((p, i) => {
     const fila = h('div', { clase: 'plano-gv' },
       h('div', { clase: 'plano-gv-cabeza' },
@@ -35879,11 +35900,12 @@ function panelPilotoParrilla() {
   const enOrden = estados => videosPilotoDelProyecto(estados).reverse();
   const yaSalio = v => !!v.salio;
   const revisarTodos = enOrden(['revisar', 'parado', 'error', 'interrumpido']);
-  const revisar = revisarTodos.filter(v => !yaSalio(v));
+  /* uno que falló pero se terminó a mano ya no necesita revisión: va con los listos (piloto-al-dia) */
+  const revisar = revisarTodos.filter(v => !yaSalio(v) && !v.terminado_a_mano);
   const vivos = enOrden(['trabajando', 'en_cola']);
-  const listosTodos = enOrden(['listo']);
+  const listosTodos = enOrden(['listo']).concat(revisarTodos.filter(v => v.terminado_a_mano));
   const listos = listosTodos.filter(v => !yaSalio(v));
-  const publicados = revisarTodos.concat(listosTodos).filter(yaSalio);
+  const publicados = revisarTodos.concat(enOrden(['listo'])).filter(yaSalio);
   const cancelados = enOrden(['cancelado']);
   const deOtros = ((d.videos || []).filter(v => (v.cid || '') !== (PAR.cid || ''))).length;
   if (deOtros) {
@@ -35931,12 +35953,28 @@ function esperaSolaPiloto(v) {
 
 function tarjetaVideoPiloto(v) {
   const nombres = (PIL.datos || {}).estados || {};
-  const marco = { trabajando: ' estado-trabajando', error: ' estado-error' }[v.estado] || '';
+  /* TERMINADO A MANO (rama piloto-al-dia): falló o se paró, pero su vídeo ya está
+     montado y al día. La tarjeta lo dice y ofrece Publicar; «Reintentar» no
+     (podría volver a pagar el revisor). */
+  const aMano = !!v.terminado_a_mano;
+  const marco = aMano ? '' : ({ trabajando: ' estado-trabajando', error: ' estado-error' }[v.estado] || '');
   const tarjeta = h('article', { clase: `tarjeta-piloto${marco}`, datos: { piloto: v.id } });
   tarjeta.appendChild(h('div', { clase: 'fila cab-tarjeta-piloto' },
     h('b', { clase: 'titulo-piloto' }, v.nombre || v.titulo || 'Vídeo del piloto'),
-    h('span', { clase: `pastilla ${CLASE_ESTADO_PILOTO[v.estado] || ''}`.trim() },
-      esperaSolaPiloto(v) ? 'esperando: sigue solo' : (nombres[v.estado] || v.estado))));
+    h('span', { clase: `pastilla ${aMano ? (CLASE_ESTADO_PILOTO.listo || '') : (CLASE_ESTADO_PILOTO[v.estado] || '')}`.trim() },
+      aMano ? 'Terminado a mano' : esperaSolaPiloto(v) ? 'esperando: sigue solo' : (nombres[v.estado] || v.estado))));
+  if (aMano) {
+    tarjeta.appendChild(h('div', { clase: 'lineas-piloto' },
+      h('span', { clase: 'meta' }, `El piloto se paró en «${nombreEtapaPiloto(v.etapa)}», pero el vídeo ya está montado y al día: `
+        + (v.salio ? 'ya salió o está programado.' : 'solo falta publicarlo (revisa sus títulos y su portada en Publicar).'))));
+    const botonesMano = h('div', { clase: 'fila botones-piloto' },
+      h('button', { clase: 'mini', onclick: () => abrirVideoDeLaCola(v.pid) }, 'Abrir el vídeo'),
+      v.salio ? null : h('button', { clase: 'mini primario', onclick: () => abrirPublicarVideo(v.pid) }, 'Publicar ›'),
+      h('button', { clase: 'mini fantasma', title: 'Quitar de esta lista (el vídeo se queda en Tus proyectos)',
+        onclick: () => quitarPiloto(v) }, 'Quitar de la lista'));
+    tarjeta.appendChild(botonesMano);
+    return tarjeta;
+  }
   const lineas = h('div', { clase: 'lineas-piloto' });
   if (v.estado === 'trabajando' || v.estado === 'en_cola') {
     lineas.appendChild(h('span', { clase: 'meta' }, v.estado === 'trabajando'

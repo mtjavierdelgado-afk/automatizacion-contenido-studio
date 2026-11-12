@@ -5507,6 +5507,44 @@ def _tipo_relato_guardado(ctx):
         return {}
 
 
+def _imagenes_del_relato_por_pagar(ctx):
+    """Las imagenes del tipo de relato que FALTAN y se pagan antes de los planos:
+    la base de cada ambiente (salvo la que se pone con la foto subida, gratis) y
+    la de cada estado que no esta hecha con su cambio de ahora. Solo lee; ante
+    cualquier duda, 0 (como antes)."""
+    try:
+        tr = _tipo_relato()
+        p6 = PASOS_MODULOS.p6_assets
+        params = ctx.estado.params("assets") or {}
+        if not tr.edita(tr.resolver(params)):
+            return 0
+        bases = _tipo_relato_guardado(ctx).get("bases") or {}
+        subida = (params.get("espacio_fijo") or {}).get("imagen") \
+            if isinstance(params.get("espacio_fijo"), dict) else None
+
+        def en_disco(ficha):
+            # una base apuntada cuyo fichero no esta (una copia de antes del
+            # 12-11) hay que volver a pagarla
+            relativa = str((ficha or {}).get("imagen") or "")
+            try:
+                return bool(relativa) and os.path.exists(ctx.proyecto.ruta(*relativa.split("/")))
+            except ValueError:
+                return False
+
+        sitio, _espacio = p6.espacio_del_relato(ctx.proyecto, params)
+        n = 0
+        if not (sitio and en_disco(bases.get(sitio))) and not subida:
+            n += 1
+        sitio_e, pedidos = p6.estados_del_relato(ctx.proyecto, params)
+        hechos = ((bases.get(sitio_e) or {}).get("estados") or {}) if sitio_e else {}
+        n += sum(1 for est, cambio in pedidos.items()
+                 if not (en_disco(hechos.get(est))
+                         and tr.mismo_cambio((hechos.get(est) or {}).get("cambio"), cambio)))
+        return n
+    except Exception:                                       # noqa: BLE001
+        return 0
+
+
 def _ficha_tipo_relato(ctx):
     """Lo que la pantalla necesita del tipo de relato del video."""
     tr = _tipo_relato()
@@ -6555,7 +6593,29 @@ def _ficha_guion_visual(ctx):
     if comprobacion.get("huella") != gv.huella(guardado.get("planos")):
         comprobacion = {}
     estilo = params.get("estilo") if isinstance(params.get("estilo"), dict) else {}
+    # LINEAS CON UN ESTADO QUE NO ES NINGUNO DEL ESPACIO (rama piloto-al-dia, Y05):
+    # se avisan aqui, y `p6_assets.ejecutar` no las paga. Solo lee.
+    sin_casar, casados = [], []
+    try:
+        p6 = PASOS_MODULOS.p6_assets
+        # con el SITIO, no con los estados con cambio: `planificar` para en cuanto
+        # hay etiquetas, aunque todas sean la base (revision del 12-11)
+        sitio_e, _cambios = p6.estados_del_relato(ctx.proyecto, params)
+        if sitio_e:
+            catalogo_e = p6._catalogo_de(p6._con_defectos(params), ctx.proyecto)
+            todos = p6.etiquetas_del_espacio(catalogo_e, sitio_e)
+            ajenos = set(p6.etiquetas_ajenas(catalogo_e, sitio_e))
+            planos_ver = guardado.get("planos") or propuesta or _planos_ef
+            otro_sitio = p6.bloques_de_otro_sitio(catalogo_e, sitio_e, [b["id"] for b in bloques])
+            bloque_de = {p.get("id"): str(p.get("bloque") or "").strip().upper()
+                         for p in planos_ver or [] if isinstance(p, dict)}
+            sin_casar = [x for x in gv.estados_sin_casar(planos_ver, todos)
+                         if x["estado"] not in ajenos and bloque_de.get(x["plano"]) not in otro_sitio]
+            casados = gv.estados_casados(planos_ver, todos)
+    except Exception:                                       # noqa: BLE001
+        sin_casar, casados = [], []
     return {"modo": gv.modo_de(params),
+            "estados_sin_casar": sin_casar, "estados_casados": casados,
             "del_video": params.get("imagenes") or "",
             "del_estilo": estilo.get("imagenes") or "",
             "modos": [{"clave": k, "nombre": v} for k, v in gv.MODOS.items()],
@@ -9941,6 +10001,22 @@ def _rehacer_en_linea(avisar, ctx, retoque, sustituye):
     return _correr_notas_imagenes(avisar, ctx)
 
 
+def _max_usd_del_revisor(ctx, revisor, ajustes):
+    """El tope de dolares del revisor en ESTE video (`revisor.elegir` le resta lo
+    que el revisor ya gasto). Con el piloto, nunca mas de lo que queda de SU tope
+    con lo gastado de verdad: lo que el revisor ya gasto mas lo que queda."""
+    tope = float(ajustes.get("revisor_max_usd") or 0.0)
+    del_piloto = ajustes.get("piloto_tope_usd")
+    if del_piloto is None:
+        return tope
+    queda = float(del_piloto) - _piloto_gastado(ctx) - float(ajustes.get("piloto_portada_usd") or 0.0)
+    try:
+        ya = float(revisor.leer_estado(ctx.proyecto).get("gastado_usd") or 0.0)
+    except Exception:                                       # noqa: BLE001
+        return 0.0
+    return round(max(0.0, min(tope, ya + max(0.0, queda))), 4)
+
+
 def _revisar_y_corregir(avisar, ctx, modo, ajustes, planos=None):
     """El bucle de los modos autonomo y automatico. -> informe
 
@@ -9966,7 +10042,7 @@ def _revisar_y_corregir(avisar, ctx, modo, ajustes, planos=None):
             break
         retoque, sustituye, porque = revisor.elegir(
             ctx.proyecto, modo, cupo - informe["mandadas"],
-            float(ajustes.get("revisor_max_usd") or 0.0), usd,
+            _max_usd_del_revisor(ctx, revisor, ajustes), usd,
             # SOLO lo que ESTA vuelta acaba de mirar y marcar: una nota vieja de
             # un plano cuya imagen nueva no se pudo revisar (cupo, tiempo) es de
             # la imagen de antes, y rehacerla seria pagar a ciegas
@@ -13616,6 +13692,38 @@ def _impedimentos(ctx, pestana, pendientes):
             fuera.append({"tarea": "assets",
                           "que": "las imágenes siguen el guion y el guion visual no está "
                                  "aprobado: revísalo y apruébalo antes de dibujar",
+                          "donde": "Guion visual"})
+        # una linea con un estado que no es ninguno del espacio (rama piloto-al-dia):
+        # p6 tambien para, antes de pagar; aqui se dice antes de lanzar (y el
+        # piloto se DETIENE con su sitio, en vez de fallar)
+        # lo MISMO que mira p6: solo los planos que esta tanda va a dibujar (uno ya hecho
+        # con un estado raro no se paga y no bloquea); sin plan aun, todas las lineas
+        # las lineas de AHORA (un plan viejo puede traer un estado ya corregido), menos
+        # las que ya tienen su plano dibujado: ese no se paga y no tiene que bloquear
+        sin_casar = []
+        try:
+            sin_casar = _ficha_guion_visual(ctx).get("estados_sin_casar") or []
+            if sin_casar:
+                p6 = PASOS_MODULOS.p6_assets
+                plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+                carpetas = _carpetas_de_assets(ctx) or [""]
+                # una linea esta hecha si TODOS sus planos tienen imagen (si no, p6 aun pagaria uno)
+                por_linea = {}
+                for e in plan.get("escenas") or []:
+                    lid = (e.get("linea_gv") or {}).get("id")
+                    if lid and not p6._sin_imagen(e):        # una cartela no deja imagen: no cuenta
+                        hecho = any(os.path.exists(os.path.join(c, "escenas", f"{e['id']}.png")) for c in carpetas)
+                        por_linea[lid] = por_linea.get(lid, True) and hecho
+                hechas = {lid for lid, todo in por_linea.items() if todo}
+                sin_casar = [x for x in sin_casar if x.get("plano") not in hechas]
+        except Exception as fallo:                          # noqa: BLE001
+            print(f"[impedimentos] no se han podido mirar los estados del guion visual: {fallo}", flush=True)
+            sin_casar = []
+        if sin_casar:
+            fuera.append({"tarea": "assets",
+                          "que": "en el guion visual hay líneas con un estado que no es ninguno de los del "
+                                 "espacio (" + ", ".join(f"{x['plano']} «{x['estado']}»" for x in sin_casar[:4])
+                                 + "): corrígelas antes de dibujar",
                           "donde": "Guion visual"})
     return fuera
 
@@ -23539,6 +23647,18 @@ def _piloto_gastado(ctx):
         return 0.0
 
 
+def _piloto_usd_portada_pendiente(raiz, vid, aj):
+    """Lo que falta pagar de portada: nada si la de IA ya esta hecha (al retomar
+    no se paga otra vez, ver `_piloto_portadas`)."""
+    try:
+        hechas = {c.get("tipo") for c in (_piloto().leer(raiz, vid).get("portadas") or [])
+                  if c.get("fichero") and os.path.isfile(os.path.join(
+                      _piloto().carpeta_portadas(raiz, vid), c["fichero"]))}
+    except Exception:                                       # noqa: BLE001
+        hechas = set()
+    return 0.0 if "ia" in hechas else _piloto_usd_portada(aj)
+
+
 def _piloto_usd_portada(aj):
     if aj.get("portadas") not in ("ambas", "ia"):
         return 0.0
@@ -23550,7 +23670,15 @@ def _piloto_previsto(ctx, aj):
     SIGUE: un cotizador que falla daba 0 $ y el tope dejaba pasarlo todo."""
     try:
         coste = _coste_previsto(ctx, ["guion", "voz", "video", "render"])
-        total = float(coste.get("usd_por_generar") or coste.get("usd_total") or 0.0)
+        # lo que FALTA por generar; con todo hecho es 0, no el total del video
+        # (si no, «Seguir igualmente» volvia a parar aqui: tren del 12-11)
+        falta = coste.get("usd_por_generar")
+        total = float(falta if falta is not None else (coste.get("usd_total") or 0.0))
+        # Y LA IMAGEN BASE Y LA DE CADA ESTADO que el piloto dibuja antes de los
+        # planos (G01: 0,54 $ previstos de imagenes y 0,93 $ pagados, entre otras
+        # cosas porque no se contaban). Solo aqui: una tanda de la pantalla no las
+        # dibuja (`planos_sin_base` la para), y contarlas alli prometia de mas
+        total += _imagenes_del_relato_por_pagar(ctx) * float(coste.get("usd_por_imagen") or 0.0)
         total += _piloto_usd_portada(aj)
     except Exception as fallo:                              # noqa: BLE001
         raise _PilotoPara(f"no se ha podido calcular lo que costaría ({str(fallo)[:160]}): sin "
@@ -23675,14 +23803,22 @@ def _piloto_aprobar_bases(ctx, sitio, estado=""):
         ctx.estado.actualizar_params("assets", {"tipo_relato": tr.normalizar(guardado)})
 
 
-def _piloto_imagenes(avisar, ctx, aj, queda_usd=None):
+def _piloto_imagenes(avisar, ctx, aj, queda_usd=None, portada_usd=None):
     """La tanda de imagenes con el revisor en «automatico» y el tope del piloto.
     Lo que el revisor puede gastar rehaciendo es lo que quede del tope (o lo de
-    Configuracion, si es menos): asi rehacer no pasa el tope por detras."""
+    Configuracion, si es menos): asi rehacer no pasa el tope por detras.
+
+    Y lo que queda se vuelve a medir con lo GASTADO de verdad justo antes de
+    cada ronda del revisor (`piloto_tope_usd`): lo de arriba es una prevision,
+    y si las imagenes costaron mas, el revisor gastaba lo que ya no habia (G01,
+    tren del 12-11: 0,95 $ con un tope de 0,90 $)."""
     forzado = {"revisor_modo": "automatico", "revisor_vueltas": int(aj.get("vueltas") or 2)}
     if queda_usd is not None:
         de_config = float(AJUSTES.leer().get("revisor_max_usd") or 0.0)
         forzado["revisor_max_usd"] = round(max(0.0, min(de_config, float(queda_usd))), 3)
+        if portada_usd is not None:
+            forzado["piloto_tope_usd"] = float(aj["tope_usd"])
+            forzado["piloto_portada_usd"] = float(portada_usd or 0.0)
     with _REVISOR_LOCK:
         _REVISOR_FORZADO[ctx.id] = forzado
     try:
@@ -23716,7 +23852,7 @@ def _piloto_decidir(ctx, raiz, vid, aj, forzar):
         P.apuntar_revision(raiz, vid, f"{resumen['sin_revisar']} imágenes no se pudieron revisar "
                                       "(Claude no contestó): míralas tú", "Imágenes")
     if forzar and decision == "parar":
-        return "seguir", "lo has mirado tú: se monta igual"
+        return "seguir", "pulsaste «Seguir igualmente»: se monta igual y las marcadas quedan para revisar"
     return decision, porque
 
 
@@ -23763,7 +23899,15 @@ def _piloto_render_portada(diseno, rutas, destino):
     return destino
 
 
-def _piloto_portadas(avisar, ctx, raiz, vid, aj):
+def _piloto_portada_ia_cabe(ctx, aj, tope_usd):
+    """¿Cabe la portada de IA en el tope del piloto? Sin tope (o «Seguir
+    igualmente» sobre el tope: None), o sin portada de IA pedida, si."""
+    if tope_usd is None or aj.get("portadas") not in ("ambas", "ia"):
+        return True
+    return _piloto_gastado(ctx) + _piloto_usd_portada(aj) <= float(tope_usd)
+
+
+def _piloto_portadas(avisar, ctx, raiz, vid, aj, tope_usd=None):
     """Opcion C del dueño: una portada con un plano del video (gratis) y otra
     hecha con IA (se paga una imagen). Se deja puesta la primera; las dos se
     pueden elegir en la ficha del piloto."""
@@ -23814,9 +23958,18 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj):
             candidatos.append({"id": f"plano{i}", "tipo": "plano", "fichero": nombre,
                                "nombre": "Con un plano del vídeo", "coste_usd": 0.0,
                                "por_que": str(prop.get("por_que") or "")[:200], "diseno": diseno})
+    # LA DE IA NO PASA EL TOPE (tren del 12-11): si no cabe, se queda la del
+    # plano y se apunta. Con «Seguir igualmente» sobre el tope, `tope_usd` es None
+    sin_sitio = "ia" not in hechas and not _piloto_portada_ia_cabe(ctx, aj, tope_usd)
+    if sin_sitio:
+        P.apuntar_revision(raiz, vid, f"La portada con IA no se hizo: pasaría tu tope de "
+                                      f"{float(tope_usd):.2f} $"
+                           + (" (el guion traía una portada propuesta: está en Publicar → Portada)"
+                              if del_guion else "")
+                           + ". Hazla en Publicar → Portada si la quieres", "Publicar → Portada")
     if "ia" in hechas:
         candidatos.append(hechas["ia"])
-    elif aj.get("portadas") in ("ambas", "ia"):
+    elif aj.get("portadas") in ("ambas", "ia") and not sin_sitio:
         diseno = PO.normalizar(candidatos[0]["diseno"] if candidatos else base)
         try:
             avisar(0.5, "dibujando la portada con IA (se paga una imagen)", "Dibujando la portada")
@@ -23886,6 +24039,50 @@ def _piloto_usar_portada(ctx, diseno):
                                                          "formato": diseno["formato"], "piloto": True})
 
 
+#: las paradas desde las que «Seguir igualmente» salta TAMBIEN el interruptor
+#: (decision del dueño del 12-11: desde el tope, un solo clic)
+PILOTO_SALTA_INTERRUPTOR = ("interruptor", "tope")
+
+
+def _piloto_tope_inicial(ctx, aj, previsto):
+    """El paso 0: lo que falta por generar, MAS lo ya gastado si es un reintento
+    (punto D del tren del 12-11), contra el tope. Lanza `_PilotoPara`."""
+    # sin la portada: se mira en su paso, y si no cabe queda la del plano (como C).
+    # Con nada mas que pagar, no se para (G01: «Seguir» con todo dibujado)
+    previsto = round(float(previsto or 0.0) - _piloto_usd_portada(aj), 3)
+    if previsto <= 0:
+        return
+    ya = _piloto_gastado(ctx)
+    if ya + previsto > aj["tope_usd"]:
+        raise _PilotoPara(f"costaría unos {previsto:.2f} $"
+                          + (f" más los {ya:.2f} $ ya gastados" if ya > 0 else "")
+                          + f" y tu tope por vídeo es {aj['tope_usd']:.2f} $: sube el tope "
+                          "o pulsa «Seguir igualmente»", "Piloto → Ajustes", "tope")
+
+
+def _piloto_tope_antes_de_dibujar(ctx, raiz, vid, aj):
+    """El tope, con los planos de verdad, antes de dibujar. -> (queda, portada)
+
+    `queda` es lo que el revisor puede gastar rehaciendo; `portada`, lo que
+    falta pagar de portada. Lanza `_PilotoPara` si lo que falta pasa el tope."""
+    try:
+        por_dibujar = float(_coste_previsto(ctx, ["video"]).get("usd_por_generar") or 0.0)
+        portada = _piloto_usd_portada_pendiente(raiz, vid, aj)
+    except Exception as fallo:                              # noqa: BLE001
+        raise _PilotoPara(f"no se ha podido calcular lo que costarían las imágenes "
+                          f"({str(fallo)[:160]})", "Piloto → Ajustes", "tope") from None
+    gastado = _piloto_gastado(ctx)
+    # SOLO si quedan imagenes que pagar: tras «Seguir igualmente» con todo
+    # dibujado, lo que falta (montar) es gratis y no se para (G01, tren del
+    # 12-11). La portada de IA mira el tope en su paso: si no cabe, no se hace
+    # sin la portada (punto C del tren): si no cabe, se queda la del plano en su paso
+    if por_dibujar > 0 and gastado + por_dibujar > aj["tope_usd"]:
+        raise _PilotoPara(f"las imágenes que faltan costarían unos {por_dibujar:.2f} $, ya van "
+                          f"{gastado:.2f} $ y tu tope es {aj['tope_usd']:.2f} $",
+                          "Piloto → Ajustes", "tope")
+    return max(0.0, aj["tope_usd"] - gastado - por_dibujar - portada), portada
+
+
 def _piloto_cadena(avisar, ctx, raiz, vid):
     """EL VIDEO ENTERO, en un trabajo. Las paradas se apuntan y no son un error."""
     P = _piloto()
@@ -23910,10 +24107,7 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
         previsto = _piloto_previsto(ctx, aj) if saltar != "tope" else None
         if previsto is not None:
             P.cambiar(raiz, vid, previsto_usd=previsto)
-        if previsto is not None and previsto > aj["tope_usd"]:
-            raise _PilotoPara(f"costaría unos {previsto:.2f} $ y tu tope por vídeo es "
-                              f"{aj['tope_usd']:.2f} $: sube el tope o pulsa «Seguir igualmente»",
-                              "Piloto → Ajustes", "tope")
+            _piloto_tope_inicial(ctx, aj, previsto)
         # 1-2. GUION Y VOZ
         tanda("guion", "guion", "escribiendo el guion")
         tanda("voz", "voz", "poniéndole voz")
@@ -23922,29 +24116,21 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
         _piloto_vistos_buenos(_piloto_tramo(avisar, "vistos"), ctx, raiz, vid, aj["si_falla"])
         # el tope, ahora con los planos de verdad
         queda = None
+        portada = 0.0
         if saltar != "tope":
-            try:
-                por_dibujar = float(_coste_previsto(ctx, ["video"]).get("usd_por_generar") or 0.0)
-                portada = _piloto_usd_portada(aj)
-            except Exception as fallo:                      # noqa: BLE001
-                raise _PilotoPara(f"no se ha podido calcular lo que costarían las imágenes "
-                                  f"({str(fallo)[:160]})", "Piloto → Ajustes", "tope") from None
-            gastado = _piloto_gastado(ctx)
-            if gastado + por_dibujar + portada > aj["tope_usd"]:
-                raise _PilotoPara(f"las imágenes costarían unos {por_dibujar:.2f} $ (ya van "
-                                  f"{gastado:.2f} $) y tu tope es {aj['tope_usd']:.2f} $",
-                                  "Piloto → Ajustes", "tope")
-            # lo que queda del tope es lo que puede gastar el revisor rehaciendo
-            queda = aj["tope_usd"] - gastado - por_dibujar - portada
+            queda, portada = _piloto_tope_antes_de_dibujar(ctx, raiz, vid, aj)
         # 4. LAS IMAGENES, con el revisor y su tope de rehacer
         etapa("imagenes", f"dibujando las imágenes (el revisor rehace lo marcado, "
                           f"hasta {aj['vueltas']} {'ronda' if aj['vueltas'] == 1 else 'rondas'})")
-        hecho = _piloto_imagenes(_piloto_tramo(avisar, "imagenes"), ctx, aj, queda)
+        hecho = _piloto_imagenes(_piloto_tramo(avisar, "imagenes"), ctx, aj, queda,
+                                 None if saltar == "tope" else portada)
         for aviso in (hecho or {}).get("avisos") or []:
             P.apuntar_revision(raiz, vid, str(aviso), "Imágenes")
         # 5. EL INTERRUPTOR
         etapa("decidir", "mirando lo que dejó marcado el revisor")
-        decision, porque = _piloto_decidir(ctx, raiz, vid, aj, saltar == "interruptor")
+        # «Seguir igualmente» desde el TOPE salta tambien el interruptor: un solo
+        # clic para seguir (decision del dueño del 12-11); las marcas quedan en «revisar»
+        decision, porque = _piloto_decidir(ctx, raiz, vid, aj, saltar in PILOTO_SALTA_INTERRUPTOR)
         if decision == "parar":
             raise _PilotoPara(porque, "Imágenes", "interruptor")
         # 6. EL MONTAJE, en la cola de montaje
@@ -23953,7 +24139,8 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
         etapa("textos", "escribiendo los títulos, descripciones y hashtags de cada red")
         _piloto_textos(_piloto_tramo(avisar, "textos"), ctx, raiz, vid)
         etapa("portadas", "preparando las portadas")
-        _piloto_portadas(_piloto_tramo(avisar, "portadas"), ctx, raiz, vid, aj)
+        _piloto_portadas(_piloto_tramo(avisar, "portadas"), ctx, raiz, vid, aj,
+                         None if saltar == "tope" else aj["tope_usd"])
     except _PilotoPara as parada:
         P.cambiar(raiz, vid, coste_usd=round(_piloto_gastado(ctx), 3))
         _piloto_parar(raiz, vid, parada)
@@ -23994,6 +24181,42 @@ def _piloto_vivo(ficha):
             "segundos": t.get("segundos"), "cancelando": t.get("cancelando")}
 
 
+#: pid -> (marca de su estado.json, ¿render «listo»?) (rama piloto-al-dia)
+_PILOTO_RENDER = {}
+_PILOTO_RENDER_LOCK = threading.Lock()
+#: las etapas hasta el montaje: si el piloto se paro en una de estas y el video
+#: ya esta montado, alguien lo termino a mano. Uno que fallo DESPUES (titulos,
+#: portadas) tiene su montaje hecho por el propio piloto: eso no es terminarlo.
+_PILOTO_ANTES_DEL_MONTAJE = ("crear", "guion", "voz", "vistos", "imagenes", "decidir", "montaje")
+
+
+def _piloto_render_al_dia(pid):
+    """¿El video tiene su montaje al dia (render «listo» y nada en marcha)? Solo
+    LEE el estado del video (regla 1); se recuerda mientras su estado.json no
+    cambie, para no abrirlo en cada vuelta de la lista."""
+    try:
+        marca = os.stat(os.path.join(raiz_proyectos(), str(pid), "estado.json")).st_mtime_ns
+    except (OSError, ValueError):
+        return False
+    try:
+        ctx = contexto(pid)
+        # lo que tiene en marcha se mira SIEMPRE (un trabajo puede acabar sin tocar estado.json)
+        if ctx.gestor.listar(activos=True):
+            return False
+        with _PILOTO_RENDER_LOCK:
+            guardado = _PILOTO_RENDER.get(pid)
+        if guardado and guardado[0] == marca:
+            return guardado[1]
+        listo = ctx.estado.estado_de("render") == "listo"
+    except Exception:                                       # noqa: BLE001
+        return False
+    with _PILOTO_RENDER_LOCK:
+        _PILOTO_RENDER[pid] = (marca, listo)
+        while len(_PILOTO_RENDER) > 2000:
+            _PILOTO_RENDER.pop(next(iter(_PILOTO_RENDER)))
+    return listo
+
+
 def _piloto_para_pantalla(ficha):
     salida = {k: v for k, v in ficha.items() if k != "portadas"}
     salida["portadas"] = [{k: v for k, v in c.items() if k != "diseno"}
@@ -24008,6 +24231,15 @@ def _piloto_para_pantalla(ficha):
     # una de antes de un reinicio espera a «Reintentar», como todas
     if ficha.get("estado") == "parado" and ficha.get("tipo_parada") == "ocupado":
         salida["espera_sola"] = ficha.get("id") in _PILOTO_ESPERAS
+    # TERMINADO A MANO (rama piloto-al-dia, X01 e Y05 del 12-11): fallo o se paro
+    # antes del montaje, alguien lo arreglo y lo monto, y la tarjeta seguia
+    # diciendo «Falló» (y ofrecia «Reintentar», que puede volver a pagar el
+    # revisor). Se mira al pintar la lista; la ficha del piloto no se toca.
+    if (ficha.get("pid") and ficha.get("estado") in ("error", "parado", "interrumpido")
+            and (ficha.get("etapa") or "crear") in _PILOTO_ANTES_DEL_MONTAJE
+            and not salida.get("espera_sola") and _piloto_render_al_dia(ficha["pid"])):
+        salida["terminado_a_mano"] = True
+        salida["salio"] = _video_salio(ficha["pid"])
     return salida
 
 
@@ -24023,7 +24255,7 @@ def piloto_estado(peticion: Request):
     # el aviso «N para revisar» sin lo que ya salio ni lo que espera solo
     resumen["a_revisar"] = sum(1 for v in resumen["videos"]
                                if v.get("estado") in P.A_REVISAR and not v.get("salio")
-                               and not v.get("espera_sola"))
+                               and not v.get("espera_sola") and not v.get("terminado_a_mano"))
     resumen["cupo"] = _piloto_cupo_lleno(resumen["ajustes"]["cupo_max_pct"])
     return resumen
 
@@ -24233,6 +24465,11 @@ async def recibidos_guardar(peticion: Request):
             datos = json.loads(bytes(crudo).decode("utf-8") or "{}")
         except (ValueError, UnicodeDecodeError):
             raise ErrorApi(400, "lo enviado no es JSON") from None
+        # a un proyecto con clave no se envia desde fuera (la extension no lleva
+        # su pase): se envia sin proyecto y se le pone desde la bandeja
+        if isinstance(datos, dict) and str(datos.get("proyecto") or "").strip() in _cerrados(peticion):
+            raise ErrorApi(400, "ese proyecto tiene clave: envíalo sin proyecto y ponle el "
+                                "proyecto desde la bandeja, con el proyecto abierto")
         guardado = _por_recibidos(R.guardar, raiz_proyectos(), datos if isinstance(datos, dict) else {},
                                   _ids_proyectos())
         anotar_global("recibido", {"red": guardado["red"], "captura": bool(guardado["captura"]),
@@ -24247,8 +24484,11 @@ async def recibidos_guardar(peticion: Request):
 def recibidos_proyectos(peticion: Request):
     """Los proyectos, para el menú «Proyecto» de la extensión (pide el código de envío)."""
     _codigo_de_envio(peticion)
+    # sin los proyectos con clave: la extension no lleva su pase (tren del 12-11)
+    cerrados = _cerrados(peticion)
     return {"proyectos": [{"id": c["id"], "nombre": c.get("nombre") or c["id"]}
-                          for c in CLIENTES.listar(raiz_proyectos())["clientes"]]}
+                          for c in CLIENTES.listar(raiz_proyectos())["clientes"]
+                          if c["id"] not in cerrados]}
 
 
 @app.get("/api/recibidos")

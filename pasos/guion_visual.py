@@ -408,12 +408,21 @@ def fuera_de_la_voz(planos, bloques):
 #: Palabras que cambian el sentido de un estado: si son lo que sobra entre el
 #: nombre de la linea y el del espacio, no es el mismo estado («muebles» no es
 #: «sin_muebles», «pintar» no es «antes_de_pintar»). Revision del 12-11.
-_NO_CASAN = {"sin", "no", "non", "not", "without", "antes", "before", "pre", "ex", "casi", "medio", "semi",
-             "quitar", "quitado", "quitada", "sacar", "sacado", "retirar", "retirado", "apagado", "apagada",
-             "apagar", "off", "falta", "faltan", "vacio", "vacia", "empty", "removed", "remove", "less"}
+#: Raíces de palabras que cambian el sentido de un estado: si una de las palabras
+#: que sobran entre el nombre de la linea y el del espacio empieza asi, no es el
+#: mismo estado («muebles» no es «sin_muebles» ni «muebles_retirados»; «en_obra»
+#: no es «obra_terminada»). Revisiones del 12-11: mejor parar y preguntar que
+#: pagar el estado contrario.
+_NO_CASAN = ("sin", "no", "non", "not", "without", "antes", "before", "pre", "ex", "casi", "medi", "semi",
+             "quit", "retir", "sac", "apag", "fuera", "nada", "falt", "vaci", "empty", "remov", "less",
+             "termin", "acab", "final", "complet", "rot", "sucio", "nuev", "viej", "off", "on")
 #: Palabras que no dicen nada del estado: se quitan de los dos lados antes de comparar
 #: («con_muebles» es «muebles», «despues_de_pintar» contiene «despues»).
-_RELLENO = {"de", "del", "la", "el", "los", "las", "y", "o", "of", "the", "and", "or", "con", "with", "a", "en", "un", "una"}
+_RELLENO = {"de", "del", "la", "el", "los", "las", "y", "o", "of", "the", "and", "or", "con", "with", "un", "una"}
+
+
+def _cambia_sentido(palabras):
+    return any(p == r or (len(r) >= 3 and p.startswith(r)) for p in palabras for r in _NO_CASAN)
 
 
 def _trozos(etiqueta):
@@ -446,7 +455,7 @@ def casar_estado(nombre, todos):
     candidatos = []
     for t in todos:
         suyos = set(_trozos(t)) - _RELLENO
-        if suyos and (mios <= suyos or suyos <= mios) and not ((mios ^ suyos) & _NO_CASAN):
+        if suyos and (mios <= suyos or suyos <= mios) and not _cambia_sentido(mios ^ suyos):
             candidatos.append(t)
     return candidatos[0] if len(candidatos) == 1 else ""
 
@@ -498,11 +507,15 @@ def estados_sin_casar(planos, todos):
     salida = []
     for i, p in enumerate(planos or []):
         estado = str((p or {}).get("estado") or "").strip()
-        if not estado or sin_cambio(estado.replace("_", " ")):
+        if not estado:
             continue
-        if not casar_estado(estado, todos):
-            salida.append({"plano": (p or {}).get("id") or f"V{i + 1:03d}", "estado": estado,
-                           "opciones": sorted(todos)})
+        if casar_estado(estado, todos):
+            continue
+        parecidos = [t for t in todos if (set(_trozos(estado)) - _RELLENO) & (set(_trozos(t)) - _RELLENO)]
+        if sin_cambio(estado.replace("_", " ")) and not parecidos:
+            continue
+        salida.append({"plano": (p or {}).get("id") or f"V{i + 1:03d}", "estado": estado,
+                       "opciones": sorted(todos)})
     return salida
 
 

@@ -81,6 +81,13 @@ def prueba_casar():
                                  ("muebles", ["quitar_muebles"], ""), ("luz", ["luz_apagada"], ""),
                                  ("terminado", ["casi_terminado"], "")):
         igual(G.casar_estado(linea, espacio), casa, f"«{linea}» con {espacio}: {casa or 'no casa'}")
+    for linea, espacio in (("en_obra", ["obra_terminada"]), ("muebles", ["muebles_retirados"]),
+                           ("luces", ["luces_apagadas"]), ("pintado", ["pintado_a_medias"]),
+                           ("limpio", ["nada_limpio"]), ("muebles", ["muebles_fuera"])):
+        igual(G.casar_estado(linea, espacio), "", f"«{linea}» NO casa con {espacio}")
+    igual(G.estados_sin_casar([{"id": "V001", "estado": "vacia"}], ["antes", "vacia_sin_muebles"]),
+          [{"plano": "V001", "estado": "vacia", "opciones": ["antes", "vacia_sin_muebles"]}],
+          "«vacia» con un estado «vacia_sin_muebles» no se da por la base: se para y se pregunta")
     for base in ("la_base", "sin_cambios", "tal_cual", "la_imagen_base", "igual_que_la_base"):
         etiqueta = G._etiqueta(base)                                   # noqa: SLF001  (como llega de la Parrilla)
         igual(G.estados_sin_casar([{"id": "V001", "estado": etiqueta}], todos), [],
@@ -143,13 +150,13 @@ def _proyecto(carpeta):
     return proyecto
 
 
-LINEAS = [{"bloque": "B001", "visual": "The bathroom under the ceiling light, no people", "estado": "frio",
+LINEAS = [{"id": "V001", "bloque": "B001", "visual": "The bathroom under the ceiling light, no people", "estado": "frio",
            "camara": "wide shot from the door"},
-          {"bloque": "B002", "visual": "The bathroom as it is, no people", "estado": "antes",
+          {"id": "V002", "bloque": "B002", "visual": "The bathroom as it is, no people", "estado": "antes",
            "camara": "wide shot from the door"},
-          {"bloque": "B003", "visual": "The bathroom under the ceiling light, no people", "estado": "calido",
+          {"id": "V003", "bloque": "B003", "visual": "The bathroom under the ceiling light, no people", "estado": "calido",
            "camara": "wide shot from the door"},
-          {"bloque": "B004", "visual": "The bathroom with a strange light, no people", "estado": "rojo",
+          {"id": "V004", "bloque": "B004", "visual": "The bathroom with a strange light, no people", "estado": "rojo",
            "camara": "wide shot from the door"}]
 
 CATALOGO = {"sets": {"bano": {"descripcion": "a small white bathroom with a mirror and a ceiling lamp",
@@ -238,6 +245,19 @@ def prueba_el_aviso(proyecto, carpeta):
     avisos = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
     ok(any(a.get("donde") == "Guion visual" and "«rojo»" in a.get("que", "") for a in avisos),
        f"con una línea «rojo», se avisa antes de lanzar y dice dónde se arregla ({avisos})")
+    # el plano de «rojo» ya dibujado (con el plan guardado): no se paga, no bloquea
+    import medios as M                                            # noqa: PLC0415
+    plan = P6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado)
+    rojo = next(e for e in plan["escenas"] if (e.get("linea_gv") or {}).get("id") == "V004")
+    escenas = os.path.join(ctx.proyecto.ruta_trabajo("assets"), "escenas")
+    os.makedirs(escenas, exist_ok=True)
+    png = os.path.join(escenas, f"{rojo['id']}.png")
+    from PIL import Image                                         # noqa: PLC0415
+    Image.new("RGB", (8, 8)).save(png)
+    avisos = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+    ok(not any("no es ninguno" in a.get("que", "") for a in avisos), "con su plano ya dibujado, no bloquea (p6 tampoco lo paga)")
+    os.remove(png)
+    del M
     ctx.estado.set_params("assets", _params([dict(x, estado="blanco_frio") if x["estado"] == "rojo" else x for x in LINEAS]))
     avisos = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
     ok(not any("no es ninguno" in a.get("que", "") for a in avisos), "con los estados bien, nada que avisar por eso")

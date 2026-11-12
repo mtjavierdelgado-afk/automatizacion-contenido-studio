@@ -13267,9 +13267,14 @@ def _impedimentos(ctx, pestana, pendientes):
                 p6 = PASOS_MODULOS.p6_assets
                 plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
                 carpetas = _carpetas_de_assets(ctx) or [""]
-                hechas = {(e.get("linea_gv") or {}).get("id") for e in plan.get("escenas") or []
-                          if (e.get("linea_gv") or {}).get("id")
-                          and os.path.exists(os.path.join(carpetas[-1], "escenas", f"{e['id']}.png"))}
+                # una linea esta hecha si TODOS sus planos tienen imagen (si no, p6 aun pagaria uno)
+                por_linea = {}
+                for e in plan.get("escenas") or []:
+                    lid = (e.get("linea_gv") or {}).get("id")
+                    if lid:
+                        hecho = any(os.path.exists(os.path.join(c, "escenas", f"{e['id']}.png")) for c in carpetas)
+                        por_linea[lid] = por_linea.get(lid, True) and hecho
+                hechas = {lid for lid, todo in por_linea.items() if todo}
                 sin_casar = [x for x in sin_casar if x.get("plano") not in hechas]
         except Exception as fallo:                          # noqa: BLE001
             print(f"[impedimentos] no se han podido mirar los estados del guion visual: {fallo}", flush=True)

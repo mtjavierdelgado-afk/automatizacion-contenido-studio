@@ -592,6 +592,29 @@ def guardar_y_leer(carpeta, foto):
     ok(C.guardar(raiz, "cli", tras_el_corte, nid)["id"] == nid, "y se puede volver a guardar sin aviso de conflicto")
     ok(falla(C.guardar, raiz, "cli", antes_del_corte, nid), "lo abierto antes del corte sigue recibiendo el aviso")
 
+    # 4.ª revisión del 11-11: el PRIMER guardado en capas de una pieza normal,
+    # cortado antes de la ficha pequeña; la lista, la descarga y el editor de
+    # antes tienen que ver lo mismo que «abrir»
+    otra = G.guardar_pieza(raiz, "cli", {"plantilla": 1, "textos": TEXTOS})
+    doc_otra = G._con_turno(lambda p: C.convertir(p, otra))
+    doc_otra["nombre"] = "Cortada en el primer guardado"
+    G._escribir_json = se_cae
+    try:
+        try:
+            C.guardar(raiz, "cli", doc_otra, otra["id"])
+        except OSError:
+            pass
+    finally:
+        G._escribir_json = escribir
+    _f, abierta_otra = C.leer(raiz, "cli", otra["id"])
+    en_lista = next(p for p in G.listar_piezas(raiz, "cli") if p["id"] == otra["id"])
+    ok(abierta_otra is not None and en_lista["en_capas"] and en_lista["nombre"] == "Cortada en el primer guardado",
+       "tras un corte en el primer guardado, abrir y la lista dicen lo mismo")
+    ok(G.ruta_final(raiz, "cli", otra["id"], "png").endswith("capas.png"), "la descarga también")
+    ok(falla(G.guardar_pieza, raiz, "cli", dict(otra, textos=dict(TEXTOS, titulo="x")), otra["id"]),
+       "y el editor de antes no la descarta en silencio")
+    G.borrar_pieza(raiz, "cli", otra["id"])
+
     print("una tipografía quitada de la lista no deja la pieza sin abrir")
     meta_ruta = os.path.join(carpeta_nueva, "capas.json")
     datos = json.load(open(meta_ruta, encoding="utf-8"))

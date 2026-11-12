@@ -1147,20 +1147,16 @@ def leer(raiz, cid, pieza_id):
 
 
 def _estado(raiz, cid, pieza_id, ficha):
-    """-> (vale, guardado, doc crudo). Manda `capas.json`, que se escribe antes
-    que la ficha pequeña: si el proceso murió entre los dos, la versión en capas
-    sigue valiendo con su número de verdad (3.ª revisión del 11-11: una nacida
-    se quedaba bloqueada para siempre)."""
+    """-> (vale, guardado, doc crudo), con la misma regla que la lista y la
+    descarga (`graficas.capas_que_valen`), mirando siempre `capas.json`: se
+    escribe antes que la ficha pequeña y tiene el número de verdad del último
+    guardado (3.ª y 4.ª revisión del 11-11)."""
+    vale = G.capas_que_valen(raiz, cid, pieza_id, ficha, exacto=True)
     try:
         crudo = G._leer_json(_rutas(raiz, cid, pieza_id)["json"])
     except ErrorGraficas:
         crudo = None
-    origen = (crudo or {}).get("origen") if isinstance(crudo, dict) and isinstance(crudo.get("origen"), dict) else {}
-    if origen.get("sello") and origen.get("sello") == ficha.get("sello"):
-        return True, str(origen.get("guardado") or ""), crudo
-    vale = G.capas_vigentes(raiz, cid, pieza_id, ficha)
-    guardado = ((G.meta_capas(raiz, cid, pieza_id) or {}).get("guardado") or "") if vale else ""
-    return vale, guardado, crudo
+    return vale is not None, (vale or {}).get("guardado") or "", crudo
 
 
 def _leer(raiz, cid, pieza_id):

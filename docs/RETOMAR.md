@@ -564,7 +564,7 @@ láminas, y en cada una capas sueltas de texto, foto, logo o forma. Lo hace
 - **Lo oculto con el editor de antes** se rescata con todo lo que cuelga de
   ello (los textos del sello) y en su sitio: las dos pasadas se casan por el
   índice del elemento, que no cambia al ocultar.
-- **`capas.json` manda sobre la ficha pequeña** cuando su `origen.sello`
+- **`capas.json` manda sobre la ficha pequeña** (una sola regla para todos: `graficas.capas_que_valen`) cuando su `origen.sello`
   coincide con el de la pieza (`graficas_capas._estado`): se escribe antes, así
   que si el proceso muere entre los dos, la pieza sigue abriéndose y
   guardándose con su número de verdad (3.ª revisión: una nacida se quedaba

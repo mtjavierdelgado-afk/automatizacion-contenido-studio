@@ -900,15 +900,39 @@ def capas_vigentes(raiz, cid, pieza_id, ficha=None):
     en las nacidas en capas: si alguien la vuelve a guardar con el editor de
     antes, el sello cambia y manda lo más nuevo. Solo lee, y una ficha
     ilegible cuenta como «sin capas» (la descarga de siempre no se rompe)."""
-    meta = meta_capas(raiz, cid, pieza_id)
-    if not meta or not meta.get("sello"):
-        return False
+    return capas_que_valen(raiz, cid, pieza_id, ficha) is not None
+
+
+def capas_que_valen(raiz, cid, pieza_id, ficha=None, exacto=False):
+    """La ÚNICA regla de si vale la versión en capas (la usan la lista, la
+    descarga, el guardado de siempre y el de capas). -> dict con sello,
+    guardado, nombre y cambiada, o None. Primero la ficha pequeña; si no
+    cuadra, `capas.json`, que se escribe antes que ella: así, tras un corte
+    entre las dos escrituras, todos ven lo mismo (4.ª revisión del 11-11).
+    `exacto`: mirar SIEMPRE capas.json (el guardado necesita su número de
+    verdad); la lista y la descarga se fían de la ficha pequeña si cuadra."""
     if ficha is None:
         try:
             ficha = _ficha(raiz, cid, pieza_id)
         except Exception:                                   # noqa: BLE001
-            return False
-    return bool(ficha) and meta.get("sello") == ficha.get("sello")
+            return None
+    if not ficha or not ficha.get("sello"):
+        return None
+    meta = meta_capas(raiz, cid, pieza_id)
+    if not exacto and meta and meta.get("sello") == ficha["sello"]:
+        return dict(meta)
+    try:
+        doc = _leer_json(os.path.join(_carpeta_pieza(raiz, cid, pieza_id), "capas.json"))
+    except Exception:                                       # noqa: BLE001
+        doc = None
+    origen = doc.get("origen") if isinstance(doc, dict) and isinstance(doc.get("origen"), dict) else {}
+    if origen.get("sello") == ficha["sello"]:
+        # capas.json es lo último que se guardó de verdad
+        return {"sello": ficha["sello"], "guardado": str(origen.get("guardado") or ""),
+                "nombre": str(doc.get("nombre") or ""), "cambiada": str(doc.get("cambiada") or "")}
+    if meta and meta.get("sello") == ficha["sello"] and doc is None:
+        return dict(meta)
+    return None
 
 
 def listar_piezas(raiz, cid):
@@ -924,12 +948,12 @@ def listar_piezas(raiz, cid):
         except ErrorGraficas:
             continue
         if ficha:
-            en_capas = capas_vigentes(raiz, cid, pieza_id, ficha)
+            vale = capas_que_valen(raiz, cid, pieza_id, ficha)
+            en_capas = vale is not None
             if en_capas:
                 # lo último que se guardó es la versión en capas: su nombre y su fecha
-                meta = meta_capas(raiz, cid, pieza_id)
-                ficha = dict(ficha, nombre=meta.get("nombre") or ficha.get("nombre"),
-                             cambiada=meta.get("cambiada") or ficha.get("cambiada"))
+                ficha = dict(ficha, nombre=vale.get("nombre") or ficha.get("nombre"),
+                             cambiada=vale.get("cambiada") or ficha.get("cambiada"))
             salida.append(dict(ficha, en_capas=en_capas))
     salida.sort(key=lambda p: p.get("cambiada") or "", reverse=True)
     return salida

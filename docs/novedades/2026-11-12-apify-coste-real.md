@@ -9,3 +9,7 @@
   siga cobrando, y apunta lo reservado (nunca 0), porque la cifra de una lectura
   a medias todavía puede crecer.
 - El tope de gasto al mes funciona igual que antes.
+- **Si TikTok no deja leer una cuenta**, el aviso lo dice claro: «TikTok no le ha
+  dejado ver los vídeos al lector de Apify (le pide iniciar sesión)». Antes
+  decía que la cuenta no existía o era privada. Pasó de verdad con @ikeausa y
+  @sodimacperu el 12-11: es un bloqueo de TikTok, no un fallo del Studio.

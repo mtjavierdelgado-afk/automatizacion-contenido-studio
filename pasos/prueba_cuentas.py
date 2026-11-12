@@ -262,6 +262,10 @@ class Falso(http.server.BaseHTTPRequestHandler):
             if usuario == "camposraros":       # el actor cambió de nombres: cobra y no se entiende nada
                 items = [{"loQueSea": i} for i in range(6)]
                 cobrado = 0.0055
+            elif usuario == "muro":                # lo que devolvió de verdad el 12-11 (@ikeausa)
+                items = [{"authorMeta": {"name": usuario}, "input": usuario,
+                          "note": "Profile has no videos (or is behind a login wall)"}]
+                cobrado = 0.005
             elif usuario == "bloqueada":           # el actor contesta con un error en el resultado
                 items = [{"url": f"https://www.tiktok.com/@{usuario}", "error": "Profile could not be loaded"}]
                 cobrado = 0.0017
@@ -370,6 +374,9 @@ def prueba_fuentes(bases):
     f = lanza(F.apify, TOKEN_APIFY, "tiktok", "bloqueada", 4, bases=bases)
     ok(f is not None and f.motivo == "red" and "Profile could not be loaded" in str(f) and "¿existe?" not in str(f),
        f"si el actor contesta con un error, se dice ESE error, no «¿existe?» (prueba real del 12-11): {f}")
+    f = lanza(F.apify, TOKEN_APIFY, "tiktok", "muro", 4, bases=bases)
+    ok(f is not None and f.motivo == "red" and "le pide iniciar sesión" in str(f) and f.coste_usd == 0.005,
+       f"el muro de login de TikTok (lo que pasó de verdad el 12-11) se dice claro, con lo cobrado: {f}")
     r = F.apify(TOKEN_APIFY, "tiktok", "cero", 4, bases=bases)
     igual((r["coste_usd"], r["coste_real"]), (F.coste_apify("tiktok", 4), False),
           "un 0 con resultados no se cree: la tabla de siempre")

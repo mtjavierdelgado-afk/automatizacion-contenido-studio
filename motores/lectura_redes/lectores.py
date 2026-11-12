@@ -400,18 +400,29 @@ def leer_items_apify(red, usuario, items):
             "seguidores": seguidores, "fuente": "apify", "videos": videos}
 
 
+#: Lo que el actor de TikTok pone en «note» cuando TikTok no le deja ver los
+#: vídeos (código PROFILE_EMPTY de su página; visto en real el 12-11-2026 con
+#: @ikeausa y @sodimacperu, que sí tienen vídeos) -> lo que se le dice al dueño
+MURO_DE_LOGIN = ("login wall", "no videos")
+AVISO_MURO = ("TikTok no le ha dejado ver los vídeos al lector de Apify (le pide iniciar sesión; "
+              "la cuenta puede tener vídeos). Prueba más tarde u otra cuenta")
+
+
 def _error_de_items(items):
     """El error que el actor puso en sus resultados («error», «errorMessage»,
-    «message»), en una línea y corto. "" si no trae ninguno."""
+    «message», «note»), en una línea y corto. "" si no trae ninguno."""
     for it in items or []:
         if not isinstance(it, dict):
             continue
-        for clave in ("error", "errorMessage", "errorDescription", "message"):
+        for clave in ("error", "errorMessage", "errorDescription", "message", "note"):
             valor = it.get(clave)
             if isinstance(valor, dict):
                 valor = valor.get("message") or valor.get("type")
             if valor:
-                return " ".join(str(valor).split())[:200]
+                texto = " ".join(str(valor).split())[:200]
+                if all(trozo in texto.lower() for trozo in MURO_DE_LOGIN):
+                    return f"{AVISO_MURO} (Apify: «{texto}»)"
+                return texto
     return ""
 
 

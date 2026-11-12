@@ -554,9 +554,21 @@ class ClienteUploadPost:
 
     @staticmethod
     def _numero(valor):
+        """Un número de lo que manda Upload-Post, o None. Acepta texto: «3»,
+        «40%» (el signo se quita: la escala la decide quien lo lee), «1,234»
+        o «1.234.567» (miles) y «0,5» (coma decimal). Lo demás, None."""
         if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            if not isinstance(valor, str) or not valor.strip():
+                return None
+            texto = valor.strip().replace("\u00a0", "").replace(" ", "").rstrip("%")
+            if re.fullmatch(r"-?\d{1,3}(,\d{3})+(\.\d+)?", texto):
+                texto = texto.replace(",", "")                 # 1,234.5
+            elif re.fullmatch(r"-?\d{1,3}(\.\d{3})+(,\d+)?", texto):
+                texto = texto.replace(".", "").replace(",", ".")  # 1.234,5
+            elif re.fullmatch(r"-?\d+,\d+", texto):
+                texto = texto.replace(",", ".")                 # 0,5
             try:
-                valor = float(str(valor).strip()) if isinstance(valor, str) and valor.strip() else None
+                valor = float(texto)
             except ValueError:
                 return None
         if valor is None or valor != valor or valor in (float("inf"), float("-inf")):
@@ -599,8 +611,17 @@ class ClienteUploadPost:
         datos.update(cls._detalle(bruto))
         return datos
 
+    @staticmethod
+    def _primero(item, claves):
+        """El primer valor de `claves` que no es None ni vacío (un «second»
+        null no tapa el «time» de al lado)."""
+        for k in claves:
+            if item.get(k) not in (None, ""):
+                return item.get(k)
+        return None
+
     @classmethod
-    def _escala_comun(cls, crudos):
+    def _escala_comun(cls, crudos, reparto=False):
         """Porcentajes de UNA lista como fracciones (0..1). La escala se decide
         una vez POR LISTA, no punto a punto (revision independiente, 11-11): si
         algun valor pasa de 1, la lista viene en 0-100 y se dividen TODOS. Punto
@@ -611,8 +632,16 @@ class ClienteUploadPost:
         numeros = [v if v is not None and v >= 0 else None for v in numeros]
         # 1,5 y no 1: una lista 0-100 de verdad nunca tiene su maximo tan bajo
         # (la curva empieza cerca de 100, un reparto suma cerca de 100), y una
-        # fraccion que se pasa un pelo de 1 (1,02) no divide la lista entera
+        # fraccion que se pasa un pelo de 1 (1,02) no divide la lista entera.
+        # Upload-Post las manda en fracciones (docs, get-analytics: «fractions
+        # of 1»); esto es por si algún día llegan en 0-100.
         en_cien = any(v is not None and v > 1.5 for v in numeros)
+        # un REPARTO de enteros que suma más de 1,5 ([1, 1]) solo puede estar en
+        # 0-100: en fracciones, dos enteros serían dos «100 %» (revisión, 12-11)
+        validos = [v for v in numeros if v is not None]
+        if reparto and not en_cien and len(validos) >= 2 and sum(validos) > 1.5 \
+                and all(float(v).is_integer() for v in validos):
+            en_cien = True
         salida = []
         for v in numeros:
             if v is not None and en_cien:
@@ -635,19 +664,29 @@ class ClienteUploadPost:
             if v is not None and 0 <= v < 10 ** 10:
                 total = round(v, 1)
                 break
+        # En SEGUNDOS (docs de Upload-Post, get-analytics, comprobado el 12-11:
+        # 40.218 vistas × 7,4 s de media = 297.613). Si un día llegara en
+        # milisegundos, cuadraría mil veces por encima de vistas × tiempo medio:
+        # se pasa a segundos en vez de enseñar «mil veces más».
+        vistas = cls._numero(bruto.get("views"))
+        medio = cls._numero(cls._primero(bruto, cls.CAMPOS_TIEMPO_MEDIO))
+        if total and vistas and medio and vistas > 0 and medio > 0 \
+                and total > 100 * vistas * medio:
+            total = round(total / 1000, 1)
         curva, mitad = [], None
         crudo = bruto.get("retention")
         if isinstance(crudo, dict):
             crudo = [{"second": k, "percentage": v} for k, v in crudo.items()]
         if isinstance(crudo, list):
             puntos = [p for p in crudo if isinstance(p, dict)]
-            segundos = [cls._numero(p.get("second", p.get("time", p.get("seconds")))) for p in puntos]
-            partes = cls._escala_comun([p.get("percentage", p.get("rate", p.get("value"))) for p in puntos])
+            segundos = [cls._numero(cls._primero(p, ("second", "time", "seconds"))) for p in puntos]
+            partes = cls._escala_comun([cls._primero(p, ("percentage", "rate", "value")) for p in puntos])
             por_segundo = {}
             for segundo, parte in zip(segundos, partes):
                 if segundo is None or parte is None or segundo < 0 or segundo > 86400:
                     continue
-                por_segundo[round(segundo, 1)] = parte      # un segundo repetido: manda el ultimo
+                # a la milésima: a la décima, el segundo 0,04 pisaba al 0 (12-11)
+                por_segundo[round(segundo, 3)] = parte      # un segundo repetido: manda el ultimo
             curva = [[sg, round(pt, 4)] for sg, pt in sorted(por_segundo.items())]
             # EN QUE SEGUNDO SE VA LA MITAD, con la curva ENTERA (antes de
             # aligerarla): la pantalla lo dice en una frase y no puede mentir
@@ -668,7 +707,8 @@ class ClienteUploadPost:
             if not isinstance(crudo, list):
                 return None
             items = [i for i in crudo if isinstance(i, dict)]
-            partes = cls._escala_comun([i.get("percentage", i.get("value")) for i in items])
+            partes = cls._escala_comun([cls._primero(i, ("percentage", "value")) for i in items],
+                                       reparto=True)
             salida = []
             for item, parte in zip(items, partes):
                 nombre = next((str(item[k]) for k in claves if item.get(k) not in (None, "")), "")
@@ -681,7 +721,9 @@ class ClienteUploadPost:
                 "mitad_s": mitad if curva else None,
                 "fuentes": reparto(bruto.get("impression_sources"),
                                    ("impression_source", "source", "nombre", "name")),
-                "publico": reparto(bruto.get("audience_types"), ("type", "nombre", "name"))}
+                # «audience_type» es como lo llama Upload-Post (docs, 12-11)
+                "publico": reparto(bruto.get("audience_types"),
+                                   ("audience_type", "type", "nombre", "name"))}
 
     #: Un recuento por encima de esto no es una cifra, es un error
     TOPE_RECUENTO = 10 ** 12

@@ -29023,11 +29023,27 @@ function textoMetricas(m) {
    veces a quien vio dos: por eso dice «sumado». */
 function textoMetricasAparte(m, sumado) {
   if (!m) return '';
+  // en un total, cada cifra dice de cuántas publicaciones sale si no son todas
+  // (TikTok no da impresiones; solo Instagram da lo visto en Facebook…)
+  const de = k => {
+    const n = m[`${k}_posts`];
+    return sumado && typeof n === 'number' && typeof m.posts === 'number' && n < m.posts
+      ? ` (${n} de ${m.posts} publicaciones)` : '';
+  };
   const partes = [];
-  if (typeof m.alcance === 'number') partes.push(`${numeroCorto(m.alcance)} personas alcanzadas${sumado ? ' (sumado)' : ''}`);
-  if (typeof m.impresiones === 'number') partes.push(`${numeroCorto(m.impresiones)} impresiones`);
-  if (typeof m.tiempo_total_s === 'number') partes.push(`${tiempoLegible(m.tiempo_total_s)} vistas en total`);
+  if (typeof m.alcance === 'number') partes.push(`${numeroCorto(m.alcance)} personas alcanzadas${sumado ? ' (sumado)' : ''}${de('alcance')}`);
+  if (typeof m.impresiones === 'number') partes.push(`${numeroCorto(m.impresiones)} impresiones${de('impresiones')}`);
+  if (sumado && typeof m.vistas_facebook === 'number') partes.push(`${numeroCorto(m.vistas_facebook)} vistas de tus Reels en Facebook${de('vistas_facebook')}`);
+  if (sumado && typeof m.visitas_perfil === 'number') partes.push(`${numeroCorto(m.visitas_perfil)} visitas al perfil${de('visitas_perfil')}`);
+  if (typeof m.tiempo_total_s === 'number') partes.push(`${tiempoLegible(m.tiempo_total_s)} vistas en total${de('tiempo_total_s')}`);
   return partes.join(' · ');
+}
+
+/* Bajo una cifra grande de Resultados: «2 de 5» si no todas la dan. */
+function deCuantasPublicaciones(total, k) {
+  const n = (total || {})[`${k}_posts`];
+  return typeof n === 'number' && typeof total.posts === 'number' && n < total.posts && k !== 'posts'
+    ? ` · ${n} de ${total.posts}` : '';
 }
 
 /* La curva de retención de TikTok (qué parte sigue viendo en cada segundo),
@@ -29081,14 +29097,20 @@ function detalleMetricasEnvio(e) {
     curva ? h('div', { clase: 'fila curva-envio' }, curva,
       h('span', { clase: 'meta' }, mitad
         ? `La mitad deja de verlo en el segundo ${Math.round(mitad[0])}.`
-        : 'Más de la mitad lo ve hasta el final.')) : null,
+        // lo último que da TikTok, no «hasta el final»: la curva puede acabar
+        // antes que el vídeo y chocar con «X % lo vio hasta el final» (12-11)
+        : `Más de la mitad sigue viéndolo en el segundo ${Math.round(((m.curva || []).slice(-1)[0] || [0])[0])}, lo último que da TikTok.`)) : null,
     fuentes, publico);
 }
 
 /* La retención (publicar-redes-2): solo la dan TikTok y YouTube. Lo que no
    llega no se escribe (nunca «0 %»: sería mentir). */
 function porcentaje(fraccion) {
-  return `${(Number(fraccion) * 100).toFixed(Number(fraccion) < 0.1 ? 1 : 0).replace('.', ',')} %`;
+  const f = Number(fraccion);
+  // por debajo del 1 %, con dos decimales (0,05 %, no «0,0 %» ni «0,1 %»);
+  // por debajo del 0,01 %, «menos de 0,01 %» (revisión, 12-11)
+  if (f > 0 && f < 0.0001) return 'menos de 0,01 %';
+  return `${(f * 100).toFixed(f < 0.01 ? 2 : f < 0.1 ? 1 : 0).replace('.', ',')} %`;
 }
 
 function textoRetencion(m) {
@@ -29864,7 +29886,7 @@ function seccionResultadosPublicar() {
       ['comentarios', 'comentarios'], ['compartidos', 'compartidos'], ['guardados', 'guardados'],
       ['nuevos_seguidores', 'seguidores nuevos']].map(([k, t]) =>
       h('div', { clase: 'cifra' }, h('b', {}, typeof total[k] === 'number' ? numeroCorto(total[k]) : '—'),
-        h('span', { clase: 'meta' }, t)))));
+        h('span', { clase: 'meta' }, typeof total[k] === 'number' ? t + deCuantasPublicaciones(total, k) : t)))));
   // metricas-completas: lo que no son reproducciones, aparte y dicho como es
   const aparteTotal = textoMetricasAparte(total, true);
   if (aparteTotal) {
@@ -33924,7 +33946,7 @@ function seccionInformePublicar() {
       ['comentarios', 'comentarios'], ['compartidos', 'compartidos'], ['guardados', 'guardados']].map(([k, nombre]) => {
       const cambio = variacion(t[k], a[k]);
       return h('div', { clase: 'cifra' }, h('b', {}, typeof t[k] === 'number' ? numeroCorto(t[k]) : '—'),
-        h('span', { clase: 'meta' }, nombre),
+        h('span', { clase: 'meta' }, typeof t[k] === 'number' ? nombre + deCuantasPublicaciones(t, k) : nombre),
         cambio ? h('span', { clase: 'meta' }, `${cambio} vs. ${r.en_curso ? 'los mismos días del mes anterior' : 'mes anterior'}`) : null);
     })));
   caja.appendChild(h('div', { clase: 'meta' }, `${r.videos} vídeo(s) · ${r.dias_con_publicacion} día(s) con publicación`

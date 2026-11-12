@@ -265,15 +265,21 @@ class SimuladoUploadPost:
                 if r == "tiktok":
                     duracion = 30
                     crudo = {"new_followers": base // 90 + vueltas, "profile_views": base // 30,
-                             "total_time_watched": float(base * vueltas * 7),
-                             "retention": [{"second": str(s), "percentage": 100 if s == 0 else max(5, 100 - s * 3 - base % 7)}
+                             # como Upload-Post: segundos (vistas × tiempo medio) y
+                             # porcentajes en fracciones de 1 (docs, get-analytics)
+                             "views": salida[r].get("vistas"),
+                             "average_time_watched": salida[r].get("tiempo_medio_s"),
+                             "total_time_watched": float((salida[r].get("vistas") or base)
+                                                         * (salida[r].get("tiempo_medio_s") or 7)),
+                             "retention": [{"second": str(s), "percentage": 1.0 if s == 0 else
+                                            round(max(5, 100 - s * 3 - base % 7) / 100, 2)}
                                            for s in range(0, duracion + 1, 3)],
                              "impression_sources": [
                                  {"impression_source": "For You", "percentage": 0.81},
                                  {"impression_source": "Personal Profile", "percentage": 0.12},
                                  {"impression_source": "Search", "percentage": 0.07}],
-                             "audience_types": [{"type": "New viewers", "percentage": 0.9},
-                                                {"type": "Returning viewers", "percentage": 0.1}]}
+                             "audience_types": [{"audience_type": "New viewers", "percentage": 0.9},
+                                                {"audience_type": "Returning viewers", "percentage": 0.1}]}
                 elif r == "instagram":
                     crudo = {"impressions": base * vueltas * 2, "reach": base * vueltas,
                              "facebook_views": base // 3}

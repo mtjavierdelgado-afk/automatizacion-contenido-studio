@@ -47,6 +47,14 @@ def publicar_metricas_completas(navegador, datos):
     ok(pg.visible(".cifras-grandes-publicar .cifra", "guardados"), "y los guardados")
     ok(pg.esperar(".cifras-aparte", "impresiones", 5) and pg.visible(".cifras-aparte", "(sumado)"),
        "y, aparte, las impresiones y el alcance «sumado»")
+    # revisión del 12-11: cada total dice de cuántas publicaciones sale
+    ok(pg.visible(".cifras-grandes-publicar .cifra", "seguidores nuevos · 1 de 2"),
+       "los seguidores nuevos (solo TikTok) dicen de cuántas publicaciones salen")
+    ok(pg.visible(".cifras-aparte", "publicaciones)"), "y las impresiones (solo Instagram), también")
+    ok(pg.visible(".cifras-aparte", "vistas de tus Reels en Facebook"),
+       "lo visto de los Reels en Facebook sale en el total")
+    ok(pg.p.evaluate("() => [porcentaje(0.0005), porcentaje(0.00001), porcentaje(0.05), porcentaje(0.184)].join('|')")
+       == "0,05 %|menos de 0,01 %|5,0 %|18 %", "los porcentajes pequeños no salen como «0,0 %»")
     pg.captura("publicar_metricas_completas_resultados")
     pg.js(f"abrirPublicarVideo('{pid}');")
     ok(_paso_ficha(pg, "envios"), "la ficha, en su paso «Envíos»")
@@ -56,8 +64,8 @@ def publicar_metricas_completas(navegador, datos):
     ok(pg.p.locator(".mas-cifras-envio[open] svg.curva-retencion polyline").count() >= 1,
        "con la curva de retención de TikTok dibujada")
     ok(pg.visible(".mas-cifras-envio[open] .curva-envio", "segundo")
-       or pg.visible(".mas-cifras-envio[open] .curva-envio", "hasta el final"),
-       "y lo que dice la curva en una frase")
+       and not pg.visible(".mas-cifras-envio[open] .curva-envio", "hasta el final"),
+       "y lo que dice la curva en una frase (sin «hasta el final», que podía contradecir la retención)")
     ok(pg.visible(".mas-cifras-envio[open]", "De dónde vinieron las vistas") and pg.visible(".mas-cifras-envio[open]", "Para ti"),
        "y de dónde vinieron las vistas, en español («Para ti», no «For You»)")
     pg.captura("publicar_metricas_completas_ficha")

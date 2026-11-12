@@ -2082,8 +2082,59 @@ def prueba_metricas_completas():
         igual(C._detalle({"retention": [{"second": 0, "percentage": 1.0}, {"second": 5, "percentage": 1.02},
                                         {"second": 10, "percentage": 0.4}]})["mitad_s"], 10.0,
               "una fracción que se pasa un pelo de 1 no divide la lista entera entre 100")
+        # REVISIÓN DEL 12-11 (los 8 detalles): una lectura nueva SIN un campo no
+        # borra el que ya había, y el total sigue contándolo
+        envio_ig = next(e for e in P._leer_video(raiz, "completo")["envios"] if e["red"] == "instagram")
+        impresiones_antes = envio_ig["metricas"]["impresiones"]
+        P._apuntar_metricas(raiz, [("completo", envio_ig)], {"instagram": {"vistas": 5, "impresiones": None}})
+        ig2 = {e["red"]: e for e in P._leer_video(raiz, "completo")["envios"]}["instagram"]["metricas"]
+        igual(ig2["impresiones"], impresiones_antes, "una lectura sin impresiones no borra las que había")
+        res = P.resultados(raiz, [{"pid": "completo", "nombre": "Completo", "cliente": ""}], "")
+        igual((res["total"]["impresiones"], res["total"]["impresiones_posts"], res["total"]["posts"]),
+              (impresiones_antes, 1, 2), "y el total las sigue sumando, diciendo que salen de 1 de 2 publicaciones")
     finally:
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+    seccion("4f] métricas completas: los 8 detalles de la revisión del 12-11")
+    # 1) cada total dice de cuántas publicaciones sale; lo que nadie da, sin clave
+    total = {"posts": 2}
+    P._suma(total, {"vistas": 5, "nuevos_seguidores": 3})
+    P._suma(total, {"vistas": 3})
+    P._medias(total)
+    igual((total["vistas_posts"], total["nuevos_seguidores"], total["nuevos_seguidores_posts"]), (2, 3, 1),
+          "los seguidores nuevos (solo TikTok) dicen que salen de 1 de 2 publicaciones")
+    ok("impresiones" not in total and "impresiones_posts" not in total,
+       "una cifra que ninguna red da no sale en el total (la pantalla pone «—», no 0)")
+    ok(not any(k.startswith("_") for k in total), "y no quedan cuentas internas en el total")
+    import publicar_informe as INF  # noqa: PLC0415
+    texto = INF.resumen({"nombre": "X", "nombre_mes": "noviembre", "en_curso": False, "videos": 1,
+                         "dias_con_publicacion": 1, "por_red": {}, "total": dict(total, guardados=4, guardados_posts=1),
+                         "anterior": {}, "mejores": [], "horario": {}, "palabras": {}, "seguidores": {},
+                         "sin_cifras": 0})
+    ok("Guardados: 4 (1 de 2 publicaciones)" in texto, f"el informe dice de cuántas salen los guardados: {texto!r}")
+    # 3) un reparto de enteros que suma más de 1,5 está en 0-100; uno solapado en fracciones, no
+    igual(C._detalle({"impression_sources": [{"source": "A", "percentage": 1}, {"source": "B", "percentage": 1}]})["fuentes"],
+          [["A", 0.01], ["B", 0.01]], "[1, 1] en un reparto es 1 % y 1 % (no 100 % y 100 %)")
+    igual(C._detalle({"audience_types": [{"audience_type": "Followers", "percentage": 0.6},
+                                         {"audience_type": "New viewers", "percentage": 0.8}]})["publico"],
+          [["New viewers", 0.8], ["Followers", 0.6]], "un público con grupos que se solapan, en fracciones, se deja igual")
+    # el público se llama «audience_type» en Upload-Post (docs, 12-11)
+    igual(C._detalle({"audience_types": [{"audience_type": "New viewers", "percentage": 0.881},
+                                         {"audience_type": "Returning viewers", "percentage": 0.119}]})["publico"],
+          [["New viewers", 0.881], ["Returning viewers", 0.119]], "el público con la clave de Upload-Post («audience_type»)")
+    # 4) formas que antes se perdían
+    igual([C._numero(x) for x in ("40%", "1,234", "1.234,5", "0,5", " 7 ", "abc", "")],
+          [40.0, 1234.0, 1234.5, 0.5, 7.0, None, None], "«40%», «1,234», «1.234,5» y «0,5» se leen")
+    igual(C._detalle({"retention": [{"second": None, "time": 3, "percentage": 0.5},
+                                    {"second": 0, "percentage": 1.0}]})["curva"],
+          [[0.0, 1.0], [3.0, 0.5]], "un «second» vacío no tapa el «time» de al lado")
+    igual(C._detalle({"retention": [{"second": 0, "percentage": 1.0}, {"second": 0.04, "percentage": 0.99},
+                                    {"second": 1, "percentage": 0.8}]})["curva"],
+          [[0.0, 1.0], [0.04, 0.99], [1.0, 0.8]], "el segundo 0,04 ya no pisa el 100 % del segundo 0")
+    # 5) el tiempo total en segundos (docs); si llegara en milisegundos, se nota y se pasa
+    igual(C._detalle({"views": 40218, "average_time_watched": 7.4, "total_time_watched": 297613})["tiempo_total_s"],
+          297613.0, "el tiempo total del ejemplo de Upload-Post (segundos) se queda igual")
+    igual(C._detalle({"views": 40218, "average_time_watched": 7.4, "total_time_watched": 297613000})["tiempo_total_s"],
+          297613.0, "en milisegundos, cuadra mil veces por encima: se pasa a segundos")
 
 def prueba_retencion_y_resumenes():
     seccion("4b] retención, lectura guardada, semana y mes, lo que mejor funcionó")

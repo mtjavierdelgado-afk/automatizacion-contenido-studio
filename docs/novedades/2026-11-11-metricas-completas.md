@@ -3,3 +3,7 @@
 - Debajo, aparte, las **impresiones** (las veces que la red lo enseñó, que no es lo mismo que verlo), las **personas alcanzadas** (sumadas entre publicaciones: quien vio dos cuenta dos veces) y el **tiempo total visto**.
 - En la ficha de cada vídeo, paso **Envíos → «Más cifras»**: la **curva de TikTok** (qué parte sigue viendo en cada segundo y en qué segundo se va la mitad), **de dónde vinieron las vistas** (Para ti, tu perfil, búsqueda…) y **qué público lo vio**. De Instagram, además, lo que se vio del mismo Reel en Facebook.
 - Sale con lo que se pida a partir de ahora con «Actualizar»: no cuesta nada más ni gasta más consultas.
+- Cada total dice **de cuántas publicaciones sale** cuando no todas las redes dan esa cifra (por ejemplo «seguidores nuevos · 1 de 2»: solo TikTok los da). En el **Informe del mes**, igual con los guardados (YouTube no los da).
+- En el total salen también las **vistas de tus Reels en Facebook** y las **visitas al perfil**.
+- La frase de la curva ya no dice «hasta el final» cuando la curva de TikTok se corta antes: dice en qué segundo sigue viéndolo más de la mitad.
+- Los porcentajes pequeños se leen bien («0,05 %», no «0,0 %»), y el **público** de TikTok («Espectadores nuevos», «Que ya lo habían visto») sale con lo que manda de verdad Upload-Post.

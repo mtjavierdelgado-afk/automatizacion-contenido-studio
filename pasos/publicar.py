@@ -4003,6 +4003,9 @@ def _suma(destino, metricas):
         v = (metricas or {}).get(k)
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             destino[k] = (destino.get(k) or 0) + (round(float(v), 1) if k == "tiempo_total_s" else int(v))
+            # cuántas publicaciones entran en esa cifra (revisión, 12-11): no
+            # todas las redes dan todo, y un total de 2 de 5 tiene que decirlo
+            destino[f"_c_{k}"] = (destino.get(f"_c_{k}") or 0) + 1
     vistas = (metricas or {}).get("vistas")
     peso = float(vistas) if isinstance(vistas, (int, float)) and vistas > 0 else 0.0
     for k in RETENCION:
@@ -4019,7 +4022,12 @@ def _suma(destino, metricas):
 
 def _medias(destino):
     """Cierra una suma: la retencion pasa a ser la media de los posts que la
-    dan (no de todos: los que no la dan no cuentan como cero)."""
+    dan (no de todos: los que no la dan no cuentan como cero). Y cada cifra
+    sumada dice de cuántas publicaciones sale (`<cifra>_posts`)."""
+    for k in METRICAS + EXTRAS:
+        n = destino.pop(f"_c_{k}", None)
+        if n is not None:
+            destino[f"{k}_posts"] = n
     for k in RETENCION:
         n = destino.pop(f"_n_{k}", 0)
         suma = destino.pop(f"_s_{k}", 0)

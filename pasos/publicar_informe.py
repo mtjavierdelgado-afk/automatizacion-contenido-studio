@@ -326,7 +326,11 @@ def resumen(inf):
                       ("comentarios", "Comentarios"), ("compartidos", "Compartidos"),
                       ("guardados", "Guardados")):
         if isinstance(t.get(k), (int, float)):
-            lineas.append(f"• {nombre}: {_num(t[k])}" + _cambio(t.get(k), a.get(k), frente))
+            # no todas las redes dan todo (YouTube no da guardados): se dice
+            n = t.get(f"{k}_posts")
+            de = (f" ({n} de {t.get('posts')} publicaciones)"
+                  if isinstance(n, int) and isinstance(t.get("posts"), int) and n < t["posts"] else "")
+            lineas.append(f"• {nombre}: {_num(t[k])}{de}" + _cambio(t.get(k), a.get(k), frente))
     if inf["por_red"]:
         lineas += ["", "Por red:"]
         for red, f in inf["por_red"].items():

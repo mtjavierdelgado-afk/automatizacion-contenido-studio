@@ -129,6 +129,9 @@ def prueba_piezas():
 
 class Falso(http.server.BaseHTTPRequestHandler):
     vistas = []
+    ejecuciones = {}       # las de Apify: {id: run}
+    resultados = {}        # sus datasets: {id: [items]}
+    abortadas = []
 
     def log_message(self, *a):
         pass
@@ -191,6 +194,28 @@ class Falso(http.server.BaseHTTPRequestHandler):
                 "media": {"data": [{"id": "m1", "caption": "Reel 1", "like_count": 50, "comments_count": 3,
                                     "view_count": 4000, "timestamp": "2026-10-02T20:00:00+0000",
                                     "permalink": "https://instagram.com/p/m1", "media_product_type": "REELS"}]}}})
+        if url.path.startswith("/apify/actor-runs/"):   # cómo va la ejecución
+            if self._portador() != TOKEN_APIFY:
+                return self._json(401, {"error": {"message": "token no vale"}})
+            run = Falso.ejecuciones.get(url.path.rsplit("/", 1)[-1])
+            if not run:
+                return self._json(404, {})
+            if run.get("_caida"):                       # Apify no contesta a las preguntas
+                return self._json(500, {"error": {"message": "fallo interno"}})
+            if run["_preguntas"] > 0:
+                run["_preguntas"] -= 1
+                run["usageTotalUsd"] = round((run.get("usageTotalUsd") or 0) + 0.0003, 4)
+                if not run["_preguntas"]:
+                    run["status"] = run["_final"]
+                    if run.get("_cobrado") is not None:
+                        run["usageTotalUsd"] = run["_cobrado"]
+                    else:
+                        run.pop("usageTotalUsd", None)
+            return self._json(200, {"data": {k: v for k, v in run.items() if not k.startswith("_")}})
+        if url.path.startswith("/apify/datasets/"):     # los resultados
+            if self._portador() != TOKEN_APIFY:
+                return self._json(401, {"error": {"message": "token no vale"}})
+            return self._json(200, Falso.resultados.get(url.path.split("/")[3], []))
         if url.path == "/apify/users/me":           # quién soy: no corre ningún actor
             if self._portador() != TOKEN_APIFY:
                 return self._json(401, {"error": {"message": f"token {self._portador()} no vale"}})
@@ -204,24 +229,59 @@ class Falso(http.server.BaseHTTPRequestHandler):
         cuerpo = json.loads(self.rfile.read(largo) or b"{}")
         Falso.vistas.append(("POST", url.path, q, cuerpo))
         Falso.caminos.append(self.path)
+        if url.path.startswith("/apify/actor-runs/") and url.path.endswith("/abort"):
+            run = Falso.ejecuciones.get(url.path.split("/")[3])
+            if not run:
+                return self._json(404, {})
+            Falso.abortadas.append(url.path.split("/")[3])
+            if run.get("_caida"):
+                return self._json(500, {"error": {"message": "fallo interno"}})
+            # como Apify: el aborto contesta ABORTING, con lo cobrado hasta ese instante
+            run.update(status="ABORTING", usageTotalUsd=0.0021, _preguntas=0)
+            return self._json(200, {"data": {k: v for k, v in run.items() if not k.startswith("_")}})
         if url.path.startswith("/apify/"):
             if self._portador() != TOKEN_APIFY:
                 return self._json(401, {"error": {"message": f"token {self._portador()} no vale"}})
             usuario = (cuerpo.get("profiles") or cuerpo.get("username") or ["?"])[0]
             if usuario == "sincredito":
                 return self._json(402, {"error": {"message": "Not enough credit"}})
-            if usuario == "tarda":
-                return self._json(408, {"error": {"message": "Run timed out"}})
+            # LA EJECUCIÓN (rama apify-coste-real): estado, dataset y lo cobrado
+            final, preguntas, cobrado, caida = "SUCCEEDED", 0, 0.0042, False
+            if usuario == "tarda":                 # el actor se pasa de su tiempo
+                final, cobrado = "TIMED-OUT", 0.009
+            elif usuario == "lenta":               # aún corre: tarda dos preguntas
+                preguntas = 2
+            elif usuario == "nunca":               # no acaba nunca: se aborta
+                preguntas = 10 ** 6
+            elif usuario == "caida":               # arranca y Apify deja de contestar
+                preguntas, caida = 10 ** 6, True
+            elif usuario == "sincifra":            # Apify no dice lo cobrado
+                cobrado = None
+            elif usuario == "cero":                # dice 0 con resultados (precio por resultado fuera)
+                cobrado = 0.0
             if usuario == "camposraros":       # el actor cambió de nombres: cobra y no se entiende nada
-                return self._json(201, [{"loQueSea": i} for i in range(6)])
-            if usuario.startswith("noexiste"):
-                return self._json(201, [])
-            if "tiktok" in url.path:
-                return self._json(201, [{"id": str(i), "text": f"tiktok {i}", "playCount": 900 - i, "diggCount": 10,
-                                         "createTimeISO": "2026-10-01T00:00:00Z", "authorMeta": {"nickName": usuario}}
-                                        for i in range(4)])
-            return self._json(201, [{"shortCode": "s1", "caption": "por apify", "videoPlayCount": 777,
-                                     "likesCount": 7, "commentsCount": 1}])
+                items = [{"loQueSea": i} for i in range(6)]
+                cobrado = 0.0055
+            elif usuario.startswith("noexiste"):
+                items = []
+                cobrado = 0.0009
+            elif "tiktok" in url.path:
+                items = [{"id": str(i), "text": f"tiktok {i}", "playCount": 900 - i, "diggCount": 10,
+                          "createTimeISO": "2026-10-01T00:00:00Z", "authorMeta": {"nickName": usuario}}
+                         for i in range(4)]
+            else:
+                items = [{"shortCode": "s1", "caption": "por apify", "videoPlayCount": 777,
+                          "likesCount": 7, "commentsCount": 1}]
+            rid = f"run{len(Falso.ejecuciones) + 1}"
+            Falso.resultados[f"ds_{rid}"] = items
+            # como Apify: arranca RUNNING con casi nada cobrado; lo final, al terminar
+            run = {"id": rid, "status": "RUNNING" if preguntas else final, "defaultDatasetId": f"ds_{rid}",
+                   "_final": final, "_preguntas": preguntas, "_cobrado": cobrado, "_caida": caida,
+                   "usageTotalUsd": 0.0001 if preguntas else cobrado}
+            if run["usageTotalUsd"] is None:
+                run.pop("usageTotalUsd")
+            Falso.ejecuciones[rid] = run
+            return self._json(201, {"data": {k: v for k, v in run.items() if not k.startswith("_")}})
         return self._json(404, {})
 
 
@@ -271,8 +331,11 @@ def prueba_fuentes(bases):
           "«Buscar mi cuenta» con el token")
 
     r = F.apify(TOKEN_APIFY, "tiktok", "ana", 4, bases=bases)
-    igual((len(r["videos"]), r["fuente"], r["coste_usd"]), (4, "apify", 0.0068), "Apify TikTok, con su coste")
+    igual((len(r["videos"]), r["fuente"], r["coste_usd"], r["coste_real"]), (4, "apify", 0.0042, True),
+          "Apify TikTok, con lo que Apify dice que ha cobrado (no la tabla: 0,0068)")
     pedido = [v for v in Falso.vistas if v[0] == "POST"][-1]
+    ok(pedido[1].endswith("/runs") and pedido[2].get("maxItems") == "4" and "waitForFinish" in pedido[2],
+       "se lanza la ejecución con su techo de resultados y esperando a que acabe")
     ok("clockworks~tiktok-scraper" in pedido[1] and pedido[3].get("profiles") == ["ana"]
        and pedido[3].get("shouldDownloadVideos") is False, "el actor de TikTok, sin descargar vídeos")
     f = lanza(F.apify, TOKEN_APIFY, "tiktok", "sincredito", 4, bases=bases)
@@ -281,6 +344,31 @@ def prueba_fuentes(bases):
     ok(f is not None and f.motivo == "clave" and "apify_api_MALO_1234567" not in str(f), "un token malo de Apify, sin el token")
     f = lanza(F.apify, TOKEN_APIFY, "tiktok", "noexiste_x", 4, bases=bases)
     igual(getattr(f, "motivo", ""), "no_encontrada", "una cuenta sin vídeos públicos")
+    igual(getattr(f, "coste_usd", None), 0.0009, "y lo que Apify cobró por mirarla viaja con el fallo")
+    # LO COBRADO DE VERDAD (rama apify-coste-real)
+    r = F.apify(TOKEN_APIFY, "tiktok", "lenta", 4, bases=bases)
+    igual((len(r["videos"]), r["coste_usd"]), (4, 0.0042), "una ejecución que tarda: se espera a que acabe")
+    r = F.apify(TOKEN_APIFY, "tiktok", "sincifra", 4, bases=bases)
+    igual((r["coste_usd"], r["coste_real"]), (F.coste_apify("tiktok", 4), False),
+          "si Apify no dice lo cobrado, la tabla de siempre (y se sabe que es estimado)")
+    f = lanza(F.apify, TOKEN_APIFY, "tiktok", "tarda", 4, bases=bases)
+    ok(f is not None and f.cobrado and f.coste_usd == 0.009, "el actor se pasó de su tiempo: cobrado, con su cifra")
+    antes = len(Falso.abortadas)
+    f = lanza(F.apify, TOKEN_APIFY, "tiktok", "nunca", 4, bases=bases, plazo=8)
+    ok(f is not None and f.cobrado and len(Falso.abortadas) == antes + 1 and f.coste_usd is None,
+       "si no acaba en el plazo, se ABORTA y la cifra a medias no vale: se queda la reserva")
+    f = lanza(F.apify, TOKEN_APIFY, "tiktok", "caida", 4, bases=bases, plazo=8)
+    ok(f is not None and f.cobrado and f.coste_usd is None,
+       "si Apify deja de contestar, NUNCA se apunta 0: se queda la reserva (revisión del 12-11)")
+    igual(F._cobrado_apify({"status": "TIMED-OUT", "usageTotalUsd": 0.0003}, "tiktok", 30), None,
+          "un fallo que llevaba resultados con una cifra mínima no se cree: se queda la reserva")
+    igual(F._cobrado_apify({"status": "TIMED-OUT", "usageTotalUsd": 0.04}, "tiktok", 30), 0.04,
+          "una cifra que cuadra, sí")
+    r = F.apify(TOKEN_APIFY, "tiktok", "cero", 4, bases=bases)
+    igual((r["coste_usd"], r["coste_real"]), (F.coste_apify("tiktok", 4), False),
+          "un 0 con resultados no se cree: la tabla de siempre")
+    ok("TOKENDEPRUEBA" not in json.dumps([v[1] for v in Falso.vistas]),
+       "el token nunca va en las direcciones (va en la cabecera)")
 
 
 # ------------------------------------------------------ 3. el orden y el dinero
@@ -358,13 +446,13 @@ def prueba_orden(bases):
         # lo que Apify cobra aunque falle también cuenta para el tope
         antes = C.gasto_del_mes(raiz)
         lanza(C.leer, raiz, "tiktok", "tarda", 10, pagar=True)
-        igual(round(C.gasto_del_mes(raiz) - antes, 4), F.coste_apify("tiktok", 10),
-              "un actor que se pasa de tiempo: lo reservado se queda apuntado")
+        igual(round(C.gasto_del_mes(raiz) - antes, 4), 0.009,
+              "un actor que se pasa de tiempo: se apunta lo que Apify cobró de verdad")
         antes = C.gasto_del_mes(raiz)
         f = lanza(C.leer, raiz, "tiktok", "camposraros", 10, pagar=True)
         ok(f is not None, "resultados que no se entienden: no hay cuenta")
-        igual(round(C.gasto_del_mes(raiz) - antes, 4), F.coste_apify("tiktok", 6),
-              "pero los 6 resultados cobrados se apuntan")
+        igual(round(C.gasto_del_mes(raiz) - antes, 4), 0.0055,
+              "pero lo cobrado por los 6 resultados se apunta (lo que dice Apify)")
         antes = C.gasto_del_mes(raiz)
         C.guardar_claves({"apify_token": "apify_api_malo_000000"})
         lanza(C.leer, raiz, "tiktok", "otra", 10, pagar=True)

@@ -36264,7 +36264,8 @@ function lineaPublicoBusquedas(f, real) {
     return h('div', { clase: 'caja-aviso publico-linea' },
       `Esto se investigó en ${medido}; este proyecto ahora mide en ${ahora}. Vuelve a investigar para ver sus cifras. `, cambiar);
   }
-  return h('div', { clase: 'meta publico-linea' }, `Búsquedas medidas en ${medido || ahora}. `, cambiar);
+  return h('div', { clase: 'meta publico-linea' },
+    medido ? `Búsquedas medidas en ${medido}. ` : `Se medirán en ${ahora}. `, cambiar);
 }
 
 /* Dónde se midió una investigación guardada: lo de antes de vidiq-2 no lo

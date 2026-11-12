@@ -184,8 +184,11 @@ async function hablarConElStudio(cfg, ruta, metodo, cuerpo) {
   const conPermiso = await chrome.permissions.contains({ origins: [cfg.origen + '/*'] }).catch(() => true);
   if (!conPermiso) return { mal: 'La extensión ya no tiene permiso para hablar con tu Studio: pulsa ⚙ y luego «Probar» para volver a darlo.' };
   let r;
-  try { r = await enviarDirecto(cfg, ruta, metodo, cuerpo); } catch (e) { r = { sinRed: true }; }
+  try { r = await enviarDirecto(cfg, ruta, metodo, cuerpo); }
+  catch (e) { r = e && e.name === 'TimeoutError' ? { lento: true } : { sinRed: true }; }
   if (r.caido) return { mal: CAIDO(r.caido) };
+  /* tardó demasiado: puede haber llegado igual, y volver a mandarlo lo duplicaría */
+  if (r.lento) return { mal: 'Tu Studio tarda mucho en contestar. Mira en Automatizar → Recibidos de Chrome si ya llegó antes de volver a pulsar.' };
   if (r.sinSesion || r.sinRed) {
     const otra = await enviarDesdeElStudio(cfg, ruta, metodo, cuerpo).catch(() => ({ fallo: true }));
     if (otra.sinPestana) {
@@ -350,7 +353,11 @@ async function guardar() {
   estado('estadoConfig', 'Comprobando la dirección…');
   if (!(await esUnStudio(n))) {
     /* el permiso para esa web no hace falta: se devuelve */
-    try { chrome.permissions.remove({ origins: [n.origen + '/*'] }).catch(() => {}); } catch (e) { /* no estorba */ }
+    /* (salvo que sea la web del Studio ya guardado: estará caído, y su permiso hace falta) */
+    const guardado = normalizar((await chrome.storage.local.get(['studio']).catch(() => ({}))).studio);
+    if (!guardado || guardado.origen !== n.origen) {
+      try { chrome.permissions.remove({ origins: [n.origen + '/*'] }).catch(() => {}); } catch (e) { /* no estorba */ }
+    }
     estado('estadoConfig', 'En esa dirección no contesta un CrearIA Studio. Cópiala de Configuración → Enviar al Studio.', 'mal');
     return false;
   }

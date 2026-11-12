@@ -115,7 +115,11 @@
     /* una web normal se recarga en cada página, salvo los diarios con «scroll infinito», que cambian
        la barra al bajar y dejan las etiquetas de la primera noticia: entonces no valen */
     const deOtra = u => u && ruta(u) !== '' && !mismaPagina(u) && (() => { try { return new URL(u, location.href).hostname === location.hostname; } catch (e) { return false; } })();
-    ogVale = !(deOtra(ogUrl) || deOtra(canonico));
+    /* la dirección con la que se CARGÓ el documento: si sigue siendo la de la barra, sus etiquetas
+       son de esta página aunque su canónico sea otra ruta (Amazon, WordPress «?p=», un slug corregido) */
+    let cargada = '';
+    try { const n = performance.getEntriesByType('navigation')[0]; cargada = n ? n.name : ''; } catch (e) { cargada = ''; }
+    ogVale = !!(cargada && mismaPagina(cargada)) || !(deOtra(ogUrl) || deOtra(canonico));
   }
   else if (!ogUrl) ogVale = false;
   else if (codigoIg) ogVale = new RegExp('/' + codigoIg + '(?:/|$|\\?)').test(ogUrl);
@@ -131,11 +135,11 @@
     cifras: {}, red, lector: red === 'web' || red === 'threads' || red === 'pinterest' ? 'generico' : red,
   };
   if (red === 'web') {
-    /* el canónico solo si es esta misma página (quita lo que sobra de la dirección) */
+    /* el canónico (quita lo que sobra de la dirección), salvo que sea la portada */
     const canon = canonico || ogUrl;
     try {
       const c = new URL(canon, location.href);
-      if (canon && ogVale && c.hostname === location.hostname && mismaPagina(canon)) datos.url = c.href;
+      if (canon && ogVale && c.hostname === location.hostname && !(c.pathname === '/' && location.pathname !== '/')) datos.url = c.href;
     } catch (e) { /* se queda la barra */ }
     if (!ogVale) {
       /* el título de la pestaña también puede ser el de la primera noticia */
@@ -229,13 +233,16 @@
            si en toda la página hay UN vídeo con su descripción y sus cifras (si no, el de detrás
            podría ser otro: el inicio, el «Para ti») */
         const DESC = '[data-e2e="browse-video-desc"], [data-e2e="video-desc"]';
+        /* (si la ventana enlaza a vídeos y a este no, es la de otro: una carrera al pasar de uno a otro) */
+        const deEste = d => { const ids = [...d.querySelectorAll('a[href*="/video/"]')].map(a => ((a.getAttribute('href') || '').match(/\/video\/(\d+)/) || [])[1]);
+          return !ids.length || ids.includes(idVideo); };
         const ventana = [...document.querySelectorAll('div[role="dialog"]')].filter(seVe)
-          .find(d => d.querySelector('[data-e2e="browse-like-count"]'));
+          .find(d => d.querySelector('[data-e2e="browse-like-count"]') && deEste(d));
         if (ventana) caja = ventana;
         else if (document.querySelectorAll(DESC).length === 1 && document.querySelectorAll(CUENTAS).length === 1) {
           let c = document.querySelector(DESC);
           while (c && c !== document.documentElement && !c.querySelector(CUENTAS)) c = c.parentElement;
-          caja = c && c !== document.documentElement && !c.closest('[data-e2e="anchoring-chrome-host"]') ? c : null;
+          caja = c && c !== document.documentElement && !c.closest('[data-e2e="anchoring-chrome-host"]') && deEste(c) ? c : null;
         }
       }
       /* el reproductor nuevo (medido el 12-11 en el inicio): UNA sola capa con las cifras y la
@@ -340,7 +347,9 @@
         datos.cifras.me_gusta = numeroEn(caja, '.social-details-social-counts__reactions-count', '.social-details-social-counts__social-proof-fallback-number');
         /* trozo a trozo («77» y «5 comentarios» pegados no son 775) */
         const bloque = caja.querySelector('.social-details-social-counts');
-        const sociales = bloque ? [...bloque.querySelectorAll('*')].filter(e => !e.children.length).map(e => limpio(textoDe(e))).filter(Boolean).join(' · ') : '';
+        const trozos = bloque ? [...bloque.querySelectorAll('*')].filter(e => !e.children.length).map(e => limpio(textoDe(e))).filter(Boolean) : [];
+        /* entre dos números va un separador; entre un número y su palabra («5» «comentarios»), un espacio */
+        const sociales = trozos.reduce((t, x, i) => !i ? x : t + (/\d$/.test(trozos[i - 1]) && /^\d/.test(x) ? ' · ' : ' ') + x, '');
         if (sociales) cifrasDeFrase(sociales, datos.cifras);
       }
     } else if (red === 'facebook') {

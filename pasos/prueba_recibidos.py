@@ -664,6 +664,9 @@ HOSTILES = {
         "<div data-e2e='video-desc'>vídeo de ana del feed</div><strong data-e2e='like-count'>1M</strong></div></div>"
         "<div role='dialog'><span data-e2e='browse-username'>beto</span><h1 data-e2e='browse-video-desc'>vídeo de beto</h1>"
         "<strong data-e2e='browse-like-count'>7</strong></div></body>",
+    "https://www.tiktok.com/@beto/video/444": "<body><div role='dialog'><a href='/@ana/video/555'>enlace</a>"
+        "<span data-e2e='browse-username'>ana</span><h1 data-e2e='browse-video-desc'>vídeo de ana</h1>"
+        "<strong data-e2e='browse-like-count'>99</strong></div></body>",
     "https://www.tiktok.com/@beto/video/333": "<body><main><div data-e2e='anchoring-chrome-host'>"
         "<strong data-e2e='like-count'>229K</strong><div data-e2e='video-desc'>vídeo de ana del inicio</div></div></main>"
         "<div><span data-e2e='browse-username'>beto</span><h1 data-e2e='browse-video-desc'>vídeo de beto</h1></div></body>",
@@ -703,6 +706,14 @@ HOSTILES = {
     "https://diario.ejemplo.pe/noticia-2-consolas": _og("https://diario.ejemplo.pe/noticia-1-elecciones", "Resumen de la noticia 1",
         "Noticia 1: elecciones") + "<link rel='canonical' href='https://diario.ejemplo.pe/noticia-1-elecciones'>"
         "<title>Noticia 1: elecciones</title><body><article>noticia 1</article><article>noticia 2</article></body>",
+    "https://diario.ejemplo.pe/noticia-1-elecciones": _og("https://diario.ejemplo.pe/noticia-1-elecciones", "Resumen de la noticia 1",
+        "Noticia 1: elecciones") + "<link rel='canonical' href='https://diario.ejemplo.pe/noticia-1-elecciones'>"
+        "<title>Noticia 1: elecciones</title><body><article>noticia 1</article></body>",
+    # webs normales cuyo canónico es OTRA ruta (cargadas así, sin moverse): se leen
+    "https://www.amazon.com/dp/B0ABC123?ref=xyz": _og("https://www.amazon.com/Consola-Retro/dp/B0ABC123", "Una consola retro",
+        "Consola Retro") + "<link rel='canonical' href='https://www.amazon.com/Consola-Retro/dp/B0ABC123'><body></body>",
+    "https://blog.ejemplo.com/?p=123": _og("https://blog.ejemplo.com/ideas-fiesta-gamer/", "Ideas probadas", "Ideas para tu fiesta")
+        + "<link rel='canonical' href='https://blog.ejemplo.com/ideas-fiesta-gamer/'><body></body>",
     "https://diario.ejemplo.pe/amp/noticia-3": _og("https://diario.ejemplo.pe/noticia-3", "Resumen de la 3", "Noticia 3")
         + "<link rel='canonical' href='https://diario.ejemplo.pe/noticia-3'><body></body>",
     "https://x.com/ana/status/5": "<body><article data-testid='tweet'><div data-testid='User-Name'>Ana @ana</div>"
@@ -712,6 +723,10 @@ HOSTILES = {
         "<div data-urn='urn:li:activity:7123456789012345678'><span class='update-components-actor__name'>Empresa</span>"
         "<div class='update-components-text'>Texto del post</div><div class='social-details-social-counts'>"
         "<span class='social-details-social-counts__reactions-count'>77</span><span>5 comentarios</span></div></div></body>",
+    "https://www.linkedin.com/feed/update/urn:li:activity:7000000000000000001/": "<body>"
+        "<div data-urn='urn:li:activity:7000000000000000001'><span class='update-components-actor__name'>Empresa</span>"
+        "<div class='update-components-text'>Post</div><div class='social-details-social-counts'>"
+        "<span class='social-details-social-counts__reactions-count'>77</span><button><span>5</span><span>comentarios</span></button></div></div></body>",
     "https://www.youtube.com/shorts/NUEVONUEVO1": "<title>YouTube</title><body><ytd-shorts>"
         "<ytd-reel-video-renderer is-active style='display:block;height:700px'><a class='ytp-title-link' href='https://www.youtube.com/shorts/VIEJOVIEJO1'>t</a>"
         "<yt-shorts-video-title-view-model><h1>Short VIEJO</h1></yt-shorts-video-title-view-model>"
@@ -744,7 +759,12 @@ def prueba_lector_hostil():
                              body="<!doctype html><html><head>" + html.replace("<body>", "</head><body>", 1) + "</html>")
             pagina.route("**/*", servir)
             for url in HOSTILES:
-                pagina.goto(url)
+                if url.endswith("noticia-2-consolas"):
+                    # «scroll infinito» de verdad: se carga la noticia 1 y la barra pasa a la 2 sin recargar
+                    pagina.goto("https://diario.ejemplo.pe/noticia-1-elecciones")
+                    pagina.evaluate("history.pushState({}, '', '/noticia-2-consolas')")
+                else:
+                    pagina.goto(url)
                 if "largo" in url:
                     pagina.evaluate("() => { const r = document.createRange(); r.selectNodeContents(document.getElementById('p'));"
                                     " getSelection().removeAllRanges(); getSelection().addRange(r); }")
@@ -776,12 +796,13 @@ def prueba_lector_hostil():
         ("https://www.tiktok.com/@beto/video/333", ("ana", "229K"), "TikTok: un vídeo sin su ventana, con la capa del inicio delante"),
         ("https://www.tiktok.com/@beto", ("ana", "229K"), "TikTok: un perfil con la capa del inicio oculta"),
         ("https://www.tiktok.com/explore", ("ana", "229K"), "TikTok: en Explorar, la capa del inicio oculta no vale"),
+        ("https://www.tiktok.com/@beto/video/444", ("ana", "99"), "TikTok: una ventana de OTRO vídeo (carrera al pasar de uno a otro)"),
         ("https://www.tiktok.com/following?2", ("ana", "1M", "/video/1"), "TikTok: el vídeo que se ve aún sin cifras no presta las del vecino"),
         ("https://www.instagram.com/reels/BBB222/", ("ana", "5.555", "66"), "Instagram: el reel que se ve sin botones no presta los del vecino"),
         ("https://www.instagram.com/p/CCC333/", ("99 mil", "Reel de"), "Instagram: una foto abierta sobre Explorar"),
         ("https://www.instagram.com/reels/audio/123456/", ("pie de un reel", "AAA111"), "Instagram: la página de un audio"),
         ("https://www.facebook.com/watch/", ("vídeo A", "900"), "Facebook Watch: el muro de vídeos"),
-        ("https://www.facebook.com/watch/?v=777", ("vídeo A", "900", "del inicio"), "Facebook Watch: un vídeo sin saber cuál es su caja"),
+        ("https://www.facebook.com/watch/?v=777", ("vídeo A", "900", "inicio"), "Facebook Watch: un vídeo (no es el muro) sin saber cuál es su caja"),
         ("https://www.facebook.com/beto/posts/pfbid0abc", ("post A", "900"), "Facebook: la ventana del post aún cargando"),
         ("https://diario.ejemplo.pe/noticia-2-consolas", ("noticia-1", "Noticia 1", "Resumen de la noticia 1"),
          "una web con «scroll infinito»: la barra en la noticia 2 y las etiquetas en la 1"),
@@ -831,6 +852,11 @@ def prueba_lector_hostil():
     fc = res["https://www.facebook.com/beto/posts/124"]
     ok(fc["texto"] == "post de beto" and "precio" not in json.dumps(fc) and "comentarios" not in fc["cifras"],
        "Facebook: un chat de Messenger encima no se lee como el post")
+    for url, titulo in (("https://www.amazon.com/dp/B0ABC123?ref=xyz", "Consola Retro"),
+                        ("https://blog.ejemplo.com/?p=123", "Ideas para tu fiesta"),
+                        ("https://diario.ejemplo.pe/noticia-1-elecciones", "Noticia 1: elecciones")):
+        d = res[url]
+        ok(d["titulo"] == titulo and not d.get("aviso"), f"una web normal con su canónico en otra ruta se lee ({url})")
     am = res["https://diario.ejemplo.pe/amp/noticia-3"]
     ok(am["titulo"] == "Noticia 3" and am["url"] == "https://diario.ejemplo.pe/noticia-3" and not am.get("aviso"),
        "la versión AMP de una noticia sí vale con su canónico")
@@ -838,6 +864,8 @@ def prueba_lector_hostil():
           "las cifras en singular («1 respuesta», «1 visualización») también cuentan")
     igual(res["https://www.linkedin.com/posts/empresa_eventos-activity-7123456789012345678-AbCd/"]["cifras"],
           {"me_gusta": "77", "comentarios": "5"}, "LinkedIn: dos cifras pegadas no se leen como una («77» y «5 comentarios»)")
+    igual(res["https://www.linkedin.com/feed/update/urn:li:activity:7000000000000000001/"]["cifras"],
+          {"me_gusta": "77", "comentarios": "5"}, "LinkedIn: el número y su palabra en trozos separados también se leen")
     igual((R.numero_visto("2,5 mi"), R.numero_visto("140 mil")), (2_500_000, 140_000), "«2,5 mi» (portugués) son 2,5 millones")
 
 

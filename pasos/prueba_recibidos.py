@@ -721,6 +721,13 @@ HOSTILES = {
     "https://www.tiktok.com/@ana/video/120": "<body><div><span data-e2e='browse-username'>ana</span>"
         "<h1 data-e2e='browse-video-desc'>el 120</h1><strong data-e2e='browse-like-count'>8</strong>"
         "<div><a href='/@x/video/9'><img><strong data-e2e='video-views'>8.5M</strong></a></div></div></body>",
+    # --- ronda 5: la página se «mueve» sola sin cambiar de página (se lee) o cambia de página (aviso)
+    "https://tienda.ejemplo.pe/collections/x/products/y?variant=123": "",
+    "https://tienda.ejemplo.pe/dp/B01": "",
+    "https://tienda.ejemplo.pe/blog/post-7": "",
+    "https://tienda.ejemplo.pe/ficha.php?id=2": "",
+    "https://tienda.ejemplo.pe/spa-vuelta": "",
+    "https://tienda.ejemplo.pe/collections/x/products/y#opiniones": "",
     "https://diario.ejemplo.pe/amp/noticia-3": _og("https://diario.ejemplo.pe/noticia-3", "Resumen de la 3", "Noticia 3")
         + "<link rel='canonical' href='https://diario.ejemplo.pe/noticia-3'><body></body>",
     "https://x.com/ana/status/5": "<body><article data-testid='tweet'><div data-testid='User-Name'>Ana @ana</div>"
@@ -745,6 +752,27 @@ HOSTILES = {
 }
 
 
+#: Las páginas de la ronda 5: (dirección que se carga, lo que hace la página después, su HTML)
+_TIENDA = _og("https://tienda.ejemplo.pe/products/y", "Consola en oferta", "Consola Y") \
+    + "<link rel='canonical' href='https://tienda.ejemplo.pe/products/y'><body>tienda</body>"
+_FICHA1 = _og("https://tienda.ejemplo.pe/ficha.php?id=1", "La ficha 1", "Ficha 1") \
+    + "<link rel='canonical' href='https://tienda.ejemplo.pe/ficha.php?id=1'><body>ficha</body>"
+MOVIDAS = {
+    "https://tienda.ejemplo.pe/collections/x/products/y?variant=123": (
+        "https://tienda.ejemplo.pe/collections/x/products/y", "history.replaceState({}, '', location.pathname + '?variant=123')", _TIENDA),
+    "https://tienda.ejemplo.pe/dp/B01": (
+        "https://tienda.ejemplo.pe/dp/B01?utm_source=fb", "history.replaceState({}, '', location.pathname)", _TIENDA),
+    "https://tienda.ejemplo.pe/blog/post-7": (
+        "https://tienda.ejemplo.pe/blog/post-7/", "history.replaceState({}, '', '/blog/post-7')", _TIENDA),
+    "https://tienda.ejemplo.pe/ficha.php?id=2": (
+        "https://tienda.ejemplo.pe/ficha.php?id=1", "history.pushState({}, '', '?id=2')", _FICHA1),
+    "https://tienda.ejemplo.pe/spa-vuelta": (
+        "https://tienda.ejemplo.pe/spa-vuelta", "history.pushState({}, '', '/producto-b'); history.back()", _TIENDA),
+    "https://tienda.ejemplo.pe/collections/x/products/y#opiniones": (
+        "https://tienda.ejemplo.pe/collections/x/products/y#opiniones", "", _TIENDA),
+}
+
+
 def prueba_lector_hostil():
     seccion("5c] el lector nunca manda lo de OTRO post")
     try:
@@ -760,13 +788,21 @@ def prueba_lector_hostil():
             navegador = p.chromium.launch()
             pagina = navegador.new_page(viewport={"width": 1280, "height": 720})
 
+            cargas = {v[0].split("#")[0]: v[2] for v in MOVIDAS.values()}
+
             def servir(ruta):
-                html = HOSTILES.get(ruta.request.url, "<body>nada</body>")
+                html = cargas.get(ruta.request.url) or HOSTILES.get(ruta.request.url, "<body>nada</body>")
                 ruta.fulfill(status=200, content_type="text/html; charset=utf-8",
                              body="<!doctype html><html><head>" + html.replace("<body>", "</head><body>", 1) + "</html>")
             pagina.route("**/*", servir)
             for url in HOSTILES:
-                if url.endswith("?p=224"):
+                if url in MOVIDAS:
+                    carga, js, _html = MOVIDAS[url]
+                    pagina.goto(carga)
+                    if js:
+                        pagina.evaluate("() => { " + js + " }")
+                        pagina.wait_for_timeout(150)
+                elif url.endswith("?p=224"):
                     # una web que pasa de ?p=123 a ?p=124 sin recargar: las etiquetas son del 123
                     pagina.goto("https://blog.ejemplo.com/?p=223")
                     pagina.evaluate("history.pushState({}, '', '/?p=224')")
@@ -873,6 +909,16 @@ def prueba_lector_hostil():
     sp = res["https://blog.ejemplo.com/?p=224"]
     ok(sp.get("aviso") and "Entrada 123" not in json.dumps(sp) and sp["url"] == "https://blog.ejemplo.com/?p=224",
        "una web que se movió sin recargar (?p=223 → ?p=224) no manda la entrada de antes")
+    for url in ("https://tienda.ejemplo.pe/collections/x/products/y?variant=123", "https://tienda.ejemplo.pe/dp/B01",
+                "https://tienda.ejemplo.pe/blog/post-7", "https://tienda.ejemplo.pe/collections/x/products/y#opiniones"):
+        d = res[url]
+        ok(d["titulo"] == "Consola Y" and not d.get("aviso"),
+           f"una página que retoca su propia dirección sin cambiar de página se lee ({url.split('ejemplo.pe')[1]})")
+    for url, que in (("https://tienda.ejemplo.pe/ficha.php?id=2", "?id=1 → ?id=2, con el canónico en la misma ruta"),
+                     ("https://tienda.ejemplo.pe/spa-vuelta", "una web que fue a otro producto y volvió sin recargar")):
+        d = res[url]
+        ok(d.get("aviso") and not d["titulo"] and "Ficha 1" not in json.dumps(d) and "Consola" not in json.dumps(d),
+           f"{que}: no se fía de sus etiquetas y lo avisa")
     tt = res["https://www.tiktok.com/@ana/video/120"]
     igual((tt["texto"], tt["cifras"]), ("el 120", {"me_gusta": "8"}),
           "TikTok: un vídeo con miniaturas de relacionados en su caja se sigue leyendo")

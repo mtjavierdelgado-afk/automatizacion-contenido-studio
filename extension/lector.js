@@ -120,15 +120,25 @@
         return x.hostname === location.hostname && (!mismaPagina(u) || (!!x.search && x.search !== location.search)); } catch (e) { return false; } };
     /* la dirección con la que se CARGÓ el documento: si sigue siendo la de la barra, sus etiquetas
        son de esta página aunque su canónico sea otra ruta (Amazon, WordPress «?p=», un slug corregido) */
-    const sinAlmohadilla = u => { try { const x = new URL(u, location.href); x.hash = ''; return x.href; } catch (e) { return ''; } };
+    /* la misma página que otra dirección: misma ruta (sin la barra final) y ningún «?…» que tengan las
+       dos con otro valor; quitar o añadir uno (utm, ?variant=, &color=) no es otra página, ?p=123 → ?p=124 sí */
+    const SEGUIMIENTO = /^(utm_|fbclid$|gclid$|gbraid$|wbraid$|msclkid$|yclid$|ttclid$|igshid$|mc_|_ga$|_gl$|ref$|ref_|si$|srsltid$)/i;
+    const igualQue = (u, v) => { try { const x = new URL(u, location.href), y = new URL(v, location.href);
+        if (x.origin !== y.origin || x.pathname.replace(/\/+$/, '') !== y.pathname.replace(/\/+$/, '')) return false;
+        /* x es la de ahora, y la cargada: lo que tienen las dos, igual; lo que se quitó, solo seguimiento */
+        for (const k of new Set([...x.searchParams.keys(), ...y.searchParams.keys()])) {
+          if (!x.searchParams.has(k)) { if (!SEGUIMIENTO.test(k)) return false; }
+          else if (y.searchParams.has(k) && x.searchParams.getAll(k).join('\n') !== y.searchParams.getAll(k).join('\n')) return false;
+        }
+        return true; } catch (e) { return false; } };
     let quieta = false;
     try {
       const n = performance.getEntriesByType('navigation')[0];
-      const cargada = n ? sinAlmohadilla(n.name) : '';
-      /* ni la barra ni ninguna entrada de este mismo documento (atrás/adelante) en otra dirección */
+      const cargada = n ? n.name : '';
+      /* ni la barra ni ninguna entrada de este mismo documento (atrás/adelante) en otra página */
       const movida = (window.navigation && navigation.entries ? navigation.entries() : [])
-        .some(e => e.sameDocument && sinAlmohadilla(e.url) !== cargada);
-      quieta = !!cargada && cargada === sinAlmohadilla(location.href) && !movida;
+        .some(e => e.sameDocument && !igualQue(e.url, cargada));
+      quieta = !!cargada && igualQue(location.href, cargada) && !movida;
     } catch (e) { quieta = false; }
     ogVale = quieta || !(deOtra(ogUrl) || deOtra(canonico));
   }

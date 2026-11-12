@@ -2535,7 +2535,7 @@ def _tiempo_srt(segundos):
 def idioma_bcp47(idioma):
     """«es», «es-PE», «español» -> «es»; vacio -> «es» (el idioma del Estudio);
     lo que no se entiende -> «»: sin pista, mejor que una con la etiqueta mal."""
-    crudo = str(idioma or "").strip().lower().replace("_", "-")
+    crudo = str(idioma or "").split("(")[0].strip().lower().replace("_", "-")
     if not crudo:
         return "es"
     if crudo in ("español", "espanol", "castellano", "spanish"):

@@ -1967,8 +1967,8 @@ def prueba_subtitulos_youtube():
     ok("00:00:04,000" not in corto.split(" --> ")[0] and all(
         b.split("\n")[1].split(" --> ")[1] <= "00:00:04,000"
         for b in corto.split("\n\n") if b.strip()), "nada pasa del final del vídeo")
-    igual([P.idioma_bcp47(x) for x in ("es", "es-PE", "Español", "en_US", "", "??")],
-          ["es", "es", "es", "en", "es", ""], "el idioma, en el código que pide YouTube")
+    igual([P.idioma_bcp47(x) for x in ("es", "es-PE", "Español", "en_US", "", "??", "Español (Perú)")],
+          ["es", "es", "es", "en", "es", "", "es"], "el idioma, en el código que pide YouTube")
     # (revisión 1, ALTO) el MP4 EMPIEZA en el t_in del primer plano: todo va en
     # el reloj del vídeo, no en el del plan
     tarde = [escena(1, 0.35, "Hola, esto es una prueba de subtítulos."),

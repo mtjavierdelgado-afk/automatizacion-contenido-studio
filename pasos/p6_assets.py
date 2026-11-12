@@ -2264,11 +2264,13 @@ CAMARA_DE_CERCA = re.compile(
 #: Los planos MEDIOS. En «un espacio que cambia» respetan su camara como los de
 #: cerca (rama base-fiel, decision del dueño del 12-11); en «producto» siguen
 #: editando la base, que es lo que copia el producto aprobado (`_familia_del_plano`).
-CAMARA_MEDIA = re.compile(r"\bmedium close|\bplano medio\b|\bmcu\b|"
-                          # rama base-fiel (X01, 12-11): «medium shot from the shower side»;
-                          # «medium-wide» no: es casi un general y enseña la habitacion
-                          r"\bmedium shot\b|\bmid[- ]?shot\b|\bplano americano\b",
-                          re.IGNORECASE)
+CAMARA_MEDIA = re.compile(r"\bmedium close|\bplano medio\b|\bmcu\b", re.IGNORECASE)
+#: Los medios que cuentan en «un espacio que cambia» (rama base-fiel, X01:
+#: «medium shot from the shower side»). Fuera de ese modo se usa SOLO la de
+#: arriba, la de siempre, y la familia sale byte a byte como antes (revision del
+#: arbitro, 12-11). «medium-wide» no: es casi un general y enseña la habitacion.
+CAMARA_MEDIA_ESPACIO = re.compile(r"\bmedium close|\bplano medio\b|\bmcu\b|\bmedium shot\b|"
+                                  r"\bmid[- ]?shot\b|\bplano americano\b", re.IGNORECASE)
 
 
 def _familia_del_plano(escena, modo, relato=None):
@@ -2292,8 +2294,11 @@ def _familia_del_plano(escena, modo, relato=None):
     if camara.strip():
         llano = unicodedata.normalize("NFKD", camara.lower())
         llano = "".join(c for c in llano if not unicodedata.combining(c))
+        if medio_cerca:
+            return "cerca" if (CAMARA_MEDIA_ESPACIO.search(llano)
+                               or CAMARA_DE_CERCA.search(llano)) else "lejos"
         if CAMARA_MEDIA.search(llano):
-            return "cerca" if medio_cerca else "lejos"
+            return "lejos"
         return "cerca" if CAMARA_DE_CERCA.search(llano) else "lejos"
     linea = escena.get("linea_gv") or {}
     if linea and not escena.get("carta"):
@@ -2301,9 +2306,12 @@ def _familia_del_plano(escena, modo, relato=None):
         # parrilla-estados): lo dice la propia linea («Close-up of the mirror»)
         llano = unicodedata.normalize("NFKD", str(linea.get("visual") or "").lower())
         llano = "".join(c for c in llano if not unicodedata.combining(c))
-        if CAMARA_MEDIA.search(llano):
-            return "cerca" if medio_cerca else ""
-        return "cerca" if CAMARA_DE_CERCA.search(llano) else ""
+        if medio_cerca:
+            return "cerca" if (CAMARA_MEDIA_ESPACIO.search(llano)
+                               or CAMARA_DE_CERCA.search(llano)) else ""
+        if CAMARA_DE_CERCA.search(llano) and not CAMARA_MEDIA.search(llano):
+            return "cerca"
+        return ""
     return _familia_de_carta(escena.get("carta"), modo)
 
 

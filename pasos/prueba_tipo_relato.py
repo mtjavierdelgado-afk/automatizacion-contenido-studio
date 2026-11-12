@@ -524,6 +524,12 @@ def prueba_ambientes_y_camara():
           "lejos", "un «medium-wide» enseña la habitación: edita")
     igual(P6._familia_del_plano({"linea_gv": {"visual": "Medium close-up of the mirror"}}, "foto"),  # noqa: SLF001
           "", "sin relato y sin cámara, un medio como antes")
+    for camara, esperada in (("medium shot moving into a close-up of the label", "cerca"),
+                             ("close-up of the label, mid-shot framing", "cerca"),
+                             ("medium close-up of the jar", "lejos")):
+        igual(P6._familia_del_plano({"linea_gv": {"camara": camara}}, "foto",  # noqa: SLF001
+                                    {"modo": "producto"}), esperada,
+              f"en «producto», «{camara}» sale como en main ({esperada})")
     igual(P6._familia_del_plano({"carta": "detalle"}, "ilustracion"), "cerca",  # noqa: SLF001
           "sin línea, la familia de su carta, como siempre")
     rel = T.resolver({"tipo_relato": {"modo": "espacio_que_cambia", "cambia": "objeto"}})

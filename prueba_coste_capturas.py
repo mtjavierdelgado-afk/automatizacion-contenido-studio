@@ -49,6 +49,17 @@ _ok = 0
 _fallos = []
 
 
+
+def _png_pequeno():
+    import io                                               # noqa: PLC0415
+    from PIL import Image                                   # noqa: PLC0415
+    salida = io.BytesIO()
+    Image.new("RGB", (8, 8), (120, 60, 30)).save(salida, "PNG")
+    return salida.getvalue()
+
+
+_PNG_DE_PRUEBA = _png_pequeno()
+
 def ok(condicion, mensaje):
     global _ok
     if condicion:
@@ -271,7 +282,9 @@ def prueba_instrumentacion(proyecto):
     def falsa_imagen(prompt, referencias, *, quality="low", tamano="apaisado",
                      api_key=None, reintentos=2):
         llamadas["imagen"] += 1
-        return (b"\x89PNG\r\n\x1a\n" + b"0" * 64,
+        # una imagen DE VERDAD (rama png-seguro: lo que llega roto ya no se
+        # guarda, y unos bytes con la firma PNG y ceros detrás están rotos)
+        return (_PNG_DE_PRUEBA,
                 {"segundos": 1.0, "quality": quality, "refs": len(referencias),
                  "coste": imagen.PRECIO[quality], "modelo": imagen.MODELO,
                  "tamano": imagen.TAMANOS[tamano],

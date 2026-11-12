@@ -495,6 +495,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/publicar/videos/{pid}` | La ficha de publicar de un video: redes, textos, encaje, envios. |
 | `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?, |
 | `POST` | `/api/publicar/videos/{pid}/a-mano` | «Lo he subido yo»: {red, url?}. Queda en el historial. |
+| `POST` | `/api/publicar/videos/{pid}/copiado` | {red}: se copiaron los textos de esa red para publicar a mano. Solo lo |
 | `POST` | `/api/publicar/videos/{pid}/emojis` | «✨ Más emojis» (rama `textos-emojis`): {red, campo: titulo|descripcion, |
 | `POST` | `/api/publicar/videos/{pid}/enviar` | {redes, modo: ahora|programar|pendiente, cuando?, confirmado, repetir?} |
 | `POST` | `/api/publicar/videos/{pid}/envios/{eid}/cancelar` | Cancela lo programado (en Upload-Post) o lo que esperaba tu OK, y quita |
@@ -550,7 +551,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/sistema/notas` | Apunta una mejora para hacer mas adelante. |
 | `DELETE` | `/api/sistema/notas/{nid}` | — |
 | `PUT` | `/api/sistema/notas/{nid}` | Cambia el texto de una nota o la marca como hecha / pendiente. |
-| `GET` | `/api/sistema/novedades` | El historial de cambios, tal cual esta en docs/NOVEDADES.md. |
+| `GET` | `/api/sistema/novedades` | El historial de cambios: docs/NOVEDADES.md con lo de docs/novedades/ dentro. |
 | `GET` | `/api/sistema/revisiones/{rid}` | — |
 | `GET` | `/api/sistema/terminos` | Los terminos de uso, tal cual estan en docs/TERMINOS.md (el pie). |
 | `POST` | `/api/sonido/subir` | Sube un audio tuyo (MP3, WAV, M4A, OGG) para la música o un efecto. |
@@ -562,4 +563,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**448 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**449 endpoints.** Escrito por `generar_api.py` desde `app.py`.

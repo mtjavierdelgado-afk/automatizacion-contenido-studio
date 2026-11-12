@@ -18,6 +18,7 @@ derecha se convierte en "presta atencion a la zona superior derecha".
 """
 import json
 import os
+import threading
 import subprocess
 import sys
 
@@ -133,8 +134,18 @@ def regenerar_directo(proyecto, escena_id, feedback, trazos, generales="",
     if os.path.exists(anterior):
         n = len([f for f in os.listdir(historial) if f.startswith(escena_id)])
         os.replace(anterior, os.path.join(historial, f"{escena_id}_v{n + 1}.png"))
-    with open(anterior, "wb") as fh:
-        fh.write(png)
+    # entera o nada (rama png-seguro, 11-11): nadie lee una imagen a medias
+    temporal = f"{anterior}.{os.getpid()}.{threading.get_ident()}.parcial"
+    try:
+        with open(temporal, "wb") as fh:
+            fh.write(png)
+        os.replace(temporal, anterior)
+    except OSError:
+        try:
+            os.remove(temporal)
+        except OSError:
+            pass
+        raise
 
     registro["prompt"] = prompt
     registro["revisiones"] = registro.get("revisiones", 0) + 1

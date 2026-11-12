@@ -2590,8 +2590,14 @@ def prueba_20oct_programado():
                                                 "cuando": luego, "confirmado": True}, en_hilo=False)
         envios = P._leer_video(raiz, "prog")["envios"]
         igual(sorted(e["estado"] for e in envios), ["programado", "programado"], "programados para dentro de 2 h")
-        c = P.cola(raiz, [{"pid": "prog", "nombre": "Prog", "montado": True}])
-        ok(all(e.get("debio_salir") is False for e in c["envios"]), "a su hora todavía no: no «debió salir»")
+        # LA COLA ENSEÑA LA SEMANA DESDE EL LUNES: se pide desde AYER y dos
+        # semanas, o un lunes de madrugada la hora retrasada de abajo (3 h 22
+        # min) cae en la semana anterior y la cola sale vacía (visto el 09-11
+        # a las 03:15 de Lima)
+        desde = (P.ahora_lima() - dt.timedelta(days=1)).strftime("%Y-%m-%d")
+        c = P.cola(raiz, [{"pid": "prog", "nombre": "Prog", "montado": True}], desde=desde, dias=14)
+        ok(c["envios"] and all(e.get("debio_salir") is False for e in c["envios"]),
+           "a su hora todavía no: no «debió salir»")
         # pasa el tiempo: la hora era las 09:00 y son las 12:22 (en el almacén y en el simulador)
         hace = P.ahora_lima() - dt.timedelta(hours=3, minutes=22)
         for lote in {e["lote"] for e in nuevos}:
@@ -2602,7 +2608,7 @@ def prueba_20oct_programado():
             t["cuando_utc"] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=3)).isoformat()
         with open(simulador, "w", encoding="utf-8") as fh:
             json.dump(sim, fh)
-        c = P.cola(raiz, [{"pid": "prog", "nombre": "Prog", "montado": True}])
+        c = P.cola(raiz, [{"pid": "prog", "nombre": "Prog", "montado": True}], desde=desde, dias=14)
         ok(c["envios"] and all(e.get("debio_salir") for e in c["envios"]),
            "pasada su hora, la cola dice que DEBIÓ salir (la pantalla: «debería haber salido a las …»)")
         f = P.ficha(raiz, info, ajustes)

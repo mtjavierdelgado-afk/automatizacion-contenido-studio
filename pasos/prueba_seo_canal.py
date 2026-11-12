@@ -322,6 +322,20 @@ def prueba_trends():
     g.trends_429 = False
     t = SC.tendencias(["otra frase"], raiz)
     ok(t["frases"]["otra frase"]["sentido"], "y no se guardó: la siguiente vez se vuelve a preguntar")
+    # vidiq-2: el país del proyecto; sin país, todo el mundo y con su propia caché
+    antes = len(g.pedidas)
+    SC.tendencias(["fiesta infantil", "consolas lima"], raiz, ("", "es"))
+    ok(len(g.pedidas) > antes, "otro sitio no sale de la caché de Perú")
+    explore = next(p for p in reversed(g.pedidas) if "/api/explore" in p[1])
+    req = json.loads(dict(urllib.parse.parse_qsl(urllib.parse.urlparse(explore[1]).query))["req"])
+    igual(req["comparisonItem"][0]["geo"], "", "todo el mundo: Trends sin país")
+    SC.tendencias(["fiesta infantil"], raiz, ("mx", "es"))
+    explore = next(p for p in reversed(g.pedidas) if "/api/explore" in p[1])
+    req = json.loads(dict(urllib.parse.parse_qsl(urllib.parse.urlparse(explore[1]).query))["req"])
+    igual(req["comparisonItem"][0]["geo"], "MX", "México: Trends de México")
+    antes = len(g.pedidas)
+    SC.tendencias(["consolas lima", "fiesta infantil"], raiz, ("pe", "es"))
+    igual(len(g.pedidas), antes, "Perú dicho comparte la caché de siempre")
     igual(SC._medir([0.0] * 52), None, "una frase de nicho en ceros es «sin dato», no «estable»")
     igual(SC._medir([0.0] * 50 + [1.0, 0.0]), None, "y casi en ceros tampoco sube «+100 %»")
     c = {"frase": "x", "demanda": {"valor": 50, "nivel": "baja", "textos": []}}

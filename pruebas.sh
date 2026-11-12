@@ -73,6 +73,7 @@ suites=(
   pasos/prueba_consumo_claude.py
   pasos/prueba_piloto.py
   pasos/prueba_graficas.py
+  pasos/prueba_graficas_capas.py
   pasos/prueba_choques_reglas.py
   pasos/prueba_ramas_sin_choques.py
   herramientas/prueba_herramientas_prueba.py

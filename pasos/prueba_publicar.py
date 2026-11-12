@@ -1934,6 +1934,137 @@ def prueba_portada():
     igual(len(todo), cuerpo.longitud, "y su longitud cuadra")
 
 
+
+def prueba_subtitulos_youtube():
+    """extras-youtube (12-11-2026): la pista de subtitulos que se sube a YouTube."""
+    seccion("4e] subtítulos para YouTube: el .srt sale de la voz y se manda solo a YouTube")
+    def escena(i, t_in, frase, desfase=0.0):
+        palabras = frase.split()
+        marcas = [[t_in + desfase + k * 0.4, t_in + desfase + k * 0.4 + 0.35] for k in range(len(palabras))]
+        return {"id": i, "t_in": t_in, "t_out": t_in + len(palabras) * 0.4, "narracion": frase,
+                "marcas": marcas}
+    escenas = [escena(1, 0.0, "Hola, esto es una prueba de subtítulos."),
+               escena(2, 3.0, "Segundo plano con otra frase corta.")]
+    srt = P.subtitulos_srt(escenas, idioma="es", duracion=10)
+    bloques = [b for b in srt.split("\n\n") if b.strip()]
+    ok(len(bloques) >= 2 and bloques[0].startswith("1\n00:00:00,000 --> "),
+       f"un .srt numerado que empieza en el segundo 0 ({len(bloques)} subtítulos)")
+    ok("Hola" in srt and "Segundo plano" in srt, "con el texto de cada plano")
+    ok(any(b.split("\n")[1].startswith("00:00:03,000") for b in bloques),
+       "y el segundo plano en SU tiempo del vídeo (t_in + la marca)")
+    tiempos = []
+    for b in bloques:
+        a, z = b.split("\n")[1].split(" --> ")
+        tiempos.append((a, z))
+    ok(all(tiempos[i][1] <= tiempos[i + 1][0] for i in range(len(tiempos) - 1)),
+       "en orden y sin pisarse")
+    malo = dict(escena(3, 6.0, "tres palabras aquí"), marcas=[[6.0, 6.3]])
+    igual(P.subtitulos_srt([malo]), "", "texto y marcas que no cuadran: sin subtítulo (como en el vídeo)")
+    escrito = P.subtitulos_srt([escenas[0]], idioma="es",
+                               escritos={"1": ("Hola, esto es una prueba de subtítulos.", escenas[0]["narracion"])})
+    ok("Hola" in escrito, "lo corregido a mano entra (con su ancla)")
+    corto = P.subtitulos_srt(escenas, idioma="es", duracion=4)
+    ok("00:00:04,000" not in corto.split(" --> ")[0] and all(
+        b.split("\n")[1].split(" --> ")[1] <= "00:00:04,000"
+        for b in corto.split("\n\n") if b.strip()), "nada pasa del final del vídeo")
+    igual([P.idioma_bcp47(x) for x in ("es", "es-PE", "Español", "en_US", "", "??", "Español (Perú)")],
+          ["es", "es", "es", "en", "es", "", "es"], "el idioma, en el código que pide YouTube")
+    # (revisión 1, ALTO) el MP4 EMPIEZA en el t_in del primer plano: todo va en
+    # el reloj del vídeo, no en el del plan
+    tarde = [escena(1, 0.35, "Hola, esto es una prueba de subtítulos."),
+             escena(2, 3.35, "Segundo plano con otra frase corta.")]
+    srt_tarde = P.subtitulos_srt(tarde, idioma="es", duracion=10)
+    igual(srt_tarde, srt, "con el primer plano en 0,35 s, el .srt sale igual (el vídeo empieza ahí)")
+    def capitulo(i, t, bloque):
+        return {"id": i, "t_in": t, "narracion": f"frase {i}", "origen": {"bloque": bloque}}
+    caps = P.capitulos_base([capitulo(1, 0.35, "a"), capitulo(2, 20.85, "b"), capitulo(3, 40.85, "c")], 60)
+    igual([c["t"] for c in caps], [0, 20, 40], "y los capítulos, en el mismo reloj")
+    flecha = P.subtitulos_srt([escena(1, 0.0, "de A --> B")], idioma="es")
+    igual(flecha.count("-->"), 1, "una «-->» dentro del texto no rompe el .srt (sale «→»)")
+    # campos y fichero
+    raiz = os.path.join(CARPETA, "subtitulos")
+    os.makedirs(raiz)
+    info = dict(INFO, pid="sub1", srt=srt, idioma="es")
+    campos, ficheros = P.campos_subtitulos(raiz, info, ["youtube", "tiktok"], "lote1", dict(P.AJUSTES_DEFECTO))
+    igual((campos.get("youtube_subtitle_language_0"), campos.get("youtube_subtitle_name_0")), ("es", "Español"),
+          "a YouTube va el idioma y el nombre de la pista")
+    ok(ficheros and ficheros[0][0] == "youtube_subtitle_file_0" and os.path.isfile(ficheros[0][1])
+       and open(ficheros[0][1], encoding="utf-8").read().startswith("1\n"), "y el .srt como fichero")
+    igual(P.campos_subtitulos(raiz, info, ["tiktok"], "lote2", dict(P.AJUSTES_DEFECTO)), ({}, []),
+          "sin YouTube no se manda nada")
+    igual(P.campos_subtitulos(raiz, info, ["youtube"], "lote3", dict(P.AJUSTES_DEFECTO, subtitulos_youtube=False)),
+          ({}, []), "con el ajuste apagado tampoco")
+    igual(P.campos_subtitulos(raiz, dict(info, srt=""), ["youtube"], "lote4", dict(P.AJUSTES_DEFECTO)),
+          ({}, []), "ni si el vídeo no da subtítulos")
+    igual(P.campos_subtitulos(raiz, dict(info, idioma="klingon??"), ["youtube"], "lote5",
+                              dict(P.AJUSTES_DEFECTO)), ({}, []),
+          "ni con un idioma que no se entiende (mejor sin pista que con la etiqueta mal)")
+    pedidos = []
+    perezoso = dict(info, srt=lambda: pedidos.append(1) or srt)
+    P.campos_subtitulos(raiz, perezoso, ["tiktok"], "lote6", dict(P.AJUSTES_DEFECTO))
+    igual(pedidos, [], "el .srt no se calcula si no va YouTube (llega perezoso de app.py)")
+    campos_p, _f = P.campos_subtitulos(raiz, perezoso, ["youtube"], "lote7", dict(P.AJUSTES_DEFECTO))
+    ok(pedidos == [1] and campos_p, "y se calcula una vez al mandarlo")
+    ok(P.AJUSTES_DEFECTO.get("subtitulos_youtube") is True, "encendido de fábrica")
+    try:
+        P.guardar_ajustes(raiz, "", {"subtitulos_youtube": "sí"})
+        ok(False, "«subtitulos_youtube» solo acepta sí o no")
+    except P.ErrorPublicar:
+        ok(True, "«subtitulos_youtube» solo acepta sí o no")
+    # de punta a punta, con el Upload-Post simulado
+    simulador = os.path.join(CARPETA, "sim_subtitulos.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    try:
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_s")
+        cli.enlace_conectar("studio_s", ["youtube", "tiktok"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        info = dict(info, mp4=mp4, mp4_huella="h1")
+        ajustes = dict(P.AJUSTES_DEFECTO, perfil="studio_s")
+        P.guardar_ficha(raiz, "sub1", {"textos": {"tiktok": {"descripcion": "T"},
+                                                  "youtube": {"titulo": "Y", "descripcion": "Y"}}})
+        P.enviar(raiz, info, ajustes, {"redes": ["youtube", "tiktok"], "modo": "ahora",
+                                       "confirmado": True}, en_hilo=False)
+        envios = {e["red"]: e for e in P._leer_video(raiz, "sub1")["envios"]}
+        igual(envios["youtube"].get("subtitulos"), "Español", "el envío de YouTube apunta que llevó subtítulos")
+        ok(not envios["tiktok"].get("subtitulos"), "el de TikTok no")
+        visto = {e["red"]: e for e in P.ficha(raiz, info, ajustes)["envios"]}
+        igual(visto["youtube"].get("subtitulos"), "Español",
+              "y la ficha que ve la pantalla lo trae (no solo el fichero)")
+        datos_sim = json.load(open(simulador, encoding="utf-8"))
+        mandados = [t for t in datos_sim["subidas"] if "youtube" in t.get("redes", [])]
+        ok(mandados and "youtube_subtitle_file_0" in (mandados[0].get("imagenes") or {})
+           and mandados[0]["campos"].get("youtube_subtitle_language_0") == "es",
+           "a Upload-Post le llega el .srt con su idioma")
+        sin_yt = [t for t in datos_sim["subidas"] if "youtube" not in t.get("redes", [])]
+        ok(sin_yt, "(YouTube va en su propia subida cuando va con otras redes)")
+        ok(all("youtube_subtitle_file_0" not in (t.get("imagenes") or {}) for t in sin_yt),
+           "y la subida sin YouTube no lo lleva")
+        ok(not os.path.isfile(P.ruta_subtitulos(raiz, "sub1", envios["youtube"]["lote"])),
+           "el .srt se borra después de mandarlo")
+        # (revisión 1) si la subida FALLA, la ficha no dice que llevó subtítulos
+        original = P.cliente
+        class _Roto:
+            def __init__(self, real):
+                self.real = real
+            def __getattr__(self, n):
+                return getattr(self.real, n)
+            def publicar(self, *a, **k):
+                raise P.UP.ErrorUploadPost("rechazado", sin_respuesta=False)
+        P.cliente = lambda r: _Roto(original(r))
+        try:
+            P.enviar(raiz, info, ajustes, {"redes": ["youtube"], "modo": "ahora",
+                                           "confirmado": True, "repetir": True}, en_hilo=False)
+        finally:
+            P.cliente = original
+        ultimo = [e for e in P._leer_video(raiz, "sub1")["envios"] if e["red"] == "youtube"][-1]
+        ok(ultimo.get("estado") == "fallido" and not ultimo.get("subtitulos"),
+           f"una subida rechazada no apunta «Subtítulos» ({ultimo.get('estado')}, {ultimo.get('subtitulos')!r})")
+    finally:
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
 def prueba_retencion_y_resumenes():
     seccion("4b] retención, lectura guardada, semana y mes, lo que mejor funcionó")
     raiz = os.path.join(CARPETA, "retencion")
@@ -2786,6 +2917,7 @@ def main():
     prueba_informe()
     prueba_titulo_completo()
     prueba_retencion_y_resumenes()
+    prueba_subtitulos_youtube()
     prueba_perfiles()
     prueba_textos()
     prueba_seo()

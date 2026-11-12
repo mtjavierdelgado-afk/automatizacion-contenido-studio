@@ -21377,7 +21377,41 @@ def _info_para_publicar(ctx):
         "cta": (ctx.estado.params("guion") or {}).get("cta") or {},
         "guion": bloques,
         "capitulos_base": P.capitulos_base(plan.get("escenas") or [], duracion),
+        # extras-youtube: la pista de subtitulos, de lo mismo que se dibuja
+        "idioma": str(plan.get("idioma") or ""),
+        # PEREZOSO: solo lo pide el envio (campos_subtitulos); las ~25 rutas
+        # que leen esta info no pagan el calculo
+        "srt": lambda: _srt_para_publicar(ctx, plan, duracion),
     }
+
+
+def _srt_para_publicar(ctx, plan, duracion):
+    """El .srt del video (extras-youtube), con lo corregido a mano de cada
+    plano igual que el subtitulo dibujado. «» si no hay plan o algo falla:
+    un envio nunca se cae por los subtitulos."""
+    escenas = plan.get("escenas") or []
+    if not escenas:
+        return ""
+    escritos = {}
+    try:
+        p7 = PASOS_MODULOS.p7_callouts if PASOS_MODULOS else None
+        p = ctx.estado.params("callouts") or {}
+        if p7 is not None:
+            for e in escenas:
+                uid = f"escena:{e.get('id')}"
+                texto = p7.texto_subtitulo_de(p, uid)
+                if texto:
+                    escritos[str(e.get("id"))] = (texto, p7.ancla_subtitulo_de(p, uid, e))
+    except Exception:                                       # noqa: BLE001
+        escritos = {}
+    try:
+        return _publicar().subtitulos_srt(escenas, idioma=plan.get("idioma"), escritos=escritos,
+                                          duracion=duracion or None)
+    except Exception as fallo:                              # noqa: BLE001
+        # se dice en la bitacora: un «» callado escondio un fallo el 12-11
+        print(f"[publicar] subtitulos_fallo {ctx.id}: {type(fallo).__name__}: {fallo}",
+              file=sys.stderr, flush=True)
+        return ""
 
 
 def _videos_para_publicar(peticion):
@@ -21635,7 +21669,7 @@ def publicar_proyectos(peticion: Request):
         fila["palabras"] = P.estado_palabras(fila["id"])
     return {"proyectos": filas, "clave": P.estado_clave(), "seo_opciones": {
         "categorias": P.SEO.CATEGORIAS_YOUTUBE, "idiomas": P.SEO.IDIOMAS,
-        "idiomas_audio": P.SEO.IDIOMAS_AUDIO},
+        "idiomas_audio": P.SEO.IDIOMAS_AUDIO, "paises": P.SR.PAISES_BUSQUEDA},
         # publicar-mas: los desplegables de «Redes de este proyecto»
         "redes_opciones": {"redes": list(P.REDES), "clasicas": list(P.REDES_CLASICAS),
                            "cta_gbp": P.RD.CTA_GBP,
@@ -22675,9 +22709,15 @@ def parrilla_chats(cid: str, peticion: Request):
 
 @app.post("/api/parrilla/proyectos/{cid}/chats", status_code=201)
 def parrilla_chat_nuevo(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """Una conversación nueva: {modelo?}. No se guarda hasta el primer mensaje."""
+    """Una conversación nueva: {modelo?, estilo?}. No se guarda hasta el primer mensaje.
+    Con `estilo` (uno de ESE proyecto), los guiones que se guarden desde ella llevan
+    ese estilo y el piloto lo usa (lo pide «✍️ Escribir el guion» de un recibido)."""
     cid = _proyecto_parrilla(cid, peticion)
-    chat = _por_guionista(_guionista().nueva, raiz_proyectos(), cid, _cuerpo(cuerpo).get("modelo"))
+    d = _cuerpo(cuerpo)
+    estilo = str(d.get("estilo") or "")
+    if estilo and estilo not in {e["id"] for e in _estilos_para_parrilla(peticion) if e.get("cliente") == cid}:
+        raise ErrorApi(400, "ese estilo no es de este proyecto")
+    chat = _por_guionista(_guionista().nueva, raiz_proyectos(), cid, d.get("modelo"), estilo)
     return chat.ver()
 
 
@@ -22713,6 +22753,16 @@ async def parrilla_chat_mensaje(cid: str, chid: str, peticion: Request):
     return await _en_hilo(_parrilla_chat_mensaje_en_hilo, cid, chid, campos, imagenes, peticion)
 
 
+def _vidiq_donde(cid):
+    """vidiq-2: dónde busca vidIQ en el chat de este proyecto, en palabras
+    («Perú», «todo el mundo hispano»…); sin elegir, Perú."""
+    try:
+        P = _publicar()
+        return P.SR.texto_publico(P.SR.publico_de(P.ajustes_de(raiz_proyectos(), cid or P.SIN_PROYECTO)))
+    except Exception:                                       # noqa: BLE001
+        return True          # sin saberlo, el turno con vidIQ sigue como antes
+
+
 def _parrilla_chat_mensaje_en_hilo(cid, chid, campos, imagenes, peticion):
     G = _guionista()
     chat = _por_guionista(G.obtener, raiz_proyectos(), cid, chid)
@@ -22735,7 +22785,7 @@ def _parrilla_chat_mensaje_en_hilo(cid, chid, campos, imagenes, peticion):
     vista = _por_guionista(chat.escribir, campos.get("texto") or "", web=campos.get("web") == "1",
                            resultados_texto=resultados, imagenes=imagenes,
                            modelo=campos.get("modelo") or None, cuenta_texto=cuenta_texto,
-                           cuenta=cuenta_nombre, vidiq=campos.get("vidiq") == "1")
+                           cuenta=cuenta_nombre, vidiq=_vidiq_donde(cid) if campos.get("vidiq") == "1" else False)
     anotar_global("parrilla_chat", {"proyecto": cid, "chat": chat.id,
                                     "web": campos.get("web") == "1", "capturas": len(imagenes)})
     return vista
@@ -22975,6 +23025,9 @@ def vidiq_mejorar_titulo(pid: str, peticion: Request):
              "titulo": titulo, "guion": guion or str(info.get("material") or ""),
              # vidIQ puntúa distinto un Short: hasta 120 s es corto (decisión del dueño)
              "formato": "short" if 0 < float(info.get("duracion_s") or 0) <= 120 else "long"}
+    # vidiq-2: el país y el idioma de «SEO de este proyecto» (sin elegir, Perú)
+    P = _publicar()
+    datos["publico"] = P.SR.publico_de(P.ajustes_de(raiz_proyectos(), info.get("cliente") or P.SIN_PROYECTO))
     vista = _por_vidiq(_vidiq().lanzar_titulo, raiz_proyectos(), ctx.id, datos, proyecto=ctx.proyecto)
     anotar_global("vidiq_titulo", {"proyecto": ctx.id})
     return vista
@@ -24071,6 +24124,11 @@ def _por_recibidos(fn, *args, **kwargs):
         raise ErrorApi(fallo.codigo, str(fallo)) from None
 
 
+def _ids_proyectos():
+    """Los ids de los proyectos de este Studio: un recibido solo se anexa a uno que exista."""
+    return {c["id"] for c in CLIENTES.listar(raiz_proyectos())["clientes"]}
+
+
 def _codigo_de_envio(peticion):
     """El código de la extensión, o 401. Nunca se repite en el mensaje."""
     R = _recibidos()
@@ -24111,19 +24169,34 @@ async def recibidos_guardar(peticion: Request):
             datos = json.loads(bytes(crudo).decode("utf-8") or "{}")
         except (ValueError, UnicodeDecodeError):
             raise ErrorApi(400, "lo enviado no es JSON") from None
-        guardado = _por_recibidos(R.guardar, raiz_proyectos(), datos if isinstance(datos, dict) else {})
-        anotar_global("recibido", {"red": guardado["red"], "captura": bool(guardado["captura"])})
+        guardado = _por_recibidos(R.guardar, raiz_proyectos(), datos if isinstance(datos, dict) else {},
+                                  _ids_proyectos())
+        anotar_global("recibido", {"red": guardado["red"], "captura": bool(guardado["captura"]),
+                                   "proyecto": guardado.get("proyecto", "")})
         return guardado
 
     r = await _en_hilo(_guardar)
     return {"ok": True, "id": r["id"], "red": r["red"]}
 
 
+@app.get("/api/recibidos/proyectos")
+def recibidos_proyectos(peticion: Request):
+    """Los proyectos, para el menú «Proyecto» de la extensión (pide el código de envío)."""
+    _codigo_de_envio(peticion)
+    return {"proyectos": [{"id": c["id"], "nombre": c.get("nombre") or c["id"]}
+                          for c in CLIENTES.listar(raiz_proyectos())["clientes"]]}
+
+
 @app.get("/api/recibidos")
-def recibidos_lista():
-    """Los recibidos (el más nuevo primero), el estado del código y la versión de la extensión."""
+def recibidos_lista(peticion: Request, filtro: str = "todos", proyecto: str = "", desde: int = 0):
+    """Los recibidos (el más nuevo primero), el estado del código y la versión de la extensión.
+
+    `filtro`: todos · proyecto (los del `proyecto`) · sin (sin proyecto) · archivados;
+    `cuentas` dice cuántos hay en cada uno; `desde` pasa página (de 100 en 100).
+    Los de un proyecto con clave sin abrir no salen."""
     R = _recibidos()
-    datos = _por_recibidos(R.listar, raiz_proyectos())
+    datos = _por_recibidos(R.listar, raiz_proyectos(), 100, filtro, proyecto, _ids_proyectos(),
+                           _cerrados(peticion), desde)
     datos.update({"codigo": R.estado_codigo(), "version_extension": R.version_extension()})
     return datos
 
@@ -24145,24 +24218,52 @@ def recibidos_extension():
         "Cache-Control": "no-store"})
 
 
+@app.post("/api/recibidos/borrar-archivados")
+def recibidos_borrar_archivados(peticion: Request):
+    """Borra todos los archivados (los que quien pide puede ver), mirándolos en el servidor."""
+    return {"borrados": _por_recibidos(_recibidos().borrar_archivados, raiz_proyectos(), _cerrados(peticion))}
+
+
 @app.get("/api/recibidos/{rid}/captura")
 def recibidos_captura(rid: str):
-    """La captura de lo que se veía al enviarlo (PNG, JPG o WEBP)."""
+    """La captura de lo que se veía al enviarlo (PNG, JPG o WEBP).
+
+    Sin mirar los proyectos con clave: la pide un <img>, que no lleva el pase de
+    los abiertos, y el id es al azar; las listas ya no enseñan los de uno cerrado."""
     ruta = _por_recibidos(_recibidos().ruta_captura, raiz_proyectos(), rid)
     tipo = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}.get(ruta.rsplit(".", 1)[-1], "image/jpeg")
     return FileResponse(ruta, media_type=tipo, headers={"Cache-Control": "private, max-age=3600"})
 
 
+@app.post("/api/recibidos/{rid}/proyecto")
+def recibidos_anexar(rid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{proyecto, estilo?} -> lo anexa a ese proyecto («» lo deja sin proyecto) y al
+    estilo con el que se hará su vídeo (uno de ese proyecto)."""
+    datos = cuerpo if isinstance(cuerpo, dict) else {}
+    cid = str(datos.get("proyecto") or "").strip()
+    estilos = {e["id"] for e in _estilos_para_parrilla(peticion) if e.get("cliente") == cid} if datos.get("estilo") else None
+    return _por_recibidos(_recibidos().anexar, raiz_proyectos(), rid, datos.get("proyecto"), _ids_proyectos(),
+                          datos.get("estilo") if "estilo" in datos else None, _cerrados(peticion), estilos)
+
+
+@app.post("/api/recibidos/{rid}/archivar")
+def recibidos_archivar(rid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{archivado: true|false} -> lo archiva o lo devuelve (no se borra)."""
+    datos = cuerpo if isinstance(cuerpo, dict) else {}
+    return _por_recibidos(_recibidos().archivar, raiz_proyectos(), rid, datos.get("archivado", True) is not False,
+                          _cerrados(peticion))
+
+
 @app.post("/api/recibidos/{rid}/usado")
-def recibidos_usado(rid: str):
+def recibidos_usado(rid: str, peticion: Request):
     """Lo marca como usado (lo hace «Usar en el chat»)."""
-    return _por_recibidos(_recibidos().marcar_usado, raiz_proyectos(), rid)
+    return _por_recibidos(_recibidos().marcar_usado, raiz_proyectos(), rid, _cerrados(peticion))
 
 
 @app.delete("/api/recibidos/{rid}")
-def recibidos_borrar(rid: str):
+def recibidos_borrar(rid: str, peticion: Request):
     """Lo borra, con su captura."""
-    _por_recibidos(_recibidos().borrar, raiz_proyectos(), rid)
+    _por_recibidos(_recibidos().borrar, raiz_proyectos(), rid, _cerrados(peticion))
     return {"ok": True}
 
 # ------------------------------- CUENTAS QUE TE GUSTAN 2 (rama cuentas-gustan-2)
@@ -24535,6 +24636,94 @@ def graficas_fichero(cid: str, pieza_id: str, extension: str, peticion: Request)
     _ficha_de_graficas(cid, peticion)
     ruta = _por_graficas(_graficas().ruta_final, raiz_proyectos(), cid, pieza_id, extension)
     return servir_fichero(peticion, ruta)
+
+
+# --- Las piezas en capas (rama graficas-2-capas, 11-11-2026; graficas_capas.py).
+# Lo nuevo va en capas.json/png/jpg y la pieza de siempre NO se toca, así que
+# `main` sigue leyéndola. Leer, convertir, comparar y la vista previa no escriben
+# nada. Nada de esto llama a una IA: no cuesta dinero.
+
+# aparte: si las capas no cargan, el resto de Gráficas sigue funcionando
+try:
+    import graficas_capas as GRAFICAS_CAPAS  # noqa: E402
+    ERROR_GRAFICAS_CAPAS = ""
+except Exception as _fallo_capas:  # noqa: BLE001
+    GRAFICAS_CAPAS = None
+    ERROR_GRAFICAS_CAPAS = f"{type(_fallo_capas).__name__}: {_fallo_capas}"
+
+
+def _por_capas(fn, *args, **kwargs):
+    """Como `_por_graficas`, con el 409 de «la pieza cambió» y el 404 de «no está»."""
+    G = _graficas()
+    try:
+        return fn(*args, **kwargs)
+    except GRAFICAS_CAPAS.ErrorConflicto as fallo:
+        raise ErrorApi(409, str(fallo))
+    except G.ErrorGraficas as fallo:
+        raise ErrorApi(404 if isinstance(fallo, G.ErrorNoEsta) else 400, str(fallo))
+
+
+def _contexto_capas(cid, peticion):
+    if GRAFICAS_CAPAS is None:
+        raise ErrorApi(503, f"Las capas de Gráficas no se han podido cargar: {ERROR_GRAFICAS_CAPAS}")
+    ficha = _ficha_de_graficas(cid, peticion)
+    G = _graficas()
+    raiz = raiz_proyectos()
+    kit = _por_capas(G.leer_kit, raiz, cid)
+    logo, oscuro = _logos_de_graficas(ficha, kit)
+    return G, GRAFICAS_CAPAS, raiz, kit, logo, oscuro
+
+
+@app.get("/api/graficas/{cid}/piezas/{pieza_id}/capas")
+def graficas_leer_capas(cid: str, pieza_id: str, peticion: Request):
+    """La pieza en capas: la guardada si sigue valiendo, o la pieza de siempre
+    convertida ahora mismo. No guarda nada."""
+    G, C, raiz, kit, logo, oscuro = _contexto_capas(cid, peticion)
+    ficha, doc = _por_capas(C.leer, raiz, cid, pieza_id)
+    if doc:
+        return {"doc": doc, "origen": "guardada"}
+    doc = _por_capas(G._con_turno, lambda p: C.convertir(p, ficha, kit, logo, oscuro))
+    return {"doc": doc, "origen": "convertida"}
+
+
+@app.post("/api/graficas/{cid}/piezas/{pieza_id}/comparar")
+def graficas_comparar_capas(cid: str, pieza_id: str, peticion: Request):
+    """Pinta la pieza como siempre y convertida en capas, y dice si salen
+    iguales. No guarda nada: es la comprobación antes de abrirla en capas."""
+    G, C, raiz, kit, logo, oscuro = _contexto_capas(cid, peticion)
+    ficha = _por_capas(G.leer_pieza, raiz, cid, pieza_id)
+    if ficha.get("nacida_en_capas"):
+        raise ErrorApi(400, "esta pieza nació en capas: no hay una versión de antes con la que compararla")
+    imagen = G.ruta_imagen(raiz, cid, ficha.get("imagen") or "")
+    r = _por_capas(G._con_turno, lambda p: C.comparar(p, ficha, kit, imagen, logo, oscuro))
+    return {k: r[k] for k in ("igual", "diferencia", "visible", "lineas", "faltan", "movidos")}
+
+
+@app.post("/api/graficas/{cid}/capas/vista")
+def graficas_vista_capas(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """La vista de una pieza en capas tal como saldría. No guarda nada."""
+    G, C, raiz, kit, logo, oscuro = _contexto_capas(cid, peticion)
+    cuerpo = cuerpo or {}
+    lamina = cuerpo.get("lamina", 0)
+    if not isinstance(lamina, int) or isinstance(lamina, bool):
+        raise ErrorApi(400, "esa lámina no está")
+    png, avisos, _ = _por_capas(G._con_turno, lambda p: C.pintar(
+        p, cuerpo.get("doc"), kit, lambda n: G.ruta_imagen(raiz, cid, n), logo, oscuro, lamina))
+    return {"img": G._uri_jpg(G.a_jpg(png, 1080, 88)), "avisos": avisos}
+
+
+@app.put("/api/graficas/{cid}/piezas/{pieza_id}/capas")
+def graficas_guardar_capas(cid: str, pieza_id: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Guarda la versión en capas de una pieza, al lado de la de siempre."""
+    _G, C, raiz, _kit, logo, oscuro = _contexto_capas(cid, peticion)
+    return _por_capas(C.guardar, raiz, cid, (cuerpo or {}).get("doc"), pieza_id, logo, oscuro)
+
+
+@app.post("/api/graficas/{cid}/capas", status_code=201)
+def graficas_crear_en_capas(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Una pieza nueva que nace en capas."""
+    _G, C, raiz, _kit, logo, oscuro = _contexto_capas(cid, peticion)
+    return _por_capas(C.guardar, raiz, cid, (cuerpo or {}).get("doc"), None, logo, oscuro)
 
 
 def main():

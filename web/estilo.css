@@ -5499,6 +5499,12 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .aviso-vidiq { color: var(--aviso); }
 .saldo-vidiq, .resultado-vidiq { overflow-wrap: anywhere; }
 
+/* ======================================================== VIDIQ-2 · PÚBLICO */
+.publico-busquedas { margin: 6px 0 4px; }
+.publico-busquedas select { max-width: 100%; }
+.publico-linea { margin: 4px 0; }
+.publico-linea .enlace-publico { margin-left: 4px; }
+
 /* ============================================================ COLA DEL STUDIO
    rama cola-montaje (25-10-2026): el botón «Cola» de la barra de módulos y su
    panel lateral. El panel reutiliza `.capa-ajustes-proyecto`/`.cajon-proyecto`;
@@ -5692,6 +5698,12 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   border-radius: 6px; border: 1px solid var(--acento); background: var(--acento-relleno); color: var(--sobre-acento);
   font-weight: 600; }
 .mandos-recibido a { font-size: 12px; }
+/* 11-11-2026: el proyecto de cada recibido y los filtros de la bandeja */
+.filtros-recibidos { flex-wrap: wrap; gap: 6px; }
+.proyecto-recibido { display: grid; gap: 4px; min-width: 0; }
+.proyecto-recibido label { gap: 6px; align-items: center; min-width: 0; flex-wrap: nowrap; }
+.proyecto-recibido .meta { flex: 0 0 56px; }
+.proyecto-recibido select { flex: 1 1 auto; min-width: 0; max-width: 100%; }
 @media (max-width: 640px) {
   .rejilla-recibidos { grid-template-columns: minmax(0, 1fr); }
 }
@@ -5876,3 +5888,9 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .grupo-publicados .tarjeta-piloto { opacity: 0.75; }
 .ver-publicados-piloto { align-self: flex-start; }
 .relleno-repintado { pointer-events: none; }
+
+/* publicar-ok-envios: el «OK» del día y la hora, y su confirmación */
+.ok-cuando-publicar { align-self: flex-end; min-width: 48px; font-weight: 600; }
+.cuando-confirmado { color: var(--ok); margin-top: 4px; }
+.cuando-confirmado.sin-hora { color: var(--aviso); }
+@media (max-width: 640px) { .ok-cuando-publicar { min-height: 44px; min-width: 56px; } }

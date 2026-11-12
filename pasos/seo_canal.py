@@ -503,9 +503,11 @@ def _trends_simulado(frases):
     return salida
 
 
-def _serie(frases, propiedad):
-    """{frase: [valores semana a semana]} de Trends para Perú, 12 meses."""
-    peticion = {"comparisonItem": [{"keyword": f, "geo": SR.PAIS.upper(), "time": "today 12-m"}
+def _serie(frases, propiedad, geo=None):
+    """{frase: [valores semana a semana]} de Trends, 12 meses: para Perú si no
+    se dice otra cosa; `geo` "" = todo el mundo (rama vidiq-2)."""
+    geo = SR.PAIS.upper() if geo is None else geo
+    peticion = {"comparisonItem": [{"keyword": f, "geo": geo, "time": "today 12-m"}
                                    for f in frases],
                 "category": 0, "property": propiedad}
     url = f"{URL_TRENDS}/explore?" + urllib.parse.urlencode({
@@ -513,7 +515,7 @@ def _serie(frases, propiedad):
     cod, texto = HTTP("GET", url)
     if cod != 200:
         # la primera vez Trends pide una galleta: se coge en la portada y se reintenta
-        HTTP("GET", f"https://trends.google.com/trends/explore?geo={SR.PAIS.upper()}")
+        HTTP("GET", f"https://trends.google.com/trends/explore?geo={geo}")
         cod, texto = HTTP("GET", url)
     if cod != 200:
         raise ErrorCanal("Google Trends no contesta ahora" + (" (demasiadas preguntas: 429)"
@@ -559,7 +561,7 @@ def _medir(serie):
     return {"indice": indice, "cambio": max(-100, min(300, cambio))}
 
 
-def tendencias(frases, raiz_p=None):
+def tendencias(frases, raiz_p=None, publico=None):
     """{frase: {youtube: {indice, cambio} | None, google: {...} | None,
     texto, sentido: sube|baja|estable|""}} para hasta 5 frases (Trends
     compara 5 a la vez: el índice es relativo ENTRE ellas). Lo que falla
@@ -568,7 +570,8 @@ def tendencias(frases, raiz_p=None):
     salida = {"frases": {}, "error": ""}
     if not frases:
         return salida
-    clave = "trends|" + "|".join(sorted(SR.normal(f) for f in frases))
+    clave = "trends|" + "|".join(sorted(SR.normal(f) for f in frases)) + SR.sufijo_pais(publico)
+    geo = SR._publico(publico)[0].upper()          # "" = todo el mundo
     guardada = _de_cache(raiz_p, clave, CADUCA_TRENDS_S)
     if guardada is not None:
         return guardada
@@ -578,7 +581,7 @@ def tendencias(frases, raiz_p=None):
             if simulado():
                 medidas = _trends_simulado(frases)
             else:
-                series = _serie(frases, propiedad)
+                series = _serie(frases, propiedad, geo)
                 medidas = {f: _medir(series.get(f)) for f in frases}
             por_fuente[fuente] = medidas
         except ErrorCanal as fallo:

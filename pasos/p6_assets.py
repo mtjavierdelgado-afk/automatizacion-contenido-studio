@@ -2261,14 +2261,17 @@ CAMARA_DE_CERCA = re.compile(
     r"\bprimer(?:isimo)? plano\b|\bplano (?:de )?detalle\b|\bdetalle de(?:l)?\b|\bde cerca\b|"
     r"\bplano (?:corto|cerrado)\b|\binserto\b",
     re.IGNORECASE)
-#: «medium close-up» y «plano medio corto» enseñan el sitio: no son de cerca.
+#: Los planos MEDIOS. En «un espacio que cambia» respetan su camara como los de
+#: cerca (rama base-fiel, decision del dueño del 12-11); en «producto» siguen
+#: editando la base, que es lo que copia el producto aprobado (`_familia_del_plano`).
 CAMARA_MEDIA = re.compile(r"\bmedium close|\bplano medio\b|\bmcu\b|"
-                          # rama base-fiel (X01, 12-11): «medium shot from the shower side»
-                          r"\bmedium(?:[- ]wide)? shot\b|\bmid[- ]?shot\b|\bplano americano\b",
+                          # rama base-fiel (X01, 12-11): «medium shot from the shower side»;
+                          # «medium-wide» no: es casi un general y enseña la habitacion
+                          r"\bmedium shot\b|\bmid[- ]?shot\b|\bplano americano\b",
                           re.IGNORECASE)
 
 
-def _familia_del_plano(escena, modo):
+def _familia_del_plano(escena, modo, relato=None):
     """La familia que decide si el plano edita la base. En modo guion (rama
     tipo-de-relato-2) manda la CAMARA de su linea: un primer plano o un detalle
     es «cerca» y no edita la base -- editar fija la camara de la base, y el
@@ -2280,23 +2283,27 @@ def _familia_del_plano(escena, modo):
     dueño del 12-11): editar la imagen del estado fija su camara y el FINAL
     CHECK dice «keep exactly its camera»; en X01, «medium shot from the shower
     side» y «medium close-up of the mirror» salian iguales a la imagen del
-    estado. Ahora es «cerca»: lleva esa imagen de referencia y su angulo manda."""
+    estado. Ahora es «cerca»: lleva esa imagen de referencia y su angulo manda.
+    SOLO en «un espacio que cambia» (`relato`): en «producto» el plano medio
+    sigue editando la base, porque editarla es lo que copia el producto
+    aprobado (revision del arbitro, 12-11). Sin `relato`, como antes."""
+    medio_cerca = (relato or {}).get("modo") == "espacio_que_cambia"
     camara = str(((escena.get("linea_gv") or {}).get("camara")) or "")
     if camara.strip():
         llano = unicodedata.normalize("NFKD", camara.lower())
         llano = "".join(c for c in llano if not unicodedata.combining(c))
-        if CAMARA_MEDIA.search(llano) or CAMARA_DE_CERCA.search(llano):
-            return "cerca"
-        return "lejos"
+        if CAMARA_MEDIA.search(llano):
+            return "cerca" if medio_cerca else "lejos"
+        return "cerca" if CAMARA_DE_CERCA.search(llano) else "lejos"
     linea = escena.get("linea_gv") or {}
     if linea and not escena.get("carta"):
         # SIN CAMARA Y SIN CARTA (videos nuevos de la Parrilla, rama
         # parrilla-estados): lo dice la propia linea («Close-up of the mirror»)
         llano = unicodedata.normalize("NFKD", str(linea.get("visual") or "").lower())
         llano = "".join(c for c in llano if not unicodedata.combining(c))
-        if CAMARA_DE_CERCA.search(llano) or CAMARA_MEDIA.search(llano):
-            return "cerca"
-        return ""
+        if CAMARA_MEDIA.search(llano):
+            return "cerca" if medio_cerca else ""
+        return "cerca" if CAMARA_DE_CERCA.search(llano) else ""
     return _familia_de_carta(escena.get("carta"), modo)
 
 
@@ -2307,7 +2314,7 @@ def _marcar_edicion(escena, beat, relato, principal, modo, bases_rel):
     el, el plano no gana ni una clave y el plan sale como siempre. `base` es la
     ruta RELATIVA de la base aprobada: viaja en el plan para la V2.0 fase 5, que
     arrancara los clips de ese sitio desde la misma imagen."""
-    familia = _familia_del_plano(escena, modo)
+    familia = _familia_del_plano(escena, modo, relato)
     if not tipo_relato.plano_se_edita(escena, relato, principal, familia):
         for clave in ("editar_base", "cambio", "estado", "base", "base_clave", "ref_clave"):
             escena.pop(clave, None)

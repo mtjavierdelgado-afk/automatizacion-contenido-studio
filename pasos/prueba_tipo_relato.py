@@ -514,8 +514,16 @@ def prueba_ambientes_y_camara():
           "lejos", "un plano general la edita")
     igual(P6._familia_del_plano({"linea_gv": {"camara": "wide shot, detailed tiles"}}, "foto"),  # noqa: SLF001
           "lejos", "«detailed» no es un detalle")
-    igual(P6._familia_del_plano({"linea_gv": {"camara": "medium shot, detailed tiles"}}, "foto"),  # noqa: SLF001
-          "cerca", "un plano medio respeta su cámara (decisión del 12-11)")
+    ec = {"modo": "espacio_que_cambia", "cambia": "estado"}
+    igual(P6._familia_del_plano({"linea_gv": {"camara": "medium shot, detailed tiles"}}, "foto", ec),  # noqa: SLF001
+          "cerca", "un plano medio de un espacio que cambia respeta su cámara (decisión del 12-11)")
+    igual(P6._familia_del_plano({"linea_gv": {"camara": "medium shot of the jar"}}, "foto",  # noqa: SLF001
+                                {"modo": "producto"}),
+          "lejos", "en «producto» el plano medio sigue editando la base (copia el producto)")
+    igual(P6._familia_del_plano({"linea_gv": {"camara": "medium-wide shot of the room"}}, "foto", ec),  # noqa: SLF001
+          "lejos", "un «medium-wide» enseña la habitación: edita")
+    igual(P6._familia_del_plano({"linea_gv": {"visual": "Medium close-up of the mirror"}}, "foto"),  # noqa: SLF001
+          "", "sin relato y sin cámara, un medio como antes")
     igual(P6._familia_del_plano({"carta": "detalle"}, "ilustracion"), "cerca",  # noqa: SLF001
           "sin línea, la familia de su carta, como siempre")
     rel = T.resolver({"tipo_relato": {"modo": "espacio_que_cambia", "cambia": "objeto"}})
@@ -538,7 +546,8 @@ def prueba_revision_03_11():
                              ("insert of the key", "cerca"), ("ECU of the hinge", "cerca"),
                              ("plano corto del grifo", "cerca"), ("medium close-up of Ana in the kitchen", "cerca"),
                              ("plano medio de la cocina", "cerca"), ("medium shot from the shower side", "cerca"), ("wide shot from the door", "lejos")):
-        igual(P6._familia_del_plano({"linea_gv": {"camara": camara}}, "foto"), esperada,  # noqa: SLF001
+        igual(P6._familia_del_plano({"linea_gv": {"camara": camara}}, "foto",  # noqa: SLF001
+                                    {"modo": "espacio_que_cambia"}), esperada,
               f"la cámara «{camara}» es {esperada}")
     # el principal de un recorrido es el primero que declaró Claude, aunque otro tenga más tramos
     cat = {"sets": {"cocina": {"descripcion": "an oak kitchen", "luz": "day"},

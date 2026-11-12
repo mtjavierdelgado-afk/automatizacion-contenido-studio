@@ -188,7 +188,11 @@ async function hablarConElStudio(cfg, ruta, metodo, cuerpo) {
   catch (e) { r = e && e.name === 'TimeoutError' ? { lento: true } : { sinRed: true }; }
   if (r.caido) return { mal: CAIDO(r.caido) };
   /* tardó demasiado: puede haber llegado igual, y volver a mandarlo lo duplicaría */
-  if (r.lento) return { mal: 'Tu Studio tarda mucho en contestar. Mira en Automatizar → Recibidos de Chrome si ya llegó antes de volver a pulsar.' };
+  if (r.lento) {
+    return { mal: metodo === 'POST'
+      ? 'Tu Studio tarda mucho en contestar. Mira en Automatizar → Recibidos de Chrome si ya llegó antes de volver a pulsar.'
+      : 'Tu Studio tarda mucho en contestar. Prueba otra vez en unos minutos.' };
+  }
   if (r.sinSesion || r.sinRed) {
     const otra = await enviarDesdeElStudio(cfg, ruta, metodo, cuerpo).catch(() => ({ fallo: true }));
     if (otra.sinPestana) {

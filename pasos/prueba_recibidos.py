@@ -714,6 +714,13 @@ HOSTILES = {
         "Consola Retro") + "<link rel='canonical' href='https://www.amazon.com/Consola-Retro/dp/B0ABC123'><body></body>",
     "https://blog.ejemplo.com/?p=123": _og("https://blog.ejemplo.com/ideas-fiesta-gamer/", "Ideas probadas", "Ideas para tu fiesta")
         + "<link rel='canonical' href='https://blog.ejemplo.com/ideas-fiesta-gamer/'><body></body>",
+    "https://blog.ejemplo.com/?p=223": _og("https://blog.ejemplo.com/entrada-123/", "Resumen de la 123", "Entrada 123")
+        + "<link rel='canonical' href='https://blog.ejemplo.com/entrada-123/'><body></body>",
+    "https://blog.ejemplo.com/?p=224": _og("https://blog.ejemplo.com/entrada-123/", "Resumen de la 123", "Entrada 123")
+        + "<link rel='canonical' href='https://blog.ejemplo.com/entrada-123/'><body></body>",
+    "https://www.tiktok.com/@ana/video/120": "<body><div><span data-e2e='browse-username'>ana</span>"
+        "<h1 data-e2e='browse-video-desc'>el 120</h1><strong data-e2e='browse-like-count'>8</strong>"
+        "<div><a href='/@x/video/9'><img><strong data-e2e='video-views'>8.5M</strong></a></div></div></body>",
     "https://diario.ejemplo.pe/amp/noticia-3": _og("https://diario.ejemplo.pe/noticia-3", "Resumen de la 3", "Noticia 3")
         + "<link rel='canonical' href='https://diario.ejemplo.pe/noticia-3'><body></body>",
     "https://x.com/ana/status/5": "<body><article data-testid='tweet'><div data-testid='User-Name'>Ana @ana</div>"
@@ -726,7 +733,7 @@ HOSTILES = {
     "https://www.linkedin.com/feed/update/urn:li:activity:7000000000000000001/": "<body>"
         "<div data-urn='urn:li:activity:7000000000000000001'><span class='update-components-actor__name'>Empresa</span>"
         "<div class='update-components-text'>Post</div><div class='social-details-social-counts'>"
-        "<span class='social-details-social-counts__reactions-count'>77</span><button><span>5</span><span>comentarios</span></button></div></div></body>",
+        "<span class='social-details-social-counts__reactions-count'>77</span><button><span>5</span> comentarios</button></div></div></body>",
     "https://www.youtube.com/shorts/NUEVONUEVO1": "<title>YouTube</title><body><ytd-shorts>"
         "<ytd-reel-video-renderer is-active style='display:block;height:700px'><a class='ytp-title-link' href='https://www.youtube.com/shorts/VIEJOVIEJO1'>t</a>"
         "<yt-shorts-video-title-view-model><h1>Short VIEJO</h1></yt-shorts-video-title-view-model>"
@@ -759,7 +766,11 @@ def prueba_lector_hostil():
                              body="<!doctype html><html><head>" + html.replace("<body>", "</head><body>", 1) + "</html>")
             pagina.route("**/*", servir)
             for url in HOSTILES:
-                if url.endswith("noticia-2-consolas"):
+                if url.endswith("?p=224"):
+                    # una web que pasa de ?p=123 a ?p=124 sin recargar: las etiquetas son del 123
+                    pagina.goto("https://blog.ejemplo.com/?p=223")
+                    pagina.evaluate("history.pushState({}, '', '/?p=224')")
+                elif url.endswith("noticia-2-consolas"):
                     # «scroll infinito» de verdad: se carga la noticia 1 y la barra pasa a la 2 sin recargar
                     pagina.goto("https://diario.ejemplo.pe/noticia-1-elecciones")
                     pagina.evaluate("history.pushState({}, '', '/noticia-2-consolas')")
@@ -857,6 +868,14 @@ def prueba_lector_hostil():
                         ("https://diario.ejemplo.pe/noticia-1-elecciones", "Noticia 1: elecciones")):
         d = res[url]
         ok(d["titulo"] == titulo and not d.get("aviso"), f"una web normal con su canónico en otra ruta se lee ({url})")
+    igual(res["https://www.amazon.com/dp/B0ABC123?ref=xyz"]["url"], "https://www.amazon.com/Consola-Retro/dp/B0ABC123",
+          "y su enlace es el canónico (sin lo que sobra)")
+    sp = res["https://blog.ejemplo.com/?p=224"]
+    ok(sp.get("aviso") and "Entrada 123" not in json.dumps(sp) and sp["url"] == "https://blog.ejemplo.com/?p=224",
+       "una web que se movió sin recargar (?p=223 → ?p=224) no manda la entrada de antes")
+    tt = res["https://www.tiktok.com/@ana/video/120"]
+    igual((tt["texto"], tt["cifras"]), ("el 120", {"me_gusta": "8"}),
+          "TikTok: un vídeo con miniaturas de relacionados en su caja se sigue leyendo")
     am = res["https://diario.ejemplo.pe/amp/noticia-3"]
     ok(am["titulo"] == "Noticia 3" and am["url"] == "https://diario.ejemplo.pe/noticia-3" and not am.get("aviso"),
        "la versión AMP de una noticia sí vale con su canónico")

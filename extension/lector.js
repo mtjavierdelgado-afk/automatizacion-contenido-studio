@@ -114,12 +114,23 @@
   if (red === 'web') {
     /* una web normal se recarga en cada página, salvo los diarios con «scroll infinito», que cambian
        la barra al bajar y dejan las etiquetas de la primera noticia: entonces no valen */
-    const deOtra = u => u && ruta(u) !== '' && !mismaPagina(u) && (() => { try { return new URL(u, location.href).hostname === location.hostname; } catch (e) { return false; } })();
+    /* de otra página: otra ruta, o la misma con otra «?…» (las webs que van por «?id=») */
+    const deOtra = u => { if (!u || ruta(u) === '') return false;
+      try { const x = new URL(u, location.href);
+        return x.hostname === location.hostname && (!mismaPagina(u) || (!!x.search && x.search !== location.search)); } catch (e) { return false; } };
     /* la dirección con la que se CARGÓ el documento: si sigue siendo la de la barra, sus etiquetas
        son de esta página aunque su canónico sea otra ruta (Amazon, WordPress «?p=», un slug corregido) */
-    let cargada = '';
-    try { const n = performance.getEntriesByType('navigation')[0]; cargada = n ? n.name : ''; } catch (e) { cargada = ''; }
-    ogVale = !!(cargada && mismaPagina(cargada)) || !(deOtra(ogUrl) || deOtra(canonico));
+    const sinAlmohadilla = u => { try { const x = new URL(u, location.href); x.hash = ''; return x.href; } catch (e) { return ''; } };
+    let quieta = false;
+    try {
+      const n = performance.getEntriesByType('navigation')[0];
+      const cargada = n ? sinAlmohadilla(n.name) : '';
+      /* ni la barra ni ninguna entrada de este mismo documento (atrás/adelante) en otra dirección */
+      const movida = (window.navigation && navigation.entries ? navigation.entries() : [])
+        .some(e => e.sameDocument && sinAlmohadilla(e.url) !== cargada);
+      quieta = !!cargada && cargada === sinAlmohadilla(location.href) && !movida;
+    } catch (e) { quieta = false; }
+    ogVale = quieta || !(deOtra(ogUrl) || deOtra(canonico));
   }
   else if (!ogUrl) ogVale = false;
   else if (codigoIg) ogVale = new RegExp('/' + codigoIg + '(?:/|$|\\?)').test(ogUrl);
@@ -234,7 +245,9 @@
            podría ser otro: el inicio, el «Para ti») */
         const DESC = '[data-e2e="browse-video-desc"], [data-e2e="video-desc"]';
         /* (si la ventana enlaza a vídeos y a este no, es la de otro: una carrera al pasar de uno a otro) */
-        const deEste = d => { const ids = [...d.querySelectorAll('a[href*="/video/"]')].map(a => ((a.getAttribute('href') || '').match(/\/video\/(\d+)/) || [])[1]);
+        const deEste = d => { const ids = [...d.querySelectorAll('a[href*="/video/"]')]
+            /* las miniaturas de «relacionados» o «vídeos del creador» no dicen de quién es la caja */
+            .filter(a => !a.querySelector('[data-e2e="video-views"], img, picture, video')).map(a => ((a.getAttribute('href') || '').match(/\/video\/(\d+)/) || [])[1]);
           return !ids.length || ids.includes(idVideo); };
         const ventana = [...document.querySelectorAll('div[role="dialog"]')].filter(seVe)
           .find(d => d.querySelector('[data-e2e="browse-like-count"]') && deEste(d));
@@ -347,7 +360,12 @@
         datos.cifras.me_gusta = numeroEn(caja, '.social-details-social-counts__reactions-count', '.social-details-social-counts__social-proof-fallback-number');
         /* trozo a trozo («77» y «5 comentarios» pegados no son 775) */
         const bloque = caja.querySelector('.social-details-social-counts');
-        const trozos = bloque ? [...bloque.querySelectorAll('*')].filter(e => !e.children.length).map(e => limpio(textoDe(e))).filter(Boolean) : [];
+        /* los trozos de texto tal cual están (un «5» en su span y «comentarios» suelto al lado) */
+        const trozos = [];
+        if (bloque) {
+          const w = document.createTreeWalker(bloque, NodeFilter.SHOW_TEXT);
+          for (let n = w.nextNode(); n; n = w.nextNode()) { const t = limpio(n.nodeValue); if (t) trozos.push(t); }
+        }
         /* entre dos números va un separador; entre un número y su palabra («5» «comentarios»), un espacio */
         const sociales = trozos.reduce((t, x, i) => !i ? x : t + (/\d$/.test(trozos[i - 1]) && /^\d/.test(x) ? ' · ' : ' ') + x, '');
         if (sociales) cifrasDeFrase(sociales, datos.cifras);

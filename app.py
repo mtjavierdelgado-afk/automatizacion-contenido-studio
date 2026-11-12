@@ -5134,6 +5134,38 @@ def _tipo_relato_guardado(ctx):
         return {}
 
 
+def _imagenes_del_relato_por_pagar(ctx):
+    """Las imagenes del tipo de relato que FALTAN y se pagan antes de los planos:
+    la base de cada ambiente (salvo la que se pone con la foto subida, gratis) y
+    la de cada estado que no esta hecha con su cambio de ahora. Solo lee; ante
+    cualquier duda, 0 (como antes)."""
+    try:
+        tr = _tipo_relato()
+        p6 = PASOS_MODULOS.p6_assets
+        params = ctx.estado.params("assets") or {}
+        if not tr.edita(tr.resolver(params)):
+            return 0
+        bases = _tipo_relato_guardado(ctx).get("bases") or {}
+        subida = (params.get("espacio_fijo") or {}).get("imagen") \
+            if isinstance(params.get("espacio_fijo"), dict) else None
+        sitio, _espacio = p6.espacio_del_relato(ctx.proyecto, params)
+        n = 0
+        if not (sitio and sitio in bases) and not subida:
+            n += 1
+        try:
+            otros = [a["sitio"] for a in p6.ambientes_del_relato(ctx.proyecto, params)][1:]
+        except Exception:                                   # noqa: BLE001
+            otros = []
+        n += sum(1 for a in otros if a not in bases)
+        sitio_e, pedidos = p6.estados_del_relato(ctx.proyecto, params)
+        hechos = ((bases.get(sitio_e) or {}).get("estados") or {}) if sitio_e else {}
+        n += sum(1 for est, cambio in pedidos.items()
+                 if not (hechos.get(est) and tr.mismo_cambio((hechos.get(est) or {}).get("cambio"), cambio)))
+        return n
+    except Exception:                                       # noqa: BLE001
+        return 0
+
+
 def _ficha_tipo_relato(ctx):
     """Lo que la pantalla necesita del tipo de relato del video."""
     tr = _tipo_relato()
@@ -6195,7 +6227,11 @@ def _ficha_guion_visual(ctx):
             todos = p6.etiquetas_del_espacio(catalogo_e, sitio_e)
             ajenos = set(p6.etiquetas_ajenas(catalogo_e, sitio_e))
             planos_ver = guardado.get("planos") or propuesta or _planos_ef
-            sin_casar = [x for x in gv.estados_sin_casar(planos_ver, todos) if x["estado"] not in ajenos]
+            otro_sitio = p6.lineas_de_otro_sitio(catalogo_e, sitio_e)
+            claves = {p.get("id"): _catalogo_visual()._clave_linea(p.get("visual"))
+                      for p in planos_ver or [] if isinstance(p, dict)}
+            sin_casar = [x for x in gv.estados_sin_casar(planos_ver, todos)
+                         if x["estado"] not in ajenos and claves.get(x["plano"]) not in otro_sitio]
             casados = gv.estados_casados(planos_ver, todos)
     except Exception:                                       # noqa: BLE001
         sin_casar, casados = [], []
@@ -18815,7 +18851,12 @@ def _coste_previsto(ctx, pestanas, modo="pendientes"):
     hojas, hojas_hechas = (_hojas_de_reparto(ctx, rehara) if "video" in pestanas
                            else (0, 0))
     imagenes += hojas
-    usd_imagenes = round(imagenes * usd_imagen, 3)
+    # Y LA IMAGEN BASE Y LA DE CADA ESTADO del tipo de relato, que se pagan antes
+    # de los planos (G01, tren del 12-11: se previeron 0,54 $ y costaron 0,93 $,
+    # entre otras cosas por la base y el estado, que no se contaban). Solo las
+    # que FALTAN: se cuentan como imagenes por hacer.
+    relato_por_pagar = _imagenes_del_relato_por_pagar(ctx) if "video" in pestanas else 0
+    usd_imagenes = round((imagenes + relato_por_pagar) * usd_imagen, 3)
     usd_tts = round(caracteres * usd_caracter, 4)
     # la voz ya grabada y al dia no se vuelve a pagar en una tanda «pendientes»;
     # en una 'todo' se graba otra vez entera, y se paga entera
@@ -18828,12 +18869,13 @@ def _coste_previsto(ctx, pestanas, modo="pendientes"):
     # en el otro: uno asusta al que retoma, el otro promete barato de mas.
     hechas = (_imagenes_ya_generadas(ctx, planos, rehara) + hojas_hechas) if imagenes else 0
     hechas = min(hechas, imagenes)
-    por_generar = max(0, imagenes - hechas)
+    por_generar = max(0, imagenes - hechas) + relato_por_pagar
+    imagenes += relato_por_pagar
     precio = AJUSTES.precio_por_imagen(calidad, modo=modo_imagen)
     ficha = {"imagenes": imagenes, "calidad": calidad,
              "usd_por_imagen": usd_imagen, "usd_imagenes": usd_imagenes,
              "precio_de": precio.get("fuente"),
-             "hojas_reparto": hojas,
+             "hojas_reparto": hojas, "imagenes_relato": relato_por_pagar,
              "imagenes_hechas": hechas, "imagenes_por_generar": por_generar,
              "usd_por_generar": round(por_generar * usd_imagen + usd_tts_por_generar, 3),
              "caracteres": caracteres, "usd_tts": usd_tts,
@@ -23577,6 +23619,24 @@ def _piloto_usar_portada(ctx, diseno):
                                                          "formato": diseno["formato"], "piloto": True})
 
 
+#: las paradas desde las que «Seguir igualmente» salta TAMBIEN el interruptor
+#: (decision del dueño del 12-11: desde el tope, un solo clic)
+PILOTO_SALTA_INTERRUPTOR = ("interruptor", "tope")
+
+
+def _piloto_tope_inicial(ctx, aj, previsto):
+    """El paso 0: lo que falta por generar, MAS lo ya gastado si es un reintento
+    (punto D del tren del 12-11), contra el tope. Lanza `_PilotoPara`."""
+    if not previsto or previsto <= 0:
+        return
+    ya = _piloto_gastado(ctx)
+    if ya + previsto > aj["tope_usd"]:
+        raise _PilotoPara(f"costaría unos {previsto:.2f} $"
+                          + (f" más los {ya:.2f} $ ya gastados" if ya > 0 else "")
+                          + f" y tu tope por vídeo es {aj['tope_usd']:.2f} $: sube el tope "
+                          "o pulsa «Seguir igualmente»", "Piloto → Ajustes", "tope")
+
+
 def _piloto_tope_antes_de_dibujar(ctx, raiz, vid, aj):
     """El tope, con los planos de verdad, antes de dibujar. -> (queda, portada)
 
@@ -23592,13 +23652,12 @@ def _piloto_tope_antes_de_dibujar(ctx, raiz, vid, aj):
     # SOLO si quedan imagenes que pagar: tras «Seguir igualmente» con todo
     # dibujado, lo que falta (montar) es gratis y no se para (G01, tren del
     # 12-11). La portada de IA mira el tope en su paso: si no cabe, no se hace
-    falta = por_dibujar + portada
-    if por_dibujar > 0 and gastado + falta > aj["tope_usd"]:
-        raise _PilotoPara(f"lo que falta costaría unos {falta:.2f} $ (imágenes {por_dibujar:.2f} $"
-                          + (f", portada {portada:.2f} $" if portada else "")
-                          + f"), ya van {gastado:.2f} $ y tu tope es {aj['tope_usd']:.2f} $",
+    # sin la portada (punto C del tren): si no cabe, se queda la del plano en su paso
+    if por_dibujar > 0 and gastado + por_dibujar > aj["tope_usd"]:
+        raise _PilotoPara(f"las imágenes que faltan costarían unos {por_dibujar:.2f} $, ya van "
+                          f"{gastado:.2f} $ y tu tope es {aj['tope_usd']:.2f} $",
                           "Piloto → Ajustes", "tope")
-    return max(0.0, aj["tope_usd"] - gastado - falta), portada
+    return max(0.0, aj["tope_usd"] - gastado - por_dibujar - portada), portada
 
 
 def _piloto_cadena(avisar, ctx, raiz, vid):
@@ -23625,10 +23684,7 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
         previsto = _piloto_previsto(ctx, aj) if saltar != "tope" else None
         if previsto is not None:
             P.cambiar(raiz, vid, previsto_usd=previsto)
-        if previsto is not None and previsto > aj["tope_usd"]:
-            raise _PilotoPara(f"costaría unos {previsto:.2f} $ y tu tope por vídeo es "
-                              f"{aj['tope_usd']:.2f} $: sube el tope o pulsa «Seguir igualmente»",
-                              "Piloto → Ajustes", "tope")
+            _piloto_tope_inicial(ctx, aj, previsto)
         # 1-2. GUION Y VOZ
         tanda("guion", "guion", "escribiendo el guion")
         tanda("voz", "voz", "poniéndole voz")
@@ -23649,7 +23705,9 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
             P.apuntar_revision(raiz, vid, str(aviso), "Imágenes")
         # 5. EL INTERRUPTOR
         etapa("decidir", "mirando lo que dejó marcado el revisor")
-        decision, porque = _piloto_decidir(ctx, raiz, vid, aj, saltar == "interruptor")
+        # «Seguir igualmente» desde el TOPE salta tambien el interruptor: un solo
+        # clic para seguir (decision del dueño del 12-11); las marcas quedan en «revisar»
+        decision, porque = _piloto_decidir(ctx, raiz, vid, aj, saltar in PILOTO_SALTA_INTERRUPTOR)
         if decision == "parar":
             raise _PilotoPara(porque, "Imágenes", "interruptor")
         # 6. EL MONTAJE, en la cola de montaje

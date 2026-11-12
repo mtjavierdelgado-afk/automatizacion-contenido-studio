@@ -1634,7 +1634,10 @@ def planificar(proyecto, params, inventario=None, replantear=False,
                 if principal else {}, todos_los_estados))
             # UN ESTADO QUE NO ES NINGUNO DEL ESPACIO (piloto-al-dia, Y05): se
             # apunta y `ejecutar` para la tanda ANTES de pagar
+            # solo los planos DEL ESPACIO: uno de otro sitio no edita la base y su
+            # estado no para el video (punto B del tren del 12-11)
             if principal and todos_los_estados and linea.get("estado") and not beat.get("estado") \
+                    and escena.get("set") == principal \
                     and linea["estado"] not in estados_ajenos \
                     and guion_visual.estados_sin_casar([linea], todos_los_estados):
                 estados_sin_casar.append({"plano": escena["id"], "linea": linea.get("id") or "",
@@ -1674,6 +1677,7 @@ def planificar(proyecto, params, inventario=None, replantear=False,
                 nueva["linea_gv"], tipo_relato.estados_del_catalogo(catalogo, principal)
                 if principal else {}, todos_los_estados))
             if principal and todos_los_estados and nueva["linea_gv"].get("estado") and not beat.get("estado") \
+                    and (nueva.get("set") or partida.get("set")) == principal \
                     and nueva["linea_gv"]["estado"] not in estados_ajenos \
                     and guion_visual.estados_sin_casar([nueva["linea_gv"]], todos_los_estados):
                 estados_sin_casar.append({"plano": nueva["id"], "linea": nueva["linea_gv"].get("id") or "",
@@ -6287,6 +6291,16 @@ def etiquetas_del_espacio(catalogo, sitio=None):
         if etiqueta and etiqueta not in salida:
             salida.append(etiqueta)
     return salida
+
+
+def lineas_de_otro_sitio(catalogo, sitio):
+    """Los textos de las lineas visuales que el catalogo puso en OTRO sitio (rama
+    gv-sitios, `_lineas_del_catalogo`). -> set de claves de linea. Con ellas la
+    ficha calla lo mismo que `planificar`, que mira el sitio del plano."""
+    if not sitio:
+        return set()
+    return {clave for clave, linea in _lineas_del_catalogo(catalogo).items()
+            if linea.get("set") and linea.get("set") != sitio}
 
 
 def etiquetas_ajenas(catalogo, sitio):

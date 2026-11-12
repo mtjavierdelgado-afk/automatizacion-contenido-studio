@@ -202,7 +202,7 @@ def prueba_seguir_igualmente(servidor, raiz):
             servidor._piloto_tope_antes_de_dibujar(None, raiz, "p1", aj)
             ok(False, "con imágenes por pagar y el tope pasado, se tenía que parar")
         except servidor._PilotoPara as parada:
-            ok("imágenes 0.10" in str(parada) and "portada 0.05" in str(parada) and "ya van 0.95" in str(parada),
+            ok("0.10" in str(parada) and "ya van 0.95" in str(parada),
                f"con imágenes por pagar, para y dice qué falta ({parada})")
         servidor._coste_previsto = lambda _ctx, _pasos: {"usd_por_generar": 0.40}
         servidor._piloto_gastado = lambda _ctx: 0.30

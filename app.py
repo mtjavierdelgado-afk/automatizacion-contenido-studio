@@ -6182,7 +6182,25 @@ def _ficha_guion_visual(ctx):
     if comprobacion.get("huella") != gv.huella(guardado.get("planos")):
         comprobacion = {}
     estilo = params.get("estilo") if isinstance(params.get("estilo"), dict) else {}
+    # LINEAS CON UN ESTADO QUE NO ES NINGUNO DEL ESPACIO (rama piloto-al-dia, Y05):
+    # se avisan aqui, y `p6_assets.ejecutar` no las paga. Solo lee.
+    sin_casar, casados = [], []
+    try:
+        p6 = PASOS_MODULOS.p6_assets
+        # con el SITIO, no con los estados con cambio: `planificar` para en cuanto
+        # hay etiquetas, aunque todas sean la base (revision del 12-11)
+        sitio_e, _cambios = p6.estados_del_relato(ctx.proyecto, params)
+        if sitio_e:
+            catalogo_e = p6._catalogo_de(p6._con_defectos(params), ctx.proyecto)
+            todos = p6.etiquetas_del_espacio(catalogo_e, sitio_e)
+            ajenos = set(p6.etiquetas_ajenas(catalogo_e, sitio_e))
+            planos_ver = guardado.get("planos") or propuesta or _planos_ef
+            sin_casar = [x for x in gv.estados_sin_casar(planos_ver, todos) if x["estado"] not in ajenos]
+            casados = gv.estados_casados(planos_ver, todos)
+    except Exception:                                       # noqa: BLE001
+        sin_casar, casados = [], []
     return {"modo": gv.modo_de(params),
+            "estados_sin_casar": sin_casar, "estados_casados": casados,
             "del_video": params.get("imagenes") or "",
             "del_estilo": estilo.get("imagenes") or "",
             "modos": [{"clave": k, "nombre": v} for k, v in gv.MODOS.items()],
@@ -13239,6 +13257,38 @@ def _impedimentos(ctx, pestana, pendientes):
             fuera.append({"tarea": "assets",
                           "que": "las imágenes siguen el guion y el guion visual no está "
                                  "aprobado: revísalo y apruébalo antes de dibujar",
+                          "donde": "Guion visual"})
+        # una linea con un estado que no es ninguno del espacio (rama piloto-al-dia):
+        # p6 tambien para, antes de pagar; aqui se dice antes de lanzar (y el
+        # piloto se DETIENE con su sitio, en vez de fallar)
+        # lo MISMO que mira p6: solo los planos que esta tanda va a dibujar (uno ya hecho
+        # con un estado raro no se paga y no bloquea); sin plan aun, todas las lineas
+        # las lineas de AHORA (un plan viejo puede traer un estado ya corregido), menos
+        # las que ya tienen su plano dibujado: ese no se paga y no tiene que bloquear
+        sin_casar = []
+        try:
+            sin_casar = _ficha_guion_visual(ctx).get("estados_sin_casar") or []
+            if sin_casar:
+                p6 = PASOS_MODULOS.p6_assets
+                plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+                carpetas = _carpetas_de_assets(ctx) or [""]
+                # una linea esta hecha si TODOS sus planos tienen imagen (si no, p6 aun pagaria uno)
+                por_linea = {}
+                for e in plan.get("escenas") or []:
+                    lid = (e.get("linea_gv") or {}).get("id")
+                    if lid and not p6._sin_imagen(e):        # una cartela no deja imagen: no cuenta
+                        hecho = any(os.path.exists(os.path.join(c, "escenas", f"{e['id']}.png")) for c in carpetas)
+                        por_linea[lid] = por_linea.get(lid, True) and hecho
+                hechas = {lid for lid, todo in por_linea.items() if todo}
+                sin_casar = [x for x in sin_casar if x.get("plano") not in hechas]
+        except Exception as fallo:                          # noqa: BLE001
+            print(f"[impedimentos] no se han podido mirar los estados del guion visual: {fallo}", flush=True)
+            sin_casar = []
+        if sin_casar:
+            fuera.append({"tarea": "assets",
+                          "que": "en el guion visual hay líneas con un estado que no es ninguno de los del "
+                                 "espacio (" + ", ".join(f"{x['plano']} «{x['estado']}»" for x in sin_casar[:4])
+                                 + "): corrígelas antes de dibujar",
                           "donde": "Guion visual"})
     return fuera
 
@@ -23579,6 +23629,42 @@ def _piloto_vivo(ficha):
             "segundos": t.get("segundos"), "cancelando": t.get("cancelando")}
 
 
+#: pid -> (marca de su estado.json, ¿render «listo»?) (rama piloto-al-dia)
+_PILOTO_RENDER = {}
+_PILOTO_RENDER_LOCK = threading.Lock()
+#: las etapas hasta el montaje: si el piloto se paro en una de estas y el video
+#: ya esta montado, alguien lo termino a mano. Uno que fallo DESPUES (titulos,
+#: portadas) tiene su montaje hecho por el propio piloto: eso no es terminarlo.
+_PILOTO_ANTES_DEL_MONTAJE = ("crear", "guion", "voz", "vistos", "imagenes", "decidir", "montaje")
+
+
+def _piloto_render_al_dia(pid):
+    """¿El video tiene su montaje al dia (render «listo» y nada en marcha)? Solo
+    LEE el estado del video (regla 1); se recuerda mientras su estado.json no
+    cambie, para no abrirlo en cada vuelta de la lista."""
+    try:
+        marca = os.stat(os.path.join(raiz_proyectos(), str(pid), "estado.json")).st_mtime_ns
+    except (OSError, ValueError):
+        return False
+    try:
+        ctx = contexto(pid)
+        # lo que tiene en marcha se mira SIEMPRE (un trabajo puede acabar sin tocar estado.json)
+        if ctx.gestor.listar(activos=True):
+            return False
+        with _PILOTO_RENDER_LOCK:
+            guardado = _PILOTO_RENDER.get(pid)
+        if guardado and guardado[0] == marca:
+            return guardado[1]
+        listo = ctx.estado.estado_de("render") == "listo"
+    except Exception:                                       # noqa: BLE001
+        return False
+    with _PILOTO_RENDER_LOCK:
+        _PILOTO_RENDER[pid] = (marca, listo)
+        while len(_PILOTO_RENDER) > 2000:
+            _PILOTO_RENDER.pop(next(iter(_PILOTO_RENDER)))
+    return listo
+
+
 def _piloto_para_pantalla(ficha):
     salida = {k: v for k, v in ficha.items() if k != "portadas"}
     salida["portadas"] = [{k: v for k, v in c.items() if k != "diseno"}
@@ -23593,6 +23679,15 @@ def _piloto_para_pantalla(ficha):
     # una de antes de un reinicio espera a «Reintentar», como todas
     if ficha.get("estado") == "parado" and ficha.get("tipo_parada") == "ocupado":
         salida["espera_sola"] = ficha.get("id") in _PILOTO_ESPERAS
+    # TERMINADO A MANO (rama piloto-al-dia, X01 e Y05 del 12-11): fallo o se paro
+    # antes del montaje, alguien lo arreglo y lo monto, y la tarjeta seguia
+    # diciendo «Falló» (y ofrecia «Reintentar», que puede volver a pagar el
+    # revisor). Se mira al pintar la lista; la ficha del piloto no se toca.
+    if (ficha.get("pid") and ficha.get("estado") in ("error", "parado", "interrumpido")
+            and (ficha.get("etapa") or "crear") in _PILOTO_ANTES_DEL_MONTAJE
+            and not salida.get("espera_sola") and _piloto_render_al_dia(ficha["pid"])):
+        salida["terminado_a_mano"] = True
+        salida["salio"] = _video_salio(ficha["pid"])
     return salida
 
 
@@ -23608,7 +23703,7 @@ def piloto_estado(peticion: Request):
     # el aviso «N para revisar» sin lo que ya salio ni lo que espera solo
     resumen["a_revisar"] = sum(1 for v in resumen["videos"]
                                if v.get("estado") in P.A_REVISAR and not v.get("salio")
-                               and not v.get("espera_sola"))
+                               and not v.get("espera_sola") and not v.get("terminado_a_mano"))
     resumen["cupo"] = _piloto_cupo_lleno(resumen["ajustes"]["cupo_max_pct"])
     return resumen
 

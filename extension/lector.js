@@ -343,6 +343,9 @@
       ? 'en el inicio no se sabe qué post es: ábrelo (pulsa en su fecha o en él) y vuelve a enviar; va el enlace y la captura'
       : 'no se ha podido leer este post; va el enlace y la captura';
   }
+  if (red !== 'web' && caja && esMuro && ruta(datos.url) === aqui && !datos.aviso) {
+    datos.aviso = 'el enlace es el del inicio, no el del vídeo: si lo quieres guardar, ábrelo y vuelve a enviar';
+  }
   datos.autor = limpio(datos.autor).replace(/^@/, '');
   datos.texto = largo(datos.texto).slice(0, 5000);
   for (const k of Object.keys(datos.cifras)) if (!datos.cifras[k]) delete datos.cifras[k];

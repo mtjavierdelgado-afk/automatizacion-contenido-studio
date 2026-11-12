@@ -18196,7 +18196,9 @@ function editorGuionVisual() {
     caja.appendChild(h('div', { clase: 'caja-aviso' },
       `${sinCasar.length === 1 ? 'Un plano pide' : `${sinCasar.length} planos piden`} un estado que no es ninguno de los del espacio: `
       + sinCasar.slice(0, 6).map(x => `${x.plano} («${x.estado}»)`).join(', ') + (sinCasar.length > 6 ? '…' : '')
-      + `. Los estados son: ${(sinCasar[0].opciones || []).map(e => `«${e}»`).join(', ')}. `
+      + ((sinCasar[0].opciones || []).length
+        ? `. Los estados son: ${sinCasar[0].opciones.map(e => `«${e}»`).join(', ')}. `
+        : '. Este espacio no tiene estados con nombre: deja la línea sin estado (la base). ')
       + 'Corrige el estado de esas líneas («Usar estas líneas» si vienen de la Parrilla): hasta entonces no se dibujan.'));
   }
   /* las que se han casado con OTRO nombre («frio» → «blanco_frio»): que se vean antes de pagar */

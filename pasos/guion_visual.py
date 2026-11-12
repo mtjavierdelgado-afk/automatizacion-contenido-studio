@@ -415,7 +415,8 @@ def fuera_de_la_voz(planos, bloques):
 #: pagar el estado contrario.
 _NO_CASAN = ("sin", "no", "non", "not", "without", "antes", "before", "pre", "ex", "casi", "medi", "semi",
              "quit", "retir", "sac", "apag", "fuera", "nada", "falt", "vaci", "empty", "remov", "less",
-             "termin", "acab", "final", "complet", "rot", "sucio", "nuev", "viej", "off", "on")
+             "termin", "acab", "final", "complet", "rot", "sucio", "nuev", "viej", "off", "on",
+             "restaur", "reform", "renov", "repar", "arregl")
 #: Palabras que no dicen nada del estado: se quitan de los dos lados antes de comparar
 #: («con_muebles» es «muebles», «despues_de_pintar» contiene «despues»).
 _RELLENO = {"de", "del", "la", "el", "los", "las", "y", "o", "of", "the", "and", "or", "con", "with", "un", "una"}
@@ -426,7 +427,7 @@ def _cambia_sentido(palabras):
 
 
 #: Lo que en una linea quiere decir «la base» aunque no sea un estado del espacio.
-_PALABRAS_BASE = {"antes", "inicial", "inicio", "original", "actual", "before", "initial", "start"}
+_PALABRAS_BASE = {"antes", "inicial", "inicio", "original", "before", "initial", "start"}
 #: La etiqueta que `tipo_relato.estado_de` saca de un cambio sin nombre.
 _RE_ETIQUETA_SACADA = re.compile(r"^c[0-9a-f]{8}$")
 

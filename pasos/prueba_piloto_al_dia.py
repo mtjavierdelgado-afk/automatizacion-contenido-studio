@@ -348,6 +348,22 @@ def prueba_revision_y05(proyecto, carpeta):
     rojo = [x for x in plan.get("estados_sin_casar") or [] if x["estado"] == "rojo"]
     ok(rojo and rojo[0]["opciones"] == ["blanco_frio"],
        f"las opciones no enseñan la etiqueta sacada del cambio («c…»), que nadie puede escribir ({rojo})")
+    igual(G.casar_estado("original", ["original_restaurado", "pintado"]), "",
+          "«original» no casa con «original_restaurado» (es lo contrario)")
+    unico = copy.deepcopy(CATALOGO)
+    unico["beats"] = [dict(base, desde="B001", hasta="B004", cambio=FRIO)]
+    params = _params([dict(x, estado="despues") if x["id"] == "V001" else dict(x, estado="") for x in LINEAS], estados={})
+    params["catalogo"] = unico
+    from PIL import Image                                             # noqa: PLC0415
+    ref = os.path.join(proyecto.raiz, "estilo.png")
+    Image.new("RGB", (64, 64), (200, 120, 40)).save(ref)
+    params["estilo"]["referencias"] = [ref]
+    try:
+        P6.ejecutar(proyecto, params)
+        ok(False, "con «despues» y un solo estado sin nombre se tenía que parar")
+    except RuntimeError as fallo:
+        ok("no tiene estados con nombre" in str(fallo) and "son: ." not in str(fallo),
+           f"sin estados con nombre, el mensaje dice qué hacer y no una lista vacía ({str(fallo)[-110:]})")
     # todos los tramos SIN cambio: la ficha avisa igual que para `planificar`
     try:
         import app as servidor                                    # noqa: PLC0415

@@ -5562,7 +5562,9 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
                 + "; ".join(f"{x['plano']}" + (f" (línea {x['linea']})" if x.get("linea") else "") + f" pide «{x['estado']}»"
                          for x in sin_estado[:6])
                 + (f" (y {len(sin_estado) - 6} más)" if len(sin_estado) > 6 else "")
-                + ". Los estados son: " + ", ".join(f"«{e}»" for e in sin_estado[0]["opciones"])
+                + (". Los estados son: " + ", ".join(f"«{e}»" for e in sin_estado[0]["opciones"])
+                   if sin_estado[0]["opciones"] else
+                   ". Este espacio no tiene estados con nombre: deja la línea sin estado (la base)")
                 + ". Corrige el estado de esas líneas en «Guion visual» (paso Imágenes) antes de generar los planos")
         faltan = planos_sin_base(plan, dirs, unidades=unidades, rehacer=rehacer)
         if faltan:

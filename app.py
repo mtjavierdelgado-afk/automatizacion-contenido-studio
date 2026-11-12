@@ -6188,7 +6188,8 @@ def _ficha_guion_visual(ctx):
     if estados:
         try:
             p6 = PASOS_MODULOS.p6_assets
-            todos = list(_tipo_relato().estados_fijos(p6._catalogo_de(p6._con_defectos(params), ctx.proyecto)))
+            sitio_e, _cambios = p6.estados_del_relato(ctx.proyecto, params)
+            todos = p6.etiquetas_del_espacio(p6._catalogo_de(p6._con_defectos(params), ctx.proyecto), sitio_e)
             planos_ver = guardado.get("planos") or propuesta or _planos_ef
             sin_casar = gv.estados_sin_casar(planos_ver, todos)
             casados = gv.estados_casados(planos_ver, todos)

@@ -1583,7 +1583,7 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     set_anterior, presentados = None, set()
     # TODAS las etiquetas del espacio (tambien las que son la base tal cual),
     # para casar un estado abreviado de una linea (rama piloto-al-dia)
-    todos_los_estados = list(tipo_relato.estados_fijos(catalogo)) if principal else []
+    todos_los_estados = etiquetas_del_espacio(catalogo, principal) if principal else []
     estados_sin_casar = []
     for indice, (escena, beat) in enumerate(zip(escenas, beats)):
         if escena.get("sigue_a"):
@@ -6257,6 +6257,28 @@ def generar_imagen_estado(proyecto, params, estado, rehacer=False):
     return {"sitio": sitio, "estado": estado, "cambio": cambio,
             "imagen": f"espacio_fijo/{huella}.png", "coste": meta.get("coste", 0.0),
             "origen": meta.get("origen"), "calidad": p["calidad"]}
+
+
+def etiquetas_del_espacio(catalogo, sitio=None):
+    """TODAS las etiquetas de estado del espacio, tambien las que son la base tal
+    cual («antes»). -> [etiqueta] (rama piloto-al-dia)
+
+    Con los ESTADOS DEL ESPACIO de la Parrilla (`estados_fijos`), esos. Sin ellos
+    (Y05, prueba del 12-11: `guion_visual.estados` vacio) los estados salen de
+    los tramos del catalogo, como en `tipo_relato.estados_del_catalogo`: los que
+    llevan cambio y las etiquetas de los que no. Solo lee el catalogo."""
+    fijos = tipo_relato.estados_fijos(catalogo)
+    if fijos:
+        return list(fijos)
+    salida = []
+    beats = (catalogo.get("beats") or []) if isinstance(catalogo, dict) else []
+    for beat in beats:
+        if not isinstance(beat, dict) or (sitio and beat.get("set") not in (None, "", sitio)):
+            continue
+        etiqueta = tipo_relato.estado_de(beat) or tipo_relato._etiqueta(beat.get("estado"))
+        if etiqueta and etiqueta not in salida:
+            salida.append(etiqueta)
+    return salida
 
 
 def planos_sin_estado(plan, dirs, unidades=None, rehacer=False):

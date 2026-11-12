@@ -233,6 +233,85 @@ def prueba_el_plan(proyecto):
     ok("estados_sin_casar" not in sin_estados, "sin estados en el espacio, nada que avisar")
 
 
+def _catalogo_y05():
+    """Como Y05 en el servidor (12-11): sin ESTADOS DEL ESPACIO de la Parrilla
+    (`guion_visual.estados` vacio); los estados salen de los tramos del catalogo."""
+    cat = copy.deepcopy(CATALOGO)
+    base = {"set": "bano", "personajes": [], "tono": "neutro", "accion": "the bathroom", "palabras": []}
+    cat["beats"] = [dict(base, desde="B001", hasta="B001", estado="blanco_frio", cambio=FRIO),
+                    dict(base, desde="B002", hasta="B002", estado="antes"),
+                    dict(base, desde="B003", hasta="B004", estado="blanco_calido", cambio=CALIDO)]
+    return cat
+
+
+def _params_y05(lineas):
+    params = _params(lineas, estados={})
+    params["catalogo"] = _catalogo_y05()
+    return params
+
+
+def prueba_y05(proyecto):
+    seccion("6] Y05 de verdad: sin estados de la Parrilla, los del catálogo (prueba del 12-11)")
+    igual(P6.etiquetas_del_espacio(_catalogo_y05(), "bano"), ["blanco_frio", "antes", "blanco_calido"],
+          "las etiquetas salen de los tramos: las que cambian y «antes»")
+    igual(P6.etiquetas_del_espacio(_catalogo_y05(), "otro_sitio"), [], "solo las del sitio del vídeo")
+    con_fijos = dict(_catalogo_y05(), estados_fijos={"blanco_frio": FRIO, "sin_nada": ""})
+    igual(P6.etiquetas_del_espacio(con_fijos, "bano"), ["blanco_frio", "sin_nada"],
+          "con los estados de la Parrilla mandan esos (como antes)")
+    plan = P6.planificar(proyecto, _params_y05(LINEAS))
+    por_bloque = {}
+    for e in plan["escenas"]:
+        if e.get("prompt"):
+            por_bloque.setdefault((e.get("linea_gv") or {}).get("bloque"), e)
+    frio, antes, calido = (por_bloque.get(b) for b in ("B001", "B002", "B003"))
+    ok(frio and frio.get("base_clave") == "bano#blanco_frio",
+       f"«frio» casa con «blanco_frio» también sin la Parrilla ({frio and frio.get('base_clave')})")
+    ok(calido and calido.get("base_clave") == "bano#blanco_calido", "«calido» con «blanco_calido»")
+    ok(antes and not antes.get("base_clave"), "«antes» sigue siendo la base")
+    sueltos = plan.get("estados_sin_casar") or []
+    ok(len(sueltos) == 1 and sueltos[0]["estado"] == "rojo", f"«rojo» queda apuntado ({sueltos})")
+    from PIL import Image                                             # noqa: PLC0415
+    ref = os.path.join(proyecto.raiz, "estilo.png")
+    Image.new("RGB", (64, 64), (200, 120, 40)).save(ref)
+    con_estilo = _params_y05(LINEAS)
+    con_estilo["estilo"]["referencias"] = [ref]
+    try:
+        P6.ejecutar(proyecto, con_estilo)
+        ok(False, "con «rojo» la tanda de Y05 se tenía que parar")
+    except RuntimeError as fallo:
+        ok("no es ninguno de los del espacio" in str(fallo) and "«rojo»" in str(fallo),
+           f"y la tanda se para ANTES de pagar ({str(fallo)[:120]})")
+    exactas = [dict(x, estado={"frio": "blanco_frio", "calido": "blanco_calido", "rojo": ""}.get(x["estado"], x["estado"]))
+               for x in LINEAS]
+    plan_exacto = P6.planificar(proyecto, _params_y05(exactas))
+    p_exacto = {(e.get("linea_gv") or {}).get("bloque"): e["prompt"] for e in plan_exacto["escenas"] if e.get("prompt")}
+    igual(p_exacto.get("B001"), frio and frio["prompt"], "«frio» da el mismo prompt que «blanco_frio» entero")
+    ok("estados_sin_casar" not in plan_exacto, "bien escritos, el plan no lleva la clave nueva (regla 1)")
+
+
+def prueba_el_aviso_y05(proyecto, carpeta):
+    seccion("6b] Y05: el guion visual lo enseña (nota y aviso) y el piloto se detiene")
+    try:
+        import app as servidor                                    # noqa: PLC0415
+    except ImportError as fallo:
+        print(f"  (omitida: falta {fallo.name} en este entorno; en el servidor sí corre)")
+        return
+    if servidor.PASOS_MODULOS is None:
+        print(f"  (omitida: los pasos no cargan aquí: {servidor.ERROR_PASOS[:80]})")
+        return
+    servidor.fijar_raiz_proyectos(carpeta)
+    ctx = servidor.contexto(proyecto.id)
+    ctx.estado.set_params("assets", _params_y05(LINEAS))
+    ficha = servidor._ficha_guion_visual(ctx)
+    ok(any(c.get("estado") == "frio" and c.get("casa_con") == "blanco_frio" for c in ficha.get("estados_casados") or []),
+       f"la nota «frio» → «blanco_frio» sale ({ficha.get('estados_casados')})")
+    ok(any(c.get("estado") == "rojo" for c in ficha.get("estados_sin_casar") or []),
+       f"y el aviso de «rojo» ({ficha.get('estados_sin_casar')})")
+    avisos = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+    ok(any(a.get("donde") == "Guion visual" and "«rojo»" in a.get("que", "") for a in avisos),
+       "el piloto se detiene en «Guion visual» antes de lanzar")
+
+
 def prueba_el_aviso(proyecto, carpeta):
     seccion("5] el aviso de antes de lanzar (el piloto se DETIENE en «Guion visual»)")
     try:
@@ -274,6 +353,8 @@ def main():
         proyecto = _proyecto(os.path.join(carpeta, "video"))
         prueba_el_plan(proyecto)
         prueba_el_aviso(proyecto, os.path.join(carpeta, "video"))
+        prueba_y05(proyecto)
+        prueba_el_aviso_y05(proyecto, os.path.join(carpeta, "video"))
     finally:
         shutil.rmtree(carpeta, ignore_errors=True)
     print()

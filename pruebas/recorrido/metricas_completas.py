@@ -55,7 +55,8 @@ def publicar_metricas_completas(navegador, datos):
        "el alcance, en un solo paréntesis")
     ok(pg.p.evaluate("() => [porcentaje(0), porcentaje(0.0999), porcentaje(0.00999)].join('|')") == "0 %|10 %|1,0 %",
        "0 % es «0 %», y los decimales se eligen ya redondeado")
-    ok(pg.p.evaluate("() => porcentaje('nada')") == "—", "algo que no es un número no se escribe como «0 %»")
+    ok(pg.p.evaluate("() => [porcentaje('nada'), porcentaje(null), porcentaje(''), porcentaje(-0.05)].join('|')")
+       == "—|—|—|—", "lo que no es un número (o es negativo) no se escribe como «0 %»")
     ok(pg.p.evaluate("() => textoMetricas({posts: 2, vistas: 9, vistas_posts: 2, nuevos_seguidores: 3, "
                      "nuevos_seguidores_posts: 1}, true)") == "9 vistas · 3 seguidores nuevos (1 de 2)",
        "una fila «Por red» dice de cuántas publicaciones sale cada cifra")

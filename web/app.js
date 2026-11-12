@@ -29116,11 +29116,11 @@ function detalleMetricasEnvio(e) {
 /* La retención (publicar-redes-2): solo la dan TikTok y YouTube. Lo que no
    llega no se escribe (nunca «0 %»: sería mentir). */
 function porcentaje(fraccion) {
-  const f = Number(fraccion);
+  if (typeof fraccion !== 'number' || !Number.isFinite(fraccion) || fraccion < 0) return '—';
+  const f = fraccion;
   // por debajo del 1 %, con dos decimales (0,05 %, no «0,0 %» ni «0,1 %»);
   // por debajo del 0,01 %, «menos de 0,01 %»; el 0, «0 %» (revisión, 12-11).
   // Los decimales se eligen con el valor YA redondeado: 9,99 % es «10 %»
-  if (!Number.isFinite(f)) return '—';
   if (f === 0) return '0 %';
   if (f > 0 && f < 0.0001) return 'menos de 0,01 %';
   const p = f * 100;

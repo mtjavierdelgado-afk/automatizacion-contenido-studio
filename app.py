@@ -4284,6 +4284,34 @@ def _espacio_fijo_guardado(ctx):
         raise RuntimeError(f"el espacio fijo guardado no vale: {fallo}")
 
 
+def _lineas_para_catalogo(ctx, bloques):
+    """Las lineas visuales con las que se reparten el reparto y los sitios. -> lista o None
+
+    Rama gv-sitios (11-11-2026): en modo «guion» lo que se ve lo dicen las
+    lineas, y un catalogo escrito leyendo la VOZ las contradecia (ZV01: un
+    backstage en todos los planos de un video de calle y azotea). Las que
+    mandan (aprobadas, o las de la Parrilla que casan solas) y, si aun no hay,
+    las propuestas o las de la Parrilla casadas con el guion. En modo «voz»,
+    None: el catalogo se pide como siempre. Solo lee, no escribe nada."""
+    params = ctx.estado.params("assets") or {}
+    gv = _guion_visual()
+    if gv.modo_de(params) != "guion":
+        return None
+    planos, _origen = gv.efectivo(params, bloques)
+    if planos:
+        return planos
+    try:
+        guardado = gv.normalizar(params.get("guion_visual"))
+    except ValueError:
+        return None
+    if guardado.get("planos"):
+        return guardado["planos"]
+    if guardado.get("visuales"):
+        casados, _avisos = gv.casar(guardado["visuales"], bloques)
+        return [{"id": f"V{i + 1:03d}", **pl} for i, pl in enumerate(casados)] or None
+    return None
+
+
 def _correr_catalogo(avisar, ctx, ajuste, peticion):
     catalogo = _catalogo_visual()
     bloques = _bloques_del_guion(ctx)
@@ -4336,7 +4364,10 @@ def _correr_catalogo(avisar, ctx, ajuste, peticion):
                               relato=PASOS_MODULOS.tipo_relato.resolver(params),
                               # cuanto se explica dibujando (rama
                               # diagramas-por-contenido): sin ajuste, ""
-                              diagramas=_diagramas_del_video(ctx))
+                              diagramas=_diagramas_del_video(ctx),
+                              # en modo guion, desde las lineas visuales
+                              # (rama gv-sitios); en modo voz, None
+                              lineas=_lineas_para_catalogo(ctx, bloques))
     ctx.bitacora.anotar("catalogo_propuesto", "assets", {
         "personajes": len(ficha.get("reparto") or {}),
         "sets": len(ficha.get("sets") or {}),
@@ -4416,6 +4447,17 @@ def guardar_catalogo(pid: str, cuerpo: dict = Body(default=None)):
     for clave in ("reales", "_firma_guion", "relato", "_pedido"):
         if clave in previo and clave not in catalogo:
             limpio[clave] = previo[clave]
+    # REPARTIDO DESDE LAS LINEAS (rama gv-sitios): lo que traiga la propuesta,
+    # o lo guardado SOLO si sigue cuadrando con los sitios de ahora. Un
+    # catalogo distinto (otra propuesta, un sitio renombrado o quitado a mano)
+    # no hereda el sitio de cada linea: lo mandaria a un sitio que ya no esta
+    if catalogo.get("desde_lineas") is True and isinstance(catalogo.get("lineas"), list):
+        limpio["lineas"], limpio["desde_lineas"] = catalogo["lineas"], True
+    elif previo.get("desde_lineas") is True and "lineas" not in catalogo:
+        sitios = set(limpio["sets"] or {})
+        if all((x or {}).get("set") in sitios for x in previo.get("lineas") or []
+               if (x or {}).get("set")):
+            limpio["lineas"], limpio["desde_lineas"] = previo.get("lineas") or [], True
     if isinstance(catalogo.get("relato"), dict) and catalogo["relato"]:
         limpio["relato"] = catalogo["relato"]
     # los tramos que explican y los graficos (rama diagramas-por-contenido):
@@ -4666,8 +4708,12 @@ def _firma_del_guion(ctx):
 
 
 
-def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
-    """Deduce del guion quien sale y donde ocurre."""
+def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer, desde_lineas=False):
+    """Deduce del guion quien sale y donde ocurre.
+
+    `desde_lineas` (rama gv-sitios): «Volver a repartir desde las líneas»,
+    en un video hecho en modo guion cuyo reparto se escribio leyendo la voz.
+    Vuelve a leer aunque el guion no haya cambiado (como un pedido escrito)."""
     guardado = (ctx.estado.params("assets") or {}).get("catalogo") or {}
     hay = bool(guardado.get("sets") or guardado.get("reparto"))
 
@@ -4738,7 +4784,12 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
     pedido = " ".join(str(peticion or "").split())
     if pedido and hay:
         avisar(0.02, "con tu pedido: se vuelve a repartir el reparto y los sitios")
-    if (rehacer and cambio) or incompleto or not hay or pedido:
+    if desde_lineas and not _lineas_para_catalogo(ctx, _bloques_del_guion(ctx)):
+        raise RuntimeError("este vídeo no dibuja desde el guion visual (o aún no tiene "
+                           "líneas): no hay líneas desde las que repartir")
+    if desde_lineas and hay:
+        avisar(0.02, "desde las líneas visuales: se vuelve a repartir el reparto y los sitios")
+    if (rehacer and cambio) or incompleto or not hay or pedido or desde_lineas:
         avisar(0.02, "leyendo el guion para deducir quien sale y donde ocurre")
         ficha = _correr_catalogo(_tramo(0.02, 0.33), ctx, ajuste_catalogo, peticion)
         # Se guarda lo mismo que guardaba el PUT de aprobar: reparto, sitios y
@@ -4764,6 +4815,11 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
         if pedido:
             # el ultimo pedido con el que se repartio, para enseñarlo
             limpio["_pedido"] = pedido[:400]
+        if ficha.get("desde_lineas"):
+            # repartido desde las lineas visuales (rama gv-sitios): el sitio y
+            # la gente de cada linea. Sin lineas no hay clave (regla 1)
+            limpio["lineas"] = ficha.get("lineas") or []
+            limpio["desde_lineas"] = True
         if diagramas:
             # CON EL AJUSTE «DIAGRAMAS», sus tramos y SOLO los graficos con
             # cifras (los mapas siguen fuera, como siempre). Sin el, nada.
@@ -4802,6 +4858,7 @@ def construir_escenarios(pid: str, cuerpo: dict = Body(default=None)):
                                    ajuste_catalogo,
                                    str(datos.get("peticion") or ""),
                                    bool(datos.get("rehacer")),
+                                   desde_lineas=datos.get("desde_lineas") is True,
                                    paso="assets")
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "ajuste": ajuste_catalogo,
@@ -5140,6 +5197,7 @@ def _ficha_tipo_relato(ctx):
         ambientes = []
     return {
         "ambientes": ambientes,
+        "sitios_de_lineas": _sitios_y_lineas(ctx, params, catalogo),
         "tipo_relato": {k: v for k, v in guardado.items() if k != "bases"},
         "resuelto": dict(resuelto, nombre=tr.nombre(resuelto["modo"], resuelto.get("cambia"))),
         "del_estilo": tr.normalizar_de_estilo((params.get("estilo") or {}).get("relato"))
@@ -5165,6 +5223,37 @@ def _ficha_tipo_relato(ctx):
         "donde_base": en_espanol["donde_base"],
         "traduccion": en_espanol["traduccion"],
     }
+
+
+def _sitios_y_lineas(ctx, params, catalogo):
+    """Si el reparto y los sitios contradicen las lineas visuales. -> {} o {de_la_voz?, nuevas, sin_sitio}
+
+    Rama gv-sitios: se avisa en «El reparto y los sitios» ANTES de generar.
+    `de_la_voz`: en modo guion con lineas, el catalogo guardado se escribio
+    leyendo la voz (un video de antes de esta rama, o de cuando no habia
+    lineas). `nuevas`: lineas que el reparto no conoce (se cambio el guion
+    visual despues de repartir). Solo lee."""
+    try:
+        if not (catalogo.get("sets") or catalogo.get("reparto")):
+            return {}
+        if _espacio_fijo_guardado(ctx) or PASOS_MODULOS.tipo_relato.activo(
+                PASOS_MODULOS.tipo_relato.resolver(params)):
+            return {}
+        lineas = _lineas_para_catalogo(ctx, _bloques_del_guion(ctx)) or []
+    except Exception:                                       # noqa: BLE001
+        return {}
+    if not lineas:
+        return {}
+    if not catalogo.get("desde_lineas"):
+        return {"de_la_voz": True, "lineas": len(lineas)}
+    clave = _catalogo_visual()._clave_linea
+    conocidas = {clave(x.get("visual")): x for x in catalogo.get("lineas") or []
+                 if isinstance(x, dict)}
+    nuevas = [x["id"] for x in lineas if clave(x.get("visual")) not in conocidas]
+    sin_sitio = [x["id"] for x in lineas
+                 if not (conocidas.get(clave(x.get("visual"))) or {}).get("set")
+                 and clave(x.get("visual")) in conocidas]
+    return {"lineas": len(lineas), "nuevas": nuevas, "sin_sitio": sin_sitio}
 
 
 @app.get("/api/proyectos/{pid}/tipo_relato")
@@ -14065,10 +14154,13 @@ def terminos_del_sistema():
 
 @app.get("/api/sistema/novedades")
 def novedades_del_sistema():
-    """El historial de cambios, tal cual esta en docs/NOVEDADES.md."""
+    """El historial de cambios: docs/NOVEDADES.md con lo de docs/novedades/ dentro."""
+    # Suelto (solo biblioteca estandar), como `ajustes`: un motor roto no deja
+    # las novedades en blanco. Cada rama apunta lo suyo en docs/novedades/ y
+    # aqui se junta en su sitio (rama ramas-sin-choques, 05-11-2026).
+    import novedades as _novedades  # noqa: PLC0415
     try:
-        with open(RUTA_NOVEDADES, encoding="utf-8") as fh:
-            texto = fh.read()
+        texto = _novedades.texto(RAIZ_ESTUDIO)
     except OSError:
         texto = ""
     return {"version": VERSION, "producto": NOMBRE_PRODUCTO,
@@ -21022,6 +21114,15 @@ def publicar_guardar_ficha(pid: str, peticion: Request, cuerpo: dict = Body(defa
     return publicar_ficha(pid, peticion)
 
 
+@app.post("/api/publicar/videos/{pid}/copiado")
+def publicar_copiado(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{red}: se copiaron los textos de esa red para publicar a mano. Solo lo
+    apunta (rama piloto-lista: el video sale de la lista del piloto)."""
+    ctx = _ctx_publicable(pid, peticion)
+    red = str(_cuerpo(cuerpo).get("red") or "")
+    return {"copiado": _por_publicar(_publicar().marcar_copiado, raiz_proyectos(), ctx.id, red)}
+
+
 @app.get("/api/publicar/videos/{pid}/fotograma")
 def publicar_fotograma(pid: str, peticion: Request, ms: int = 0):
     """El fotograma del momento `ms` (vista pequeña), para elegir la portada."""
@@ -21807,6 +21908,41 @@ def _video_publicado(pid):
         return False
     return any((e or {}).get("estado") in ("publicado", "a_mano")
                for e in (datos or {}).get("envios") or [])
+
+
+#: Los estados de un envio que dicen que el video ya salio o va a salir solo:
+#: programado, en camino, publicado o subido a mano (rama piloto-lista). NO
+#: «comprobar»: es una subida cortada a medias que hay que mirar.
+ENVIOS_QUE_SALEN = ("enviando", "programado", "publicando", "publicado", "a_mano")
+
+#: {pid: (mtime de su ficha de Publicar, salio)}: la pantalla pregunta cada
+#: pocos segundos y la ficha solo cambia cuando se publica o se copia
+_SALIO_CACHE = {}
+
+
+def _video_salio(pid):
+    """Si el video ya salio o esta programado en Publicar, o se copiaron sus
+    textos para publicarlo a mano. -> bool (rama piloto-lista). Solo lee."""
+    if PUBLICAR is None or not pid:
+        return False
+    try:
+        ruta = PUBLICAR._ruta_video(raiz_proyectos(), pid)
+        marca = os.path.getmtime(ruta) if os.path.exists(ruta) else 0.0
+    except Exception:                                       # noqa: BLE001
+        return False
+    guardado = _SALIO_CACHE.get(pid)
+    if guardado and guardado[0] == marca:
+        return guardado[1]
+    try:
+        datos = PUBLICAR._leer_video(raiz_proyectos(), pid)
+    except Exception:                                       # noqa: BLE001
+        return False
+    salio = bool((datos or {}).get("copiado")) or any(
+        (e or {}).get("estado") in ENVIOS_QUE_SALEN for e in (datos or {}).get("envios") or [])
+    _SALIO_CACHE[pid] = (marca, salio)
+    while len(_SALIO_CACHE) > 2000:
+        _SALIO_CACHE.pop(next(iter(_SALIO_CACHE)))
+    return salio
 
 
 def _contexto_parrilla(cid, datos):
@@ -22643,11 +22779,57 @@ def _piloto_cupo_lleno(tope_pct):
     return ""
 
 
+def _cola_esperando(ctx):
+    """Si la cola de notas de este video esta esperando para lanzar. Con el
+    _COLA_LOCK tomado."""
+    return bool((_COLA_NOTAS.get(ctx.id) or {}).get("esperando"))
+
+
+def _piloto_ocupado(pid):
+    """Si el video tiene algo en marcha (lo mismo que mira `_piloto_correr`
+    antes de arrancar). -> bool; ante la duda, True (no se retoma)."""
+    try:
+        ctx = contexto(pid)
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            return True
+        with _COLA_LOCK:
+            return bool(_cola_dibujando(ctx) or _cola_esperando(ctx))
+    except Exception:                                       # noqa: BLE001
+        return True
+
+
+def _piloto_retomar_ocupados(P, raiz):
+    """LO QUE SE PARO SOLO POR ESPERAR se retoma solo (rama piloto-lista).
+
+    Una parada «ocupado» no es una decision del dueño: el piloto se aparto
+    porque el video tenia otra cosa en marcha (algo lanzado a mano, una tanda
+    de notas). En cuanto termina, vuelve a la cola como con «Reintentar» --sigue
+    donde iba, sin repagar lo hecho--. Las demas paradas (el tope, las
+    imagenes marcadas, los vistos buenos) siguen esperando a una persona."""
+    for ficha in P.listar(raiz):
+        if ficha.get("estado") != "parado" or ficha.get("tipo_parada") != "ocupado":
+            continue
+        # solo las de este proceso, y nunca uno que ya salio en Publicar
+        if ficha["id"] not in _PILOTO_ESPERAS or not ficha.get("pid") \
+                or _video_salio(ficha["pid"]) or _piloto_ocupado(ficha["pid"]):
+            continue
+        try:
+            # y SOLO si sigue parado por eso (comprobado dentro del cerrojo del
+            # piloto: entre mirar y retomar alguien pudo pararlo por otra cosa)
+            if P.preparar_reintento(raiz, ficha["id"], solo_si_tipo="ocupado") is None:
+                continue
+            P.cambiar(raiz, ficha["id"], mensaje="retomado solo: lo que tenía en marcha ya terminó")
+        except P.ErrorPiloto:
+            pass
+        _PILOTO_ESPERAS.discard(ficha["id"])
+
+
 def _piloto_una_vuelta():
     """Arranca los videos que tocan, si hay hueco y cupo."""
     P = _piloto()
     raiz = raiz_proyectos()
     ajustes = P.ajustes(raiz)
+    _piloto_retomar_ocupados(P, raiz)
     with _PILOTO_LOCK:
         vivos = {v for v, h in _PILOTO_HILOS.items() if h.is_alive()}
         for v in list(_PILOTO_HILOS):
@@ -22692,14 +22874,20 @@ def _piloto_correr(raiz, vid):
                 raise _PilotoCancelado()
             activo = _trabajo_de_cadena(ctx)
             if activo is not None or ctx.gestor.listar(activos=True):
-                raise _PilotoPara("ese vídeo tiene algo en marcha: cuando acabe, pulsa «Reintentar»",
+                raise _PilotoPara("ese vídeo tiene algo en marcha (míralo en «Abrir el vídeo» → "
+                                  "la cola): el piloto sigue solo cuando acabe",
                                   "el vídeo", "ocupado")
+            # EL CERROJO DE LA COLA DE NOTAS HASTA LANZAR (revision de
+            # piloto-lista): soltandolo antes, la cola de notas podia lanzar su
+            # tanda en el mismo instante y salian dos tandas a la vez (regla 2).
+            # Y una cola de notas que solo ESPERA tambien cuenta: espera a esto.
             with _COLA_LOCK:
-                if _cola_dibujando(ctx):
-                    raise _PilotoPara("se están rehaciendo imágenes con tus notas en ese vídeo: "
-                                      "cuando acaben, pulsa «Reintentar»", "Imágenes", "ocupado")
-            trabajo_id = ctx.gestor.lanzar("generar:piloto", _piloto_cadena, ctx, raiz, vid,
-                                           paso="ingesta", toca=[p["id"] for p in PASOS])
+                if _cola_dibujando(ctx) or _cola_esperando(ctx):
+                    raise _PilotoPara("se están rehaciendo imágenes con tus notas en ese vídeo "
+                                      "(«Abrir el vídeo» → Imágenes): el piloto sigue solo "
+                                      "cuando acaben", "Imágenes", "ocupado")
+                trabajo_id = ctx.gestor.lanzar("generar:piloto", _piloto_cadena, ctx, raiz, vid,
+                                               paso="ingesta", toca=[p["id"] for p in PASOS])
         _registrar_trabajo(trabajo_id, ctx.id)
         P.cambiar(raiz, vid, trabajo=trabajo_id)
         # «Parar» pulsado mientras se creaba el video: llega ahora al trabajo
@@ -22738,8 +22926,19 @@ def _piloto_nombre_etapa(etapa):
     return dict(PILOTO.ETAPAS).get(etapa, etapa or "") if PILOTO else str(etapa or "")
 
 
+#: Las paradas por «ocupado» que ESTE proceso ha visto nacer (revision de
+#: piloto-lista). Solo esas se retoman solas: una que viene de antes de un
+#: reinicio o de un despliegue la decide una persona (lo mismo que hace
+#: `piloto.al_arrancar` con lo interrumpido).
+_PILOTO_ESPERAS = set()
+
+
 def _piloto_parar(raiz, vid, parada):
     P = _piloto()
+    if getattr(parada, "tipo", "") == "ocupado":
+        _PILOTO_ESPERAS.add(vid)
+    else:
+        _PILOTO_ESPERAS.discard(vid)
     # EL PORQUE Y EL DONDE VAN EN LA FICHA, no en «Para revisar»: al retomarlo
     # se borran (ya no son verdad), y lo apuntado para revisar se queda
     P.cambiar(raiz, vid, estado="parado", trabajo="", terminado=ahora(), saltar="",
@@ -23333,6 +23532,15 @@ def _piloto_para_pantalla(ficha):
     salida["portadas"] = [{k: v for k, v in c.items() if k != "diseno"}
                           for c in ficha.get("portadas") or []]
     salida["vivo"] = _piloto_vivo(ficha)
+    # YA SALIO (rama piloto-lista): programado, publicado, subido a mano o con
+    # sus textos copiados. Solo un video TERMINADO (listo o con cosas que
+    # revisar): uno parado o con error sigue necesitando al dueño
+    if ficha.get("pid") and ficha.get("estado") in ("listo", "revisar"):
+        salida["salio"] = _video_salio(ficha["pid"])
+    # una parada por «ocupado» que se retoma sola (la vio nacer este proceso);
+    # una de antes de un reinicio espera a «Reintentar», como todas
+    if ficha.get("estado") == "parado" and ficha.get("tipo_parada") == "ocupado":
+        salida["espera_sola"] = ficha.get("id") in _PILOTO_ESPERAS
     return salida
 
 
@@ -23345,6 +23553,10 @@ def piloto_estado(peticion: Request):
     cerrados = _cerrados(peticion)
     resumen["videos"] = [_piloto_para_pantalla(v) for v in resumen["videos"]
                          if _piloto_visible(v, cerrados)]
+    # el aviso «N para revisar» sin lo que ya salio ni lo que espera solo
+    resumen["a_revisar"] = sum(1 for v in resumen["videos"]
+                               if v.get("estado") in P.A_REVISAR and not v.get("salio")
+                               and not v.get("espera_sola"))
     resumen["cupo"] = _piloto_cupo_lleno(resumen["ajustes"]["cupo_max_pct"])
     return resumen
 

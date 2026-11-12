@@ -61,6 +61,7 @@ de un estilo mezcla las dos carpetas: de cada eje manda la propuesta si la hay,
 que es lo ultimo dibujado y lo que esta pendiente de mirar.
 """
 import hashlib
+import io
 import json
 import math
 import os
@@ -325,7 +326,8 @@ def tile_para(escena, referencias, cache, raiz=None):
     if not ejes:
         return None
     destino = os.path.join(cache, f"tile_{'_'.join(ejes)}.png")
-    if os.path.exists(destino):
+    # una hoja rota de una pasada de antes se rehace (es gratis: se monta aqui)
+    if os.path.exists(destino) and medios.imagen_sana(destino):
         return destino
     rutas = [os.path.join(carpeta, f"{e}.png") for e in ejes]
     return _montar(rutas, destino)
@@ -352,8 +354,12 @@ def _montar(rutas, destino):
         x = (indice % columnas) * ancho + (ancho - copia.width) // 2
         y = (indice // columnas) * alto + (alto - copia.height) // 2
         hoja.paste(copia, (x, y))
-    os.makedirs(os.path.dirname(destino), exist_ok=True)
-    hoja.save(destino, "PNG")
+    # ENTERA O NADA (rama png-seguro): dos planos piden la misma hoja a la vez;
+    # escrita en su sitio, uno la leia a medias o las dos escrituras se
+    # mezclaban y quedaba rota para siempre
+    salida = io.BytesIO()
+    hoja.save(salida, "PNG")
+    medios.escribir_bytes(destino, salida.getvalue())
     return destino
 
 
@@ -641,8 +647,7 @@ def guardar(clave, eje, png, raiz=None, ficha=None):
     carpeta = os.path.join(raiz_propuestas(raiz), clave)
     os.makedirs(carpeta, exist_ok=True)
     destino = os.path.join(carpeta, f"{eje}.png")
-    with open(destino, "wb") as fh:
-        fh.write(png)
+    medios.escribir_bytes(destino, png)      # entera o nada (rama png-seguro)
     if ficha is not None:
         medios.escribir_json(os.path.join(carpeta, "ficha.json"), ficha)
     return destino
@@ -669,7 +674,7 @@ def aprobar(referencias, raiz=None):
     for eje in sorted(EJES):
         lamina = os.path.join(origen, f"{eje}.png")
         if os.path.exists(lamina):
-            shutil.copyfile(lamina, os.path.join(destino, f"{eje}.png"))
+            medios.copiar(lamina, os.path.join(destino, f"{eje}.png"))
             aprobadas.append(eje)
 
     ficha = medios.leer_json(os.path.join(destino, "ficha.json"), {}) or {}
@@ -719,8 +724,8 @@ def exportar(referencias, destino, raiz=None):
     shutil.rmtree(destino, ignore_errors=True)
     os.makedirs(destino, exist_ok=True)
     for eje in ejes:
-        shutil.copyfile(os.path.join(banco, f"{eje}.png"),
-                        os.path.join(destino, f"{eje}.png"))
+        medios.copiar(os.path.join(banco, f"{eje}.png"),
+                      os.path.join(destino, f"{eje}.png"))
     ficha = medios.leer_json(os.path.join(banco, "ficha.json"), {}) or {}
     ficha["clave"] = clave
     medios.escribir_json(os.path.join(destino, "ficha.json"), ficha)
@@ -744,7 +749,7 @@ def importar(carpeta, clave, raiz=None):
         lamina = os.path.join(carpeta, f"{eje}.png")
         final = os.path.join(destino, f"{eje}.png")
         if os.path.exists(lamina) and not os.path.exists(final):
-            shutil.copyfile(lamina, final)
+            medios.copiar(lamina, final)
             devueltos.append(eje)
     if devueltos and not os.path.exists(os.path.join(destino, "ficha.json")):
         ficha = medios.leer_json(os.path.join(carpeta, "ficha.json"), {}) or {}
@@ -954,8 +959,9 @@ def dibujar_desde_guia(estilo, destino, ejes=None, calidad="medium",
             png, meta = imagen.generar(prompt, refs, quality=calidad,
                                        tamano="apaisado")
             ruta = os.path.join(destino, f"{eje}.png")
-            with open(ruta, "wb") as fh:
-                fh.write(png)
+            if not medios.bytes_de_imagen_sanos(png):
+                raise RuntimeError(f"la lámina {eje} llegó rota de OpenAI: no se ha guardado")
+            medios.escribir_bytes(ruta, png)  # entera o nada (rama png-seguro)
             apuntar_lamina(destino, eje, huella)
             resultados[indice] = (eje, ruta, float(meta.get("coste") or 0.0))
         with candado:

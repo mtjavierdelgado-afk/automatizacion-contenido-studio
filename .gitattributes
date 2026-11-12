@@ -11,3 +11,11 @@ despliegue/*.conf         text eol=lf
 despliegue/*.service      text eol=lf
 *.py              text eol=lf
 *.js              text eol=lf
+
+# docs/API.md lo escribe generar_api.py y lo comparten todas las ramas: se UNE
+# SUMANDO los dos lados en vez de pararse en un choque (rama ramas-sin-choques,
+# 05-11-2026). Después de unir, `python generar_api.py` lo deja exacto: si dos
+# ramas cambiaron la misma fila, la suma deja las dos y prueba_api.py NO lo ve
+# (solo mira que estén todas las rutas). NOVEDADES.md NO va aquí: la suma pega
+# dos entradas y la pantalla las enseña juntas; las nuevas van en docs/novedades/.
+docs/API.md        merge=union

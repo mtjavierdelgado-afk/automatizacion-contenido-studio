@@ -897,6 +897,85 @@ def _subir_cancelacion(avance, para):
     raise RuntimeError(f"{para} se cancelo mientras esperaba al CLI de claude")
 
 
+# ---------------------------------------------------- arrancar de uno en uno
+#
+# LA SESION QUE SE CAIA (rama sesion-y-saltos, diagnosticado el 09-11-2026 con
+# los registros del servidor). Varias llamadas al CLI con la MISMA cuenta
+# arrancaban en el mismo segundo (el piloto con dos videos, el revisor, el
+# medidor de cupo). Al arrancar, el CLI renueva el acceso si ha caducado, y la
+# renovacion GASTA la llave anterior: si dos lo hacen a la vez, la que llega
+# segunda usa una llave ya gastada y la cuenta se queda sin sesion hasta volver
+# a entrar. Por eso dos llamadas de la misma cuenta no ARRANCAN a la vez: la
+# segunda espera a que la primera lleve `ESPACIO_ARRANQUE_S` en marcha (o haya
+# terminado), que es tiempo de sobra para renovar y guardar la llave nueva. Lo
+# que ya esta corriendo no se toca, y cuentas distintas no se esperan.
+# OJO, ES UNA HIPOTESIS sacada de los registros (no se ha visto renovar al
+# CLI) y solo coordina DENTRO de este proceso: otro proceso con la misma
+# carpeta de cuenta (una consola, `herramientas/prueba_real.py`) no la ve. Si
+# vuelven las caidas, el siguiente paso es un cerrojo de fichero en la carpeta
+# de la cuenta.
+
+#: Segundos entre dos arranques del CLI con la misma cuenta (mientras el
+#: primero sigue vivo). 0 lo desactiva.
+ESPACIO_ARRANQUE_S = float(os.environ.get("ESTUDIO_CLI_ESPACIO_S") or 5)
+_ARRANQUES = {}             # cuenta -> [(cuando, proceso)]
+_CERROJOS_ARRANQUE = {}     # cuenta -> threading.Lock
+_LOCK_ARRANQUES = threading.Lock()
+
+
+def _clave_de_cuenta(cuenta):
+    carpeta = str((cuenta or {}).get("config_dir") or "")
+    return os.path.realpath(carpeta) if carpeta else "_por_defecto"
+
+
+def _sigue_vivo(proceso):
+    try:
+        return proceso.poll() is None
+    except Exception:                                     # noqa: BLE001
+        return False
+
+
+def lanzar_escalonado(orden, cuenta=None, avance=None, para="la llamada", **opciones):
+    """`subprocess.Popen(orden, **opciones)` sin arrancar a la vez que otra
+    llamada de la misma cuenta. -> el proceso
+
+    Espera, de cuarto en cuarto de segundo, mientras otra llamada de esa cuenta
+    lleve menos de `ESPACIO_ARRANQUE_S` en marcha; si en la espera cancelan,
+    sube la cancelacion sin haber lanzado nada."""
+    clave = _clave_de_cuenta(cuenta)
+    with _LOCK_ARRANQUES:
+        cerrojo = _CERROJOS_ARRANQUE.setdefault(clave, threading.Lock())
+
+    def cancelada():
+        return avance is not None and getattr(avance, "cancelado", False)
+    # el turno tambien se espera mirando la cancelacion: una llamada en cola
+    # se entera en el acto, sin esperar a que le toque
+    while not cerrojo.acquire(timeout=0.25):
+        if cancelada():
+            _subir_cancelacion(avance, para)
+    try:
+        while ESPACIO_ARRANQUE_S > 0:
+            ahora = time.monotonic()
+            recientes = [(t, p) for t, p in _ARRANQUES.get(clave, [])
+                         if ahora - t < ESPACIO_ARRANQUE_S and _sigue_vivo(p)]
+            _ARRANQUES[clave] = recientes
+            if not recientes:
+                break
+            if cancelada():
+                _subir_cancelacion(avance, para)
+            falta = ESPACIO_ARRANQUE_S - (ahora - max(t for t, _ in recientes))
+            time.sleep(min(0.25, max(0.02, falta)))
+        # y justo antes de arrancar: arrancar para matarlo en el acto es justo
+        # lo que puede pillar al CLI renovando el acceso
+        if cancelada():
+            _subir_cancelacion(avance, para)
+        proceso = subprocess.Popen(orden, **opciones)
+        _ARRANQUES.setdefault(clave, []).append((time.monotonic(), proceso))
+    finally:
+        cerrojo.release()
+    return proceso
+
+
 def _una_pasada_cruda(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tiempo_s,
                       sistema, herramientas_vetadas, permisos, extra, avance,
                       consejos_extra, para, cuenta, herramientas_permitidas=()):
@@ -912,11 +991,13 @@ def _una_pasada_cruda(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tie
     if avance is not None and getattr(avance, "cancelado", False):
         _subir_cancelacion(avance, para)
     try:
-        proceso = subprocess.Popen(orden, stdin=subprocess.PIPE,
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE,
-                                   cwd=cwd, env=entorno(cuenta), **SIN_VENTANA,
-                                   **GRUPO_PROPIO)
+        # sin arrancar a la vez que otra llamada de la misma cuenta (arriba)
+        proceso = lanzar_escalonado(orden, cuenta, avance, para,
+                                    stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    cwd=cwd, env=entorno(cuenta), **SIN_VENTANA,
+                                    **GRUPO_PROPIO)
     except OSError as fallo:
         raise RuntimeError(
             f"no se ha podido lanzar el CLI de claude: {fallo}") from fallo

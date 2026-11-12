@@ -431,6 +431,145 @@ vacio.
 
 """
 
+# LAS LINEAS VISUALES MANDAN (rama gv-sitios, 11-11-2026). Prueba real del
+# 09-11 (ZV01, un video musical en modo «guion»): el catalogo se escribia
+# leyendo la VOZ, que era la letra de una cancion que hablaba de escenarios y
+# pistas, y salio un backstage como sitio obligatorio de todos los planos
+# mientras las 19 lineas «Visual:» pedian calle, azotea y auto. Y como las lineas
+# decian «el artista» sin atarlo a nadie, no hubo hoja de personaje y cada plano
+# invento una cara. Con lineas, el reparto y los sitios salen DE ELLAS, y cada
+# linea dice su sitio y su gente. Sin lineas estos dos huecos quedan vacios y el
+# prompt sale byte a byte como antes.
+LINEAS = """
+
+LO QUE SE VE LO DICEN LAS LINEAS VISUALES, NO LA VOZ
+Este video se dibuja desde su GUION VISUAL: cada linea de abajo es un plano y
+dice lo que se ve en el. La voz (el guion de mas abajo) es solo CONTEXTO: puede
+ser la letra de una cancion o un texto que habla de cosas que no se ven. Por eso
+esto va por delante del criterio de arriba:
+
+  - LOS SITIOS SALEN DE LAS LINEAS. Declara un sitio por cada lugar que las
+    lineas describen o dejan claro (una calle, una azotea, el interior de un
+    auto). Un lugar que solo nombra la voz y que ninguna linea pide NO se
+    declara: si la letra habla de un escenario y ninguna linea lo ensena, no
+    hay escenario.
+  - EL REPARTO SALE DE LAS LINEAS. Si varias lineas hablan de la misma persona
+    («el artista», un nombre, «ella»), es UNA entrada con su descripcion fisica
+    cerrada (la regla de siempre: si nadie la describe, inventala y avisalo), y
+    sus 'palabras' son las formas con que la nombran LAS LINEAS.
+  - DEVUELVE 'lineas': una entrada por cada linea de abajo, con su id, el sitio
+    donde ocurre y quien sale. El sitio es uno de tus 'sets' que encaje con lo
+    que describe la linea, o null si la linea describe un lugar que no es
+    ninguno de ellos. NUNCA le pongas a una linea un sitio que contradiga el
+    lugar que ella misma describe.
+  - Los 'beats' siguen haciendo falta, por bloques de la voz, y su sitio es uno
+    de los que usan las lineas de ese tramo.
+
+LINEAS VISUALES, EN ORDEN (id | bloque de la voz | camara | lo que se ve)
+<<<
+{texto}
+>>>"""
+
+SALIDA_LINEAS = """,
+  "lineas": [
+    {"id": "<id de la linea: V001>", "set": "<id de set, o null>", "personajes": ["<id de reparto>", "..."]}
+  ]"""
+
+
+def _clave_linea(texto):
+    """Como se reconoce una linea visual: su texto, sin espacios de mas ni mayusculas."""
+    return " ".join(str(texto or "").split()).casefold()
+
+
+def normalizar_lineas(lineas):
+    """Las lineas visuales que se le pasan al catalogo. -> [{id, bloque, visual, camara?, personajes?}]"""
+    salida = []
+    for i, linea in enumerate(lineas or []):
+        if not isinstance(linea, dict):
+            continue
+        visual = " ".join(str(linea.get("visual") or "").split())
+        if not visual:
+            continue
+        entrada = {"id": str(linea.get("id") or f"V{i + 1:03d}").strip().upper(),
+                   "bloque": str(linea.get("bloque") or "").strip().upper(),
+                   "visual": visual}
+        camara = " ".join(str(linea.get("camara") or "").split())
+        if camara:
+            entrada["camara"] = camara
+        gente = [str(x).strip() for x in (linea.get("personajes") or []) if str(x).strip()]
+        if gente:
+            entrada["personajes"] = gente
+        salida.append(entrada)
+    return salida
+
+
+def _lineas_legibles(lineas):
+    filas = []
+    for linea in lineas:
+        fila = f"{linea['id']} | {linea['bloque'] or '-'} | {linea.get('camara') or '-'} | {linea['visual']}"
+        if linea.get("personajes"):
+            fila += f" | salen: {', '.join(linea['personajes'])}"
+        filas.append(fila)
+    return "\n".join(filas)
+
+
+#: donde entran las lineas en la instruccion ya armada: delante del guion, y su
+#: salida detras de 'avisos'. Se pegan sobre el texto armado (y no con huecos
+#: en INSTRUCCION) para que sin lineas la instruccion siga siendo la misma
+ANCLA_GUION = "\n\nGUION COMPLETO, BLOQUE A BLOQUE"
+ANCLA_AVISOS = '  "avisos": ["<lo que no has podido resolver, si algo>"]'
+
+
+def _con_lineas(instruccion, lineas):
+    """La instruccion con las lineas visuales delante del guion y su salida en el JSON."""
+    if ANCLA_GUION not in instruccion or ANCLA_AVISOS not in instruccion:
+        raise RuntimeError("la instruccion del catalogo ha cambiado y no se sabe "
+                           "donde poner las lineas visuales")
+    # la primera del guion (la de la plantilla: el guion va detras) y la ULTIMA
+    # de los avisos (la del JSON, que va despues del guion)
+    instruccion = instruccion.replace(
+        ANCLA_GUION, LINEAS.format(texto=_lineas_legibles(lineas)) + ANCLA_GUION, 1)
+    corte = instruccion.rfind(ANCLA_AVISOS) + len(ANCLA_AVISOS)
+    return instruccion[:corte] + SALIDA_LINEAS + instruccion[corte:]
+
+
+def _limpiar_lineas(crudos, lineas, sets, reparto, avisos):
+    """Lo que el modelo dijo de cada linea, comprobado. -> [{id, visual, set, personajes}]
+
+    Una linea que el modelo no devolvio se queda sin sitio y sin gente (lo dice
+    en 'avisos'): sin sitio, su plano se dibuja desde la linea y nada mas, que es
+    mejor que un sitio inventado."""
+    por_id = {}
+    for crudo in crudos or []:
+        if isinstance(crudo, dict):
+            por_id.setdefault(str(crudo.get("id") or "").strip().upper(), crudo)
+    salida, olvidadas = [], []
+    for linea in lineas:
+        crudo = por_id.get(linea["id"])
+        if crudo is None:
+            olvidadas.append(linea["id"])
+            crudo = {}
+        sitio = _identificador(crudo.get("set")) or None
+        if sitio and sitio not in sets:
+            avisos.append(f"linea {linea['id']}: el sitio '{sitio}' no estaba declarado, "
+                          f"se dibuja sin sitio")
+            sitio = None
+        gente = []
+        for quien in crudo.get("personajes") or []:
+            nombre = _identificador(quien)
+            if nombre in reparto and nombre not in gente:
+                gente.append(nombre)
+            elif nombre and nombre not in reparto:
+                avisos.append(f"linea {linea['id']}: '{nombre}' no esta en el reparto")
+        salida.append({"id": linea["id"], "visual": linea["visual"], "set": sitio,
+                       "personajes": gente})
+    if olvidadas:
+        avisos.append(f"{len(olvidadas)} linea(s) sin sitio ni reparto porque no "
+                      f"vinieron en la respuesta: {', '.join(olvidadas[:8])}"
+                      + ("…" if len(olvidadas) > 8 else ""))
+    return salida
+
+
 PETICION = """
 LO QUE TE PIDE EL EDITOR
 Va por delante del criterio general. No cambia las reglas duras.
@@ -654,7 +793,7 @@ def _lista_de_palabras(crudo, por_defecto):
     return palabras or [str(por_defecto).replace("_", " ")]
 
 
-def _limpiar(datos, ids_bloque, diagramas="", guion=""):
+def _limpiar(datos, ids_bloque, diagramas="", guion="", sitios_de_lineas=()):
     """Valida la propuesta y la deja en la forma que espera p6_assets.
 
     'diagramas' y 'guion' (rama diagramas-por-contenido): con el ajuste puesto
@@ -807,8 +946,11 @@ def _limpiar(datos, ids_bloque, diagramas="", guion=""):
     # un sitio suelto SI es un candidato legitimo: quitarlo seria quitarle una
     # opcion al motor.
     sin_sitio = [b for b in beats if not b.get("set")]
+    # los sitios que usan las LINEAS VISUALES tambien estan en uso (rama
+    # gv-sitios): sin lineas, `sitios_de_lineas` va vacio y la cuenta es la de siempre
+    usados = {b["set"] for b in beats if b.get("set")} | set(sitios_de_lineas or ())
     if not sin_sitio and not huecos:
-        sobran = sorted(set(sets) - {b["set"] for b in beats if b.get("set")})
+        sobran = sorted(set(sets) - usados)
         for nombre in sobran:
             sets.pop(nombre, None)
         if sobran:
@@ -817,8 +959,8 @@ def _limpiar(datos, ids_bloque, diagramas="", guion=""):
                 f"({', '.join(sobran[:8])}" + ("…" if len(sobran) > 8 else "")
                 + "): con todos los tramos con sitio, ningun plano podia "
                   "elegirlos. Si querias alguno, dale un tramo en la tabla.")
-    elif set(sets) - {b["set"] for b in beats if b.get("set")}:
-        sueltos = sorted(set(sets) - {b["set"] for b in beats if b.get("set")})
+    elif set(sets) - usados:
+        sueltos = sorted(set(sets) - usados)
         avisos.append(
             f"{len(sueltos)} sitio(s) sin tramo propio ({', '.join(sueltos[:8])}"
             + ("…" if len(sueltos) > 8 else "")
@@ -1389,7 +1531,8 @@ def _especie_legible(regla):
 
 def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
              cwd=None, peticion="", planos=0, min_s=None, max_s=None,
-             regla_personajes="", espacio_fijo=None, relato=None, diagramas=""):
+             regla_personajes="", espacio_fijo=None, relato=None, diagramas="",
+             lineas=None):
     """Propone el catalogo visual del video. NO lo guarda: eso lo hace una persona.
 
     'bloques' son los del guion, con id y texto, EN ORDEN. Se manda el guion
@@ -1414,10 +1557,17 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
     diagramas-por-contenido). Sin el ("") el prompt y el resultado son los de
     siempre; con el, el criterio lleva su tramo tras COMPONENTES y la salida
     sus 'explicativos' y sus graficos con cifras.
+
+    'lineas' son las del guion visual en modo «guion» (rama gv-sitios): con
+    ellas el reparto y los sitios salen de lo que se VE y no de la voz, y la
+    salida trae 'lineas' (sitio y gente de cada una) y 'desde_lineas'. Con un
+    espacio fijo o un tipo de relato explicito no se usan: esos ya fijan el
+    sitio. Sin lineas, el prompt y el resultado son los de siempre.
     """
     diagramas = _diagramas().normalizar(diagramas) if diagramas else ""
     espacio = normalizar_espacio_fijo(espacio_fijo)
     relato = relato if tipo_relato.activo(relato) else None
+    lineas = [] if (espacio or relato) else normalizar_lineas(lineas)
     ajuste = ajuste or {}
     modelo = ajuste.get("modelo") or MODELO_POR_DEFECTO
     esfuerzo = ajuste.get("esfuerzo") or ESFUERZO_POR_DEFECTO
@@ -1440,6 +1590,8 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
                                                     relato), diagramas)
                   if diagramas else _criterio(planos, min_s, max_s, espacio, relato)),
         guion=guion)
+    if lineas:
+        instruccion = _con_lineas(instruccion, lineas)
 
     palabras = sum(comun.contar_palabras(b.get("texto", "")) for b in bloques)
     prevision = estadisticas.estimar(PASO, tamano=palabras, ajuste=elegido)
@@ -1463,11 +1615,22 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
     segundos = avance.parar() if avance is not None else time.time() - arranque
 
     crudo = comun.extraer_json(texto, "el catalogo")
+    extra = {}
+    if lineas:
+        extra["sitios_de_lineas"] = {_identificador(x.get("set")) for x in
+                                     ((crudo or {}).get("lineas") or [])
+                                     if isinstance(x, dict) and x.get("set")}
     if diagramas:
         catalogo = _limpiar(crudo, ids_bloque, diagramas=diagramas,
-                            guion="\n".join(str(b.get("texto") or "") for b in bloques))
+                            guion="\n".join(str(b.get("texto") or "") for b in bloques),
+                            **extra)
     else:
-        catalogo = _limpiar(crudo, ids_bloque)
+        catalogo = _limpiar(crudo, ids_bloque, **extra)
+    if lineas:
+        catalogo["lineas"] = _limpiar_lineas((crudo or {}).get("lineas"), lineas,
+                                             catalogo["sets"], catalogo["reparto"],
+                                             catalogo["avisos"])
+        catalogo["desde_lineas"] = True
     if espacio:
         catalogo = _aplicar_espacio_fijo(catalogo, espacio, ids_bloque)
     if relato:

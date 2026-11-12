@@ -2377,6 +2377,22 @@ def guardar_portada_guion(raiz, pid, valor):
     return ficha["portada_guion"]
 
 
+def marcar_copiado(raiz, pid, red=""):
+    """Apunta que se copiaron los textos de una red para publicarlos a mano. -> {red: cuando}
+
+    Rama piloto-lista (11-11-2026): el piloto quita de su lista un video que
+    ya salio, y copiar sus textos es la forma de publicar sin Upload-Post. No
+    es un envio (no cuenta como publicado en ninguna otra parte): solo esto."""
+    red = red if red in REDES else "_"
+    with _lock(pid):
+        ficha = _leer_video(raiz, pid)
+        copiado = dict(ficha.get("copiado") or {})
+        copiado[red] = ahora_lima().strftime("%Y-%m-%dT%H:%M:%S")
+        ficha["copiado"] = copiado
+        _escribir(_ruta_video(raiz, pid), ficha)
+    return copiado
+
+
 def guardar_ficha(raiz, pid, cambios):
     cambios = cambios if isinstance(cambios, dict) else {}
     with _lock(pid):

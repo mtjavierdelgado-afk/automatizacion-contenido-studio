@@ -38,6 +38,22 @@ for _v in ("ESTUDIO_SIMULAR", "ESTUDIO_SEO_SIMULADO", "YOUTUBE_API_KEY", "UPLOAD
 import seo_real as SR  # noqa: E402
 import publicar_seo as S  # noqa: E402
 import publicar as P  # noqa: E402
+import seo_canal as SC  # noqa: E402
+
+
+class TrendsApuntado:
+    """Google Trends sin salir a internet: apunta lo pedido y no contesta
+    (la tendencia queda sin dato, como con un 429)."""
+
+    def __init__(self):
+        self.pedidas = []
+
+    def __call__(self, metodo, url, datos=None, cabeceras=None, timeout=10):
+        self.pedidas.append(url)
+        return 503, ""
+
+
+TRENDS = TrendsApuntado()
 
 _ok = 0
 _fallos = []
@@ -478,15 +494,26 @@ def prueba_donde_se_busca():
     P.lanzar_investigar(raiz, INFO, mundo_aj, [], "", en_hilo=False)
     nuevas = [u for u in doble.pedidas[antes:] if "suggestqueries" in u]
     ok(nuevas and all("gl=" not in u for u in nuevas), "investigar en «todo el mundo» no pregunta a ningún país")
+    explore = [u for u in TRENDS.pedidas if "/api/explore" in u]
+    req = json.loads(dict(urllib.parse.parse_qsl(urllib.parse.urlparse(explore[-1]).query))["req"]) if explore else {}
+    ok(explore and all(c.get("geo") == "" for c in req.get("comparisonItem") or [{"geo": "x"}]),
+       "y la tendencia de Google Trends, desde Publicar, va sin país")
     f = P.ficha(raiz, INFO, mundo_aj)
     igual(f["seo"]["real"]["publico"]["texto"], "todo el mundo hispano", "la investigación dice dónde se midió")
     igual(f["seo"]["publico"]["texto"], "todo el mundo hispano", "y la ficha dónde se mide ahora")
     igual(P.ficha(raiz, INFO, GUITARRA)["seo"]["publico"]["texto"], "Perú",
           "otro proyecto sin elegir: Perú")
+    TRENDS.pedidas.clear()
+    P.lanzar_investigar(raiz, INFO, GUITARRA, [], "", en_hilo=False)
+    explore = [u for u in TRENDS.pedidas if "/api/explore" in u]
+    req = json.loads(dict(urllib.parse.parse_qsl(urllib.parse.urlparse(explore[-1]).query))["req"]) if explore else {}
+    ok(explore and all(c.get("geo") == "PE" for c in req.get("comparisonItem") or [{"geo": "x"}]),
+       "un proyecto sin elegir sigue con Trends de Perú")
 
 
 def main():
     print("PRUEBA DEL SEO DE VERDAD")
+    SC.HTTP = TRENDS        # ninguna prueba de aquí sale a Google Trends de verdad
     try:
         prueba_relevancia()
         prueba_autocompletado()
@@ -498,6 +525,7 @@ def main():
         prueba_donde_se_busca()
     finally:
         SR.HTTP = SR._http_real
+        SC.HTTP = SC._http_real
         shutil.rmtree(CARPETA, ignore_errors=True)
     print("\n" + "=" * 70)
     if _fallos:

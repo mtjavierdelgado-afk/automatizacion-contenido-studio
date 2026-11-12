@@ -30428,7 +30428,7 @@ function bloqueSeoVideo() {
 }
 
 /* «INVESTIGAR BÚSQUEDAS» (rama seo-real, 20-10): lo que la gente busca de
-   verdad (autocompletado de YouTube y Google, Perú), la competencia en YouTube
+   verdad (autocompletado de YouTube y Google, en el sitio del proyecto: vidiq-2), la competencia en YouTube
    si hay clave, y cómo le fue a cada frase en tu cuenta. Solo frases que el
    vídeo trata. «Usar» la deja como palabra clave del vídeo; no cambia ningún
    texto (para eso, «Optimizar SEO», que ya usa estas búsquedas). */
@@ -30483,7 +30483,7 @@ function bloqueBusquedasSeo() {
     })));
   caja.appendChild(h('div', { clase: 'tabla-desliza' }, tabla));
   caja.appendChild(h('div', { clase: 'meta' }, 'Del vídeo: cuánto de la frase sale en el guion o el material. '
-    + `Tendencia: si se busca más o menos que hace 3 meses en ${textoPublicoBusquedas((real.publico || seo.publico || {}).texto)} (Google Trends, experimental). `
+    + `Tendencia: si se busca más o menos que hace 3 meses en ${textoPublicoBusquedas(medidoEnBusquedas(real) || (seo.publico || {}).texto)} (Google Trends, experimental). `
     + 'Tu historial: las vistas de tus publicaciones con esa frase frente a lo normal de tu cuenta (1× = tu media) '
     + 'o, con tu canal conectado, las vistas que ya te trae esa búsqueda en YouTube. '
     + 'Total: lo que pesan las tres partes con dato.'));
@@ -36257,23 +36257,32 @@ function selectorPaisBusquedas(p, a, op, guardar) {
 function lineaPublicoBusquedas(f, real) {
   const seo = f.seo || {};
   const ahora = textoPublicoBusquedas((seo.publico || {}).texto);
-  const medido = (real.publico || {}).texto;
+  const medido = medidoEnBusquedas(real);
   const cambiar = h('a', { href: '#', clase: 'enlace-publico', datos: { accion: 'cambiar-publico' },
     onclick: ev => { ev.preventDefault(); abrirPublicoBusquedas(f.cliente || '_sin'); } }, 'Cambiar');
   if (real.al && medido && medido !== ahora) {
     return h('div', { clase: 'caja-aviso publico-linea' },
       `Esto se investigó en ${medido}; este proyecto ahora mide en ${ahora}. Vuelve a investigar para ver sus cifras. `, cambiar);
   }
-  return h('div', { clase: 'meta publico-linea' }, `Búsquedas medidas en ${ahora}. `, cambiar);
+  return h('div', { clase: 'meta publico-linea' }, `Búsquedas medidas en ${medido || ahora}. `, cambiar);
+}
+
+/* Dónde se midió una investigación guardada: lo de antes de vidiq-2 no lo
+   apuntaba y era siempre Perú. "" si no hay nada investigado. */
+function medidoEnBusquedas(real) {
+  if (!real || !real.al) return '';
+  return (real.publico || {}).texto || 'Perú';
 }
 
 function lineaDondeVidiq(f, v) {
   const ahora = textoPublicoBusquedas(((f.seo || {}).publico || {}).texto);
-  if (v && v.resultado && v.donde && v.donde !== ahora) {
+  // lo consultado antes de vidiq-2 no lo apuntaba: era Perú
+  const donde = v && v.resultado ? (v.donde || 'Perú') : '';
+  if (donde && donde !== ahora) {
     return h('div', { clase: 'caja-aviso publico-linea' },
-      `Esto se consultó para ${v.donde}; este proyecto ahora mide en ${ahora}. Vuelve a consultar si quieres lo de ese sitio.`);
+      `Esto se consultó para ${donde}; este proyecto ahora mide en ${ahora}. Vuelve a consultar si quieres lo de ese sitio.`);
   }
-  return h('div', { clase: 'meta publico-linea' }, `Para el público de ${ahora}.`);
+  return h('div', { clase: 'meta publico-linea' }, `Para el público de ${donde || ahora}.`);
 }
 
 /* Lleva a «Ajustes → <proyecto> → SEO» con el selector a la vista. */

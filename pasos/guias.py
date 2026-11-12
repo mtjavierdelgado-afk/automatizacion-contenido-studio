@@ -1256,7 +1256,8 @@ GUIAS = {
             "cuenta. «Usar» pone la elegida como palabra del vídeo.",
             "Con tu canal de YouTube conectado (Configuración → YouTube: tu canal), "
             "también salen las búsquedas que ya te traen vistas, y la columna "
-            "«Tendencia» (Google Trends) dice si una frase sube o baja en Perú.",
+            "«Tendencia» (Google Trends) dice si una frase sube o baja en el sitio del "
+            "proyecto (Perú si no eliges otro en «Dónde se mide lo que busca la gente»).",
             "También va en las etiquetas de YouTube y en el nombre con el que se sube "
             "el MP4. La nota SEO de cada red mide si es del vídeo, si se busca y cómo "
             "te fue; dónde está colocada cuenta dentro de la relevancia.",

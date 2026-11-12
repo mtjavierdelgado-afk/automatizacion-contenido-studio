@@ -244,8 +244,9 @@ def prueba_titulo():
         ok("country «PE»" in ins and "language «es»" in ins and "regionCode «PE»" in ins,
            "vidIQ consulta para Perú y en español (no en inglés)")
         ok("type «long»" in ins and "TAL CUAL" in ins, "un vídeo largo se puntúa como largo y sus títulos van tal cual")
-        ok("country «PE» (el público es de Perú)" in ins and "language «es», regionCode «PE», type" in ins,
-           "vidiq-2: sin elegir, la instrucción de Perú sale igual que antes")
+        ok("mode «research» y country «PE» (el público es de Perú). Quédate con su volumen" in ins
+           and "language «es», regionCode «PE», type «long» y numTitles 3." in ins,
+           "vidiq-2: sin elegir, las consultas de Perú salen con las mismas palabras que antes")
         ok("en español" in ins and "se descartan" in ins, "y descarta las relacionadas de otros idiomas")
         igual(v["donde"], "Perú", "queda dicho dónde se midió")
         v = V.lanzar_titulo(raiz, "v7", dict(datos, publico=("", "es")), en_hilo=False)
@@ -258,6 +259,10 @@ def prueba_titulo():
         ok("country «MX» (el público es de México)" in ins and "regionCode «MX»" in ins, "México, para México")
         V.lanzar_titulo(raiz, "v8", dict(datos, publico="raro"), en_hilo=False)
         ok("country «PE»" in doble.llamadas[-1]["instruccion"], "algo raro en `publico` es Perú")
+        V.lanzar_titulo(raiz, "v8", dict(datos, publico=["zz", "xx"]), en_hilo=False)
+        ok("country «PE»" in doble.llamadas[-1]["instruccion"] and "ZZ" not in doble.llamadas[-1]["instruccion"],
+           "un país que no está en la lista no llega a vidIQ")
+        ok("de Perú" not in V.SISTEMA, "el sistema ya no fija Perú")
         ok(not any(re.search(r"\{[a-z_]+\}", x["instruccion"]) for x in doble.llamadas),
            "ningún hueco de la instrucción se queda sin rellenar")
         V.lanzar_titulo(raiz, "v6", dict(datos, formato="short"), en_hilo=False)

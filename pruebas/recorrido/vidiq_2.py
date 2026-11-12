@@ -63,6 +63,9 @@ def publico_de_las_busquedas(navegador, datos):
            "si el proyecto cambia de sitio, avisa de que lo investigado es de otro")
         pg.pulsar(".busquedas-seo a[data-accion=cambiar-publico]")
         ok(pg.esperar(sel, segundos=15), "«Cambiar» lleva al selector del proyecto")
+        ok(pg.p.evaluate("() => medidoEnBusquedas({al: '2026-10-01'})") == "Perú"
+           and pg.p.evaluate("() => medidoEnBusquedas({})") == "",
+           "lo investigado antes de esta rama se lee como Perú (no como el sitio de ahora)")
         pg.captura("vidiq2_aviso")
         pg.sin_errores("el aviso de otro sitio")
         pg.cerrar()

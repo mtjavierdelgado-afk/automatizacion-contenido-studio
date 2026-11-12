@@ -286,7 +286,8 @@ def bloque_instruccion(ajustes, palabra, redes, recientes=None, aprendido=None, 
                       "palabras junto al gancho.")
     if busquedas:
         lineas.append("- Lo que la gente BUSCA de verdad (autocompletado de YouTube y Google, "
-                      "Perú), solo frases que el vídeo trata; usa las que encajen:\n" + busquedas)
+                      "en el sitio del proyecto), solo frases que el vídeo trata; usa las que "
+                      "encajen:\n" + busquedas)
     if palabra:
         lineas.append(f"- Palabra clave de ESTE vídeo: «{palabra}». Va en la PRIMERA LÍNEA de "
                       "cada red y en YouTube otra vez en las dos primeras líneas de la "

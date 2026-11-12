@@ -69,7 +69,7 @@ PAIS, IDIOMA = "pe", "es"
 PAISES_BUSQUEDA = [("pe", "Perú"), ("mx", "México"), ("co", "Colombia"), ("cl", "Chile"),
                    ("ar", "Argentina"), ("ec", "Ecuador"), ("bo", "Bolivia"),
                    ("es", "España"), ("us", "Estados Unidos"),
-                   ("mundo", "Todo el mundo (en el idioma del vídeo)")]
+                   ("mundo", "Todo el mundo hispano (o del idioma del vídeo)")]
 NOMBRE_PAIS = dict(PAISES_BUSQUEDA)
 IDIOMAS_BUSQUEDA = ("es", "en", "pt")
 NOMBRE_IDIOMA = {"es": "español", "en": "inglés", "pt": "portugués"}
@@ -109,6 +109,13 @@ def texto_publico(publico):
             f"todo el mundo, en {NOMBRE_IDIOMA.get(idioma, idioma)}"
     nombre = NOMBRE_PAIS.get(pais, pais.upper())
     return nombre if idioma == "es" else f"{nombre}, en {NOMBRE_IDIOMA.get(idioma, idioma)}"
+
+
+def sufijo_pais(publico):
+    """Como `_sufijo_cache`, solo con el país (Google Trends no usa el idioma):
+    nada para Perú; «@mundo», «@mx»… para lo demás."""
+    pais = _publico(publico)[0]
+    return "" if pais == PAIS else f"@{pais or 'mundo'}"
 
 
 def vista_publico(publico):

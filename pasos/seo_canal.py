@@ -570,7 +570,7 @@ def tendencias(frases, raiz_p=None, publico=None):
     salida = {"frases": {}, "error": ""}
     if not frases:
         return salida
-    clave = "trends|" + "|".join(sorted(SR.normal(f) for f in frases)) + SR._sufijo_cache(publico)
+    clave = "trends|" + "|".join(sorted(SR.normal(f) for f in frases)) + SR.sufijo_pais(publico)
     geo = SR._publico(publico)[0].upper()          # "" = todo el mundo
     guardada = _de_cache(raiz_p, clave, CADUCA_TRENDS_S)
     if guardada is not None:

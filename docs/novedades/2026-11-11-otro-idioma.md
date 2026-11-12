@@ -13,6 +13,11 @@
   dice en la bitácora de la copia.
 - Si algo falla antes de grabar la voz (Claude no contesta, cancelas), la copia
   va a la papelera: no queda un vídeo a medias en la lista.
+- Al publicar el vídeo traducido en YouTube, **sus subtítulos se suben en su
+  idioma** (inglés, portugués…), no como «Español». Y en los subtítulos los
+  números se leen en el idioma de la voz: en inglés «once» se queda «once»
+  (no «11»).
+- Un nombre de vídeo muy largo ya no pierde el «(EN)» al crear la copia.
 - Se puede elegir la voz: la misma de ahora (habla los dos idiomas) o una
   nativa de ese idioma.
 - El vídeo de origen no cambia en nada.

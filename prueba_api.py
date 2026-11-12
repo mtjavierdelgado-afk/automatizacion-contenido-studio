@@ -4928,6 +4928,53 @@ def probar_otro_idioma(cliente):
     _r, despues = cliente.get(f"/api/proyectos/{pid}/pasos/voz")
     igual(despues.get("params"), antes.get("params"), "y nada de eso escribe en el vídeo")
 
+    # B1 del árbitro (12-11): el .srt que se sube a YouTube va en el idioma de
+    # la VOZ, no en el del brief (que la copia traducida conserva a propósito)
+    import app as servidor                                    # noqa: PLC0415
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(cliente.carpeta)
+    try:
+        _otro_idioma_publicar_y_nombre(servidor, pid)
+    finally:
+        servidor.fijar_raiz_proyectos(raiz_antes)
+
+
+def _otro_idioma_publicar_y_nombre(servidor, pid):
+    ctx = servidor.contexto(pid)
+    plan = {"idioma": "es", "escenas": [{"id": "S001", "t_in": 0.0, "t_out": 2.0,
+                                         "duracion": 2.0, "narracion": "It was once a port.",
+                                         "marcas": [[k * 0.4, k * 0.4 + 0.35] for k in range(5)]}]}
+    igual(servidor._idioma_para_publicar(ctx, plan), "es",
+          "sin idioma en la voz, el del plan (como hasta ahora)")
+    params_voz = ctx.estado.params("voz") or {}
+    ctx.estado.set_params("voz", {**params_voz, "idioma": "en"})
+    try:
+        igual(servidor._idioma_para_publicar(ctx, plan), "en",
+              "con la voz en inglés, la pista de subtítulos dice inglés aunque el brief diga español")
+        pedidos = []
+        real = servidor._publicar().subtitulos_srt
+
+        def espia(escenas, idioma=None, **kw):
+            pedidos.append(idioma)
+            return real(escenas, idioma=idioma, **kw)
+        servidor._publicar().subtitulos_srt = espia
+        try:
+            srt = servidor._srt_para_publicar(ctx, plan, 2.0)
+        finally:
+            servidor._publicar().subtitulos_srt = real
+        igual(pedidos, ["en"], "y el .srt se escribe en inglés")
+        ok("once" in srt and "11" not in srt, f"«once» sigue siendo «once»: {srt!r}")
+    finally:
+        ctx.estado.set_params("voz", params_voz)
+    # m1: un nombre largo cabe en las 60 letras del id sin perder «(EN)»
+    largo = "Un título larguísimo de un vídeo que no cabe en la carpeta del proyecto " * 2
+    ctx.proyecto.config["nombre"] = largo
+    nombre = servidor._nombre_en_otro_idioma(ctx, "en")
+    ok(nombre.endswith("(EN)"), f"el nombre largo conserva «(EN)»: {nombre}")
+    carpeta = servidor._carpeta_de_copia(nombre)
+    ok(len(os.path.basename(carpeta)) <= 60 and os.path.basename(carpeta).endswith("_en"),
+       f"y su carpeta es la que se creará, en 60 letras: {os.path.basename(carpeta)}")
+
 
 def probar_montaje_por_plano(cliente, carpeta):
     """El movimiento y la 2.5D de UN plano (rama montaje-por-plano, 19-10-2026).

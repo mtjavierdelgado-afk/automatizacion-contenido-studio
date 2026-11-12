@@ -832,12 +832,17 @@ def preparar_copia(copia, estado, datos, traduccion, idioma, voz_id="", origen=N
             tocado = True
         if bloque:
             limpias[uid] = bloque
+    # Y EL IDIOMA DE LOS SUBTÍTULOS (árbitro, 12-11): sin él, p7 lee los
+    # números con las tablas de TODOS los idiomas y en inglés «once» (una vez)
+    # salía como «11». Solo en la COPIA, que ya va a volver a montarse.
+    nuevos = dict(callouts)
     if tocado:
-        nuevos = dict(callouts)
         if limpias:
             nuevos["unidades"] = limpias
         else:
             nuevos.pop("unidades", None)
+    nuevos["idioma"] = idioma
+    if nuevos != callouts:
         estado.set_params("callouts", nuevos)
 
     # 6. EL PLAN Y LAS FICHAS DE LAS IMÁGENES, con lo que se dice traducido. Es

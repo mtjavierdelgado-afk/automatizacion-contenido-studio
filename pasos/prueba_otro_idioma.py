@@ -253,6 +253,8 @@ def prueba_preparar():
     cu = estado.params("callouts")["unidades"]
     igual(cu, {"escena:S001": {"evitar": [{"x": 1}]}},
           "los subtítulos escritos a mano y los elementos sobre una palabra, fuera; lo demás se queda")
+    igual(estado.params("callouts").get("idioma"), "en",
+          "los subtítulos de la copia saben su idioma (en inglés «once» no es «11»)")
     with open(os.path.join(base, "plan.json"), encoding="utf-8") as fh:
         plan = json.load(fh)
     igual(plan["corte"], ["The freighter left port.", "It was full.",

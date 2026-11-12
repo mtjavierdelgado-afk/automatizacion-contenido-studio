@@ -1665,15 +1665,36 @@ def _estimacion_otro_idioma(ctx, datos, idioma):
         raise ErrorApi(400, str(fallo))
 
 
+def _carpeta_de_copia(nombre):
+    """La carpeta que `Proyecto.crear` daría a `nombre`: su id recortado a
+    `LARGO_MAXIMO_ID` (60) letras. Sin recortar, un nombre largo apuntaba a una
+    carpeta que nunca se crea (y la limpieza de un fallo no la encontraba)."""
+    from nucleo.proyecto import LARGO_MAXIMO_ID
+    semilla = identificador(nombre)[:LARGO_MAXIMO_ID].strip("_") or "proyecto"
+    return os.path.join(raiz_proyectos(), semilla)
+
+
 def _nombre_en_otro_idioma(ctx, idioma):
     base = str(ctx.proyecto.config.get("nombre") or ctx.id).strip()
     corto = OTRO_IDIOMA.IDIOMAS[idioma]["corto"]
-    nombre = f"{base} ({corto})"[:80]
+    # el sufijo va DELANTE del recorte: con un nombre largo, «(EN)» se perdía
+    # en el id y dos copias acababan en carpetas con el mismo nombre
+    sufijo = f" ({corto})"
+    nombre = _recortar_con_sufijo(base, sufijo)
     intento = 2
-    while os.path.isdir(os.path.join(raiz_proyectos(), identificador(nombre))):
-        nombre = f"{base} ({corto} {intento})"[:80]
+    while os.path.isdir(_carpeta_de_copia(nombre)):
+        nombre = _recortar_con_sufijo(base, f" ({corto} {intento})")
         intento += 1
     return nombre
+
+
+def _recortar_con_sufijo(base, sufijo):
+    """`base + sufijo` cuyo id cabe en 60 letras sin perder el sufijo."""
+    from nucleo.proyecto import LARGO_MAXIMO_ID
+    texto = base
+    while texto and len(identificador(texto + sufijo)) > LARGO_MAXIMO_ID:
+        texto = texto[:-1].rstrip()
+    return (texto + sufijo).strip()
 
 
 @app.get("/api/proyectos/{pid}/otro_idioma")
@@ -1822,7 +1843,7 @@ def _correr_otro_idioma(avisar, ctx, idioma, voz_id, nombre, visto=None):
         traduccion = OTRO_IDIOMA.traducir(datos, idioma, cwd=ctx.proyecto.raiz, avisar=tramo)
 
         avisar(0.88, "creando la copia", "Creando el vídeo nuevo")
-        carpeta = os.path.join(raiz_proyectos(), identificador(nombre))
+        carpeta = _carpeta_de_copia(nombre)
         existia = os.path.exists(carpeta)
         copia, lanzado, tanda = None, False, None
         try:
@@ -21377,12 +21398,25 @@ def _info_para_publicar(ctx):
         "cta": (ctx.estado.params("guion") or {}).get("cta") or {},
         "guion": bloques,
         "capitulos_base": P.capitulos_base(plan.get("escenas") or [], duracion),
-        # extras-youtube: la pista de subtitulos, de lo mismo que se dibuja
-        "idioma": str(plan.get("idioma") or ""),
+        # extras-youtube: la pista de subtitulos, de lo mismo que se dibuja.
+        # El idioma es el de la VOZ (otro-idioma, 12-11): una copia traducida
+        # conserva el brief del original a proposito (su firma), y con
+        # plan["idioma"] el .srt en ingles se subia a YouTube como «Español»
+        "idioma": _idioma_para_publicar(ctx, plan),
         # PEREZOSO: solo lo pide el envio (campos_subtitulos); las ~25 rutas
         # que leen esta info no pagan el calculo
         "srt": lambda: _srt_para_publicar(ctx, plan, duracion),
     }
+
+
+def _idioma_para_publicar(ctx, plan):
+    """El idioma en que HABLA el video: el de la voz y, si no lo dice, el del
+    plan (el brief). Solo lee: nada de params ni firmas (regla 1)."""
+    try:
+        voz = str((ctx.estado.params("voz") or {}).get("idioma") or "").strip().lower()
+    except Exception:                                       # noqa: BLE001
+        voz = ""
+    return voz or str(plan.get("idioma") or "").strip().lower()
 
 
 def _srt_para_publicar(ctx, plan, duracion):
@@ -21405,7 +21439,8 @@ def _srt_para_publicar(ctx, plan, duracion):
     except Exception:                                       # noqa: BLE001
         escritos = {}
     try:
-        return _publicar().subtitulos_srt(escenas, idioma=plan.get("idioma"), escritos=escritos,
+        return _publicar().subtitulos_srt(escenas, idioma=_idioma_para_publicar(ctx, plan) or None,
+                                          escritos=escritos,
                                           duracion=duracion or None)
     except Exception as fallo:                              # noqa: BLE001
         # se dice en la bitacora: un «» callado escondio un fallo el 12-11

@@ -484,7 +484,9 @@ def leer(raiz, red, usuario, cuantos=30, forzar=False, avance=None, pagar=False)
                 fallo = F.ErrorLectura(f"fallo inesperado: {str(fallo)[:200]}", "red", cobrado=True)
             if rid:
                 # si el actor llegó a correr, Apify ha cobrado: la reserva se queda
-                real = (F.coste_apify(red, fallo.resultados) if fallo.resultados
+                # lo que Apify dice que ha cobrado manda (rama apify-coste-real)
+                real = (fallo.coste_usd if getattr(fallo, "coste_usd", None) is not None
+                        else F.coste_apify(red, fallo.resultados) if fallo.resultados
                         else coste if fallo.cobrado else 0)
                 _ajustar(raiz, red, usuario, rid, coste, real, fallo.resultados)
             intentos.append(f"{via['nombre']}: {fallo}")
@@ -674,7 +676,8 @@ def completar_duraciones(raiz, red, usuario, pagar=False, avance=None):
     except Exception as fallo:                         # noqa: BLE001 - se apunta y se dice
         if not isinstance(fallo, F.ErrorLectura):
             fallo = F.ErrorLectura(f"fallo inesperado: {str(fallo)[:200]}", "red", cobrado=True)
-        real = (F.coste_apify(red, fallo.resultados) if fallo.resultados else coste if fallo.cobrado else 0)
+        real = (fallo.coste_usd if getattr(fallo, "coste_usd", None) is not None
+                else F.coste_apify(red, fallo.resultados) if fallo.resultados else coste if fallo.cobrado else 0)
         _ajustar(raiz, red, usuario, rid, coste, real, fallo.resultados)
         raise ErrorCuentas(f"no se ha podido completar la duración: {fallo}", 409) from None
     _ajustar(raiz, red, usuario, rid, coste, leido.get("coste_usd") or 0, len(leido["videos"]))

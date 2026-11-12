@@ -46,6 +46,7 @@ import http.client
 import json
 import re
 import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -74,11 +75,13 @@ class ErrorLectura(RuntimeError):
     cobrado y el gasto se tiene que apuntar igual. Solo un token malo o sin
     crédito no cobra."""
 
-    def __init__(self, mensaje, motivo="red", cobrado=False, resultados=0):
+    def __init__(self, mensaje, motivo="red", cobrado=False, resultados=0, coste_usd=None):
         super().__init__(mensaje)
         self.motivo = motivo
         self.cobrado = cobrado
         self.resultados = resultados
+        # lo que Apify dice que ha cobrado de verdad (`usageTotalUsd`), si lo dijo
+        self.coste_usd = coste_usd
 
 
 def _tachar(texto, *claves):
@@ -403,43 +406,109 @@ def coste_apify(red, resultados):
     return round(max(1, resultados) * por_mil / 1000.0, 4)
 
 
+#: Los estados de una ejecución de Apify que ya no van a cambiar.
+TERMINADOS_APIFY = ("SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED")
+#: Cuánto espera Apify cada vez que se le pregunta (su máximo es 60 s).
+ESPERA_APIFY_S = 60
+
+
+def _cobrado_apify(run):
+    """Lo que la ejecución ha cobrado de verdad (`usageTotalUsd`: «lo que pagas»,
+    también los eventos de un actor de pago por evento), o None si no lo dice."""
+    valor = (run or {}).get("usageTotalUsd")
+    try:
+        return round(float(valor), 4) if valor is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_usd=None):
-    """Ejecuta el actor de esa red y espera sus resultados (de pago).
+    """Ejecuta el actor de esa red, espera a que acabe y trae sus resultados (de pago).
 
     `maxItems` y `maxTotalChargeUsd` son el techo DEL LADO DE APIFY: aunque el
     actor quisiera devolver más (el de YouTube cuenta vídeos y Shorts por
-    separado), no cobra más de `cuantos` resultados ni más de `max_usd`."""
+    separado), no cobra más de `cuantos` resultados ni más de `max_usd`.
+
+    LO COBRADO DE VERDAD (rama apify-coste-real, 12-11-2026): antes se usaba la
+    llamada síncrona, que solo devuelve los resultados, y el gasto era una
+    estimación por tabla. Ahora se lanza la ejecución, se espera (de 60 en 60 s,
+    hasta `plazo`) y se lee su `usageTotalUsd`. Si Apify no lo da, la tabla de
+    siempre. Si se acaba el plazo, la ejecución se aborta (para que no siga
+    cobrando) y se apunta lo que haya cobrado."""
     if not token:
         raise ErrorLectura("falta el token de Apify", "sin_clave")
     if red not in ACTORES:
         raise ErrorLectura(f"el servicio de pago no lee {red}", "no_encontrada")
     cuantos = max(1, min(int(cuantos or 30), 50))
     actor, _p = ACTORES[red]
-    parametros = {"timeout": plazo - 20, "clean": "true", "maxItems": cuantos}
+    auth = {"Authorization": f"Bearer {token}"}
+    limite = time.monotonic() + plazo
+    parametros = {"timeout": max(10, plazo - 20), "maxItems": cuantos,
+                  "waitForFinish": min(ESPERA_APIFY_S, max(1, int(plazo)))}
     if max_usd is not None:
         parametros["maxTotalChargeUsd"] = f"{max(0.01, float(max_usd)):.2f}"
-    url = f"{BASE_APIFY}/acts/{actor}/run-sync-get-dataset-items?" + urllib.parse.urlencode(parametros)
+    url = f"{BASE_APIFY}/acts/{actor}/runs?" + urllib.parse.urlencode(parametros)
     try:
-        codigo, datos = _pedir(url, "POST", entrada_apify(red, usuario, cuantos), plazo=plazo,
-                               claves=(token,), bases=bases,
-                               cabeceras_extra={"Authorization": f"Bearer {token}"})
+        codigo, datos = _pedir(url, "POST", entrada_apify(red, usuario, cuantos), plazo=ESPERA_APIFY_S + 15,
+                               claves=(token,), bases=bases, cabeceras_extra=auth)
     except ErrorLectura as fallo:
-        fallo.cobrado = True               # el actor pudo correr: se apunta igual
+        fallo.cobrado = True               # pudo arrancar: se apunta lo reservado
         raise
     if codigo in (401, 403):
         raise ErrorLectura("el token de Apify no vale", "clave")
     if codigo == 402:
         raise ErrorLectura("Apify: se ha acabado el crédito de la cuenta", "limite")
-    if codigo == 408:
-        raise ErrorLectura("Apify ha tardado demasiado: prueba con menos vídeos", "red", cobrado=True)
     if codigo >= 400:
         mensaje = _tachar(str(((datos or {}).get("error") or {}).get("message") or datos)[:300], token)
         raise ErrorLectura(f"Apify ha contestado {codigo}: {mensaje}", "red", cobrado=codigo >= 500)
+    run = (datos or {}).get("data") if isinstance(datos, dict) else None
+    if not isinstance(run, dict) or not run.get("id"):
+        raise ErrorLectura("Apify no ha devuelto la ejecución", "red", cobrado=True)
+    rid = urllib.parse.quote(str(run["id"]), safe="")
+    # ESPERAR A QUE ACABE: Apify espera hasta 60 s por pregunta
+    while str(run.get("status") or "") not in TERMINADOS_APIFY and time.monotonic() < limite:
+        espera = int(min(ESPERA_APIFY_S, max(1, limite - time.monotonic())))
+        antes = time.monotonic()
+        try:
+            codigo, datos = _pedir(f"{BASE_APIFY}/actor-runs/{rid}?waitForFinish={espera}", plazo=espera + 15,
+                                   claves=(token,), bases=bases, cabeceras_extra=auth)
+        except ErrorLectura:
+            codigo, datos = 0, None
+        if codigo == 200 and isinstance((datos or {}).get("data"), dict):
+            run = datos["data"]
+        if str(run.get("status") or "") not in TERMINADOS_APIFY and time.monotonic() - antes < 1:
+            time.sleep(min(2.0, max(0.0, limite - time.monotonic())))
+    if str(run.get("status") or "") not in TERMINADOS_APIFY:
+        # SE ACABÓ EL PLAZO: se aborta para que no siga cobrando
+        try:
+            codigo, datos = _pedir(f"{BASE_APIFY}/actor-runs/{rid}/abort", "POST", {}, claves=(token,),
+                                   bases=bases, cabeceras_extra=auth)
+            if codigo == 200 and isinstance((datos or {}).get("data"), dict):
+                run = datos["data"]
+        except ErrorLectura:
+            pass
+        raise ErrorLectura("Apify ha tardado demasiado: prueba con menos vídeos", "red", cobrado=True,
+                           coste_usd=_cobrado_apify(run))
+    cobrado = _cobrado_apify(run)
+    if run.get("status") != "SUCCEEDED":
+        motivo = "Apify ha tardado demasiado: prueba con menos vídeos" \
+            if run.get("status") == "TIMED-OUT" else f"la ejecución de Apify ha acabado en {run.get('status')}"
+        raise ErrorLectura(motivo, "red", cobrado=True, coste_usd=cobrado)
+    dsid = urllib.parse.quote(str(run.get("defaultDatasetId") or ""), safe="")
+    try:
+        codigo, datos = _pedir(f"{BASE_APIFY}/datasets/{dsid}/items?clean=true&format=json&limit={cuantos}",
+                               claves=(token,), bases=bases, cabeceras_extra=auth)
+    except ErrorLectura as fallo:
+        fallo.cobrado, fallo.coste_usd = True, cobrado
+        raise
+    if codigo >= 400:
+        raise ErrorLectura(f"Apify no ha dado los resultados ({codigo})", "red", cobrado=True, coste_usd=cobrado)
     items = datos if isinstance(datos, list) else []
     salida = leer_items_apify(red, usuario, items)
     if not salida["videos"]:
         raise ErrorLectura(f"no se ha encontrado ningún vídeo público de «{usuario}» en {red} "
-                           "(¿existe?, ¿es privada?)", "no_encontrada", cobrado=bool(items),
-                           resultados=len(items))
-    salida["coste_usd"] = coste_apify(red, len(items))
+                           "(¿existe?, ¿es privada?)", "no_encontrada", cobrado=bool(items) or bool(cobrado),
+                           resultados=len(items), coste_usd=cobrado)
+    salida["coste_usd"] = cobrado if cobrado is not None else coste_apify(red, len(items))
+    salida["coste_real"] = cobrado is not None
     return salida

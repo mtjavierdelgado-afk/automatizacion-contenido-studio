@@ -7306,8 +7306,10 @@ def _idioma_de_brief(brief):
 
 
 def _idioma_del_video(ctx):
-    """El idioma en el que se locuta este video, con su nombre."""
-    codigo = _idioma_de_brief(ctx.estado.params("brief") or {})
+    """El idioma en el que se locuta este video, con su nombre. Una copia
+    traducida conserva el brief del original (su firma): su idioma es el de la
+    traducción, o las cartelas y el redactor le escribirían en el de antes."""
+    codigo = _idioma_traducido(ctx) or _idioma_de_brief(ctx.estado.params("brief") or {})
     p2 = PASOS_MODULOS.p2_brief
     return f"{p2.nombre_idioma(codigo)} ({codigo})"
 
@@ -8595,7 +8597,9 @@ def leer_previsualizacion(pid: str):
         raise ErrorApi(409, "todavía no hay plan de planos: genera el vídeo "
                             "antes de poder mirarlo")
     subtitulos = PASOS_MODULOS.subtitulos
-    idioma = plan.get("idioma") or ""
+    # el mismo idioma que usa el MP4: el de callouts (solo lo tiene una copia
+    # traducida) y, si no, el del plan
+    idioma = (ctx.estado.params("callouts") or {}).get("idioma") or plan.get("idioma") or ""
     # Y LOS SUBTITULOS CORREGIDOS A MANO, por el MISMO lector que usa el render
     # (`p7_callouts.texto_subtitulo_de`). Sin esto la vista previa enseñaría el
     # texto de antes de la corrección y el MP4 el de después: dos caminos para
@@ -21403,10 +21407,24 @@ def _info_para_publicar(ctx):
         # conserva el brief del original a proposito (su firma), y con
         # plan["idioma"] el .srt en ingles se subia a YouTube como «Español»
         "idioma": _idioma_para_publicar(ctx, plan),
+        # otro-idioma (árbitro, 12-11): solo en una copia traducida; con él,
+        # YouTube recibe el idioma del vídeo y del audio de la copia y no el
+        # de los ajustes del proyecto, que son los del original
+        "idioma_traducido": _idioma_traducido(ctx),
         # PEREZOSO: solo lo pide el envio (campos_subtitulos); las ~25 rutas
         # que leen esta info no pagan el calculo
         "srt": lambda: _srt_para_publicar(ctx, plan, duracion),
     }
+
+
+def _idioma_traducido(ctx):
+    """El idioma al que se tradujo esta COPIA («» en cualquier otro vídeo)."""
+    try:
+        traduccion = (ctx.proyecto.config or {}).get("traduccion_de") or {}
+        return str(traduccion.get("idioma") or "").strip().lower() if isinstance(
+            traduccion, dict) else ""
+    except Exception:                                       # noqa: BLE001
+        return ""
 
 
 def _idioma_para_publicar(ctx, plan):

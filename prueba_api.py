@@ -4940,36 +4940,42 @@ def probar_otro_idioma(cliente):
 
 
 def _otro_idioma_publicar_y_nombre(servidor, pid):
+    import types                                              # noqa: PLC0415
     ctx = servidor.contexto(pid)
     plan = {"idioma": "es", "escenas": [{"id": "S001", "t_in": 0.0, "t_out": 2.0,
                                          "duracion": 2.0, "narracion": "It was once a port.",
                                          "marcas": [[k * 0.4, k * 0.4 + 0.35] for k in range(5)]}]}
     igual(servidor._idioma_para_publicar(ctx, plan), "es",
           "sin idioma en la voz, el del plan (como hasta ahora)")
-    params_voz = ctx.estado.params("voz") or {}
-    ctx.estado.set_params("voz", {**params_voz, "idioma": "en"})
-    try:
-        igual(servidor._idioma_para_publicar(ctx, plan), "en",
-              "con la voz en inglés, la pista de subtítulos dice inglés aunque el brief diga español")
-        pedidos = []
-        real = servidor._publicar().subtitulos_srt
+    igual(servidor._idioma_traducido(ctx), "", "un vídeo que no es una traducción no dice ninguna")
+    # un vídeo FALSO con la voz en inglés: el de verdad no se toca
+    params = {"voz": {"idioma": "en"}, "callouts": {}}
+    falso = types.SimpleNamespace(
+        id=ctx.id, estado=types.SimpleNamespace(params=lambda paso: params.get(paso)),
+        proyecto=types.SimpleNamespace(config={"traduccion_de": {"idioma": "en", "video": "x"}}))
+    igual(servidor._idioma_para_publicar(falso, plan), "en",
+          "con la voz en inglés, la pista de subtítulos dice inglés aunque el brief diga español")
+    igual(servidor._idioma_traducido(falso), "en", "y la copia dice a qué idioma se tradujo")
+    ok(servidor._idioma_del_video(falso).endswith("(en)"),
+       f"las cartelas y el redactor de la copia escriben en inglés: {servidor._idioma_del_video(falso)}")
+    pedidos = []
+    real = servidor._publicar().subtitulos_srt
 
-        def espia(escenas, idioma=None, **kw):
-            pedidos.append(idioma)
-            return real(escenas, idioma=idioma, **kw)
-        servidor._publicar().subtitulos_srt = espia
-        try:
-            srt = servidor._srt_para_publicar(ctx, plan, 2.0)
-        finally:
-            servidor._publicar().subtitulos_srt = real
-        igual(pedidos, ["en"], "y el .srt se escribe en inglés")
-        ok("once" in srt and "11" not in srt, f"«once» sigue siendo «once»: {srt!r}")
+    def espia(escenas, idioma=None, **kw):
+        pedidos.append(idioma)
+        return real(escenas, idioma=idioma, **kw)
+    servidor._publicar().subtitulos_srt = espia
+    try:
+        srt = servidor._srt_para_publicar(falso, plan, 2.0)
     finally:
-        ctx.estado.set_params("voz", params_voz)
+        servidor._publicar().subtitulos_srt = real
+    igual(pedidos, ["en"], "y el .srt se escribe en inglés")
+    ok("once" in srt and "11" not in srt, f"«once» sigue siendo «once»: {srt!r}")
     # m1: un nombre largo cabe en las 60 letras del id sin perder «(EN)»
     largo = "Un título larguísimo de un vídeo que no cabe en la carpeta del proyecto " * 2
-    ctx.proyecto.config["nombre"] = largo
-    nombre = servidor._nombre_en_otro_idioma(ctx, "en")
+    falso_nombre = types.SimpleNamespace(id=ctx.id, proyecto=types.SimpleNamespace(
+        config={"nombre": largo}))
+    nombre = servidor._nombre_en_otro_idioma(falso_nombre, "en")
     ok(nombre.endswith("(EN)"), f"el nombre largo conserva «(EN)»: {nombre}")
     carpeta = servidor._carpeta_de_copia(nombre)
     ok(len(os.path.basename(carpeta)) <= 60 and os.path.basename(carpeta).endswith("_en"),

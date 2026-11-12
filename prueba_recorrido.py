@@ -10596,6 +10596,26 @@ def video_en_otro_idioma(navegador, datos):
     pid = datos["video"]
     api = datos["api"]
     api.libre(pid, 600)
+    # LOS ESCENARIOS DE ANTES DEJAN EL VÍDEO CON CAMBIOS SIN GENERAR: así no se
+    # deja pasar (la copia heredaría lo pendiente y lo pagaría). Se pone al día
+    # aquí con los motores simulados, como haría el dueño, y entonces se prueba
+    r, d = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    r_v, d_v = api.get(f"/api/proyectos/{pid}/pasos/voz")
+    if d.get("estado") != "listo" or d_v.get("estado") != "listo":
+        r, d = api.post(f"/api/proyectos/{pid}/otro_idioma",
+                        {"idioma": "en", "confirmado": True})
+        ok(r.status_code == 409 and "pon al día" in str(d),
+           f"con la voz o las imágenes sin generar no se deja pasar ({r.status_code})")
+        for tanda in ("voz", "video"):
+            r, d = api.post(f"/api/proyectos/{pid}/generar", {"tanda": tanda, "modo": "pendientes"})
+            tid = d.get("trabajo_id") or (d.get("trabajo") or {}).get("id")
+            if tid:
+                api.esperar(tid, 900)
+        api.libre(pid, 600)
+        r, d = api.get(f"/api/proyectos/{pid}/pasos/assets")
+        r_v, d_v = api.get(f"/api/proyectos/{pid}/pasos/voz")
+        ok(d.get("estado") == "listo" and d_v.get("estado") == "listo",
+           f"puesto al día, la voz y las imágenes están listas ({d_v.get('estado')}, {d.get('estado')})")
     antes = _foto_del_estado(datos, pid)
     imagenes = _huellas_de_imagenes(datos, pid)
     ok(imagenes, f"el vídeo de prueba tiene imágenes ({len(imagenes)})")
@@ -10650,6 +10670,11 @@ def video_en_otro_idioma(navegador, datos):
             break
         pg.p.wait_for_timeout(1000)
     ok(copia and copia != pid, f"al acabar se abre el vídeo nuevo ({copia})")
+    if not copia or copia == pid:
+        # sin copia, lo de abajo miraría el ORIGEN y daría fallos que no son
+        pg.captura("otro_idioma_sin_copia", entera=False)
+        pg.cerrar()
+        return
     pg.captura("otro_idioma_copia_abierta", entera=False)
     ok(api.libre(copia, 1500), "la tanda de la copia termina sola")
     pg.js(f"await abrirVideoLight('{copia}'); APP.light.video.vista = 'video'; pintarLight();")

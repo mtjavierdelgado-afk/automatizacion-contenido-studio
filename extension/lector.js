@@ -261,7 +261,8 @@
         datos.texto = largo(textoDe(desc)).replace(/\s*…\s*más\s*$/i, '');
         /* las vistas: el contador gira («1 2 3 4…»); su etiqueta («230 M de vistas») es lo que vale */
         const contador = caja.querySelector('#view-count');
-        const vistas = (contador && contador.getAttribute('aria-label')) || (ogVale ? meta('interactionCount') : '');
+        const vistas = (contador && contador.getAttribute('aria-label')) || (ogVale ? meta('interactionCount') : '')
+          || cortoEn(caja, 'ytd-watch-info-text #info');   // «1836 M de vistas  hace 17 años» (medido el 12-11)
         if (vistas && /\d/.test(vistas)) datos.cifras.vistas = /^\d+$/.test(limpio(vistas)) ? limpio(vistas) : (cifrasDeFrase(vistas, {}).vistas || '');
         /* los me gusta: la etiqueta («al igual que 19,501,189 personas más») es el número exacto;
            si no lo trae, el trozo del botón que es solo un número */

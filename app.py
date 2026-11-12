@@ -1754,8 +1754,12 @@ def otro_idioma_lanzar(pid: str, cuerpo: dict = Body(default=None)):
         with _LOCK:
             _OTRO_IDIOMA_EN_MARCHA.add(ctx.id)
         try:
+            visto = datos_peticion.get("visto") if isinstance(
+                datos_peticion.get("visto"), dict) else None
+            _no_mas_de_lo_visto(datos, visto)
             trabajo_id = ctx.gestor.lanzar("otro idioma", _correr_otro_idioma, ctx, idioma,
-                                           voz_id, nombre, toca=[p["id"] for p in PASOS])
+                                           voz_id, nombre, visto,
+                                           toca=[p["id"] for p in PASOS])
         except BaseException:
             with _LOCK:
                 _OTRO_IDIOMA_EN_MARCHA.discard(ctx.id)
@@ -1774,75 +1778,97 @@ def otro_idioma_lanzar(pid: str, cuerpo: dict = Body(default=None)):
 _OTRO_IDIOMA_EN_MARCHA = set()
 
 
-def _a_la_papelera_sin_ruido(copia_id):
+def _a_la_papelera_sin_ruido(copia_id=None, carpeta=None):
     """Una copia a medias, a la papelera (nunca se borra: se puede devolver)."""
     try:
-        apartar_proyecto(copia_id)
-        return True
+        if copia_id:
+            apartar_proyecto(copia_id)
+            return True
+        if carpeta and os.path.isdir(carpeta):
+            os.makedirs(raiz_papelera(), exist_ok=True)
+            destino = os.path.join(raiz_papelera(), f"{os.path.basename(carpeta)}__"
+                                   + time.strftime("%Y%m%dT%H%M%S"))
+            recolocar(carpeta, destino)
+            return True
     except Exception:                                            # noqa: BLE001
-        return False
+        pass
+    return False
 
 
-def _correr_otro_idioma(avisar, ctx, idioma, voz_id, nombre):
-    """El trabajo del ORIGEN: duplicar, traducir (Claude) y preparar la copia; y
+def _correr_otro_idioma(avisar, ctx, idioma, voz_id, nombre, visto=None):
+    """El trabajo del ORIGEN: traducir (Claude), duplicar, preparar la copia y
     dejar lanzado en la copia su propio trabajo (voz, comprobación y montaje).
 
-    DUPLICA PRIMERO y lee de la COPIA: el original, bloqueado mientras tanto
-    (`toca` con todos sus pasos), no puede cambiar a mitad, y lo traducido es
-    exactamente lo que tiene la copia. Si algo falla antes de lanzar, la copia
-    va a la papelera: no queda un vídeo a medias en la lista.
+    TRADUCE ANTES DE DUPLICAR: los minutos de Claude pasan sin que exista la
+    copia, así que nadie puede tocarla mientras tanto. Después, duplicar y
+    preparar son segundos, con el cerrojo de la tanda de la copia tomado, y el
+    trabajo de la copia (`toca` todos sus pasos) se lanza dentro del mismo
+    cerrojo. El origen está bloqueado todo el rato (`toca`), y aun así se
+    comprueba que la copia dice lo mismo que se tradujo: un guion editado a
+    mano en esos minutos no pasa por traducido. Si algo falla antes de lanzar,
+    la copia va a la papelera.
     """
     try:
-        avisar(0.02, "creando la copia", "Creando el vídeo nuevo")
+        avisar(0.02, "leyendo el vídeo", "Leyendo el vídeo")
+        p6 = PASOS_MODULOS.p6_assets
+        datos = OTRO_IDIOMA.material(ctx.proyecto, ctx.estado, p6)
+        _no_mas_de_lo_visto(datos, visto)
+
+        def tramo(valor, mensaje="", publico=""):
+            return avisar(0.05 + 0.8 * float(valor or 0), mensaje,
+                          publico or "Traduciendo el guion")
+        if hasattr(avisar, "al_cancelar"):
+            tramo.al_cancelar = avisar.al_cancelar
+        traduccion = OTRO_IDIOMA.traducir(datos, idioma, cwd=ctx.proyecto.raiz, avisar=tramo)
+
+        avisar(0.88, "creando la copia", "Creando el vídeo nuevo")
+        carpeta = os.path.join(raiz_proyectos(), identificador(nombre))
+        existia = os.path.exists(carpeta)
+        copia, lanzado, tanda = None, False, None
         try:
             nuevo = ctx.proyecto.duplicar(raiz_proyectos(), nombre)
-        except OSError as fallo:
-            raise RuntimeError(f"no se ha podido crear la copia: {fallo}")
-        copia = contexto(nuevo.id)
-        lanzado = False
-        try:
-            for clave in OTRO_IDIOMA.CONFIG_QUE_VIAJA:
-                if clave in ctx.proyecto.config:
-                    copia.proyecto.config[clave] = copy.deepcopy(ctx.proyecto.config[clave])
-            copia.proyecto.guardar_config()
-            avisar(0.05, "leyendo el vídeo", "Leyendo el vídeo")
-            datos = OTRO_IDIOMA.material(copia.proyecto, copia.estado,
-                                         PASOS_MODULOS.p6_assets)
-
-            def tramo(valor, mensaje="", publico=""):
-                return avisar(0.08 + 0.8 * float(valor or 0), mensaje,
-                              publico or "Traduciendo el guion")
-            if hasattr(avisar, "al_cancelar"):
-                tramo.al_cancelar = avisar.al_cancelar
-            traduccion = OTRO_IDIOMA.traducir(datos, idioma, cwd=copia.proyecto.raiz,
-                                              avisar=tramo)
-
-            avisar(0.9, "preparando la copia", "Preparando la copia")
-            resumen = OTRO_IDIOMA.preparar_copia(copia.proyecto, copia.estado, datos,
-                                                 traduccion, idioma, voz_id=voz_id,
-                                                 origen=ctx.id, p6=PASOS_MODULOS.p6_assets)
-            # el proyecto (cliente) del original, si se lo asignaron a mano
-            try:
-                propio = CLIENTES._leer(raiz_proyectos()).get("videos", {}).get(ctx.id)
-                if propio:
-                    CLIENTES.asignar_video(raiz_proyectos(), copia.id, propio)
-            except Exception:                                    # noqa: BLE001
-                pass
-            copia.bitacora.anotar("otro_idioma_creado", None,
-                                  {"de": ctx.id, "idioma": idioma, **resumen})
-            ctx.bitacora.anotar("otro_idioma_hecho", None,
-                                {"a": copia.id, "idioma": idioma, **resumen})
-
-            avisar(0.96, "lanzando la voz y el montaje", "Lanzando la voz y el montaje")
+            copia = contexto(nuevo.id)
             with _cerrojo_de_cadena(copia.id):
+                if copia.gestor.listar(activos=True):
+                    raise RuntimeError("la copia ya tiene algo en marcha")
+                for clave in OTRO_IDIOMA.CONFIG_QUE_VIAJA:
+                    if clave in ctx.proyecto.config:
+                        copia.proyecto.config[clave] = copy.deepcopy(ctx.proyecto.config[clave])
+                copia.proyecto.guardar_config()
+                # LO MISMO QUE SE TRADUJO: la copia se lee otra vez y tiene que
+                # decir exactamente lo mismo que el original al empezar
+                en_copia = OTRO_IDIOMA.material(copia.proyecto, copia.estado, p6)
+                if [t["partes"] for t in en_copia["trozos"]] != [t["partes"] for t in datos["trozos"]]:
+                    raise RuntimeError("el vídeo ha cambiado mientras se traducía: "
+                                       "vuelve a intentarlo")
+                avisar(0.93, "preparando la copia", "Preparando la copia")
+                resumen = OTRO_IDIOMA.preparar_copia(copia.proyecto, copia.estado, datos,
+                                                     traduccion, idioma, voz_id=voz_id,
+                                                     origen=ctx.id, p6=p6)
+                _bloques, esperadas, _t = OTRO_IDIOMA.textos_traducidos(datos, traduccion)
+                avisar(0.97, "lanzando la voz y el montaje", "Lanzando la voz y el montaje")
                 tanda = copia.gestor.lanzar("generar:otro_idioma", _correr_copia_en_idioma,
-                                            copia, datos, paso="voz",
+                                            copia, datos, esperadas, paso="voz",
                                             toca=[p["id"] for p in PASOS])
-            lanzado = True
-            _registrar_trabajo(tanda, copia.id)
+                lanzado = True
         finally:
             if not lanzado:
-                _a_la_papelera_sin_ruido(copia.id)
+                if copia is not None:
+                    _a_la_papelera_sin_ruido(copia.id)
+                elif not existia:
+                    _a_la_papelera_sin_ruido(carpeta=carpeta)
+        _registrar_trabajo(tanda, copia.id)
+        # el proyecto (cliente) del original, si se lo asignaron a mano
+        try:
+            propio = CLIENTES._leer(raiz_proyectos()).get("videos", {}).get(ctx.id)
+            if propio:
+                CLIENTES.asignar_video(raiz_proyectos(), copia.id, propio)
+        except Exception:                                        # noqa: BLE001
+            pass
+        copia.bitacora.anotar("otro_idioma_creado", None,
+                              {"de": ctx.id, "idioma": idioma, **resumen})
+        ctx.bitacora.anotar("otro_idioma_hecho", None,
+                            {"a": copia.id, "idioma": idioma, **resumen})
         avisar(1.0, "hecho", "Hecho")
         return {"copia": copia.id, "nombre": nombre, "idioma": idioma,
                 "tanda": tanda, "aviso": "", **resumen}
@@ -1851,8 +1877,26 @@ def _correr_otro_idioma(avisar, ctx, idioma, voz_id, nombre):
             _OTRO_IDIOMA_EN_MARCHA.discard(ctx.id)
 
 
-def _tanda_de_la_copia(avisar, copia, pestanas, desde, hasta):
-    """Una tanda de la copia, DENTRO de su trabajo (no se lanza otro). -> resumen"""
+def _no_mas_de_lo_visto(datos, visto):
+    """Lo que se va a pagar en imágenes no puede ser más de lo que se enseñó al
+    pedir el OK (entre mirar y confirmar pudo quedar un plano sin dibujo)."""
+    if not isinstance(visto, dict) or visto.get("a_dibujar") is None:
+        return
+    try:
+        visto_n = int(visto.get("a_dibujar"))
+    except (TypeError, ValueError):
+        return
+    if len(datos.get("sin_dibujo") or []) > visto_n:
+        raise ErrorApi(409, "desde que miraste el precio hay más imágenes sin dibujar: "
+                            "vuelve a abrir «Hacer este vídeo en otro idioma» y mira lo "
+                            "que cuesta ahora")
+
+
+def _tanda_de_la_copia(avisar, copia, pestanas, desde, hasta, max_imagenes=None):
+    """Una tanda de la copia, DENTRO de su trabajo (no se lanza otro). -> resumen
+
+    Con `max_imagenes`, si la tanda fuera a dibujar más imágenes que esas
+    (las que ya faltaban en el original y se enseñaron), no corre."""
     datos = {"pestanas": list(pestanas), "modo": "pendientes",
              "tareas": dict(_OTRO_IDIOMA_SIN)}
     plan = _plan_de_generacion(copia, list(pestanas), "pendientes", datos)
@@ -1860,6 +1904,12 @@ def _tanda_de_la_copia(avisar, copia, pestanas, desde, hasta):
         return {"tareas": []}
     if plan["impedimentos"]:
         raise RuntimeError(plan["impedimentos"][0]["que"])
+    if max_imagenes is not None:
+        a_dibujar = int((plan.get("coste") or {}).get("imagenes_por_generar") or 0)
+        if a_dibujar > max_imagenes:
+            raise OTRO_IDIOMA.ErrorOtroIdioma(
+                f"montar la copia dibujaría {a_dibujar} imagen(es) y se enseñaron "
+                f"{max_imagenes}: no se monta. La voz está grabada; no se ha dibujado nada.")
 
     def tramo(valor, mensaje="", publico=""):
         return avisar(desde + (hasta - desde) * float(valor or 0), mensaje, publico)
@@ -1874,25 +1924,45 @@ def _tanda_de_la_copia(avisar, copia, pestanas, desde, hasta):
     return _cadena_con_cuenta(tramo, copia, marca, list(pestanas), "pendientes", datos, plan)
 
 
-def _correr_copia_en_idioma(avisar, copia, datos):
+def _correr_copia_en_idioma(avisar, copia, datos, esperadas=None):
     """El trabajo de la COPIA: la voz nueva, la red de seguridad y el montaje.
 
     Entre la voz y el montaje se comprueba que la voz nueva corta en los MISMOS
-    planos que el original y que cada uno conserva su dibujo
-    (`otro_idioma.comprobar_planos`). Si no, se para aquí con la voz grabada y
-    sin dibujar nada: es la única forma de prometer «sin pagar las imágenes
-    otra vez» sin fiarse de que el corte salga igual en otro idioma.
+    planos que el original, cada uno diciendo lo suyo traducido, y que cada uno
+    conserva su dibujo (`otro_idioma.comprobar_planos`). Si no, se para con la
+    voz grabada y sin dibujar nada, y SE VUELVE A CORTAR GRATIS (`solo_cortar`):
+    así el plan de la copia es el de su voz nueva, y si luego alguien pulsa
+    «Generar» en ella, lo que cuesta se cuenta sobre los planos de verdad (con
+    el plan viejo el cotizador diría «0 imágenes» y la tanda pagaría las que
+    no casan).
     """
-    _tanda_de_la_copia(avisar, copia, ["voz"], 0.0, 0.6)
-    avisar(0.62, "comprobando los planos con la voz nueva", "Comprobando los planos")
     try:
+        _tanda_de_la_copia(avisar, copia, ["voz"], 0.0, 0.6)
+        avisar(0.62, "comprobando los planos con la voz nueva", "Comprobando los planos")
         red = OTRO_IDIOMA.comprobar_planos(copia.proyecto, copia.estado,
-                                           PASOS_MODULOS.p6_assets, datos)
-    except OTRO_IDIOMA.ErrorOtroIdioma as fallo:
-        copia.bitacora.anotar("otro_idioma_parado", None, {"motivo": str(fallo)})
-        raise RuntimeError(str(fallo))
-    copia.bitacora.anotar("otro_idioma_planos_ok", None, red)
-    resumen = _tanda_de_la_copia(avisar, copia, ["video", "render"], 0.65, 1.0)
+                                           PASOS_MODULOS.p6_assets, datos, esperadas)
+        copia.bitacora.anotar("otro_idioma_planos_ok", None, red)
+        resumen = _tanda_de_la_copia(avisar, copia, ["video", "render"], 0.65, 1.0,
+                                     max_imagenes=len(datos.get("sin_dibujo") or []))
+    except BaseException as fallo:
+        if type(fallo).__name__ == "Cancelado":
+            raise
+        motivo = getattr(fallo, "mensaje", None) or str(fallo)
+        copia.bitacora.anotar("otro_idioma_parado", None, {"motivo": motivo})
+        try:
+            config = copia.proyecto.config.get(OTRO_IDIOMA.CONFIG_TRADUCCION) or {}
+            copia.proyecto.config[OTRO_IDIOMA.CONFIG_TRADUCCION] = dict(config, parado=motivo)
+            copia.proyecto.guardar_config()
+        except Exception:                                        # noqa: BLE001
+            pass
+        if copia.estado.estado_de("voz") == "listo":
+            try:
+                _correr_paso(lambda *a, **k: None, copia, "assets", [], {"solo_cortar": True})
+            except Exception:                                    # noqa: BLE001
+                pass
+        if isinstance(fallo, OTRO_IDIOMA.ErrorOtroIdioma):
+            raise RuntimeError(motivo)
+        raise
     avisar(1.0, "hecho", "Hecho")
     return {"copia": copia.id, **red, "tareas": (resumen or {}).get("tareas", [])}
 

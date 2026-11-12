@@ -11709,7 +11709,9 @@ function abrirOtroIdioma(pid) {
   const viejo = document.getElementById('coste-video');
   if (viejo) viejo.remove();
   const cuerpo = h('div', { clase: 'cuerpo otro-idioma' });
-  const cerrar = () => { if (!est.lanzando && !est.trabajo) capa.remove(); };
+  /* Mientras corre se puede cerrar: el trabajo sigue en el servidor (y su
+     barra en la cabecera); al acabar avisa igual */
+  const cerrar = () => { if (!est.lanzando || est.trabajo) capa.remove(); };
   const capa = h('div', { id: 'coste-video', onclick: ev => { if (ev.target === capa) cerrar(); } },
     h('div', { clase: 'cuadro' },
       h('div', { clase: 'cab' }, h('b', {}, 'Hacer este vídeo en otro idioma'),
@@ -11751,7 +11753,9 @@ function abrirOtroIdioma(pid) {
     pintar();
     try {
       const r = await pedir(`${API.proyecto(pid)}/otro_idioma`, { method: 'POST', cuerpo: {
-        idioma: est.idioma, voz_id: est.vozId, nombre: est.nombre, confirmado: true } });
+        idioma: est.idioma, voz_id: est.vozId, nombre: est.nombre, confirmado: true,
+        visto: { a_dibujar: (est.estimacion && est.estimacion.imagenes || {}).a_dibujar,
+          usd: est.estimacion ? est.estimacion.usd_total : null } } });
       est.trabajo = { id: r.trabajo_id, progreso: 0, mensaje: 'empezando…' };
       pintar();
       seguirTrabajo(`otro_idioma_${pid}`, r.trabajo_id, async t => {
@@ -11761,7 +11765,9 @@ function abrirOtroIdioma(pid) {
           const res = t.resultado;
           if (res.aviso) toast(res.aviso, true);
           else toast(`«${res.nombre}» creado: grabando la voz y montando`);
+          const abierto = document.body.contains(capa);
           capa.remove();
+          if (!abierto) return;
           await cargarGaleriaLight(true).catch(() => null);
           try {
             await abrirVideoLight(res.copia);
@@ -11772,6 +11778,7 @@ function abrirOtroIdioma(pid) {
         }
         est.trabajo = null;
         est.error = t.error || (t.estado === 'cancelado' ? 'cancelado' : 'no se ha podido hacer');
+        if (!document.body.contains(capa)) toast(`El vídeo en otro idioma: ${est.error}`, true);
         pintar();
       }, t => {
         if (est.trabajo) {
@@ -11796,7 +11803,15 @@ function abrirOtroIdioma(pid) {
       cuerpo.appendChild(h('div', { clase: 'caja-info trabajo-laminas' },
         h('div', {}, `${est.trabajo.mensaje || 'trabajando…'} · ${pct} %`),
         h('progress', { max: 100, value: pct }),
-        h('div', { clase: 'meta' }, 'Al acabar se abre el vídeo nuevo y sigue solo con la voz y el montaje.')));
+        h('div', { clase: 'meta' }, 'Al acabar se abre el vídeo nuevo y sigue solo con la voz y el montaje. Puedes cerrar esto: sigue en el servidor.'),
+        h('div', { clase: 'fila' },
+          h('button', { clase: 'mini', onclick: async ev => {
+            if (!confirm('¿Parar? Todavía no se ha grabado nada: no se pierde dinero.')) return;
+            ev.target.disabled = true;
+            try { await pedir(API.cancelar(est.trabajo.id), { method: 'POST' }); }
+            catch (e) { toast(e.message, true); ev.target.disabled = false; }
+          } }, 'Parar'),
+          h('button', { clase: 'mini fantasma', onclick: () => cerrar() }, 'Cerrar (sigue solo)'))));
       return;
     }
     if (!est.info) {

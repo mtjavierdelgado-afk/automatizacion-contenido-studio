@@ -357,8 +357,17 @@ def prueba_red():
     tolerado = dict(datos, sin_dibujo=["S003"])
     resumen = oi.comprobar_planos(copia, estado, _P6Falso(sin_png), tolerado)
     igual(resumen["planos"], 3, "lo que ya faltaba en el original (y se avisó) no para")
-    resumen = oi.comprobar_planos(copia, estado, _P6Falso(buenas), datos)
-    igual(resumen["planos"], 3, "los mismos planos: sigue")
+    esperadas = {"S001": "The freighter left port", "S002": "It was full"}
+    al_reves = [dict(buenas[0], narracion="It was full."), dict(buenas[1], narracion="The freighter left port."),
+                buenas[2]]
+    try:
+        oi.comprobar_planos(copia, estado, _P6Falso(al_reves), datos, esperadas)
+        ok(False, "los mismos planos con otro reparto paran")
+    except oi.ErrorOtroIdioma as fallo:
+        ok("S001" in str(fallo) and "frase de al lado" in str(fallo),
+           "los mismos números con otro reparto paran (cada imagen iría a la frase de al lado)")
+    resumen = oi.comprobar_planos(copia, estado, _P6Falso(buenas), datos, esperadas)
+    igual(resumen["planos"], 3, "los mismos planos, diciendo lo suyo: sigue")
     with open(os.path.join(base, "escenas", "S001.json"), encoding="utf-8") as fh:
         ficha = json.load(fh)
     igual((ficha["narracion"], "narracion_imagen" in ficha), ("The freighter left port.", False),

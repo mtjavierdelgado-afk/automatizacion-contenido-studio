@@ -10724,6 +10724,68 @@ def video_en_otro_idioma(navegador, datos):
             textos += fh.read()
     ok("EN:" in textos or "EN" in textos, "los subtítulos salen en inglés")
 
+    # LA RED DE SEGURIDAD, DE VERDAD: a la copia en portugués se le quita una
+    # imagen mientras graba la voz. Tiene que pararse antes de montar, sin
+    # dibujar nada, y dejar su plan cortado con la voz nueva (gratis), para que
+    # lo que cueste «Generar» en ella se cuente sobre los planos de verdad.
+    r, info_pt = api.get(f"/api/proyectos/{pid}/otro_idioma?idioma=pt")
+    est_pt = info_pt.get("estimacion") or {}
+    r, lanzado = api.post(f"/api/proyectos/{pid}/otro_idioma", {
+        "idioma": "pt", "confirmado": True,
+        "visto": {"a_dibujar": (est_pt.get("imagenes") or {}).get("a_dibujar")}})
+    ok(r.status_code == 202, f"se lanza en portugués ({r.status_code})")
+    r2, _d = api.post(f"/api/proyectos/{pid}/otro_idioma", {"idioma": "pt", "confirmado": True})
+    ok(r2.status_code == 409, f"un segundo clic mientras tanto no hace otra copia ({r2.status_code})")
+    # en cuanto la copia aparece en disco, se le quita la imagen del primer plano
+    # (antes de que su voz termine: la comprobación va después de la voz)
+    from nucleo.proyecto import identificador  # noqa: PLC0415
+    copia_pt = identificador(str(info_pt.get("nombre_sugerido") or ""))
+    base_pt = os.path.join(datos["proyectos"], copia_pt, "pasos", "assets")
+    quitada, activa_pt = "", None
+    for _i in range(6000):
+        try:
+            with open(os.path.join(base_pt, "activa.json"), encoding="utf-8") as fh:
+                activa_pt = json.load(fh).get("activa")
+            carpeta_pt = os.path.join(base_pt, f"v{activa_pt}", "escenas")
+            pngs = sorted(n for n in os.listdir(carpeta_pt) if n.endswith(".png"))
+            if pngs:
+                os.remove(os.path.join(carpeta_pt, pngs[0]))
+                quitada = pngs[0][:-4]
+                break
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.05)
+    ok(quitada, f"a la copia se le quita una imagen mientras graba ({quitada})")
+    ficha_a = api.esperar(lanzado.get("trabajo_id"), 600)
+    ok(ficha_a.get("estado") == "listo", f"la copia en portugués se crea ({copia_pt})")
+    pngs = [quitada + ".png"]
+    ok(api.libre(copia_pt, 900), "el trabajo de la copia termina")
+    ok((_foto_del_estado(datos, copia_pt).get("render") or (0, 0, None))[2]
+       == (antes.get("render") or (0, 0, None))[2], "no la ha montado (el render sigue en su versión copiada)")
+    with open(os.path.join(datos["proyectos"], copia_pt, "bitacora.jsonl"), encoding="utf-8") as fh:
+        bit_pt = fh.read()
+    ok("otro_idioma_parado" in bit_pt and pngs[0][:-4] in bit_pt,
+       f"se ha parado antes de montar y dice qué plano ({pngs[0][:-4]})")
+    with open(os.path.join(datos["proyectos"], copia_pt, "proyecto.json"), encoding="utf-8") as fh:
+        ok((json.load(fh).get("traduccion_de") or {}).get("parado"), "la copia apunta que se paró")
+    pagadas_pt = 0
+    with open(os.path.join(datos["base"], "coste.jsonl"), encoding="utf-8") as fh:
+        for linea in fh:
+            try:
+                gasto = json.loads(linea)
+            except ValueError:
+                continue
+            if gasto.get("proyecto") == copia_pt and gasto.get("operacion") == "imagen":
+                pagadas_pt += 1
+    ok(pagadas_pt == 0, f"y no ha dibujado ni pagado ninguna imagen ({pagadas_pt})")
+    with open(os.path.join(base_pt, "activa.json"), encoding="utf-8") as fh:
+        activa_pt2 = json.load(fh).get("activa")
+    with open(os.path.join(base_pt, f"v{activa_pt2}", "plan.json"), encoding="utf-8") as fh:
+        plan_pt = json.load(fh)
+    ok(activa_pt2 != activa_pt and plan_pt.get("escenas"),
+       f"el plan se ha vuelto a cortar gratis con la voz nueva (v{activa_pt} → v{activa_pt2})")
+    ok(_foto_del_estado(datos, pid) == antes, "y el original sigue sin cambiar")
+
 
 if __name__ == "__main__":
     sys.exit(main())

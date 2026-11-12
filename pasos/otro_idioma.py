@@ -219,7 +219,11 @@ def material(proyecto, estado, p6):
     # guardado es el de una voz anterior.
     modo_guion = False
     try:
-        modo_guion = p6.guion_visual.modo_de(params_assets) == "guion"
+        # COMO SE CORTÓ DE VERDAD, no lo que dice el ajuste: en modo «guion»
+        # con el guion visual sin aprobar (o que ya no casa con la voz) el plan
+        # se cortó por la voz, y entonces manda el `corte`
+        modo_guion = (p6.guion_visual.modo_de(params_assets) == "guion"
+                      and bool(plan.get("guion_visual_ok")))
     except Exception:                                            # noqa: BLE001
         modo_guion = False
     corte = [] if modo_guion else [str(x or "") for x in (plan.get("corte") or [])
@@ -638,7 +642,7 @@ def _llamar_a_claude(cwd, avisar=None):
 
 # ---------------------------------------------------- la red, con la voz hecha
 
-def comprobar_planos(copia, estado, p6, datos):
+def comprobar_planos(copia, estado, p6, datos, esperadas=None):
     """Con la voz nueva ya grabada, ANTES de montar: ¿salen los mismos planos? -> resumen
 
     Es la red de seguridad del dinero. El corte nuevo se calcula igual que lo
@@ -662,6 +666,20 @@ def comprobar_planos(copia, estado, p6, datos):
             f"{len(esperados)}: montarlo así volvería a dibujar (y pagar) imágenes. "
             "La voz está grabada; no se ha dibujado nada. Revisa la copia en "
             "Imágenes antes de montarla.")
+    # Y CADA UNO DICIENDO LO SUYO: los ids son la posición (S001, S002...), así
+    # que el mismo número de planos con otro reparto pasaría la cuenta de arriba
+    # y cada dibujo acabaría ilustrando la frase de al lado
+    if esperadas:
+        normal = medios.normalizar_texto
+        mismo = getattr(p6, "_mismo_dicho", None) or (lambda a, b: a == b)
+        cambiados = [e["id"] for e in escenas
+                     if esperadas.get(e["id"]) and not mismo(
+                         normal(e.get("narracion") or ""), normal(esperadas[e["id"]]))]
+        if cambiados:
+            raise ErrorOtroIdioma(
+                f"con la voz nueva, {len(cambiados)} plano(s) no dicen lo que se tradujo "
+                f"para ellos ({', '.join(cambiados[:6])}): cada imagen acabaría en la frase "
+                "de al lado. La voz está grabada; no se ha montado ni dibujado nada.")
     ruta_plan = medios.salida_de(copia, "assets", claves=("plan",),
                                  patrones=(r"plan\.json",), estado=estado)
     carpeta = os.path.join(os.path.dirname(ruta_plan or ""), "escenas")

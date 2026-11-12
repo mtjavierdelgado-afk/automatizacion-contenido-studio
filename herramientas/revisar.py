@@ -81,6 +81,7 @@ QUE_PRUEBA = {
     "pasos/prueba_parrilla_estados.py": "los estados de la Parrilla",
     "pasos/prueba_parrilla_marca.py": "la marca ✗/✓ de la Parrilla",
     "pasos/prueba_choques_reglas.py": "las reglas que se contradicen",
+    "pasos/prueba_graficas_capas.py": "Gráficas en capas: las 14 plantillas salen iguales",
     "pasos/prueba_ramas_sin_choques.py": "las novedades y el recorrido de cada rama",
     "herramientas/prueba_herramientas_prueba.py": "estas mismas herramientas de prueba",
     "prueba_recorrido.py": "la pantalla entera, botón por botón",

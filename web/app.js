@@ -27867,8 +27867,18 @@ function redesDeLaFichaPublicar(f) {
   return (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
 }
 
+/* Los pasos que se ven: «Envíos» solo cuando el vídeo YA tiene algún envío
+   que no esté cancelado (publicado, programado, en el aire, fallido, esperando
+   tu OK o subido a mano: ahí están «Reintentar», «Quitar» y «Dar el OK»); antes
+   salía vacío y confundía (pedido del dueño, 12-11). Si se está EN el paso y
+   se cancela el último, no salta solo a otro paso. */
+function pasosFichaPublicarDe(f) {
+  const hayEnvios = ((f || {}).envios || []).some(e => e.estado !== 'cancelado');
+  return PASOS_FICHA_PUBLICAR.filter(([id]) => id !== 'envios' || hayEnvios || PUB.pasoFicha === 'envios');
+}
+
 function pasoFichaPublicar(f) {
-  const ids = PASOS_FICHA_PUBLICAR.map(x => x[0]);
+  const ids = pasosFichaPublicarDe(f).map(x => x[0]);
   if (ids.includes(PUB.pasoFicha)) return PUB.pasoFicha;
   return (f.redes || []).length ? 'textos' : 'redes';
 }
@@ -27932,7 +27942,7 @@ function carrilFichaPublicar(f, actual) {
   const caja = h('aside', { clase: 'carril-crear carril-publicar', 'aria-label': 'Los pasos para publicar este vídeo' });
   caja.appendChild(h('div', { clase: 'carril-titulo' }, 'Publicar este vídeo', h('span', { clase: 'desliza' }, ' · desliza →')));
   const fila = h('nav', { clase: 'pasos-carril pasos-publicar' });
-  PASOS_FICHA_PUBLICAR.forEach(([id, nombre], i) => {
+  pasosFichaPublicarDe(f).forEach(([id, nombre], i) => {
     const p = estadoPasoFichaPublicar(id, f);
     const aqui = id === actual;
     fila.appendChild(h('button', {
@@ -28301,12 +28311,25 @@ function pasoCuandoPublicar(f) {
   }
   if (elegido === 'programar') {
     if (!PUB.cuandoEnvio) PUB.cuandoEnvio = f.hora_sugerida;
+    // «OK» (pedido del dueño, 12-11): mientras el campo tiene el foco la ficha
+    // no se repinta (repintarPublicarSinPisar), así que la barra seguía con la
+    // hora de antes hasta pulsar fuera. «OK» o Intro guardan, sueltan el foco
+    // (cierra el selector) y repintan.
+    const campo = h('input', { type: 'datetime-local', value: PUB.cuandoEnvio, datos: { foco: 'cuando' },
+      oninput: ev => { if (ev.target.value) PUB.cuandoEnvio = ev.target.value; },
+      onchange: ev => { if (ev.target.value) PUB.cuandoEnvio = ev.target.value; repintarPublicarSinPisar(); },
+      onkeydown: ev => { if (ev.key === 'Enter') { ev.preventDefault(); confirmarCuandoPublicar(campo); } } });
     caja.appendChild(h('div', { clase: 'bloque' },
       h('div', { clase: 'fila' },
-        h('label', { clase: 'etiqueta-campo' }, 'Día y hora',
-          h('input', { type: 'datetime-local', value: PUB.cuandoEnvio, datos: { foco: 'cuando' },
-            onchange: ev => { PUB.cuandoEnvio = ev.target.value; repintarPublicarSinPisar(); } })),
+        h('label', { clase: 'etiqueta-campo' }, 'Día y hora', campo),
+        h('button', { type: 'button', clase: 'mini ok-cuando-publicar',
+          title: 'Usa el día y la hora elegidos',
+          // sin esto el campo suelta el foco al APRETAR, la ficha se repinta y
+          // un clic largo se perdía (el botón ya era otro)
+          onmousedown: ev => ev.preventDefault(),
+          onclick: () => confirmarCuandoPublicar(campo) }, 'OK'),
         h('span', { clase: 'meta' }, 'hora de Lima')),
+      lineaCuandoConfirmado(f),
       sugerenciasCuandoPublicar(f)));
   } else if (elegido === 'ahora') {
     caja.appendChild(h('div', { clase: 'meta' }, '«Publicar ahora ›» lo sube en cuanto confirmes. Una vez publicado no se puede deshacer desde aquí.'));
@@ -28319,6 +28342,35 @@ function pasoCuandoPublicar(f) {
       fila));
   }
   return caja;
+}
+
+/* «OK» solo deja la hora ELEGIDA en la ficha: lo que programa es el botón
+   de abajo. La línea lo dice así, y dura unos segundos aunque la ficha se
+   repinte sola entretanto (avisos, reloj de envíos). */
+function confirmarCuandoPublicar(campo) {
+  const valor = campo ? campo.value : PUB.cuandoEnvio;
+  if (campo) campo.blur();
+  if (!valor) {
+    PUB.cuandoConfirmado = { pid: PUB.pid, vacio: true, hasta: Date.now() + 5000 };
+  } else {
+    PUB.cuandoEnvio = valor;
+    PUB.cuandoConfirmado = { pid: PUB.pid, valor, hasta: Date.now() + 5000 };
+  }
+  PUB.repintar = false;
+  pintarModulo();
+}
+
+function lineaCuandoConfirmado(f) {
+  const c = PUB.cuandoConfirmado;
+  if (!c || c.pid !== PUB.pid || Date.now() > c.hasta) return null;
+  if (c.vacio) {
+    const antes = PUB.cuandoEnvio ? ` Mientras, se queda la de antes: ${cuandoLegible(PUB.cuandoEnvio)}.` : '';
+    return h('div', { clase: 'meta cuando-confirmado sin-hora', role: 'status' },
+      `Elige el día y la hora primero.${antes}`);
+  }
+  if (c.valor !== PUB.cuandoEnvio) return null;
+  return h('div', { clase: 'meta cuando-confirmado', role: 'status' },
+    `✓ Hora elegida: ${cuandoLegible(c.valor)}. Pulsa «Programar para…» abajo para programarlo.`);
 }
 
 /* 6 · ENVÍOS: lo mandado de este vídeo, red por red, con sus cifras. */
@@ -29219,6 +29271,8 @@ function filasEnvioFicha(e) {
     // QUÉ PORTADA SE MANDÓ (portadas-2): los envíos de antes no lo saben
     e.portada != null ? h('span', { clase: 'meta portada-envio' },
       `Portada: ${e.portada || 'ninguna (la puso la red)'}`) : null,
+    // extras-youtube: la pista de subtítulos que se subió con el vídeo
+    e.subtitulos ? h('span', { clase: 'meta subtitulos-envio' }, `Subtítulos: ${e.subtitulos}`) : null,
     botonComprobarPublicar(e),
     e.metricas && textoMetricas(e.metricas)
       ? h('span', { clase: 'metricas-envio', title: `actualizado ${fechaCorta(e.metricas.al)}` },
@@ -29711,9 +29765,12 @@ function loFijoProyectoPublicar(p) {
   fijos.appendChild(ajusteEmojisPublicar(p, a, guardar));
   const casillas = h('div', { clase: 'fila' });
   [['marcar_ia', 'Marcar como hecho con IA'],
-    ['avisar_youtube', 'Avisar a los suscriptores de YouTube']]
+    ['avisar_youtube', 'Avisar a los suscriptores de YouTube'],
+    // extras-youtube: encendido de fábrica (un proyecto sin el ajuste guardado lo sube)
+    ['subtitulos_youtube', 'Subir los subtítulos a YouTube (YouTube los traduce a otros idiomas)']]
     .forEach(([campo, texto]) => casillas.appendChild(h('label', { clase: 'casilla-red' },
-      h('input', { type: 'checkbox', checked: !!a[campo], onchange: ev => guardar(campo, ev.target.checked) }),
+      h('input', { type: 'checkbox', checked: campo === 'subtitulos_youtube' ? a[campo] !== false : !!a[campo],
+        datos: { ajuste: campo }, onchange: ev => guardar(campo, ev.target.checked) }),
       ` ${texto}`)));
   casillas.appendChild(h('span', { clase: 'meta' }, 'La confirmación antes de enviar no se puede quitar.'));
   fijos.appendChild(casillas);
@@ -30434,6 +30491,8 @@ function bloqueSeoProyecto(p) {
   caja.appendChild(h('div', { clase: 'fila campos-seo' },
     campoTexto('palabra_clave', 'Palabra clave principal', { ejemplo: 'alquiler de consolas en Lima' }),
     campoTexto('zona', 'Zona', { ejemplo: 'Lima, Perú (Miraflores, Surco…)' })));
+  // vidiq-2: dónde se mide lo que busca la gente (búsquedas reales, Trends y vidIQ)
+  caja.appendChild(selectorPaisBusquedas(p, a, op, guardar));
   caja.appendChild(campoTexto('secundarias', 'Palabras clave secundarias (separadas por comas, de 2 a 8)',
     { ejemplo: 'fiestas infantiles, eventos corporativos, simulador de carreras', area: true }));
   caja.appendChild(campoTexto('evitar', 'Palabras a evitar (opcional)', { ejemplo: 'barato, gratis' }));
@@ -30578,7 +30637,7 @@ function bloqueSeoVideo() {
 }
 
 /* «INVESTIGAR BÚSQUEDAS» (rama seo-real, 20-10): lo que la gente busca de
-   verdad (autocompletado de YouTube y Google, Perú), la competencia en YouTube
+   verdad (autocompletado de YouTube y Google, en el sitio del proyecto: vidiq-2), la competencia en YouTube
    si hay clave, y cómo le fue a cada frase en tu cuenta. Solo frases que el
    vídeo trata. «Usar» la deja como palabra clave del vídeo; no cambia ningún
    texto (para eso, «Optimizar SEO», que ya usa estas búsquedas). */
@@ -30600,6 +30659,7 @@ function bloqueBusquedasSeo() {
       title: 'Pregunta al buscador qué frases de este vídeo se buscan de verdad. Gratis y sin Claude.',
       onclick: () => investigarBusquedasPublicar() }, trabajando ? 'Investigando…' : (real.al ? 'Volver a investigar' : 'Investigar búsquedas'))));
   if ((seo.errores || {}).investigar) caja.appendChild(cajaError(seo.errores.investigar));
+  caja.appendChild(lineaPublicoBusquedas(f, real));
   // lo de la palabra del proyecto ya lo dice el bloque de arriba
   (real.avisos || []).filter(a => !(seo.proyecto_fuera && a.includes('(del proyecto)')))
     .forEach(a => caja.appendChild(h('div', { clase: 'meta aviso-busquedas' }, a)));
@@ -30632,7 +30692,7 @@ function bloqueBusquedasSeo() {
     })));
   caja.appendChild(h('div', { clase: 'tabla-desliza' }, tabla));
   caja.appendChild(h('div', { clase: 'meta' }, 'Del vídeo: cuánto de la frase sale en el guion o el material. '
-    + 'Tendencia: si se busca más o menos que hace 3 meses en Perú (Google Trends, experimental). '
+    + `Tendencia: si se busca más o menos que hace 3 meses en ${textoPublicoBusquedas(medidoEnBusquedas(real) || (seo.publico || {}).texto)} (Google Trends, experimental). `
     + 'Tu historial: las vistas de tus publicaciones con esa frase frente a lo normal de tu cuenta (1× = tu media) '
     + 'o, con tu canal conectado, las vistas que ya te trae esa búsqueda en YouTube. '
     + 'Total: lo que pesan las tres partes con dato.'));
@@ -34108,11 +34168,27 @@ function bloqueMejoresPublicar() {
  */
 function rutaRecibidos(resto) { return `${BASE}/api/recibidos${resto || ''}`; }
 
+/* El filtro de la bandeja (11-11-2026): «Todos» (sin los archivados), «De este
+   proyecto» (el elegido arriba en Automatizar), «Sin proyecto» o «Archivados». Se
+   empieza en «Todos»: empezar en el proyecto escondía lo recién llegado sin proyecto.
+   Es de la pantalla: no se guarda en ningún sitio. */
+function filtroRecibidos() {
+  const hayProyecto = PAR.cid && PAR.cid !== '_sin';
+  const f = PAR.recibidosFiltro || 'todos';
+  return f === 'proyecto' && !hayProyecto ? 'todos' : f;
+}
+
+function claveRecibidos() { return `${filtroRecibidos()}|${PAR.cid || ''}`; }
+
 async function cargarRecibidos() {
   if (PAR.recibidosCargando) return;
   PAR.recibidosCargando = true;
+  const clave = claveRecibidos();
   try {
-    PAR.recibidos = await pedir(rutaRecibidos());
+    const q = new URLSearchParams({ filtro: filtroRecibidos(), proyecto: PAR.cid && PAR.cid !== '_sin' ? PAR.cid : '' });
+    PAR.recibidos = await pedir(rutaRecibidos(`?${q}`));
+    PAR.recibidosMas = null;   // las páginas de «Ver más» eran de la lista de antes
+    PAR.recibidosClave = clave;
     PAR.recibidosError = '';
   } catch (e) {
     /* sin inventar datos: con un «sin código» de mentira, Configuración ofrecía
@@ -34146,15 +34222,16 @@ function seccionRecibidosParrilla() {
   const ahora_ = Date.now();
   const entrada = !PAR.recibidosPintadoAl || ahora_ - PAR.recibidosPintadoAl > 3000;
   PAR.recibidosPintadoAl = ahora_;
-  if ((!PAR.recibidos || entrada) && !PAR.recibidosCargando && !(PAR.recibidosError && !PAR.recibidos)) setTimeout(cargarRecibidos, 0);
+  const otraVista = PAR.recibidos && PAR.recibidosClave !== claveRecibidos();
+  if ((!PAR.recibidos || entrada || otraVista) && !PAR.recibidosCargando && !(PAR.recibidosError && !PAR.recibidos)) setTimeout(cargarRecibidos, 0);
   caja.appendChild(h('div', { clase: 'fila cab-recibidos' },
     h('h3', {}, 'Recibidos de Chrome'), h('span', { clase: 'crece' }),
     h('button', { clase: 'mini fantasma', title: 'Volver a mirar', onclick: () => { PAR.recibidos = null; cargarRecibidos(); } }, '↻ Actualizar'),
     botonGuia('enviar_al_studio', null)));
   caja.appendChild(h('div', { clase: 'pista' }, 'Lo que mandas con la extensión «Enviar al Studio» mientras ves un post en '
     + 'Instagram, TikTok, YouTube, Facebook, LinkedIn, X o cualquier web: el enlace, el texto, las cifras que se ven y '
-    + 'una captura. Con «Usar en el chat» se lo pasas a Claude para escribir un guion con esa referencia. Son de todo el '
-    + 'Studio, no de un proyecto.'));
+    + 'una captura. Con «Usar en el chat» se lo pasas a Claude para escribir un guion con esa referencia. Anéxalo a un '
+    + 'proyecto para tenerlo ordenado, y archiva lo que ya no te sirva.'));
   const datos = PAR.recibidos;
   if (!datos) { caja.appendChild(cargandoRecibidos()); return caja; }
   if (PAR.recibidosError) caja.appendChild(cajaError(PAR.recibidosError));
@@ -34163,16 +34240,126 @@ function seccionRecibidosParrilla() {
       h('span', { clase: 'crece' }, 'Todavía no has conectado la extensión: se descarga y se conecta en Configuración → Enviar al Studio.'),
       h('button', { clase: 'mini', onclick: () => abrirEnviarAlStudioConfig() }, 'Ir a Configuración')));
   }
-  const lista = datos.recibidos || [];
+  caja.appendChild(filtrosRecibidos(datos.cuentas || {}));
+  const lista = (datos.recibidos || []).concat((PAR.recibidosMas && PAR.recibidosMas.clave === claveRecibidos()) ? PAR.recibidosMas.lista : []);
   if (!lista.length) {
-    caja.appendChild(h('div', { clase: 'vacio' }, 'Aún no ha llegado nada. Abre un post en Chrome y pulsa el botón de la extensión.'));
+    const vacio = { proyecto: `Todavía no hay nada anexado a ${nombreProyectoParrilla() || 'este proyecto'}. Elige este proyecto en la extensión al enviar, o anéxalo desde «Sin proyecto».`,
+      sin: 'No hay nada sin proyecto.', archivados: 'No hay nada archivado.' }[filtroRecibidos()];
+    caja.appendChild(h('div', { clase: 'vacio' }, vacio || 'Aún no ha llegado nada. Abre un post en Chrome y pulsa el botón de la extensión.'));
     return caja;
   }
   const rejilla = h('div', { clase: 'rejilla-recibidos' });
   lista.forEach(r => rejilla.appendChild(tarjetaRecibido(r)));
   caja.appendChild(rejilla);
-  if (datos.total > lista.length) caja.appendChild(h('div', { clase: 'meta' }, `Se ven los ${lista.length} más nuevos de ${datos.total}.`));
+  /* la cuenta es la de ESTE filtro (no el total de todo), y lo que no cabe se pide por páginas */
+  const enFiltro = (datos.cuentas || {})[filtroRecibidos()] ?? lista.length;
+  if (enFiltro > lista.length) {
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('span', { clase: 'meta' }, `Se ven los ${lista.length} más nuevos de ${enFiltro}.`),
+      h('button', { clase: 'mini', onclick: () => masRecibidos(lista.length) }, 'Ver más')));
+  }
   return caja;
+}
+
+async function masRecibidos(desde) {
+  const clave = claveRecibidos();
+  try {
+    const q = new URLSearchParams({ filtro: filtroRecibidos(), proyecto: PAR.cid && PAR.cid !== '_sin' ? PAR.cid : '', desde: String(desde) });
+    const r = await pedir(rutaRecibidos(`?${q}`));
+    const antes = PAR.recibidosMas && PAR.recibidosMas.clave === clave ? PAR.recibidosMas.lista : [];
+    PAR.recibidosMas = { clave, lista: antes.concat(r.recibidos || []) };
+  } catch (e) { toast(e.message, true); }
+  repintarParrillaSinPisar();
+}
+
+function filtrosRecibidos(cuentas) {
+  const hayProyecto = PAR.cid && PAR.cid !== '_sin';
+  const opciones = [
+    ['todos', 'Todos'],
+    hayProyecto ? ['proyecto', `De ${nombreProyectoParrilla() || 'este proyecto'}`] : null,
+    ['sin', 'Sin proyecto'], ['archivados', 'Archivados'],
+  ].filter(Boolean);
+  const actual = filtroRecibidos();
+  return h('div', { clase: 'fila filtros-recibidos', role: 'group', 'aria-label': 'Qué recibidos ver' },
+    ...opciones.map(([id, texto]) => h('button', {
+      type: 'button', clase: `mini${actual === id ? ' primario' : ''}`, 'aria-pressed': actual === id ? 'true' : 'false',
+      onclick: () => { PAR.recibidosFiltro = id; cargarRecibidos(); pintarModulo(); },
+    }, `${texto} · ${cuentas[id] ?? 0}`)),
+    actual === 'archivados' && cuentas.archivados ? h('span', { clase: 'crece' }) : null,
+    actual === 'archivados' && cuentas.archivados
+      ? h('button', { type: 'button', clase: 'mini fantasma peligro', onclick: () => borrarArchivados() }, 'Borrar todos los archivados')
+      : null);
+}
+
+/* Borrar a mano todo lo archivado de una vez (con su captura). Se pregunta antes. */
+async function borrarArchivados() {
+  const n = ((PAR.recibidos || {}).cuentas || {}).archivados || 0;
+  if (!n) return;
+  if (!(await preguntarParrilla('Borrar los archivados', `¿Borrar los ${n} recibidos archivados? Se borran su texto y su captura, y no se pueden recuperar.`,
+    'Borrar', true))) return;
+  /* los borra el servidor, mirando cuáles están archivados AHORA (no la lista de esta pantalla) */
+  try {
+    const r = await pedir(rutaRecibidos('/borrar-archivados'), { method: 'POST', cuerpo: {} });
+    toast(`${r.borrados} archivados borrados`);
+  } catch (e) { toast(e.message, true); }
+  cargarRecibidos();
+}
+
+/* Los estilos de un proyecto (los de PAR.estilos que son suyos). */
+function estilosDelProyectoRecibido(cid) { return (PAR.estilos || []).filter(x => x.cliente === cid); }
+
+/* El menú para anexarlo a un proyecto (o dejarlo sin proyecto) y, ya en un
+   proyecto, el estilo con el que se hará su vídeo: así el guion y el piloto
+   salen con el estilo que toca. */
+function selectorProyectoRecibido(r) {
+  const proyectos = (PAR.proyectos || []).filter(p => p.id && p.id !== '_sin');
+  const sel = h('select', { clase: 'mini', 'aria-label': 'Proyecto de este recibido',
+    onchange: e => anexarRecibido(r, e.target.value) },
+  h('option', { value: '', selected: !r.proyecto ? true : null }, 'Sin proyecto'),
+  ...proyectos.map(p => h('option', { value: p.id, selected: r.proyecto === p.id ? true : null }, p.nombre || p.id)),
+  /* con la lista aún sin cargar, su proyecto se enseña igual (no «Sin proyecto») */
+  r.proyecto && !proyectos.some(p => p.id === r.proyecto) ? h('option', { value: r.proyecto, selected: true }, r.proyecto) : null);
+  const fila = h('div', { clase: 'proyecto-recibido' },
+    h('label', { clase: 'fila' }, h('span', { clase: 'meta' }, 'Proyecto'), sel));
+  const estilos = r.proyecto ? estilosDelProyectoRecibido(r.proyecto) : [];
+  if (estilos.length) {
+    fila.appendChild(h('label', { clase: 'fila' }, h('span', { clase: 'meta' }, 'Estilo'),
+      h('select', { clase: 'mini', 'aria-label': 'Estilo con el que hacer su vídeo',
+        onchange: e => anexarRecibido(r, r.proyecto, e.target.value) },
+      h('option', { value: '', selected: !r.estilo ? true : null }, 'Elegir estilo…'),
+      ...estilos.map(x => h('option', { value: x.id, selected: r.estilo === x.id ? true : null }, x.nombre || x.id)))));
+  }
+  return fila;
+}
+
+async function anexarRecibido(r, cid, estilo) {
+  try {
+    const cuerpo = estilo === undefined ? { proyecto: cid } : { proyecto: cid, estilo };
+    await pedir(rutaRecibidos(`/${r.id}/proyecto`), { method: 'POST', cuerpo });
+    const nombre = ((PAR.proyectos || []).find(p => p.id === cid) || {}).nombre;
+    toast(estilo !== undefined ? 'estilo guardado' : (cid ? `anexado a ${nombre || cid}` : 'ahora sin proyecto'));
+  } catch (e) { toast(e.message, true); }
+  cargarRecibidos();
+}
+
+/* «✍️ Escribir el guion»: con el recibido ya en un proyecto, abre el chat de ESE
+   proyecto con la referencia y le pide a Claude UN guion con el formato de la
+   Parrilla, listo para «🤖 Hacer el vídeo completo» con el estilo elegido. */
+async function guionDesdeRecibido(r) {
+  const proyecto = ((PAR.proyectos || []).find(p => p.id === r.proyecto) || {}).nombre || 'este proyecto';
+  const estilo = (estilosDelProyectoRecibido(r.proyecto).find(x => x.id === r.estilo) || {}).nombre || '';
+  const pide = `Escríbeme UN guion para «${proyecto}»${estilo ? ` (el vídeo se hará con el estilo «${estilo}»)` : ''}, `
+    + 'inspirado en esta referencia pero sin copiarla: con el formato de la Parrilla (escenas con su voz y «PARA EL ENCARGO» '
+    + 'con la duración y el formato), listo para guardarlo en la Parrilla y pasarlo al piloto automático.';
+  await usarRecibidoEnChat(r, pide, true);
+}
+
+async function archivarRecibido(r, si) {
+  try {
+    await pedir(rutaRecibidos(`/${r.id}/archivar`), { method: 'POST', cuerpo: { archivado: si } });
+    toast(si ? 'archivado: lo tienes en «Archivados»' : 'devuelto a la bandeja');
+  } catch (e) { toast(e.message, true); }
+  cargarRecibidos();
 }
 
 function tarjetaRecibido(r) {
@@ -34191,33 +34378,118 @@ function tarjetaRecibido(r) {
       cifrasDeRecibido(r) ? h('div', { clase: 'meta cifras-recibido' }, cifrasDeRecibido(r)) : null,
       texto ? h('p', { clase: 'texto-recibido' }, recortar(texto, 320)) : null,
       r.nota ? h('p', { clase: 'nota-recibido' }, `Tu nota: ${r.nota}`) : null,
+      selectorProyectoRecibido(r),
       h('div', { clase: 'fila mandos-recibido' },
-        h('button', { clase: 'primario mini', onclick: () => usarRecibidoEnChat(r) }, 'Usar en el chat'),
+        r.proyecto ? h('button', { clase: 'primario mini', title: 'Claude escribe un guion de este proyecto con esta referencia',
+          onclick: () => guionDesdeRecibido(r) }, '✍️ Escribir el guion') : null,
+        h('button', { clase: `${r.proyecto ? '' : 'primario '}mini`, onclick: () => usarRecibidoEnChat(r) }, 'Usar en el chat'),
         h('a', { href: r.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver el original'),
         h('span', { clase: 'crece' }),
+        h('button', { clase: 'mini fantasma', onclick: () => archivarRecibido(r, !r.archivado) }, r.archivado ? 'Sacar del archivo' : 'Archivar'),
         h('button', { clase: 'mini fantasma peligro', onclick: () => borrarRecibido(r) }, 'Borrar'))));
 }
 
-async function usarRecibidoEnChat(r) {
+/* «Usar en el chat» y «✍️ Escribir el guion». Un clic a la vez (un doble clic
+   pasaba la referencia dos veces). */
+async function usarRecibidoEnChat(r, peticion, enviarYa) {
+  if (PAR.recibidoEnviando) return;
+  PAR.recibidoEnviando = true;
+  try { await usarRecibidoEnChatYa(r, peticion, enviarYa); } finally { PAR.recibidoEnviando = false; }
+}
+
+async function capturaDeRecibido(r) {
+  const respuesta = await fetch(rutaRecibidos(`/${r.id}/captura`), { credentials: 'same-origin' });
+  if (!respuesta.ok) throw new Error(`HTTP ${respuesta.status}`);
+  const blob = await respuesta.blob();
+  const tipo = /^image\/(png|jpeg|webp)$/.test(blob.type) ? blob.type : 'image/jpeg';
+  const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[tipo];
+  return new window.File([blob], `recibido-${r.id}.${ext}`, { type: tipo });
+}
+
+async function usarRecibidoEnChatYa(r, peticion, enviarYa) {
+  /* el chat es el de SU proyecto. Si es de uno que esta pantalla no tiene (con clave
+     sin abrir, o la lista aún sin cargar), NO se manda al chat del que esté abierto:
+     el guion acabaría en la Parrilla de otro cliente (revisión del 12-11-2026). */
+  if (r.proyecto && r.proyecto !== PAR.cid) {
+    if (!(PAR.proyectos || []).some(p => p.id === r.proyecto)) {
+      toast('este recibido es de un proyecto que no está abierto aquí: ábrelo primero en el menú de proyectos de Automatizar', true);
+      return;
+    }
+    const destino = ((PAR.proyectos || []).find(p => p.id === r.proyecto) || {}).nombre || r.proyecto;
+    const borrador = String(PAR.chatTexto || '').trim();
+    const capturas = (PAR.chatCapturas || []).length;
+    if (borrador || capturas) {
+      /* cambiar de proyecto vacía el chat: lo escrito se copia antes al portapapeles */
+      if (!(await preguntarParrilla('Cambiar de proyecto',
+        `Tienes un mensaje a medio escribir en el chat de ${nombreProyectoParrilla() || 'este proyecto'}. Para pasar a ${destino} `
+        + `lo copio en el portapapeles (pégalo cuando vuelvas)${capturas ? '; las capturas adjuntas no se pueden copiar' : ''}. ¿Seguir?`,
+        'Seguir'))) return;
+      let copiado = false;
+      try { if (borrador) { await navigator.clipboard.writeText(borrador); copiado = true; } } catch (e) { copiado = false; }
+      if (borrador && !copiado) {
+        toast('no he podido copiarlo al portapapeles: no cambio de proyecto para no perderlo', true);
+        return;
+      }
+    }
+    elegirProyectoParrilla(r.proyecto);
+  }
+  if (enviarYa) { await escribirGuionDeRecibido(r, peticion); return; }
+  /* «Usar en el chat»: se añade a lo que estés escribiendo y lo revisas tú */
   const maximo = (PAR.chatsInfo && PAR.chatsInfo.max_capturas) || 6;
   if (r.captura && PAR.chatCapturas.length < maximo) {
-    try {
-      const respuesta = await fetch(rutaRecibidos(`/${r.id}/captura`), { credentials: 'same-origin' });
-      if (!respuesta.ok) throw new Error(`HTTP ${respuesta.status}`);
-      const blob = await respuesta.blob();
-      const tipo = /^image\/(png|jpeg|webp)$/.test(blob.type) ? blob.type : 'image/jpeg';
-      const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[tipo];
-      PAR.chatCapturas = PAR.chatCapturas.concat([new window.File([blob], `recibido-${r.id}.${ext}`, { type: tipo })]).slice(0, maximo);
-    } catch (e) { toast(`la captura no se ha podido pasar (${e.message}); va el texto`, true); }
+    try { PAR.chatCapturas = PAR.chatCapturas.concat([await capturaDeRecibido(r)]).slice(0, maximo); }
+    catch (e) { toast(`la captura no se ha podido pasar (${e.message}); va el texto`, true); }
   }
   const actual = String(PAR.chatTexto || '').trim();
   PAR.chatTexto = actual ? `${actual}\n\n${r.texto_chat}` : r.texto_chat;
+  marcarRecibidoUsado(r);
+  irASeccionParrilla('chat');
+  toast('pasado al chat: revísalo y pulsa Enviar');
+}
+
+async function marcarRecibidoUsado(r) {
   try {
     await pedir(rutaRecibidos(`/${r.id}/usado`), { method: 'POST', cuerpo: {} });
     r.usado = r.usado || new Date().toISOString();
   } catch (e) { /* si no se marca, no pasa nada */ }
-  toast('pasado al chat: revísalo y pulsa Enviar');
+}
+
+/* «✍️ Escribir el guion»: una conversación NUEVA de su proyecto, creada CON su estilo
+   (los guiones que se guarden desde ella llevan ese estilo y el piloto lo usa, aunque
+   recargues la página), y un mensaje solo con la referencia y el pedido: sin
+   «Buscar en internet» ni vidIQ (gastaría créditos sin preguntar y, con texto de una
+   página ajena, internet es justo lo que no conviene). Lo que tuvieras a medio
+   escribir en el chat no se toca. */
+async function escribirGuionDeRecibido(r, peticion) {
+  if (PAR.chatEnviando) { toast('el chat está enviando otro mensaje: espera a que salga y vuelve a pulsar', true); return; }
+  PAR.chatEnviando = true;
+  try {
+    const datos = new FormData();
+    datos.append('texto', `${r.texto_chat}\n\n${peticion}`);
+    datos.append('web', '0');
+    datos.append('resultados', '0');
+    datos.append('modelo', PAR.chatModelo || 'opus');
+    if (r.captura) {
+      try { const c = await capturaDeRecibido(r); datos.append('capturas', c, c.name); }
+      catch (e) { toast(`la captura no se ha podido pasar (${e.message}); va el texto`, true); }
+    }
+    const estilo = estilosDelProyectoRecibido(PAR.cid).some(x => x.id === r.estilo) ? r.estilo : '';
+    const chat = await pedir(rutaChatParrilla(), { method: 'POST', cuerpo: { modelo: PAR.chatModelo || 'opus', estilo } });
+    PAR.chat = await pedir(rutaChatParrilla(`/${encodeURIComponent(chat.id)}/mensajes`), { method: 'POST', cuerpo: datos });
+    PAR.chatScroll = null;
+    if (!(PAR.chats || []).some(c => c.id === PAR.chat.id)) {
+      PAR.chats = [{ id: PAR.chat.id, titulo: PAR.chat.titulo, tocada: PAR.chat.tocada }].concat(PAR.chats || []);
+    }
+    marcarRecibidoUsado(r);
+    toast('pedido a Claude en una conversación nueva: cuando conteste, «Guardar en la Parrilla» y luego «🤖 Hacer el vídeo completo»'
+      + (String(PAR.chatTexto || '').trim() ? '. Lo que tenías escrito sigue en el campo, para esta conversación' : ''));
+  } catch (e) {
+    toast(`no se ha podido pedir el guion: ${e.message}`, true);
+  } finally {
+    PAR.chatEnviando = false;
+  }
   irASeccionParrilla('chat');
+  vigilarChatParrilla();
 }
 
 async function borrarRecibido(r) {
@@ -34232,6 +34504,7 @@ async function borrarRecibido(r) {
     toast('borrado');
   } catch (e) { toast(e.message, true); }
   pintarModulo();
+  cargarRecibidos();   // las cuentas de los filtros, al día
 }
 
 function abrirEnviarAlStudioConfig() {
@@ -34263,38 +34536,54 @@ function seccionEnviarAlStudio() {
   const version = datos.version_extension ? ` (versión ${datos.version_extension})` : '';
   const paso = (n, titulo, ...resto) => h('div', { clase: 'paso-enviar' },
     h('div', { clase: 'fila' }, h('span', { clase: 'numero-paso' }, String(n)), h('b', {}, titulo)), ...resto);
+  /* El orden es el de quien la pone: descargar, cargar en Chrome y, con la ventanita
+     ya a mano, crear la clave y pegarla (la clave solo se ve 5 minutos). */
   caja.appendChild(paso(1, `Descarga la extensión${version}`,
     h('div', { clase: 'fila' },
       h('a', { href: rutaRecibidos('/extension.zip'), download: 'crearia-enviar-al-studio.zip', clase: 'boton mini primario' }, 'Descargar la extensión'),
-      h('span', { clase: 'meta' }, 'Descomprime el ZIP en una carpeta que no vayas a borrar.'))));
+      h('span', { clase: 'meta' }, 'En Descargas: clic derecho en el ZIP → «Extraer todo…» → «Extraer». Deja esa carpeta donde está: Chrome la usa.'))));
+  caja.appendChild(paso(2, 'Cárgala en Chrome', h('ol', { clase: 'pasos-instalar' },
+    h('li', {}, 'Abre chrome://extensions y activa «Modo de desarrollador» (arriba a la derecha).'),
+    h('li', {}, 'Si ya tenías una versión anterior de «Enviar a CrearIA Studio», pulsa «Quitar» en ella (tendrás que volver a pegar la clave). '
+      + 'Para actualizarla sin perder la clave: copia los archivos nuevos encima de los de su carpeta y pulsa ⟳ en ella.'),
+    h('li', {}, 'Pulsa «Cargar extensión sin empaquetar» y elige la carpeta del paso 1 (la que tiene dentro manifest.json).'),
+    h('li', {}, 'Para tenerla a mano: pieza de puzle 🧩 (arriba a la derecha de Chrome) → chincheta junto a «Enviar a CrearIA Studio».'))));
   const direccion = h('input', { type: 'text', readonly: true, 'aria-label': 'La dirección de tu Studio' });
   direccion.value = direccionDelStudio();
-  caja.appendChild(paso(2, 'La dirección de tu Studio',
-    h('div', { clase: 'fila-clave' }, direccion,
-      h('button', { type: 'button', clase: 'mini', onclick: () => copiarTexto(direccion.value) }, 'Copiar'))));
   const filaCodigo = [h('div', { clase: 'fila' },
     pastillaEstado(codigo.puesto ? 'ok' : 'vacio', codigo.puesto ? `puesto (${codigo.cola || ''})` : 'sin crear'),
     codigo.creado ? h('span', { clase: 'meta' }, `creado el ${fechaCorta(codigo.creado).slice(0, 16)}`) : null,
     h('span', { clase: 'crece' }),
     h('button', { type: 'button', clase: 'mini', onclick: () => crearCodigoEnvio(!!codigo.puesto) },
       codigo.puesto ? 'Crear uno nuevo' : 'Crear el código de envío'))];
-  /* el código en claro se ve 5 minutos, para copiarlo; después, nunca más */
+  /* el código en claro se ve 5 minutos, para copiarlo; después, nunca más. Se da como
+     «clave de conexión»: la dirección y el código juntos (`…/#env_…`), que la extensión
+     reparte sola, para pegar UNA cosa y no ir y volver entre el Studio y la ventanita */
   if (PAR.codigoEnvioNuevo && Date.now() - (PAR.codigoEnvioNuevoAl || 0) > 5 * 60 * 1000) PAR.codigoEnvioNuevo = '';
   if (PAR.codigoEnvioNuevo) {
-    const campo = h('input', { type: 'text', readonly: true, 'aria-label': 'Tu código de envío', datos: { foco: 'codigo-envio' } });
-    campo.value = PAR.codigoEnvioNuevo;
-    filaCodigo.push(h('div', { clase: 'fila-clave' }, campo,
-      h('button', { type: 'button', clase: 'mini primario', onclick: () => copiarTexto(campo.value) }, 'Copiar')),
-    h('div', { clase: 'caja-aviso' }, 'Cópialo ahora y pégalo en la extensión: por seguridad se ve solo unos minutos y no '
-      + 'se vuelve a enseñar. Si lo pierdes, crea uno nuevo.'));
+    const campo = h('input', { type: 'text', readonly: true, 'aria-label': 'Tu clave de conexión', datos: { foco: 'codigo-envio' } });
+    campo.value = `${direccion.value}#${PAR.codigoEnvioNuevo}`;
+    filaCodigo.push(h('div', { clase: 'pista' }, h('b', {}, 'Tu clave de conexión'), ' (la dirección y el código juntos):'),
+      h('div', { clase: 'fila-clave' }, campo,
+        h('button', { type: 'button', clase: 'mini primario', onclick: () => copiarTexto(campo.value) }, 'Copiar la clave')),
+      h('div', { clase: 'caja-aviso' }, 'Cópiala ahora y pégala en el primer campo de la extensión: se reparte sola. '
+        + 'Por seguridad se ve solo unos minutos y no se vuelve a enseñar. Si la pierdes, crea un código nuevo.'));
+  } else if (codigo.puesto) {
+    filaCodigo.push(h('div', { clase: 'pista' }, 'Para ver tu clave de conexión, pulsa «Crear uno nuevo» '
+      + '(el código de antes deja de valer en el Chrome donde lo pusiste).'));
   }
-  caja.appendChild(paso(3, 'El código de envío', h('div', { clase: 'pista' },
-    'Es lo que impide que otro mande cosas a tu Studio. Solo se guarda su huella.'), ...filaCodigo));
-  caja.appendChild(paso(4, 'Cárgala en Chrome', h('ol', { clase: 'pasos-instalar' },
-    h('li', {}, 'Abre chrome://extensions y activa «Modo de desarrollador» (arriba a la derecha).'),
-    h('li', {}, 'Pulsa «Cargar descomprimida» y elige la carpeta del paso 1.'),
-    h('li', {}, 'Fija el botón con la pieza de puzle, ábrelo, pega la dirección y el código, y pulsa «Probar».'),
-    h('li', {}, 'Abre un post y pulsa «Enviar al Studio». Lo verás en Automatizar → Recibidos de Chrome.'))));
+  caja.appendChild(paso(3, 'Conéctala con tu clave de conexión',
+    h('ol', { clase: 'pasos-instalar' },
+      h('li', {}, 'Aquí abajo, pulsa «Crear el código de envío» (o «Crear uno nuevo») y luego «Copiar la clave».'),
+      h('li', {}, 'Pulsa el icono de la extensión (arriba a la derecha de Chrome), pega la clave en el primer campo y pulsa «Probar».'),
+      h('li', {}, 'Si la ventanita se cierra a medias, vuelve a pulsar el icono: lo que pegaste sigue ahí. Se hace UNA vez: sirve en todas las pestañas de ese Chrome.')),
+    h('div', { clase: 'pista' }, 'Es lo que impide que otro mande cosas a tu Studio. Solo se guarda su huella.'),
+    ...filaCodigo,
+    h('div', { clase: 'pista' }, 'Si la extensión te pide solo la dirección, es esta:'),
+    h('div', { clase: 'fila-clave' }, direccion,
+      h('button', { type: 'button', clase: 'mini', onclick: () => copiarTexto(direccion.value) }, 'Copiar'))));
+  caja.appendChild(paso(4, 'Úsala', h('div', { clase: 'pista' },
+    'Abre un post, pulsa el icono de la extensión y «Enviar al Studio». Lo verás en Automatizar → Recibidos de Chrome.')));
   return caja;
 }
 
@@ -35157,6 +35446,7 @@ function bloqueVidiqSeo(f) {
     h('div', { clase: 'meta' }, `Investiga la palabra clave de este vídeo, puntúa su título y propone 3 títulos con `
       + `emojis. Gasta ${aprox} créditos de vidIQ y algo de uso de tu membresía de Claude. No cambia nada hasta que pulses «Usar».`),
     saldoVidiq());
+  caja.appendChild(lineaDondeVidiq(f, v));
   if (v.error) caja.appendChild(cajaError(v.error));
   if (!r) return caja;
   if (v.palabra && plano(v.palabra) !== plano((f.seo || {}).palabra)) {
@@ -36375,4 +36665,68 @@ async function abrirEditorGrafica(cid, pieza) {
   pintarForm();
   pintarRejilla();
   pedirVistas();
+}
+
+/* ============================================================ VIDIQ-2 · PÚBLICO
+ * Rama `vidiq-2` (12-11-2026): dónde se mide lo que busca la gente, por
+ * proyecto. Se elige en «SEO de este proyecto» (`pais_busquedas`; el idioma es
+ * el del título de YouTube) y lo usan «Investigar búsquedas», Google Trends,
+ * «Mejorar con vidIQ» y «📈 Ideas con vidIQ». Sin elegir es Perú, como antes.
+ * Es un ajuste de Publicar: no entra en ningún param ni firma.
+ */
+function textoPublicoBusquedas(texto) {
+  return String(texto || '').trim() || 'Perú';
+}
+
+function selectorPaisBusquedas(p, a, op, guardar) {
+  const paises = op.paises || [['pe', 'Perú']];
+  const actual = a.pais_busquedas || 'pe';
+  return h('div', { clase: 'publico-busquedas' },
+    h('label', { clase: 'etiqueta-campo' }, 'Dónde se mide lo que busca la gente',
+      h('select', { datos: { foco: `seo-pais_busquedas-${p.id}`, seo: 'pais_busquedas' },
+        onchange: ev => { a.pais_busquedas = ev.target.value; guardar('pais_busquedas', ev.target.value); } },
+      ...paises.map(([v, t]) => h('option', { value: v, selected: String(actual) === String(v) }, t)))),
+    h('div', { clase: 'meta' }, 'Lo usan «Investigar búsquedas», la tendencia de Google Trends y vidIQ. '
+      + 'Elige el país de tus clientes, o «Todo el mundo» si vendes a cualquier país de tu idioma '
+      + '(el idioma es el del título de YouTube, más abajo). Cambiarlo no toca ningún vídeo: '
+      + 'vuelve a investigar para ver las cifras del sitio nuevo.'));
+}
+
+function lineaPublicoBusquedas(f, real) {
+  const seo = f.seo || {};
+  const ahora = textoPublicoBusquedas((seo.publico || {}).texto);
+  const medido = medidoEnBusquedas(real);
+  const cambiar = h('a', { href: '#', clase: 'enlace-publico', datos: { accion: 'cambiar-publico' },
+    onclick: ev => { ev.preventDefault(); abrirPublicoBusquedas(f.cliente || '_sin'); } }, 'Cambiar');
+  if (real.al && medido && medido !== ahora) {
+    return h('div', { clase: 'caja-aviso publico-linea' },
+      `Esto se investigó en ${medido}; este proyecto ahora mide en ${ahora}. Vuelve a investigar para ver sus cifras. `, cambiar);
+  }
+  return h('div', { clase: 'meta publico-linea' },
+    medido ? `Búsquedas medidas en ${medido}. ` : `Se medirán en ${ahora}. `, cambiar);
+}
+
+/* Dónde se midió una investigación guardada: lo de antes de vidiq-2 no lo
+   apuntaba y era siempre Perú. "" si no hay nada investigado. */
+function medidoEnBusquedas(real) {
+  if (!real || !real.al) return '';
+  return (real.publico || {}).texto || 'Perú';
+}
+
+function lineaDondeVidiq(f, v) {
+  const ahora = textoPublicoBusquedas(((f.seo || {}).publico || {}).texto);
+  // lo consultado antes de vidiq-2 no lo apuntaba: era Perú
+  const donde = v && v.resultado ? (v.donde || 'Perú') : '';
+  if (donde && donde !== ahora) {
+    return h('div', { clase: 'caja-aviso publico-linea' },
+      `Esto se consultó para ${donde}; este proyecto ahora mide en ${ahora}. Vuelve a consultar si quieres lo de ese sitio.`);
+  }
+  return h('div', { clase: 'meta publico-linea' }, `Para el público de ${donde || ahora}.`);
+}
+
+/* Lleva a «Ajustes → <proyecto> → SEO» con el selector a la vista. */
+function abrirPublicoBusquedas(cid) {
+  PUB.ajSel = cid;
+  PUB.ajTab = 'seo';
+  return abrirSeoProyectoPublicar(cid, 'pais_busquedas');
 }

@@ -753,7 +753,15 @@ botón está apagado y la barra dice por qué («Falta el texto de Instagram»,
   YouTube, y en un vídeo publicado sale **Cómo te encontraron en YouTube**. Si
   la app sigue «en prueba», Google corta cada 7 días: **Volver a conectar**.
 - La columna **Tendencia** (Google Trends, experimental) dice si la frase sube
-  o baja en Perú. Si Trends no contesta, queda en «—».
+  o baja en el sitio del proyecto. Si Trends no contesta, queda en «—».
+- **Dónde se mide lo que busca la gente** (12-11, en **Publicar → Ajustes →
+  tu proyecto → SEO**): Perú, otro país o **Todo el mundo**. Sin elegir nada es
+  Perú. «Todo el mundo» pregunta sin país y en el idioma del título de YouTube:
+  con un vídeo en español es todo el mundo hispano (útil si vendes online a
+  cualquier país). Lo usan «Investigar búsquedas», la tendencia, **Mejorar con
+  vidIQ** y **📈 Ideas con vidIQ**. Arriba de **Búsquedas reales** dice dónde
+  se midió; si cambias el sitio después, avisa y basta con **Volver a
+  investigar**. Cambiarlo no toca ningún vídeo ni cuesta nada.
 
 **vidIQ** (opcional, 25-10; solo sale con la clave en **Configuración → vidIQ**),
 también en el paso **SEO**:
@@ -766,7 +774,8 @@ también en el paso **SEO**:
   vídeo; **Usar en YouTube** (o en Facebook) pone ese título. Sin palabra clave
   no se consulta, para no gastar créditos a ciegas.
 - Si cambias la palabra clave después, te avisa de que lo de vidIQ era de la
-  otra: **Volver a consultar**.
+  otra: **Volver a consultar**. Lo mismo si cambias **dónde se mide** el
+  proyecto: dice para qué sitio se consultó.
 
 **Después de publicar**, al volver a la ficha, arriba dice **Ya publicado en** (con el enlace a cada post) y
 **En camino** (lo programado o subiendo), y al lado de cada red su último
@@ -1053,6 +1062,16 @@ Lo que mandas con la extensión **«Enviar al Studio»** mientras ves un post en
 Chrome: tarjetas con la captura, la red, el autor, las cifras que se veían, el
 texto y tu nota, la más nueva primero.
 
+Cada recibido puede ir a un **proyecto** (se elige en la extensión al enviar, o
+después con el menú **Proyecto** de su tarjeta) y, dentro de él, a un
+**estilo**. Los filtros de arriba enseñan **Todos**, **De este proyecto** (el
+elegido arriba en Automatizar), **Sin proyecto** o **Archivados**. **Archivar**
+lo quita de la bandeja sin borrarlo; **Borrar** (o **Borrar todos los
+archivados**) lo borra con su captura. Con proyecto, **✍️ Escribir el guion**
+abre el chat de ese proyecto y le pide a Claude un guion listo para la Parrilla;
+guárdalo con «Guardar en la Parrilla» y pásalo a «🤖 Hacer el vídeo completo»,
+que sale con el estilo del recibido.
+
 - **Usar en el chat**: lo pasa a «Conversar con Claude» con su captura y un
   mensaje listo («Te paso una referencia que vi en…»). Revísalo y pulsa Enviar.
 - **Ver el original** abre el post; **Borrar** se lleva el texto y la captura.
@@ -1096,11 +1115,14 @@ Las piezas quedan en la sección **Gráficas** del proyecto, donde se pueden abr
   cuántos créditos quedan. Va por el Claude de tu membresía, sin API de pago,
   y no hace falta conectar ningún canal. Sin ella, nada de vidIQ se enseña.
 - **Enviar al Studio — la extensión de Chrome**: (1) **Descargar la
-  extensión** y descomprimirla; (2) la **dirección de tu Studio**, con
-  «Copiar»; (3) **Crear el código de envío** (se ve una sola vez; uno nuevo deja
-  sin valer el de antes); (4) en `chrome://extensions`, «Modo de desarrollador» →
-  «Cargar descomprimida», y en la extensión pegar la dirección y el código y
-  pulsar «Probar».
+  extensión** y descomprimirla con «Extraer todo»; (2) en `chrome://extensions`,
+  «Modo de desarrollador» → «Cargar extensión sin empaquetar» (la carpeta que
+  tiene `manifest.json`) y fijarla con la pieza de puzle; (3) en el Studio,
+  **Crear el código de envío** → «Copiar la clave» (la **clave de
+  conexión**: la dirección y el código juntos; se ve unos minutos; uno nuevo
+  deja sin valer el de antes), y en la ventanita de la extensión pegarla en el
+  primer campo y «Probar». Se hace
+  una vez por Chrome; lo que se pega se guarda solo aunque la ventanita se cierre.
 - **Calidad de las imágenes**: el punto de partida de los vídeos nuevos.
 - **Dictado al asistente**: con OpenAI o con el del navegador.
 - **Hora de tu región**: para que el chat y los vídeos enseñen tu hora.

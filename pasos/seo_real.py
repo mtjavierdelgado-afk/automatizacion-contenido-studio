@@ -58,8 +58,78 @@ PESOS = {"relevancia": 45, "demanda": 35, "historial": 20}
 NOMBRES_PARTE = {"relevancia": "Relevancia", "demanda": "Demanda",
                  "historial": "Tu historial"}
 
-#: El autocompletado: se pregunta a Perú en español.
+#: El autocompletado: se pregunta a Perú en español, salvo que el proyecto
+#: elija otro sitio (rama vidiq-2: `pais_busquedas` en «SEO de este proyecto»).
 PAIS, IDIOMA = "pe", "es"
+
+#: Dónde se mide lo que busca la gente. «mundo» = sin país: el autocompletado,
+#: la búsqueda de YouTube y Trends sin región, en el idioma del vídeo (con una
+#: frase en español, en la práctica todo el mundo hispano). Se lee, no se
+#: escribe: sin elegir es Perú (regla 1).
+PAISES_BUSQUEDA = [("pe", "Perú"), ("mx", "México"), ("co", "Colombia"), ("cl", "Chile"),
+                   ("ar", "Argentina"), ("ec", "Ecuador"), ("bo", "Bolivia"),
+                   ("es", "España"), ("us", "Estados Unidos"),
+                   ("mundo", "Todo el mundo hispano (o del idioma del vídeo)")]
+NOMBRE_PAIS = dict(PAISES_BUSQUEDA)
+IDIOMAS_BUSQUEDA = ("es", "en", "pt")
+NOMBRE_IDIOMA = {"es": "español", "en": "inglés", "pt": "portugués"}
+
+
+def publico_de(ajustes=None):
+    """(pais, idioma) donde se mide un proyecto: «pe» y «es» si no eligió nada;
+    pais "" = todo el mundo. Lo que no está en la lista se lee como Perú."""
+    ajustes = ajustes or {}
+    pais = str(ajustes.get("pais_busquedas") or PAIS).strip().lower()
+    if pais not in NOMBRE_PAIS:
+        pais = PAIS
+    idioma = str(ajustes.get("yt_idioma") or IDIOMA).strip().lower()
+    if idioma not in IDIOMAS_BUSQUEDA:
+        idioma = IDIOMA
+    return ("" if pais == "mundo" else pais), idioma
+
+
+def _publico(publico):
+    """`publico` como (pais, idioma); None es Perú en español."""
+    if not publico:
+        return PAIS, IDIOMA
+    pais, idioma = publico
+    return str(pais or "").lower(), str(idioma or IDIOMA).lower()
+
+
+def es_de_siempre(publico):
+    """Perú en español: lo de antes de vidiq-2 (mismas peticiones y caché)."""
+    return _publico(publico) == (PAIS, IDIOMA)
+
+
+def texto_publico(publico):
+    """«Perú» · «todo el mundo hispano» · «México (en inglés)»."""
+    pais, idioma = _publico(publico)
+    if not pais:
+        return "todo el mundo hispano" if idioma == "es" else \
+            f"todo el mundo, en {NOMBRE_IDIOMA.get(idioma, idioma)}"
+    nombre = NOMBRE_PAIS.get(pais, pais.upper())
+    return nombre if idioma == "es" else f"{nombre}, en {NOMBRE_IDIOMA.get(idioma, idioma)}"
+
+
+def sufijo_pais(publico):
+    """Como `_sufijo_cache`, solo con el país (Google Trends no usa el idioma):
+    nada para Perú; «@mundo», «@mx»… para lo demás."""
+    pais = _publico(publico)[0]
+    return "" if pais == PAIS else f"@{pais or 'mundo'}"
+
+
+def vista_publico(publico):
+    pais, idioma = _publico(publico)
+    return {"pais": pais or "mundo", "idioma": idioma, "texto": texto_publico(publico)}
+
+
+def _sufijo_cache(publico):
+    """Lo que se añade a la clave de caché: nada para Perú en español (lo ya
+    guardado sigue valiendo); «@mundo-es», «@mx-es»… para lo demás."""
+    if es_de_siempre(publico):
+        return ""
+    pais, idioma = _publico(publico)
+    return f"@{pais or 'mundo'}-{idioma}"
 URL_SUGERENCIAS = "https://suggestqueries.google.com/complete/search"
 URL_YOUTUBE = "https://www.googleapis.com/youtube/v3"
 TIEMPO_S = 6
@@ -360,21 +430,25 @@ def _leer_sugerencias(texto):
     return salida
 
 
-def sugerencias(frase, fuente="youtube", raiz_p=None):
+def sugerencias(frase, fuente="youtube", raiz_p=None, publico=None):
     """Lo que el buscador propone al escribir `frase` -> [str] o None si no se
-    ha podido preguntar (sin red, cambió la forma…). `fuente`: youtube|google."""
+    ha podido preguntar (sin red, cambió la forma…). `fuente`: youtube|google.
+    `publico` = (pais, idioma) de `publico_de`; None es Perú en español."""
     frase = " ".join(str(frase or "").split())
     if not frase:
         return []
-    clave = f"sug|{fuente}|{normal(frase)}"
+    pais, idioma = _publico(publico)
+    clave = f"sug|{fuente}|{normal(frase)}{_sufijo_cache(publico)}"
     guardada = _de_cache(raiz_p, clave)
     if guardada is not None:
         return guardada
     if simulado():
         lista = _simuladas(frase, fuente)
     else:
-        params = {"client": "firefox", "hl": IDIOMA, "gl": PAIS, "ie": "utf-8",
+        params = {"client": "firefox", "hl": idioma, "gl": pais, "ie": "utf-8",
                   "oe": "utf-8", "q": frase}
+        if not pais:
+            del params["gl"]                # todo el mundo: sin región
         if fuente == "youtube":
             params["ds"] = "yt"
         codigo, texto = HTTP(f"{URL_SUGERENCIAS}?{urllib.parse.urlencode(params)}")
@@ -424,12 +498,12 @@ def _prefijo(frase):
     return frase[:max(3, len(frase) - 2)]
 
 
-def demanda(frase, raiz_p=None):
+def demanda(frase, raiz_p=None, publico=None):
     """{valor 0-100 | None, nivel, youtube, google, sugerencias, textos}."""
     frase_n = normal(frase)
-    yt = sugerencias(frase, "youtube", raiz_p)
-    goo = sugerencias(frase, "google", raiz_p)
-    yt_p = sugerencias(_prefijo(frase), "youtube", raiz_p) if yt is not None else None
+    yt = sugerencias(frase, "youtube", raiz_p, publico)
+    goo = sugerencias(frase, "google", raiz_p, publico)
+    yt_p = sugerencias(_prefijo(frase), "youtube", raiz_p, publico) if yt is not None else None
     p_yt = _puntos_fuente(frase_n, yt, yt_p)
     p_g = _puntos_fuente(frase_n, goo, None)
     if p_yt is None and p_g is None:
@@ -541,13 +615,14 @@ def _competencia_simulada(frase):
             "ids": [f"sim{i}" for i in range(10)], "total": 1000 + semilla % 5000}
 
 
-def competencia(frase, raiz_p, clave):
+def competencia(frase, raiz_p, clave, publico=None):
     """{valor 0-100 (más = más difícil), nivel, interes 0-100, mediana_vistas,
     mediana_vistas_dia, pequenos, recientes, total, top} o {"error": ...}.
     None si no hay clave. Gasta ~102 unidades del cupo (si no está en caché)."""
     if not clave:
         return None
-    ck = f"comp|{normal(frase)}"
+    ck = f"comp|{normal(frase)}{_sufijo_cache(publico)}"
+    pais, idioma = _publico(publico)
     guardada = _de_cache(raiz_p, ck)
     if guardada is not None:
         return guardada
@@ -557,9 +632,11 @@ def competencia(frase, raiz_p, clave):
         if cupo(raiz_p)["busquedas"] <= 0:
             return {"error": "cupo", "texto": "el cupo de búsquedas de YouTube de hoy está "
                                               "gastado (se renueva a medianoche del Pacífico)"}
-        busqueda, error = _api("search", {"part": "snippet", "type": "video", "maxResults": 10,
-                                          "q": frase, "regionCode": PAIS.upper(),
-                                          "relevanceLanguage": IDIOMA}, clave)
+        params = {"part": "snippet", "type": "video", "maxResults": 10,
+                  "q": frase, "regionCode": pais.upper(), "relevanceLanguage": idioma}
+        if not pais:
+            del params["regionCode"]        # todo el mundo: sin región
+        busqueda, error = _api("search", params, clave)
         if busqueda is None:
             # una clave mala o la API sin activar no gasta cupo: no se apunta
             # (antes se apuntaban 100 por frase y el cupo «se acababa» solo)
@@ -716,10 +793,10 @@ def combinar(partes):
     return round(sum(p * v for p, v in con) / sum(p for p, _ in con))
 
 
-def candidata(frase, info, zona, raiz_p, posts, corpus=None, origen=""):
+def candidata(frase, info, zona, raiz_p, posts, corpus=None, origen="", publico=None):
     """Una frase investigada (sin la competencia, que va aparte por el cupo)."""
     rel = relevancia(frase, info, zona, corpus)
-    dem = demanda(frase, raiz_p)
+    dem = demanda(frase, raiz_p, publico)
     hist = historial(frase, posts) if posts is not None else None
     return {"frase": " ".join(str(frase).split())[:80], "origen": origen,
             "relevancia": rel, "demanda": dem, "competencia": None, "oportunidad": None,
@@ -750,6 +827,8 @@ def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
     zona = str(ajustes.get("zona") or "")
     corpus = corpus_de(info, zona)
     avisos = []
+    # vidiq-2: dónde se busca (sin elegir, Perú en español, como siempre)
+    publico = publico_de(ajustes)
 
     def limpia(x):
         return " ".join(str(x or "").split())[:80]
@@ -790,7 +869,7 @@ def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
     candidatas = []
     sugeridas = []
     for frase, origen in unicas:
-        c = candidata(frase, info, zona, raiz_p, posts, corpus, origen)
+        c = candidata(frase, info, zona, raiz_p, posts, corpus, origen, publico)
         candidatas.append(c)
         for s in c["demanda"].get("sugerencias") or []:
             n = normal(s)
@@ -802,7 +881,8 @@ def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
         if espera_s and not simulado() and HTTP is _http_real:
             time.sleep(espera_s)
     for s in sugeridas[:max(0, MAX_CANDIDATAS - len(candidatas))]:
-        candidatas.append(candidata(s, info, zona, raiz_p, posts, corpus, "la gente busca"))
+        candidatas.append(candidata(s, info, zona, raiz_p, posts, corpus, "la gente busca",
+                                    publico))
         if espera_s and not simulado() and HTTP is _http_real:
             time.sleep(espera_s)
     for c in candidatas:
@@ -817,7 +897,7 @@ def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
     if clave_yt:
         orden = sorted(candidatas, key=lambda c: -(c.get("puntuacion") or 0))
         for c in [c for c in orden if es_relevante(c["frase"], corpus=corpus)][:MAX_COMPETENCIA]:
-            comp = competencia(c["frase"], raiz_p, clave_yt)
+            comp = competencia(c["frase"], raiz_p, clave_yt, publico)
             c["competencia"] = comp
             if comp and comp.get("error"):
                 # cualquier fallo de la API para la tanda: si es la clave, las
@@ -844,7 +924,7 @@ def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
                                for c in candidatas),
             "clave_youtube": bool(clave_yt), "avisos": avisos,
             "cupo": cupo(raiz_p) if clave_yt and raiz_p else None,
-            "sin_corpus": not corpus.sabe}
+            "sin_corpus": not corpus.sabe, "publico": vista_publico(publico)}
 
 
 def caducada(real, ahora=None):

@@ -1,4 +1,4 @@
-**El piloto respeta su tope y tres detalles de los Recibidos (12 de noviembre)**
+**El piloto respeta mejor su tope y tres detalles de los Recibidos (12 de noviembre)**
 - **«🤖 Hacer el vídeo completo» respeta mejor su tope:**
   - el revisor rehace imágenes solo con lo que queda de verdad del tope (lo
     ya gastado, no lo previsto). Antes, si las imágenes costaban más de lo

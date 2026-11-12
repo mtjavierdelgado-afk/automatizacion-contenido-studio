@@ -23451,8 +23451,10 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj, tope_usd=None):
     sin_sitio = "ia" not in hechas and not _piloto_portada_ia_cabe(ctx, aj, tope_usd)
     if sin_sitio:
         P.apuntar_revision(raiz, vid, f"La portada con IA no se hizo: pasaría tu tope de "
-                                      f"{float(tope_usd):.2f} $. Hazla en Publicar → Portada si la quieres",
-                           "Publicar → Portada")
+                                      f"{float(tope_usd):.2f} $"
+                           + (" (el guion traía una portada propuesta: está en Publicar → Portada)"
+                              if del_guion else "")
+                           + ". Hazla en Publicar → Portada si la quieres", "Publicar → Portada")
     if "ia" in hechas:
         candidatos.append(hechas["ia"])
     elif aj.get("portadas") in ("ambas", "ia") and not sin_sitio:

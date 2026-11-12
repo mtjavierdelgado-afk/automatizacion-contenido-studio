@@ -727,6 +727,8 @@ HOSTILES = {
     "https://tienda.ejemplo.pe/blog/post-7": "",
     "https://tienda.ejemplo.pe/ficha.php?id=2": "",
     "https://tienda.ejemplo.pe/spa-vuelta": "",
+    "https://tienda.ejemplo.pe/wp": "",
+    "https://tienda.ejemplo.pe/dp/B02": "",
     "https://tienda.ejemplo.pe/collections/x/products/y#opiniones": "",
     "https://diario.ejemplo.pe/amp/noticia-3": _og("https://diario.ejemplo.pe/noticia-3", "Resumen de la 3", "Noticia 3")
         + "<link rel='canonical' href='https://diario.ejemplo.pe/noticia-3'><body></body>",
@@ -766,6 +768,12 @@ MOVIDAS = {
         "https://tienda.ejemplo.pe/blog/post-7/", "history.replaceState({}, '', '/blog/post-7')", _TIENDA),
     "https://tienda.ejemplo.pe/ficha.php?id=2": (
         "https://tienda.ejemplo.pe/ficha.php?id=1", "history.pushState({}, '', '?id=2')", _FICHA1),
+    "https://tienda.ejemplo.pe/wp": (
+        "https://tienda.ejemplo.pe/wp?p=123", "history.pushState({}, '', '/wp')",
+        _og("https://tienda.ejemplo.pe/entrada-123/", "La 123", "Entrada 123")
+        + "<link rel='canonical' href='https://tienda.ejemplo.pe/entrada-123/'><body></body>"),
+    "https://tienda.ejemplo.pe/dp/B02": (
+        "https://tienda.ejemplo.pe/dp/B02?UTM_Source=fb&gad_source=1", "history.replaceState({}, '', location.pathname)", _TIENDA),
     "https://tienda.ejemplo.pe/spa-vuelta": (
         "https://tienda.ejemplo.pe/spa-vuelta", "history.pushState({}, '', '/producto-b'); history.back()", _TIENDA),
     "https://tienda.ejemplo.pe/collections/x/products/y#opiniones": (
@@ -910,12 +918,14 @@ def prueba_lector_hostil():
     ok(sp.get("aviso") and "Entrada 123" not in json.dumps(sp) and sp["url"] == "https://blog.ejemplo.com/?p=224",
        "una web que se movió sin recargar (?p=223 → ?p=224) no manda la entrada de antes")
     for url in ("https://tienda.ejemplo.pe/collections/x/products/y?variant=123", "https://tienda.ejemplo.pe/dp/B01",
-                "https://tienda.ejemplo.pe/blog/post-7", "https://tienda.ejemplo.pe/collections/x/products/y#opiniones"):
+                "https://tienda.ejemplo.pe/blog/post-7", "https://tienda.ejemplo.pe/collections/x/products/y#opiniones",
+                "https://tienda.ejemplo.pe/dp/B02"):
         d = res[url]
         ok(d["titulo"] == "Consola Y" and not d.get("aviso"),
            f"una página que retoca su propia dirección sin cambiar de página se lee ({url.split('ejemplo.pe')[1]})")
     for url, que in (("https://tienda.ejemplo.pe/ficha.php?id=2", "?id=1 → ?id=2, con el canónico en la misma ruta"),
-                     ("https://tienda.ejemplo.pe/spa-vuelta", "una web que fue a otro producto y volvió sin recargar")):
+                     ("https://tienda.ejemplo.pe/spa-vuelta", "una web que fue a otro producto y volvió sin recargar"),
+                     ("https://tienda.ejemplo.pe/wp", "?p=123 → la portada sin recargar")):
         d = res[url]
         ok(d.get("aviso") and not d["titulo"] and "Ficha 1" not in json.dumps(d) and "Consola" not in json.dumps(d),
            f"{que}: no se fía de sus etiquetas y lo avisa")

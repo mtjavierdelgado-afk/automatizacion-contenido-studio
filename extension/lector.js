@@ -122,7 +122,7 @@
        son de esta página aunque su canónico sea otra ruta (Amazon, WordPress «?p=», un slug corregido) */
     /* la misma página que otra dirección: misma ruta (sin la barra final) y ningún «?…» que tengan las
        dos con otro valor; quitar o añadir uno (utm, ?variant=, &color=) no es otra página, ?p=123 → ?p=124 sí */
-    const SEGUIMIENTO = /^(utm_|fbclid$|gclid$|gbraid$|wbraid$|msclkid$|yclid$|ttclid$|igshid$|mc_|_ga$|_gl$|ref$|ref_|si$|srsltid$)/i;
+    const SEGUIMIENTO = /^(utm_|fbclid$|gclid$|gbraid$|wbraid$|msclkid$|yclid$|ttclid$|igshid$|mc_|_ga$|_gl$|ref$|ref_|si$|srsltid$|gad_|dclid$|twclid$|li_fat_id$|rdt_cid$|epik$|sccid$|_hsenc$|_hsmi$|mkt_tok$|_kx$)/i;
     const igualQue = (u, v) => { try { const x = new URL(u, location.href), y = new URL(v, location.href);
         if (x.origin !== y.origin || x.pathname.replace(/\/+$/, '') !== y.pathname.replace(/\/+$/, '')) return false;
         /* x es la de ahora, y la cargada: lo que tienen las dos, igual; lo que se quitó, solo seguimiento */

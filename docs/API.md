@@ -376,6 +376,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee; sin nombres de proyectos con clave). |
 | `GET` | `/api/dominios` | El negocio general y las fichas de los clientes (Etapa Foto C). |
 | `GET` | `/api/graficas/catalogo` | — |
+| `POST` | `/api/graficas/{cid}/capas` | Una pieza nueva que nace en capas. |
+| `POST` | `/api/graficas/{cid}/capas/vista` | La vista de una pieza en capas tal como saldría. No guarda nada. |
 | `POST` | `/api/graficas/{cid}/imagen` | — |
 | `POST` | `/api/graficas/{cid}/imagen/de-plano` | Copia la imagen ya hecha de un plano de un vídeo DE ESTE proyecto. Gratis. |
 | `GET` | `/api/graficas/{cid}/imagen/{nombre}` | — |
@@ -385,6 +387,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/graficas/{cid}/piezas` | — |
 | `DELETE` | `/api/graficas/{cid}/piezas/{pieza_id}` | — |
 | `PUT` | `/api/graficas/{cid}/piezas/{pieza_id}` | — |
+| `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/capas` | La pieza en capas: la guardada si sigue valiendo, o la pieza de siempre |
+| `PUT` | `/api/graficas/{cid}/piezas/{pieza_id}/capas` | Guarda la versión en capas de una pieza, al lado de la de siempre. |
+| `POST` | `/api/graficas/{cid}/piezas/{pieza_id}/comparar` | Pinta la pieza como siempre y convertida en capas, y dice si salen |
 | `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/fichero.{extension}` | — |
 | `POST` | `/api/graficas/{cid}/vista` | Las miniaturas de los diseños con estos datos. No guarda nada. |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
@@ -558,4 +563,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**444 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**449 endpoints.** Escrito por `generar_api.py` desde `app.py`.

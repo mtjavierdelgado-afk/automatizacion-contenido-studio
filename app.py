@@ -14153,10 +14153,13 @@ def terminos_del_sistema():
 
 @app.get("/api/sistema/novedades")
 def novedades_del_sistema():
-    """El historial de cambios, tal cual esta en docs/NOVEDADES.md."""
+    """El historial de cambios: docs/NOVEDADES.md con lo de docs/novedades/ dentro."""
+    # Suelto (solo biblioteca estandar), como `ajustes`: un motor roto no deja
+    # las novedades en blanco. Cada rama apunta lo suyo en docs/novedades/ y
+    # aqui se junta en su sitio (rama ramas-sin-choques, 05-11-2026).
+    import novedades as _novedades  # noqa: PLC0415
     try:
-        with open(RUTA_NOVEDADES, encoding="utf-8") as fh:
-            texto = fh.read()
+        texto = _novedades.texto(RAIZ_ESTUDIO)
     except OSError:
         texto = ""
     return {"version": VERSION, "producto": NOMBRE_PRODUCTO,

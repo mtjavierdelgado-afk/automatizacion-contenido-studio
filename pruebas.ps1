@@ -99,6 +99,7 @@ $suites = @(
   'pasos\prueba_graficas.py',
   'pasos\prueba_choques_reglas.py',
   'pasos\prueba_vidiq.py',
+  'pasos\prueba_ramas_sin_choques.py',
   'prueba_recorrido.py'
 )
 

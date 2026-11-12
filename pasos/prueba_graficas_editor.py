@@ -199,6 +199,8 @@ def rutas(carpeta, foto):
         ruta_antes = G.ruta_final(raiz, cid, pid, "jpg", antes=True)
         ok(ruta_capas.endswith("capas.jpg") and ruta_antes.endswith("pieza.jpg"),
            "con versión en capas, la descarga da la de capas y ?antes=1 la de antes")
+        ok(servidor.graficas_fichero(cid, pid, "jpg", _Peticion(), antes="false").path.endswith("capas.jpg"),
+           "?antes=false no trae la versión anterior")
         nacida = servidor.graficas_crear_en_capas(cid, _Peticion(), {"doc": leida["doc"]})
         ok(codigo(servidor.graficas_fichero, cid, nacida["id"], "jpg", _Peticion(), antes="1") == 404,
            "una pieza nacida en capas no tiene versión anterior (404)")

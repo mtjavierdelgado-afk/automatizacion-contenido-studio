@@ -24289,7 +24289,7 @@ def graficas_fichero(cid: str, pieza_id: str, extension: str, peticion: Request,
     _ficha_de_graficas(cid, peticion)
     G = _graficas()
     try:
-        ruta = G.ruta_final(raiz_proyectos(), cid, pieza_id, extension, antes=str(antes) not in ("", "0"))
+        ruta = G.ruta_final(raiz_proyectos(), cid, pieza_id, extension, antes=str(antes).lower() in ("1", "si", "sí", "true"))
     except G.ErrorGraficas as fallo:
         raise ErrorApi(404 if isinstance(fallo, G.ErrorNoEsta) else 400, str(fallo))
     return servir_fichero(peticion, ruta)

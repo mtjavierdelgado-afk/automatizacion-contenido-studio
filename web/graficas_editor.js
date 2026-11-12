@@ -1608,15 +1608,16 @@
       ED.doc.nombre = t ? String(t.txt).trim().split('\n')[0].slice(0, 80) : 'Pieza en capas';
       commit();
     }
-    if (comoNueva) {
-      ED.doc.nombre = `${ED.doc.nombre || 'Pieza'} (copia)`.slice(0, 80);
-      commit();
-    }
     const doc = docParaEnviar();
-    if (comoNueva) doc.origen = { plantilla: doc.origen.plantilla, sello: '', guardado: '', nacida: true };
     // LO QUE SE ENVÍA es lo que queda guardado: lo que cambie mientras el
     // servidor pinta (unos segundos) sigue «sin guardar» y pide confirmar al cerrar
-    const enviada = firmaDoc();
+    let enviada = firmaDoc();
+    if (comoNueva) {
+      // el «(copia)» va solo en lo enviado: si falla, la pieza no cambia de nombre
+      doc.origen = { plantilla: doc.origen.plantilla, sello: '', guardado: '', nacida: true };
+      doc.nombre = `${doc.nombre || 'Pieza'} (copia)`.slice(0, 80);
+      enviada = JSON.stringify(Object.assign(JSON.parse(enviada), { nombre: doc.nombre }));
+    }
     const yo = ED;
     try {
       const r = await yo.opc.pedir(nueva ? yo.opc.api(yo.cid, '/capas') : yo.opc.api(yo.cid, `/piezas/${yo.piezaId}/capas`),
@@ -1626,7 +1627,14 @@
       ED.origen = Object.assign({}, r.doc.origen);
       ED.nacida = !!ED.origen.nacida;
       ED.cambio = true;
-      ED.guardado = enviada;
+      if (comoNueva) {
+        const igual = firmaDoc() === JSON.stringify(Object.assign(JSON.parse(enviada), { nombre: ED.doc.nombre }));
+        ED.doc.nombre = doc.nombre;
+        commit();
+        ED.guardado = igual ? firmaDoc() : enviada;
+      } else {
+        ED.guardado = enviada;
+      }
       ED.vista.avisos = (r.avisos || []).slice();
       ED.convertida = false;
       const migra = ED.raiz.querySelector('.ce-migra');

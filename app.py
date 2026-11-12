@@ -6185,16 +6185,20 @@ def _ficha_guion_visual(ctx):
     # LINEAS CON UN ESTADO QUE NO ES NINGUNO DEL ESPACIO (rama piloto-al-dia, Y05):
     # se avisan aqui, y `p6_assets.ejecutar` no las paga. Solo lee.
     sin_casar, casados = [], []
-    if estados:
-        try:
-            p6 = PASOS_MODULOS.p6_assets
-            sitio_e, _cambios = p6.estados_del_relato(ctx.proyecto, params)
-            todos = p6.etiquetas_del_espacio(p6._catalogo_de(p6._con_defectos(params), ctx.proyecto), sitio_e)
+    try:
+        p6 = PASOS_MODULOS.p6_assets
+        # con el SITIO, no con los estados con cambio: `planificar` para en cuanto
+        # hay etiquetas, aunque todas sean la base (revision del 12-11)
+        sitio_e, _cambios = p6.estados_del_relato(ctx.proyecto, params)
+        if sitio_e:
+            catalogo_e = p6._catalogo_de(p6._con_defectos(params), ctx.proyecto)
+            todos = p6.etiquetas_del_espacio(catalogo_e, sitio_e)
+            ajenos = set(p6.etiquetas_ajenas(catalogo_e, sitio_e))
             planos_ver = guardado.get("planos") or propuesta or _planos_ef
-            sin_casar = gv.estados_sin_casar(planos_ver, todos)
+            sin_casar = [x for x in gv.estados_sin_casar(planos_ver, todos) if x["estado"] not in ajenos]
             casados = gv.estados_casados(planos_ver, todos)
-        except Exception:                                   # noqa: BLE001
-            sin_casar, casados = [], []
+    except Exception:                                       # noqa: BLE001
+        sin_casar, casados = [], []
     return {"modo": gv.modo_de(params),
             "estados_sin_casar": sin_casar, "estados_casados": casados,
             "del_video": params.get("imagenes") or "",

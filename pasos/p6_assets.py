@@ -1584,6 +1584,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # TODAS las etiquetas del espacio (tambien las que son la base tal cual),
     # para casar un estado abreviado de una linea (rama piloto-al-dia)
     todos_los_estados = etiquetas_del_espacio(catalogo, principal) if principal else []
+    # las de OTROS sitios del catalogo: una linea alli con su estado no se para
+    estados_ajenos = set(etiquetas_ajenas(catalogo, principal)) if principal else set()
     estados_sin_casar = []
     for indice, (escena, beat) in enumerate(zip(escenas, beats)):
         if escena.get("sigue_a"):
@@ -1633,9 +1635,11 @@ def planificar(proyecto, params, inventario=None, replantear=False,
             # UN ESTADO QUE NO ES NINGUNO DEL ESPACIO (piloto-al-dia, Y05): se
             # apunta y `ejecutar` para la tanda ANTES de pagar
             if principal and todos_los_estados and linea.get("estado") and not beat.get("estado") \
+                    and linea["estado"] not in estados_ajenos \
                     and guion_visual.estados_sin_casar([linea], todos_los_estados):
                 estados_sin_casar.append({"plano": escena["id"], "linea": linea.get("id") or "",
-                                          "estado": linea["estado"], "opciones": sorted(todos_los_estados)})
+                                          "estado": linea["estado"],
+                                          "opciones": guion_visual.opciones_legibles(todos_los_estados)})
         if relato_edita:
             _marcar_edicion(escena, beat, relato, principal, modo, bases_rel)
         escena["prompt"] = _prompt_visual(escena, beat, catalogo, modo=modo)
@@ -1670,9 +1674,11 @@ def planificar(proyecto, params, inventario=None, replantear=False,
                 nueva["linea_gv"], tipo_relato.estados_del_catalogo(catalogo, principal)
                 if principal else {}, todos_los_estados))
             if principal and todos_los_estados and nueva["linea_gv"].get("estado") and not beat.get("estado") \
+                    and nueva["linea_gv"]["estado"] not in estados_ajenos \
                     and guion_visual.estados_sin_casar([nueva["linea_gv"]], todos_los_estados):
                 estados_sin_casar.append({"plano": nueva["id"], "linea": nueva["linea_gv"].get("id") or "",
-                                          "estado": nueva["linea_gv"]["estado"], "opciones": sorted(todos_los_estados)})
+                                          "estado": nueva["linea_gv"]["estado"],
+                                          "opciones": guion_visual.opciones_legibles(todos_los_estados)})
         # el encuadre lo dice su direccion: la carta del plano partido no es suya
         nueva.pop("encuadre", None)
         # «DIRIGIR» SOBRE LA INSERTADA (28-10): su direccion o su parrafo
@@ -6277,6 +6283,23 @@ def etiquetas_del_espacio(catalogo, sitio=None):
             continue
         etiqueta = tipo_relato.estado_de(beat) or tipo_relato._etiqueta(beat.get("estado"))
         if etiqueta and etiqueta not in salida:
+            salida.append(etiqueta)
+    return salida
+
+
+def etiquetas_ajenas(catalogo, sitio):
+    """Las etiquetas de estado de los tramos de OTROS sitios (no las del espacio).
+    Una linea de esos sitios con su estado no es un estado inventado."""
+    if not sitio:
+        return []
+    beats = (catalogo.get("beats") or []) if isinstance(catalogo, dict) else []
+    propias = set(etiquetas_del_espacio(catalogo, sitio))
+    salida = []
+    for beat in beats:
+        if not isinstance(beat, dict) or beat.get("set") in (None, "", sitio):
+            continue
+        etiqueta = tipo_relato.estado_de(beat) or tipo_relato._etiqueta(beat.get("estado"))
+        if etiqueta and etiqueta not in propias and etiqueta not in salida:
             salida.append(etiqueta)
     return salida
 

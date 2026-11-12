@@ -15,5 +15,9 @@
   - el guion visual lo avisa, con los nombres que sí valen;
   - las imágenes no se pagan hasta corregirlo, en vez de dibujar la base sin
     cambio.
-- Las líneas que ya casaban dan exactamente las mismas imágenes: nada se queda
-  por rehacer.
+- «antes», «inicial» u «original» en una línea son la imagen base, aunque no
+  haya un estado con ese nombre. Un estado de otro sitio del vídeo no se
+  confunde con uno inventado.
+- Las líneas que ya casaban dan exactamente las mismas imágenes. Solo en los
+  vídeos ya hechos con un estado abreviado (como Y05) esos planos quedan «por
+  rehacer», porque se dibujaron sin el cambio que pedían.

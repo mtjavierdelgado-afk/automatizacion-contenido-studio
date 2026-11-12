@@ -425,6 +425,12 @@ def _cambia_sentido(palabras):
     return any(p == r or (len(r) >= 3 and p.startswith(r)) for p in palabras for r in _NO_CASAN)
 
 
+#: Lo que en una linea quiere decir «la base» aunque no sea un estado del espacio.
+_PALABRAS_BASE = {"antes", "inicial", "inicio", "original", "actual", "before", "initial", "start"}
+#: La etiqueta que `tipo_relato.estado_de` saca de un cambio sin nombre.
+_RE_ETIQUETA_SACADA = re.compile(r"^c[0-9a-f]{8}$")
+
+
 def _trozos(etiqueta):
     return [t for t in re.split(r"[_\s-]+", _llano(etiqueta)) if t]
 
@@ -516,9 +522,21 @@ def estados_sin_casar(planos, todos):
         parecidos = [t for t in todos if (set(_trozos(estado)) - neutras) & (set(_trozos(t)) - neutras)]
         if sin_cambio(estado.replace("_", " ")) and not parecidos:
             continue
+        # «antes», «inicial», «original»: la base, aunque ningun tramo se llame
+        # asi (sin los estados de la Parrilla las etiquetas las pone Claude, y la
+        # base puede no salir entre ellas: revision del 12-11)
+        propias = set(_trozos(estado)) - neutras
+        if propias and propias <= _PALABRAS_BASE and not parecidos:
+            continue
         salida.append({"plano": (p or {}).get("id") or f"V{i + 1:03d}", "estado": estado,
-                       "opciones": sorted(todos)})
+                       "opciones": opciones_legibles(todos)})
     return salida
+
+
+def opciones_legibles(todos):
+    """Las etiquetas que se le pueden ofrecer a una persona: sin las sacadas del
+    propio cambio («c1a2b3c4d»), que nadie puede escribir a mano."""
+    return sorted(t for t in (todos or []) if not _RE_ETIQUETA_SACADA.match(str(t)))
 
 
 # ------------------------------------------------------------ Claude: proponer

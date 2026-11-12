@@ -312,6 +312,65 @@ def prueba_el_aviso_y05(proyecto, carpeta):
        "el piloto se detiene en «Guion visual» antes de lanzar")
 
 
+def prueba_revision_y05(proyecto, carpeta):
+    seccion("6c] revisión del 12-11: la base sin tramo propio, otros sitios y etiquetas sacadas")
+    base = {"set": "bano", "personajes": [], "tono": "neutro", "accion": "the bathroom", "palabras": []}
+    # todos los tramos con cambio: ninguno se llama «antes»
+    solo_cambios = copy.deepcopy(CATALOGO)
+    solo_cambios["beats"] = [dict(base, desde="B001", hasta="B002", estado="blanco_frio", cambio=FRIO),
+                             dict(base, desde="B003", hasta="B004", estado="blanco_calido", cambio=CALIDO)]
+    params = _params(LINEAS, estados={})
+    params["catalogo"] = solo_cambios
+    plan = P6.planificar(proyecto, params)
+    sueltos = [x["estado"] for x in plan.get("estados_sin_casar") or []]
+    igual(sueltos, ["rojo"], "«antes» es la base aunque ningún tramo se llame así; solo «rojo» para")
+    igual(G.estados_sin_casar([{"id": "V1", "estado": "inicial"}, {"id": "V2", "estado": "original"}],
+                              ["blanco_frio", "blanco_calido"]), [], "«inicial» y «original» también son la base")
+    igual([x["casa_con"] for x in G.estados_casados([{"id": "V1", "estado": "antes"}], ["antes_de_pintar", "pintado"])],
+          ["antes_de_pintar"], "pero si es la parte de un estado del espacio («antes_de_pintar»), casa con él y se enseña")
+    # otro sitio con su propio estado
+    con_tienda = copy.deepcopy(solo_cambios)
+    con_tienda["sets"]["tienda"] = {"descripcion": "a small shop", "luz": "warm", "palabras": ["tienda"], "rotulo": ""}
+    con_tienda["beats"].append({"set": "tienda", "desde": "B004", "hasta": "B004", "estado": "abierta",
+                                "cambio": "the shop door open", "personajes": [], "accion": "the shop", "palabras": []})
+    igual(P6.etiquetas_ajenas(con_tienda, "bano"), ["abierta"], "las etiquetas de otro sitio se saben aparte")
+    lineas = [dict(x, estado="abierta") if x["id"] == "V004" else x for x in LINEAS]
+    params = _params(lineas, estados={})
+    params["catalogo"] = con_tienda
+    igual(P6.planificar(proyecto, params).get("estados_sin_casar"), None,
+          "una línea con el estado de otro sitio («abierta» de la tienda) no para la tanda")
+    # un tramo con cambio y sin nombre: su etiqueta sacada no se ofrece
+    sin_nombre = copy.deepcopy(solo_cambios)
+    sin_nombre["beats"][1].pop("estado")
+    params = _params(LINEAS, estados={})
+    params["catalogo"] = sin_nombre
+    plan = P6.planificar(proyecto, params)
+    rojo = [x for x in plan.get("estados_sin_casar") or [] if x["estado"] == "rojo"]
+    ok(rojo and rojo[0]["opciones"] == ["blanco_frio"],
+       f"las opciones no enseñan la etiqueta sacada del cambio («c…»), que nadie puede escribir ({rojo})")
+    # todos los tramos SIN cambio: la ficha avisa igual que para `planificar`
+    try:
+        import app as servidor                                    # noqa: PLC0415
+    except ImportError as fallo:
+        print(f"  (omitida la parte del servidor: falta {fallo.name})")
+        return
+    if servidor.PASOS_MODULOS is None:
+        return
+    servidor.fijar_raiz_proyectos(carpeta)
+    ctx = servidor.contexto(proyecto.id)
+    sin_cambios = copy.deepcopy(CATALOGO)
+    sin_cambios["beats"] = [dict(base, desde="B001", hasta="B004", estado="antes")]
+    params = _params(LINEAS, estados={})
+    params["catalogo"] = sin_cambios
+    plan = P6.planificar(proyecto, params)
+    ok(any(x["estado"] == "frio" for x in plan.get("estados_sin_casar") or []),
+       "sin ningún estado con cambio, «frio» para la tanda…")
+    ctx.estado.set_params("assets", params)
+    ficha = servidor._ficha_guion_visual(ctx)
+    ok(any(x["estado"] == "frio" for x in ficha.get("estados_sin_casar") or []),
+       f"…y el guion visual lo avisa antes (antes callaba) ({ficha.get('estados_sin_casar')})")
+
+
 def prueba_el_aviso(proyecto, carpeta):
     seccion("5] el aviso de antes de lanzar (el piloto se DETIENE en «Guion visual»)")
     try:
@@ -355,6 +414,7 @@ def main():
         prueba_el_aviso(proyecto, os.path.join(carpeta, "video"))
         prueba_y05(proyecto)
         prueba_el_aviso_y05(proyecto, os.path.join(carpeta, "video"))
+        prueba_revision_y05(proyecto, os.path.join(carpeta, "video"))
     finally:
         shutil.rmtree(carpeta, ignore_errors=True)
     print()

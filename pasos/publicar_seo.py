@@ -61,6 +61,9 @@ AJUSTES_SEO = {
     "hashtags_nicho": "",
     "hashtags_locales": "",
     "optimizar_al_escribir": False,
+    # vidiq-2: dónde se miden las búsquedas (SR.PAISES_BUSQUEDA); se lee, no
+    # se escribe: sin elegir es Perú, como siempre
+    "pais_busquedas": "pe",
 }
 BOOLEANOS = ("tt_ubicacion_puede", "tt_comentarios_puede", "yt_para_ninos",
              "optimizar_al_escribir")
@@ -197,6 +200,8 @@ def validar(k, v):
                        "de Facebook (solo cifras; pulsa «Guía» para ver cómo encontrarlo)")
     if k == "yt_categoria" and v not in {c for c, _n in CATEGORIAS_YOUTUBE}:
         raise ErrorSeo("esa categoría de YouTube no existe")
+    if k == "pais_busquedas" and v not in SR.NOMBRE_PAIS:
+        raise ErrorSeo("ese sitio de búsquedas no está en la lista")
     if k == "yt_idioma" and v not in {c for c, _n in IDIOMAS}:
         raise ErrorSeo("ese idioma no está en la lista")
     if k == "yt_idioma_audio":
@@ -281,7 +286,8 @@ def bloque_instruccion(ajustes, palabra, redes, recientes=None, aprendido=None, 
                       "palabras junto al gancho.")
     if busquedas:
         lineas.append("- Lo que la gente BUSCA de verdad (autocompletado de YouTube y Google, "
-                      "Perú), solo frases que el vídeo trata; usa las que encajen:\n" + busquedas)
+                      "en el sitio del proyecto), solo frases que el vídeo trata; usa las que "
+                      "encajen:\n" + busquedas)
     if palabra:
         lineas.append(f"- Palabra clave de ESTE vídeo: «{palabra}». Va en la PRIMERA LÍNEA de "
                       "cada red y en YouTube otra vez en las dos primeras líneas de la "

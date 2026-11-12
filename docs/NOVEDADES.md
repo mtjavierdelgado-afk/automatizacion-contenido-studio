@@ -10,6 +10,37 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V5.1 · octubre de 2026
 
+**La extensión «Enviar al Studio», más fácil de poner (11 de noviembre)**
+- En **Configuración → Enviar al Studio**, al crear el código sale una sola
+  **clave de conexión** (la dirección y el código juntos) con «Copiar la clave»:
+  se pega una vez en el primer campo de la extensión y se reparte sola.
+- Lo que pegas en la ventanita de la extensión **se guarda solo**: si se cierra
+  al ir a copiar algo, vuelve a abrirla y sigue ahí.
+- Mientras falta configurarla, la ventanita solo enseña la configuración (antes
+  salía también la parte de enviar y confundía).
+- El ZIP trae los ficheros sin carpeta de más: con «Extraer todo» de Windows ya
+  no quedan dos carpetas iguales. La extensión pasa a la versión 1.1.0.
+- Se configura **una vez por Chrome**: después sirve en todas las pestañas.
+- **Cada recibido, en su proyecto** (versión 1.3.0 de la extensión): en la
+  ventanita eliges el **Proyecto** al enviar (recuerda el último). En
+  **Automatizar → Recibidos de Chrome** cada tarjeta tiene su menú **Proyecto**
+  y, ya en un proyecto, su **Estilo**; arriba, los filtros **Todos · De este
+  proyecto · Sin proyecto · Archivados**, con cuántos hay. **Archivar** lo saca
+  de la bandeja sin borrarlo, y en «Archivados» está **Borrar todos los
+  archivados**. Al pasar del tope de 300 se borran primero los archivados, luego
+  lo suelto y lo de un proyecto lo último.
+- **YouTube, TikTok y X** (versión 1.3.1): al pasar de un vídeo a otro en la
+  misma pestaña ya no se cuelan el texto ni la imagen del primero; en YouTube las
+  vistas salen bien (antes «1 2 3 4…») y los comentarios solo con su número.
+- **✍️ Escribir el guion** (en un recibido con proyecto): abre el chat de ese
+  proyecto con la referencia y le pide a Claude un guion con el formato de la
+  Parrilla. Al guardarlo en la Parrilla, «🤖 Hacer el vídeo completo» sale ya con
+  el estilo que elegiste en el recibido.
+- **Instagram Reels** (versión 1.2.0): al ir pasando reels en el muro, se lee el
+  que tienes delante —autor, texto, me gusta, comentarios y compartidos—, y no el
+  primero que se abrió. Lo que otras extensiones pintan al lado de los botones
+  (por ejemplo vidIQ) ya no se cuela en las cifras.
+
 **En «Lo que dice el guion», las imágenes siguen tus líneas visuales (11 de noviembre)**
 - El reparto y los sitios se sacan de las líneas «Visual:», no de la voz. Si la
   voz es la letra de una canción que habla de un escenario y ninguna línea lo

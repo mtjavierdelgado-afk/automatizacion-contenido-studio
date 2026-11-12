@@ -376,6 +376,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee; sin nombres de proyectos con clave). |
 | `GET` | `/api/dominios` | El negocio general y las fichas de los clientes (Etapa Foto C). |
 | `GET` | `/api/graficas/catalogo` | — |
+| `POST` | `/api/graficas/{cid}/capas` | Una pieza nueva que nace en capas. |
+| `POST` | `/api/graficas/{cid}/capas/vista` | La vista de una pieza en capas tal como saldría. No guarda nada. |
 | `POST` | `/api/graficas/{cid}/imagen` | — |
 | `POST` | `/api/graficas/{cid}/imagen/de-plano` | Copia la imagen ya hecha de un plano de un vídeo DE ESTE proyecto. Gratis. |
 | `GET` | `/api/graficas/{cid}/imagen/{nombre}` | — |
@@ -385,6 +387,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/graficas/{cid}/piezas` | — |
 | `DELETE` | `/api/graficas/{cid}/piezas/{pieza_id}` | — |
 | `PUT` | `/api/graficas/{cid}/piezas/{pieza_id}` | — |
+| `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/capas` | La pieza en capas: la guardada si sigue valiendo, o la pieza de siempre |
+| `PUT` | `/api/graficas/{cid}/piezas/{pieza_id}/capas` | Guarda la versión en capas de una pieza, al lado de la de siempre. |
+| `POST` | `/api/graficas/{cid}/piezas/{pieza_id}/comparar` | Pinta la pieza como siempre y convertida en capas, y dice si salen |
 | `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/fichero.{extension}` | — |
 | `POST` | `/api/graficas/{cid}/vista` | Las miniaturas de los diseños con estos datos. No guarda nada. |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
@@ -420,7 +425,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/parrilla/proyectos` | Los proyectos que se pueden ver, con cuántos guiones tiene cada uno, y |
 | `GET` | `/api/parrilla/proyectos/{cid}` | Las matrices del proyecto y sus guiones, con el estado al día. |
 | `GET` | `/api/parrilla/proyectos/{cid}/chats` | Las conversaciones del proyecto, la más nueva primero. |
-| `POST` | `/api/parrilla/proyectos/{cid}/chats` | Una conversación nueva: {modelo?}. No se guarda hasta el primer mensaje. |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats` | Una conversación nueva: {modelo?, estilo?}. No se guarda hasta el primer mensaje. |
 | `DELETE` | `/api/parrilla/proyectos/{cid}/chats/{chid}` | — |
 | `GET` | `/api/parrilla/proyectos/{cid}/chats/{chid}` | — |
 | `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/cancelar` | — |
@@ -528,11 +533,15 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/youtube/probar` | Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo) |
 | `GET` | `/api/recibidos` | Los recibidos (el más nuevo primero), el estado del código y la versión de la extensión. |
 | `POST` | `/api/recibidos` | {url, titulo?, autor?, texto?, seleccion?, nota?, cifras?, imagen?, captura?} -> el recibido. |
+| `POST` | `/api/recibidos/borrar-archivados` | Borra todos los archivados (los que quien pide puede ver), mirándolos en el servidor. |
 | `POST` | `/api/recibidos/codigo` | Un código de envío nuevo (el de antes deja de valer). Se ve UNA vez. |
 | `GET` | `/api/recibidos/extension.zip` | La extensión de Chrome, en un ZIP para descomprimir y cargar. |
 | `GET` | `/api/recibidos/ping` | Lo que pulsa «Probar» en la extensión: el código vale y el Studio contesta. |
+| `GET` | `/api/recibidos/proyectos` | Los proyectos, para el menú «Proyecto» de la extensión (pide el código de envío). |
 | `DELETE` | `/api/recibidos/{rid}` | Lo borra, con su captura. |
+| `POST` | `/api/recibidos/{rid}/archivar` | {archivado: true|false} -> lo archiva o lo devuelve (no se borra). |
 | `GET` | `/api/recibidos/{rid}/captura` | La captura de lo que se veía al enviarlo (PNG, JPG o WEBP). |
+| `POST` | `/api/recibidos/{rid}/proyecto` | {proyecto, estilo?} -> lo anexa a ese proyecto («» lo deja sin proyecto) y al |
 | `POST` | `/api/recibidos/{rid}/usado` | Lo marca como usado (lo hace «Usar en el chat»). |
 | `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para el generador: {texto, nombre?, palabras?}. |
 | `GET` | `/api/reglas-estilo/afinar/{rid}` | Como va «Afinar con Claude», y la propuesta al terminar. |
@@ -558,4 +567,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**444 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**453 endpoints.** Escrito por `generar_api.py` desde `app.py`.

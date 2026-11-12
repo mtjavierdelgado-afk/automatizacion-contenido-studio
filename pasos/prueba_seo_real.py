@@ -38,6 +38,22 @@ for _v in ("ESTUDIO_SIMULAR", "ESTUDIO_SEO_SIMULADO", "YOUTUBE_API_KEY", "UPLOAD
 import seo_real as SR  # noqa: E402
 import publicar_seo as S  # noqa: E402
 import publicar as P  # noqa: E402
+import seo_canal as SC  # noqa: E402
+
+
+class TrendsApuntado:
+    """Google Trends sin salir a internet: apunta lo pedido y no contesta
+    (la tendencia queda sin dato, como con un 429)."""
+
+    def __init__(self):
+        self.pedidas = []
+
+    def __call__(self, metodo, url, datos=None, cabeceras=None, timeout=10):
+        self.pedidas.append(url)
+        return 503, ""
+
+
+TRENDS = TrendsApuntado()
 
 _ok = 0
 _fallos = []
@@ -423,8 +439,81 @@ def prueba_probar_clave():
     igual(CC.NOMBRES.get("youtube"), "YouTube (búsquedas SEO)", "con su nombre en el resumen")
 
 
+def prueba_donde_se_busca():
+    seccion("8] vidiq-2: dónde se mide lo que busca la gente, por proyecto")
+    raiz = os.path.join(CARPETA, "publico")
+    # sin elegir, Perú en español: lo de siempre
+    igual(SR.publico_de({}), ("pe", "es"), "sin nada guardado es Perú en español")
+    igual(SR.publico_de(None), ("pe", "es"), "y sin ajustes también")
+    igual(SR.publico_de({"pais_busquedas": "mundo"}), ("", "es"), "«mundo» es sin país")
+    igual(SR.publico_de({"pais_busquedas": "mx", "yt_idioma": "en"}), ("mx", "en"),
+          "el idioma es el del título de YouTube")
+    igual(SR.publico_de({"pais_busquedas": "zz", "yt_idioma": "klingon"}), ("pe", "es"),
+          "lo que no está en la lista se lee como Perú en español")
+    igual(SR.texto_publico(("", "es")), "todo el mundo hispano", "sin país en español: todo el mundo hispano")
+    igual(SR.texto_publico(None), "Perú", "y Perú se dice Perú")
+    igual(SR.texto_publico(("mx", "en")), "México, en inglés", "otro idioma se dice")
+    igual(P.ajustes_de(raiz, "p1")["pais_busquedas"], "pe", "en los ajustes de Publicar se lee Perú")
+    ok("pais_busquedas" not in json.dumps(P.leer_json(P._ruta_ajustes(raiz), {}) or {}),
+       "y leerlo no lo escribe (regla 1)")
+    try:
+        S.validar("pais_busquedas", "narnia")
+        ok(False, "un sitio raro no se guarda")
+    except S.ErrorSeo:
+        ok(True, "un sitio raro no se guarda")
+    igual(P.guardar_ajustes(raiz, "p1", {"pais_busquedas": "mundo"})["pais_busquedas"], "mundo",
+          "«Todo el mundo» se guarda")
+    # Perú: las mismas peticiones y la misma clave de caché de antes
+    doble = con_doble()
+    SR.sugerencias("decorar sala", "youtube", raiz)
+    peru = doble.pedidas[-1]
+    SR.sugerencias("decorar sala", "youtube", raiz, ("pe", "es"))
+    igual(len(doble.pedidas), 1, "Perú dicho o sin decir comparten caché (lo guardado sigue valiendo)")
+    ok("gl=pe" in peru and "hl=es" in peru, "Perú pregunta con gl=pe y hl=es, como siempre")
+    datos = json.load(open(os.path.join(raiz, "_sistema", "publicar", "seo_cache.json"), encoding="utf-8"))
+    ok("sug|youtube|decorar sala" in datos, "con la clave de caché de siempre")
+    # todo el mundo: sin región, con su propia caché
+    SR.sugerencias("decorar sala", "youtube", raiz, ("", "es"))
+    igual(len(doble.pedidas), 2, "otro sitio no reutiliza lo de Perú")
+    mundo = doble.pedidas[-1]
+    ok("gl=" not in mundo and "hl=es" in mundo, f"todo el mundo: sin gl, en español ({mundo})")
+    datos = json.load(open(os.path.join(raiz, "_sistema", "publicar", "seo_cache.json"), encoding="utf-8"))
+    ok("sug|youtube|decorar sala@mundo-es" in datos, "y se guarda aparte")
+    SR.sugerencias("decorar sala", "youtube", raiz, ("mx", "es"))
+    ok("gl=mx" in doble.pedidas[-1], "México pregunta a México")
+    # la competencia de YouTube
+    SR.competencia("decorar sala", raiz, doble.clave, ("", "es"))
+    url = next(u for u in reversed(doble.pedidas) if "/search" in u)
+    ok("regionCode" not in url and "relevanceLanguage=es" in url, "la búsqueda de YouTube, sin región")
+    SR.competencia("decorar sala", raiz, doble.clave)
+    url = next(u for u in reversed(doble.pedidas) if "/search" in u)
+    ok("regionCode=PE" in url, "y Perú sigue con su región")
+    # la investigación entera dice dónde se midió, y la ficha dónde se mide ahora
+    mundo_aj = dict(GUITARRA, pais_busquedas="mundo")
+    antes = len(doble.pedidas)
+    P.lanzar_investigar(raiz, INFO, mundo_aj, [], "", en_hilo=False)
+    nuevas = [u for u in doble.pedidas[antes:] if "suggestqueries" in u]
+    ok(nuevas and all("gl=" not in u for u in nuevas), "investigar en «todo el mundo» no pregunta a ningún país")
+    explore = [u for u in TRENDS.pedidas if "/api/explore" in u]
+    req = json.loads(dict(urllib.parse.parse_qsl(urllib.parse.urlparse(explore[-1]).query))["req"]) if explore else {}
+    ok(explore and all(c.get("geo") == "" for c in req.get("comparisonItem") or [{"geo": "x"}]),
+       "y la tendencia de Google Trends, desde Publicar, va sin país")
+    f = P.ficha(raiz, INFO, mundo_aj)
+    igual(f["seo"]["real"]["publico"]["texto"], "todo el mundo hispano", "la investigación dice dónde se midió")
+    igual(f["seo"]["publico"]["texto"], "todo el mundo hispano", "y la ficha dónde se mide ahora")
+    igual(P.ficha(raiz, INFO, GUITARRA)["seo"]["publico"]["texto"], "Perú",
+          "otro proyecto sin elegir: Perú")
+    TRENDS.pedidas.clear()
+    P.lanzar_investigar(raiz, INFO, GUITARRA, [], "", en_hilo=False)
+    explore = [u for u in TRENDS.pedidas if "/api/explore" in u]
+    req = json.loads(dict(urllib.parse.parse_qsl(urllib.parse.urlparse(explore[-1]).query))["req"]) if explore else {}
+    ok(explore and all(c.get("geo") == "PE" for c in req.get("comparisonItem") or [{"geo": "x"}]),
+       "un proyecto sin elegir sigue con Trends de Perú")
+
+
 def main():
     print("PRUEBA DEL SEO DE VERDAD")
+    SC.HTTP = TRENDS        # ninguna prueba de aquí sale a Google Trends de verdad
     try:
         prueba_relevancia()
         prueba_autocompletado()
@@ -433,8 +522,10 @@ def main():
         prueba_nota()
         prueba_investigar_en_la_ficha()
         prueba_probar_clave()
+        prueba_donde_se_busca()
     finally:
         SR.HTTP = SR._http_real
+        SC.HTTP = SC._http_real
         shutil.rmtree(CARPETA, ignore_errors=True)
     print("\n" + "=" * 70)
     if _fallos:

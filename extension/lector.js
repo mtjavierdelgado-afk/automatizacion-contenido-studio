@@ -3,8 +3,16 @@
  *
  * Se inyecta solo cuando pulsas el botón (permiso activeTab) y devuelve un
  * objeto; no guarda nada, no recorre la página ni pide nada a ningún servidor.
- * Cada red tiene su lector, y si cambia su página o no hay lector para ella,
- * queda el genérico (las etiquetas og: y meta, que llevan casi todas las webs).
+ *
+ * LA REGLA (revisión del 12-11-2026): las redes son páginas que no se recargan
+ * al pasar de un post a otro. La barra cambia, pero las etiquetas og:, el
+ * título y muchas cajas de la página siguen siendo las del PRIMER post que se
+ * abrió, o de otro que está debajo. Así que:
+ *   1. las etiquetas og: solo valen si su dirección es la de la barra;
+ *   2. lo que se lee de la página, solo dentro de una caja que se demuestre que
+ *      es la del post de la barra (su código, su id, o el vídeo que se ve);
+ *   3. si no hay ninguna de las dos, va el enlace y la captura, con un aviso.
+ * Mejor no mandar nada que mandar lo de otro post.
  *
  * Las cifras van TAL CUAL se ven («1,2 mil», «12K»): las convierte el Studio
  * (pasos/recibidos.py, numero_visto), que es donde están probadas.
@@ -16,32 +24,53 @@
     const el = document.querySelector(`meta[property="${nombre}"], meta[name="${nombre}"], meta[itemprop="${nombre}"]`);
     return el ? limpio(el.getAttribute('content')) : '';
   };
-  const uno = (...selectores) => {
+  const textoDe = el => (el ? (el.innerText || el.textContent || '') : '');
+  /* el primer elemento con texto DENTRO de una caja (nunca en toda la página) */
+  const unoEn = (caja, ...selectores) => {
+    if (!caja) return null;
     for (const s of selectores) {
       try {
-        const el = document.querySelector(s);
-        if (el && limpio(el.innerText || el.textContent)) return el;
+        for (const el of caja.querySelectorAll(s)) if (limpio(textoDe(el))) return el;
       } catch (e) { /* selector que este navegador no entiende */ }
     }
     return null;
   };
-  const texto = (...selectores) => { const el = uno(...selectores); return el ? largo(el.innerText || el.textContent) : ''; };
-  const corto = (...selectores) => limpio(texto(...selectores));
+  const textoEn = (caja, ...s) => largo(textoDe(unoEn(caja, ...s)));
+  const cortoEn = (caja, ...s) => limpio(textoEn(caja, ...s));
+  const numeroEn = (caja, ...s) => { const t = cortoEn(caja, ...s); return /\d/.test(t) ? t : ''; };
+  const enMedio = e => { const r = e.getBoundingClientRect(); return r.height > 0 && r.width > 0 && r.top < innerHeight / 2 && r.bottom > innerHeight / 2; };
+  /* la caja del vídeo que cruza la mitad de la pantalla: el primer antepasado que trae `dentro` */
+  /* la caja del vídeo que cruza la mitad de la pantalla: el primer antepasado que trae `dentro`;
+     si para encontrarlo hay que subir hasta donde hay OTRO vídeo, es la lista entera: no vale */
+  const cajaDelVideoQueSeVe = (dentro, vale = () => true) => {
+    let c = [...document.querySelectorAll('video')].find(enMedio) || null;
+    while (c && c !== document.body && !(c.querySelector(dentro) && vale(c))) {
+      if (c.querySelectorAll('video').length > 1) return null;
+      c = c.parentElement;
+    }
+    if (!c || c === document.body || c === document.documentElement || c.querySelectorAll('video').length > 1) return null;
+    return c;
+  };
+  /* a la vista de verdad: con tamaño y sin un antepasado oculto */
+  const seVe = e => { const r = e.getBoundingClientRect(); return r.height > 0 && r.width > 0 && (!e.checkVisibility || e.checkVisibility()); };
 
-  /* «12 respuestas, 34 reposts, 560 Me gusta, 89 mil visualizaciones» → cifras.
-     Sirve para las etiquetas aria y para frases como la og:description de Instagram. */
+  /* «12 respuestas, 34 reposts, 560 Me gusta, 89 mil visualizaciones» → cifras. */
   const PALABRAS = [
-    ['vistas', /(visualizaciones|reproducciones|vistas|views|plays|visualizações)/],
+    ['vistas', /(visualizaci(?:ones|ón)|reproducci(?:ones|ón)|vistas?|views?|plays?|visualizaç(?:ões|ão))/],
     ['me_gusta', /(me gusta|likes?|reacciones|reactions|curtidas)/],
-    ['comentarios', /(comentarios?|comments?|respuestas|replies)/],
+    ['comentarios', /(comentarios?|comments?|respuestas?|replies|reply)/],
     ['compartidos', /(compartid[oa]s?|veces compartido|shares?|reposts?|retweets?|republicaciones)/],
     ['guardados', /(guardad[oa]s?|bookmarks?|saves?)/],
   ];
-  /* un espacio dentro del número solo si separa miles («12 345»): «1.024 38 comentarios» son dos */
-  /* y el sufijo solo si es palabra entera: «12 más» o «7 mins» no son millones */
-  const NUMERO = '(\\d(?:[\\d.,]|\\s(?=\\d{3}(?!\\d)))*(?:\\s*(?:mil millones|mill(?:ones|\\.)?|milh(?:ões|ão)|mil|[kmb])(?![a-záéíóúñãõç]))?)';
+  /* un espacio dentro del número solo si separa miles («12 345»): «1.024 38 comentarios» son dos;
+     y el sufijo solo si es palabra entera: «12 más» o «7 mins» no son millones («mi» es el
+     «milhões» abreviado del portugués: «2,5 mi») */
+  const SUFIJO = '(?:mil millones|mill(?:ones|\\.)?|milh(?:ões|ão)|mil|mi|[kmb])(?![a-záéíóúñãõç])';
+  const NUMERO = '(\\d(?:[\\d.,]|\\s(?=\\d{3}(?!\\d)))*(?:\\s*' + SUFIJO + ')?)';
+  const SOLO = new RegExp('^\\d[\\d.,]*(?:\\s*' + SUFIJO + ')?$', 'i');
   const cifrasDeFrase = (frase, cifras) => {
-    const f = String(frase || '').toLowerCase();
+    /* «230 M de vistas», «1,2 mil de reproducciones»: el «de» no separa la cifra de su nombre */
+    const f = String(frase || '').toLowerCase().replace(/\s+de\s+(?=[a-záéíóúñ])/g, ' ');
     for (const [clave, palabra] of PALABRAS) {
       if (cifras[clave]) continue;
       const m = f.match(new RegExp(NUMERO + '\\s*' + palabra.source)) || f.match(new RegExp(palabra.source + '[:\\s]+' + NUMERO));
@@ -49,109 +78,355 @@
     }
     return cifras;
   };
-  const numeroDe = (...selectores) => { const t = corto(...selectores); return /\d/.test(t) ? t : ''; };
+  /* el primer número de una frase («al igual que 19,501,189 personas más» → «19,501,189») */
+  const numeroDeFrase = frase => { const m = String(frase || '').toLowerCase().match(new RegExp(NUMERO)); return m ? limpio(m[1]) : ''; };
+  /* lo que se ve en un botón, quedándose con el trozo que es SOLO un número (vidIQ pinta «1x» al lado) */
+  const soloNumero = el => {
+    if (!el) return '';
+    const todo = limpio(textoDe(el));
+    if (SOLO.test(todo)) return todo;
+    for (const h of el.querySelectorAll('*')) { const v = limpio(textoDe(h)); if (SOLO.test(v)) return v; }
+    return '';
+  };
 
   const host = location.hostname.toLowerCase();
   const es = (...dominios) => dominios.some(d => host === d || host.endsWith('.' + d));
+  const red = es('instagram.com') ? 'instagram' : es('tiktok.com') ? 'tiktok' : es('youtube.com', 'youtu.be') ? 'youtube'
+    : es('x.com', 'twitter.com') ? 'x' : es('linkedin.com') ? 'linkedin' : es('facebook.com', 'fb.watch') ? 'facebook'
+    : es('threads.net', 'threads.com') ? 'threads' : /(^|\.)pinterest\.([a-z]{2,3}|com?\.[a-z]{2})$/.test(host) ? 'pinterest' : 'web';
+  const ruta = u => { try { return new URL(u, location.href).pathname.replace(/\/+$/, '').toLowerCase(); } catch (e) { return null; } };
+  const aqui = ruta(location.href);
+
+  /* 1) ¿Las etiquetas og: son de ESTA dirección? */
+  const ogUrl = meta('og:url');
+  const codigoIg = red === 'instagram' ? ((location.pathname.match(/\/(?:reels?|p|tv)\/(?!audio\/)([A-Za-z0-9_-]+)/) || [])[1] || '') : '';
+  const vid = red === 'youtube'
+    ? (new URLSearchParams(location.search).get('v') || (location.pathname.match(/^\/shorts\/([A-Za-z0-9_-]+)/) || [])[1]
+      || (host === 'youtu.be' ? location.pathname.slice(1) : '') || '') : '';
+  /* las portadas y los muros: ahí la barra no dice qué post es */
+  const vidFb = red === 'facebook' ? (new URLSearchParams(location.search).get('v') || '') : '';
+  const esMuro = !vid && !codigoIg && !vidFb && /^(|\/home|\/feed|\/foryou|\/following|\/explore|\/reels|\/shorts|\/watch)$/.test(aqui || '');
+  /* la misma página: la misma ruta, sin contar la barra final ni la versión AMP */
+  const sinAmp = r => (r || '').replace(/(^|\/)amp(\/|$)/g, '$1').replace(/\.amp$/, '').replace(/\/+$/, '');
+  const mismaPagina = u => { const r = ruta(u); return r !== null && sinAmp(r) === sinAmp(aqui); };
+  const canonico = (document.querySelector('link[rel="canonical"]') || {}).href || '';
+  let ogVale;
+  if (red === 'web') {
+    /* una web normal se recarga en cada página, salvo los diarios con «scroll infinito», que cambian
+       la barra al bajar y dejan las etiquetas de la primera noticia: entonces no valen */
+    /* de otra página: otra ruta, o la misma con otra «?…» (las webs que van por «?id=») */
+    const deOtra = u => { if (!u || ruta(u) === '') return false;
+      try { const x = new URL(u, location.href);
+        return x.hostname === location.hostname && (!mismaPagina(u) || (!!x.search && x.search !== location.search)); } catch (e) { return false; } };
+    /* la dirección con la que se CARGÓ el documento: si sigue siendo la de la barra, sus etiquetas
+       son de esta página aunque su canónico sea otra ruta (Amazon, WordPress «?p=», un slug corregido) */
+    /* la misma página que otra dirección: misma ruta (sin la barra final) y ningún «?…» que tengan las
+       dos con otro valor; quitar o añadir uno (utm, ?variant=, &color=) no es otra página, ?p=123 → ?p=124 sí */
+    const SEGUIMIENTO = /^(utm_|fbclid$|gclid$|gbraid$|wbraid$|msclkid$|yclid$|ttclid$|igshid$|mc_|_ga$|_gl$|ref$|ref_|si$|srsltid$|gad_|dclid$|twclid$|li_fat_id$|rdt_cid$|epik$|sccid$|_hsenc$|_hsmi$|mkt_tok$|_kx$)/i;
+    const igualQue = (u, v) => { try { const x = new URL(u, location.href), y = new URL(v, location.href);
+        if (x.origin !== y.origin || x.pathname.replace(/\/+$/, '') !== y.pathname.replace(/\/+$/, '')) return false;
+        /* x es la de ahora, y la cargada: lo que tienen las dos, igual; lo que se quitó, solo seguimiento */
+        for (const k of new Set([...x.searchParams.keys(), ...y.searchParams.keys()])) {
+          if (!x.searchParams.has(k)) { if (!SEGUIMIENTO.test(k)) return false; }
+          else if (y.searchParams.has(k) && x.searchParams.getAll(k).join('\n') !== y.searchParams.getAll(k).join('\n')) return false;
+        }
+        return true; } catch (e) { return false; } };
+    let quieta = false;
+    try {
+      const n = performance.getEntriesByType('navigation')[0];
+      const cargada = n ? n.name : '';
+      /* ni la barra ni ninguna entrada de este mismo documento (atrás/adelante) en otra página */
+      const movida = (window.navigation && navigation.entries ? navigation.entries() : [])
+        .some(e => e.sameDocument && !igualQue(e.url, cargada));
+      quieta = !!cargada && igualQue(location.href, cargada) && !movida;
+    } catch (e) { quieta = false; }
+    ogVale = quieta || !(deOtra(ogUrl) || deOtra(canonico));
+  }
+  else if (!ogUrl) ogVale = false;
+  else if (codigoIg) ogVale = new RegExp('/' + codigoIg + '(?:/|$|\\?)').test(ogUrl);
+  else if (vid) ogVale = ogUrl.includes('v=' + vid) || ogUrl.includes('/shorts/' + vid) || ogUrl.includes('youtu.be/' + vid);
+  else if (red !== 'web') ogVale = ruta(ogUrl) === aqui;
+  if (ogVale && esMuro && red !== 'web') ogVale = false;   // la og: de la portada no es la de ningún post
+
   const datos = {
-    url: (document.querySelector('link[rel="canonical"]') || {}).href || meta('og:url') || location.href,
-    titulo: meta('og:title') || limpio(document.title),
-    autor: '', texto: '', imagen: meta('og:image'),
-    seleccion: largo(String(window.getSelection ? window.getSelection() : '')),
-    cifras: {}, red: 'web', lector: 'generico',
+    url: location.href,
+    titulo: (ogVale && meta('og:title')) || limpio(document.title),
+    autor: '', texto: '', imagen: ogVale ? meta('og:image') : '',
+    seleccion: largo(String(window.getSelection ? window.getSelection() : '')).slice(0, 5000),
+    cifras: {}, red, lector: red === 'web' || red === 'threads' || red === 'pinterest' ? 'generico' : red,
   };
-  /* el canónico de algunas webs es la portada: si no se parece a donde estás, se usa la barra */
-  try {
-    const canon = new URL(datos.url, location.href);
-    if (canon.hostname !== location.hostname || canon.pathname === '/' && location.pathname !== '/') datos.url = location.href;
-  } catch (e) { datos.url = location.href; }
-  const descripcion = meta('og:description') || meta('description');
+  if (red === 'web') {
+    /* el canónico (quita lo que sobra de la dirección), salvo que sea la portada */
+    const canon = canonico || ogUrl;
+    try {
+      const c = new URL(canon, location.href);
+      if (canon && ogVale && c.hostname === location.hostname && !(c.pathname === '/' && location.pathname !== '/')) datos.url = c.href;
+    } catch (e) { /* se queda la barra */ }
+    if (!ogVale) {
+      /* el título de la pestaña también puede ser el de la primera noticia */
+      datos.titulo = '';
+      datos.aviso = 'esta página cambió de dirección sin recargarse: va el enlace de la barra y la captura';
+    }
+  } else if (ogVale && ogUrl) {
+    try { if (new URL(ogUrl).hostname.replace(/^www\./, '') === host.replace(/^www\./, '')) datos.url = ogUrl; } catch (e) { /* la barra */ }
+  }
+  let descripcion = ogVale ? (meta('og:description') || meta('description')) : '';
+  let caja = null;            // la caja que se ha demostrado que es la del post de la barra
 
   try {
-    if (es('instagram.com')) {
-      datos.red = 'instagram'; datos.lector = 'instagram';
-      /* og:description: «1.234 Me gusta, 56 comentarios - usuario el 3 de octubre: "texto"»
-         o en inglés «1,234 likes, 56 comments - usuario on October 3, 2026: "text"». */
-      const m = descripcion.match(/^(.*?)\s+-\s+([A-Za-z0-9._]+)\s+(?:el|on)\s+[^:]+:\s*["“«]?([\s\S]*?)["”»]?\.?$/);
-      if (m) { cifrasDeFrase(m[1], datos.cifras); datos.autor = m[2]; datos.texto = m[3]; }
-      else cifrasDeFrase(descripcion, datos.cifras);
-      datos.texto = datos.texto || texto('article h1', 'article ._a9zs', 'h1');
-      datos.autor = datos.autor || corto('article header a[role="link"]', 'header h2', 'header a');
-      for (const el of document.querySelectorAll('span, a')) {
-        const t = limpio(el.innerText);
-        if (t.length < 40 && /\d/.test(t) && /(reproducciones|visualizaciones|views|plays)/i.test(t)) { cifrasDeFrase(t, datos.cifras); break; }
+    if (red === 'instagram') {
+      /* 1) Las etiquetas og: de ESTE post: «1.234 Me gusta, 56 comentarios - usuario el 3 de
+         octubre: "texto"», en inglés «… on October 3, 2026: "text"», o sin las cifras. Las cifras
+         no admiten comillas ni dos puntos, para que un « - » dentro del pie no cambie el autor. */
+      if (ogVale && descripcion) {
+        const m = descripcion.match(/^(?:([^:"“«]*?)\s+-\s+)?([A-Za-z0-9._]+)\s+(?:el|on)\s+[^:"“«]+?:\s*["“«]?([\s\S]*?)["”»]?\.?$/);
+        if (m) { if (m[1]) cifrasDeFrase(m[1], datos.cifras); datos.autor = m[2]; datos.texto = m[3]; }
+        else {
+          /* otra forma: las cifras solo del trozo de antes del primer « - », nunca del pie */
+          const partes = descripcion.split(/\s+-\s+/);
+          if (partes.length > 1 && !/[:"“«]/.test(partes[0])) {
+            cifrasDeFrase(partes[0], datos.cifras);
+            descripcion = partes.slice(1).join(' - ');
+          }
+        }
       }
-    } else if (es('tiktok.com')) {
-      datos.red = 'tiktok'; datos.lector = 'tiktok';
-      datos.autor = corto('[data-e2e="browse-username"]', '[data-e2e="video-author-uniqueid"]', 'h3[data-e2e="video-author-uniqueid"]');
-      datos.texto = texto('[data-e2e="browse-video-desc"]', '[data-e2e="video-desc"]', 'h1[data-e2e="video-desc"]');
-      datos.cifras.me_gusta = numeroDe('[data-e2e="browse-like-count"]', '[data-e2e="like-count"]');
-      datos.cifras.comentarios = numeroDe('[data-e2e="browse-comment-count"]', '[data-e2e="comment-count"]');
-      datos.cifras.compartidos = numeroDe('[data-e2e="share-count"]');
-      datos.cifras.guardados = numeroDe('[data-e2e="undefined-count"]', '[data-e2e="favorite-count"]');
-      datos.cifras.vistas = numeroDe('[data-e2e="video-views"]');
-    } else if (es('youtube.com', 'youtu.be')) {
-      datos.red = 'youtube'; datos.lector = 'youtube';
-      const corto_ = location.pathname.startsWith('/shorts/');
-      const activo = corto_ ? (document.querySelector('ytd-reel-video-renderer[is-active]') || document) : document;
-      const en = (...s) => { for (const x of s) { const el = activo.querySelector(x); if (el && limpio(el.innerText)) return limpio(el.innerText); } return ''; };
-      datos.titulo = en('h1.ytd-watch-metadata', '#title h1', 'h2.ytShortsVideoTitleViewModelShortsVideoTitle', '.title') || datos.titulo;
-      datos.autor = en('#owner #channel-name a', 'ytd-channel-name a', '.ytReelChannelBarViewModelChannelName', '#channel-name a');
-      datos.texto = largo((activo.querySelector('#description-inline-expander, ytd-text-inline-expander, #description') || {}).innerText || '') || descripcion;
-      const vistas = meta('interactionCount') || en('#info span', 'ytd-watch-info-text #info', '#view-count');
-      if (vistas) datos.cifras.vistas = /^\d+$/.test(vistas) ? vistas : (cifrasDeFrase(vistas, {}).vistas || vistas);
-      const gusta = activo.querySelector('like-button-view-model button, #like-button button, button[aria-label*="gusta"], button[aria-label*="like"]');
-      if (gusta) {
-        /* el número se ve en el botón («1,2 K»); si no, va en su etiqueta («…junto con 1.234 personas») */
-        const visto = limpio(gusta.innerText);
-        const etiqueta = (gusta.getAttribute('aria-label') || '').match(/\d[\d.,]*(?:\s*(?:mil|k|m)\b)?/i);
-        datos.cifras.me_gusta = /\d/.test(visto) ? visto : (etiqueta ? limpio(etiqueta[0]) : '');
+      /* 2) Con un código en la barra, el reel que SE VE rellena lo que falte: el vídeo que cruza
+         la mitad de la pantalla y su caja, la primera que trae el botón de comentar. Si la caja
+         enlaza a otros posts y a este no, es la de otro. Lo que está en la lista de comentarios
+         (li, ul) no cuenta: es de otras personas. */
+      const fueraDeComentarios = e => !e.closest('li, ul');
+      const BOTONES = ['Comentario', 'Comment', 'Comentar'].map(x => `svg[aria-label="${x}"]`).join(', ');
+      const codigosEn = c => [...c.querySelectorAll('a[href]')].map(a => ((a.getAttribute('href') || '').match(/\/(?:reels?|p|tv)\/(?!audio\/)([A-Za-z0-9_-]+)/) || [])[1]).filter(Boolean);
+      if (codigoIg) {
+        caja = cajaDelVideoQueSeVe(BOTONES, c => [...c.querySelectorAll(BOTONES)].some(fueraDeComentarios));
+        if (caja && !codigosEn(caja).every(c => c === codigoIg)) caja = null;
       }
-      const comentarios = en('ytd-comments-header-renderer #count', '#comments-button .yt-spec-button-shape-with-label__label');
-      if (comentarios && /\d/.test(comentarios)) datos.cifras.comentarios = datos.cifras.comentarios || comentarios;
-    } else if (es('x.com', 'twitter.com')) {
-      datos.red = 'x'; datos.lector = 'x';
-      const tuit = document.querySelector('article[data-testid="tweet"][tabindex="-1"]') || document.querySelector('article[data-testid="tweet"]');
-      if (tuit) {
-        datos.texto = largo((tuit.querySelector('[data-testid="tweetText"]') || {}).innerText || '');
-        const nombre = limpio((tuit.querySelector('[data-testid="User-Name"]') || {}).innerText || '');
+      if (caja) {
+        if (!ogVale) datos.lector = 'instagram-reel';
+        /* los perfiles a los que enlaza la caja (el autor y, si los hay fuera de li, quien comenta) */
+        const perfiles = [...caja.querySelectorAll('a')].filter(fueraDeComentarios).map(a => {
+          const u = limpio(a.innerText);
+          const r = (a.getAttribute('href') || '').replace(/^https?:\/\/[^/]+/, '');
+          return /^[A-Za-z0-9._]{2,30}$/.test(u) && (r + '/').startsWith('/' + u + '/') ? u : '';
+        }).filter(Boolean);
+        const distintos = [...new Set(perfiles)];
+        if (!datos.autor && distintos.length) datos.autor = distintos[0];
+        /* el pie: solo si nadie más escribe en la caja (con dos perfiles, uno es un comentario) */
+        if (!datos.texto && distintos.length <= 1) {
+          const BOTON = /^(seguir|siguiendo|follow|following|más|more|…\s*más|… more|ver traducción|see translation|audio original|original audio)$/i;
+          datos.texto = [...caja.querySelectorAll('[dir="auto"], h1')].filter(fueraDeComentarios)
+            .filter(e => !e.closest('a[href*="/audio/"], a[href*="/explore/locations/"]'))
+            .map(e => e.innerText || '')
+            .filter(x => limpio(x) && limpio(x) !== datos.autor && !BOTON.test(limpio(x)) && !/(audio original|original audio)/i.test(x))
+            .sort((x, y) => y.length - x.length)[0] || '';
+        }
+        /* la cifra de cada botón es el primer hermano que sea SOLO un número (así no se cuela lo que
+           pinta vidIQ al lado, «1.4K VPH»); se para en el botón siguiente o en la hora («5m») */
+        const cuenta = (...nombres) => {
+          let n = [...caja.querySelectorAll(nombres.map(x => `svg[aria-label="${x}"]`).join(','))].filter(fueraDeComentarios)
+            .sort((x, y) => y.getBoundingClientRect().height - x.getBoundingClientRect().height)[0];
+          for (let i = 0; n && n !== caja && i < 6; i++, n = n.parentElement) {
+            for (let h = n.nextElementSibling; h; h = h.nextElementSibling) {
+              const v = limpio(h.innerText);
+              if (SOLO.test(v)) return v;
+              if (h.querySelector('svg[aria-label]')) break;
+              if (h.matches('time') || h.querySelector('time')) break;
+            }
+          }
+          return '';
+        };
+        datos.cifras.me_gusta = datos.cifras.me_gusta || cuenta('Me gusta', 'Like', 'Ya no me gusta', 'Unlike');
+        datos.cifras.comentarios = datos.cifras.comentarios || cuenta('Comentario', 'Comment', 'Comentar');
+        datos.cifras.compartidos = datos.cifras.compartidos || cuenta('Compartir', 'Share');
+        for (const el of caja.querySelectorAll('span, a')) {
+          if (!fueraDeComentarios(el)) continue;
+          const t = limpio(el.innerText);
+          if (t.length < 40 && /\d/.test(t) && /\b(reproducciones|visualizaciones|views|plays)\b/i.test(t)) { cifrasDeFrase(t, datos.cifras); break; }
+        }
+        if (!ogVale && datos.autor) datos.titulo = `Reel de @${datos.autor}`;
+      } else if (!ogVale) datos.titulo = 'Instagram';
+    } else if (red === 'tiktok') {
+      const idVideo = (location.pathname.match(/\/video\/(\d+)/) || [])[1] || '';
+      const CUENTAS = '[data-e2e="browse-like-count"], [data-e2e="like-count"]';
+      if (idVideo) {
+        /* la página (o la ventana) de UN vídeo: su caja es la que lleva su descripción y sus cifras */
+        /* primero la ventana a la vista que trae las cifras del vídeo (browse-*); si no la hay, solo
+           si en toda la página hay UN vídeo con su descripción y sus cifras (si no, el de detrás
+           podría ser otro: el inicio, el «Para ti») */
+        const DESC = '[data-e2e="browse-video-desc"], [data-e2e="video-desc"]';
+        /* (si la ventana enlaza a vídeos y a este no, es la de otro: una carrera al pasar de uno a otro) */
+        const deEste = d => { const ids = [...d.querySelectorAll('a[href*="/video/"]')]
+            /* las miniaturas de «relacionados» o «vídeos del creador» no dicen de quién es la caja */
+            .filter(a => !a.querySelector('[data-e2e="video-views"], img, picture, video')).map(a => ((a.getAttribute('href') || '').match(/\/video\/(\d+)/) || [])[1]);
+          return !ids.length || ids.includes(idVideo); };
+        const ventana = [...document.querySelectorAll('div[role="dialog"]')].filter(seVe)
+          .find(d => d.querySelector('[data-e2e="browse-like-count"]') && deEste(d));
+        if (ventana) caja = ventana;
+        else if (document.querySelectorAll(DESC).length === 1 && document.querySelectorAll(CUENTAS).length === 1) {
+          let c = document.querySelector(DESC);
+          while (c && c !== document.documentElement && !c.querySelector(CUENTAS)) c = c.parentElement;
+          caja = c && c !== document.documentElement && !c.closest('[data-e2e="anchoring-chrome-host"]') && deEste(c) ? c : null;
+        }
+      }
+      /* el reproductor nuevo (medido el 12-11 en el inicio): UNA sola capa con las cifras y la
+         descripción del vídeo que suena, aparte de la lista de vídeos */
+      const capas = document.querySelectorAll('[data-e2e="anchoring-chrome-host"]');
+      if (!caja && esMuro && capas.length === 1 && seVe(capas[0]) && capas[0].querySelector(CUENTAS)) caja = capas[0];
+      if (!caja && esMuro) {
+        /* «Para ti» de antes: la barra no cambia; vale el vídeo que se ve, y su enlace si lo trae */
+        caja = cajaDelVideoQueSeVe(CUENTAS);
+        const enlace = caja && caja.querySelector('a[href*="/video/"]');
+        if (enlace) datos.url = enlace.href;
+      }
+      if (caja) {
+        datos.autor = cortoEn(caja, '[data-e2e="browse-username"]', '[data-e2e="video-author-uniqueid"]');
+        if (!datos.autor) {
+          const foto = caja.querySelector('[data-e2e="video-author-avatar"]');
+          const a = foto && foto.closest('a[href]');
+          datos.autor = ((a && a.getAttribute('href')) || '').match(/^\/@([A-Za-z0-9._]+)/)?.[1] || '';
+        }
+        datos.texto = textoEn(caja, '[data-e2e="browse-video-desc"]', '[data-e2e="video-desc"]');
+        datos.cifras.me_gusta = numeroEn(caja, '[data-e2e="browse-like-count"]', '[data-e2e="like-count"]');
+        datos.cifras.comentarios = numeroEn(caja, '[data-e2e="browse-comment-count"]', '[data-e2e="comment-count"]');
+        datos.cifras.compartidos = numeroEn(caja, '[data-e2e="share-count"]');
+        datos.cifras.guardados = numeroEn(caja, '[data-e2e="browse-favorite-count"]', '[data-e2e="undefined-count"]', '[data-e2e="favorite-count"]');
+      }
+      /* las vistas: TikTok no las enseña en el vídeo; solo en la miniatura que enlaza a ESTE vídeo */
+      if (idVideo) {
+        for (const a of document.querySelectorAll(`a[href*="/video/${idVideo}"]`)) {
+          if (!new RegExp('/video/' + idVideo + '(?:\\D|$)').test(a.getAttribute('href') || '')) continue;
+          const v = numeroEn(a, '[data-e2e="video-views"]');
+          if (v) { datos.cifras.vistas = v; break; }
+        }
+      }
+    } else if (red === 'youtube') {
+      /* el vídeo de la barra: en /watch, su página (ytd-watch-flexy con su id y a la vista); en un
+         Short, el que enlaza a su id. Nunca toda la página: una página oculta de otro vídeo (al volver
+         a la portada) o un Short visto antes siguen dentro con sus cifras. */
+      const short = location.pathname.startsWith('/shorts/');
+      if (vid && !short) caja = document.querySelector(`ytd-watch-flexy[video-id="${vid}"]:not([hidden])`);
+      if (vid && short) {
+        const reels = [...document.querySelectorAll('ytd-shorts:not([hidden]) ytd-reel-video-renderer')];
+        caja = reels.find(r => [...r.querySelectorAll('a[href*="/shorts/"]')].some(a => (a.getAttribute('href') || '').includes('/shorts/' + vid)))
+          || reels.find(r => r.hasAttribute('is-active') && enMedio(r) && ![...r.querySelectorAll('a[href*="/shorts/"]')].length) || null;
+      }
+      if (!ogVale) datos.imagen = vid ? `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` : '';
+      if (!ogVale) datos.titulo = limpio(document.title).replace(/^\(\d+\)\s*/, '').replace(/\s*-\s*YouTube$/, '');
+      if (caja) {
+        datos.titulo = cortoEn(caja, 'h1.ytd-watch-metadata', 'ytd-watch-metadata #title h1', 'yt-shorts-video-title-view-model h1',
+          'h2.ytShortsVideoTitleViewModelShortsVideoTitle') || datos.titulo;
+        datos.autor = cortoEn(caja, '#owner #channel-name a', 'ytd-watch-metadata ytd-channel-name a', '.ytReelChannelBarViewModelChannelName',
+          'ytd-channel-name a');
+        /* la descripción: el desplegable de debajo del vídeo (no «#description», que también es un dibujo) */
+        const desc = unoEn(caja, 'ytd-watch-metadata ytd-text-inline-expander #attributed-snippet-text',
+          'ytd-watch-metadata #description-inline-expander', 'ytd-text-inline-expander #attributed-snippet-text');
+        datos.texto = largo(textoDe(desc)).replace(/\s*…\s*más\s*$/i, '');
+        /* las vistas: el contador gira («1 2 3 4…»); su etiqueta («230 M de vistas») es lo que vale */
+        const contador = caja.querySelector('#view-count');
+        const vistas = (contador && contador.getAttribute('aria-label')) || (ogVale ? meta('interactionCount') : '')
+          || cortoEn(caja, 'ytd-watch-info-text #info');   // «1836 M de vistas  hace 17 años» (medido el 12-11)
+        if (vistas && /\d/.test(vistas)) datos.cifras.vistas = /^\d+$/.test(limpio(vistas)) ? limpio(vistas) : (cifrasDeFrase(vistas, {}).vistas || '');
+        /* los me gusta: la etiqueta («al igual que 19,501,189 personas más») es el número exacto;
+           si no lo trae, el trozo del botón que es solo un número */
+        const gusta = caja.querySelector('like-button-view-model button, #like-button button');
+        if (gusta) datos.cifras.me_gusta = numeroDeFrase(gusta.getAttribute('aria-label')) || soloNumero(gusta.closest('like-button-view-model') || gusta);
+        /* los comentarios: en /watch, la cabecera de los comentarios; en un Short, su botón */
+        if (short) {
+          const b = caja.querySelector('#comments-button button[aria-label], button[aria-label*="comentario"], button[aria-label*="comment"]');
+          datos.cifras.comentarios = (b && numeroDeFrase(b.getAttribute('aria-label'))) || soloNumero(caja.querySelector('#comments-button'));
+        } else {
+          datos.cifras.comentarios = numeroDeFrase(cortoEn(caja, 'ytd-comments-header-renderer #count'));
+        }
+      }
+    } else if (red === 'x') {
+      /* el tuit de la barra: el artículo que enlaza a su propio /status/ID (su hora), sin contar los
+         tuits citados (van dentro de un div[role=link]) */
+      const id = (location.pathname.match(/\/status\/(\d+)/) || [])[1] || '';
+      const deEsteId = new RegExp('/status/' + id + '(?:[/?#]|$)');
+      if (id) {
+        caja = [...document.querySelectorAll('article[data-testid="tweet"]')].find(art => [...art.querySelectorAll('a[href*="/status/"]')]
+          .some(a => deEsteId.test(a.getAttribute('href') || '') && !(a.parentElement && art.contains(a.parentElement.closest('div[role="link"]'))))) || null;
+      }
+      if (caja) {
+        const art = caja;
+        const fueraDeCita = el => { const q = el.closest('div[role="link"]'); return !q || !art.contains(q); };
+        const primero = s => [...art.querySelectorAll(s)].find(fueraDeCita);
+        datos.texto = largo(textoDe(primero('[data-testid="tweetText"]')));
+        const nombre = limpio(textoDe(primero('[data-testid="User-Name"]')));
         const arroba = nombre.match(/@([A-Za-z0-9_]+)/);
         datos.autor = arroba ? arroba[1] : nombre;
-        const grupo = tuit.querySelector('[role="group"][aria-label]');
+        const grupo = primero('[role="group"][aria-label]');
         if (grupo) cifrasDeFrase(grupo.getAttribute('aria-label'), datos.cifras);
-        const vistas = tuit.querySelector('a[href$="/analytics"]');
+        const vistas = primero('a[href$="/analytics"]');
         if (vistas && !datos.cifras.vistas) cifrasDeFrase(vistas.getAttribute('aria-label') || vistas.innerText, datos.cifras);
       }
-    } else if (es('linkedin.com')) {
-      datos.red = 'linkedin'; datos.lector = 'linkedin';
-      datos.autor = corto('.update-components-actor__title span[aria-hidden="true"]', '.update-components-actor__name', '.feed-shared-actor__name');
-      datos.texto = texto('.update-components-text', '.feed-shared-update-v2__description', '.feed-shared-text') || descripcion;
-      datos.cifras.me_gusta = numeroDe('.social-details-social-counts__reactions-count', '.social-details-social-counts__social-proof-fallback-number');
-      const sociales = corto('.social-details-social-counts');
-      if (sociales) cifrasDeFrase(sociales, datos.cifras);
-    } else if (es('facebook.com', 'fb.watch')) {
-      datos.red = 'facebook'; datos.lector = 'facebook';
-      datos.texto = texto('[data-ad-preview="message"]', '[data-ad-comet-preview="message"]', 'div[role="dialog"] [dir="auto"]') || descripcion;
-      datos.autor = corto('h2 strong a', 'h2 a', 'strong a[role="link"]');
-      for (const el of document.querySelectorAll('[aria-label]')) {
-        const a = el.getAttribute('aria-label') || '';
-        if (a.length < 80 && /\d/.test(a) && /(reacciones|reactions|comentarios|comments|compartido|shares|reproducciones|views)/i.test(a)) cifrasDeFrase(a, datos.cifras);
+    } else if (red === 'linkedin') {
+      /* el post de la barra: la caja que lleva su número de actividad (data-urn) */
+      const act = (location.pathname.match(/(?:activity|ugcPost|share)[:-](\d+)/i) || [])[1] || '';
+      if (act) caja = document.querySelector(`[data-urn$=":${act}"], [data-id$=":${act}"]`);
+      if (caja) {
+        datos.autor = cortoEn(caja, '.update-components-actor__title span[aria-hidden="true"]', '.update-components-actor__name', '.feed-shared-actor__name');
+        datos.texto = textoEn(caja, '.update-components-text', '.feed-shared-update-v2__description', '.feed-shared-text');
+        datos.cifras.me_gusta = numeroEn(caja, '.social-details-social-counts__reactions-count', '.social-details-social-counts__social-proof-fallback-number');
+        /* trozo a trozo («77» y «5 comentarios» pegados no son 775) */
+        const bloque = caja.querySelector('.social-details-social-counts');
+        /* los trozos de texto tal cual están (un «5» en su span y «comentarios» suelto al lado) */
+        const trozos = [];
+        if (bloque) {
+          const w = document.createTreeWalker(bloque, NodeFilter.SHOW_TEXT);
+          for (let n = w.nextNode(); n; n = w.nextNode()) { const t = limpio(n.nodeValue); if (t) trozos.push(t); }
+        }
+        /* entre dos números va un separador; entre un número y su palabra («5» «comentarios»), un espacio */
+        const sociales = trozos.reduce((t, x, i) => !i ? x : t + (/\d$/.test(trozos[i - 1]) && /^\d/.test(x) ? ' · ' : ' ') + x, '');
+        if (sociales) cifrasDeFrase(sociales, datos.cifras);
       }
-      if (!Object.values(datos.cifras).some(Boolean)) cifrasDeFrase(descripcion, datos.cifras);
-    } else if (es('threads.net', 'threads.com')) {
-      datos.red = 'threads'; datos.lector = 'generico';
-    } else if (/(^|\.)pinterest\.([a-z]{2,3}|com?\.[a-z]{2})$/.test(host)) {
-      datos.red = 'pinterest'; datos.lector = 'generico';
+    } else if (red === 'facebook') {
+      /* solo en la página de UN post (o la ventana que lo abre): su ventana a la vista o, en su
+         página, la parte principal. En el inicio no se sabe cuál es. */
+      /* «watch» a secas es el muro de vídeos: solo con ?v= es un vídeo */
+      const esPost = /\/(posts|permalink|photo|photos|videos|reel|story\.php|permalink\.php)(\/|\.|$|\?)/.test(location.pathname + '/')
+        || (/^\/watch\/?$/.test(location.pathname) && !!vidFb);
+      if (esPost) {
+        /* la ventana del post (la que trae su texto), a la vista; si la hay pero aún no se ve, no se
+           adivina; un chat de Messenger encima (otra ventana sin texto de post) no cuenta */
+        const MENSAJE = '[data-ad-preview="message"], [data-ad-comet-preview="message"]';
+        const ventanas = [...document.querySelectorAll('div[role="dialog"]')].filter(d => d.querySelector(MENSAJE));
+        const visibles = ventanas.filter(seVe);
+        if (visibles.length === 1) caja = visibles[0];
+        else if (!ventanas.length) {
+          const principal = document.querySelector('div[role="main"]');
+          caja = principal && principal.querySelectorAll(MENSAJE).length === 1 ? principal : null;
+        }
+      }
+      if (caja) {
+        datos.texto = textoEn(caja, '[data-ad-preview="message"]', '[data-ad-comet-preview="message"]', 'div[role="dialog"] [dir="auto"]');
+        datos.autor = cortoEn(caja, 'h2 strong a', 'h2 a', 'strong a[role="link"]');
+        for (const el of caja.querySelectorAll('[aria-label]')) {
+          const a = el.getAttribute('aria-label') || '';
+          if (a.length < 80 && /\d/.test(a) && /(reacciones|reactions|comentarios|comments|compartido|shares|reproducciones|views)/i.test(a)) cifrasDeFrase(a, datos.cifras);
+        }
+      }
     }
   } catch (e) {
-    datos.aviso = `el lector de ${datos.red} no ha podido leer esta página (${e.message}); va lo genérico`;
+    datos.aviso = `el lector de ${datos.red} no ha podido leer esta página; va lo genérico`;
   }
 
-  /* lo genérico, para lo que el lector de la red no haya llenado */
+  /* lo genérico, solo con etiquetas de ESTA dirección (descripcion ya está vacía si no) */
   if (!datos.texto) datos.texto = descripcion;
   if (!datos.autor) {
+    /* el primer trozo de la dirección es el autor (instagram.com/ana/, tiktok.com/@ana)
+       salvo que sea una sección de la red: /reels/, /p/, /watch… no son nadie */
     const m = location.pathname.match(/^\/@?([A-Za-z0-9._-]{2,40})(?:\/|$)/);
-    datos.autor = meta('author') || meta('twitter:creator') || (datos.red !== 'web' && m ? m[1] : '');
+    const SECCIONES = /^(reels?|p|tv|explore|stories|watch|shorts|feed|home|search|status|video|videos|channel|c|user|hashtag|i|in|posts|groups|pages|events|marketplace|live|music|tag|discover|foryou|following|company|school|pin|profile\.php|permalink\.php|story\.php|photo|photos|results)$/i;
+    datos.autor = (ogVale ? (meta('author') || meta('twitter:creator')) : '') || (red !== 'web' && m && !SECCIONES.test(m[1]) ? m[1] : '');
+  }
+  if (red !== 'web' && !caja && !ogVale && !datos.aviso) {
+    datos.aviso = esMuro
+      ? 'en el inicio no se sabe qué post es: ábrelo (pulsa en su fecha o en él) y vuelve a enviar; va el enlace y la captura'
+      : 'no se ha podido leer con seguridad lo de esta página; va el enlace y la captura';
+  }
+  if (red !== 'web' && caja && esMuro && ruta(datos.url) === aqui && !datos.aviso) {
+    datos.aviso = 'el enlace es el del inicio, no el del vídeo: si lo quieres guardar, ábrelo y vuelve a enviar';
   }
   datos.autor = limpio(datos.autor).replace(/^@/, '');
   datos.texto = largo(datos.texto).slice(0, 5000);

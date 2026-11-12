@@ -41,7 +41,8 @@
   /* y el sufijo solo si es palabra entera: «12 más» o «7 mins» no son millones */
   const NUMERO = '(\\d(?:[\\d.,]|\\s(?=\\d{3}(?!\\d)))*(?:\\s*(?:mil millones|mill(?:ones|\\.)?|milh(?:ões|ão)|mil|[kmb])(?![a-záéíóúñãõç]))?)';
   const cifrasDeFrase = (frase, cifras) => {
-    const f = String(frase || '').toLowerCase();
+    /* «230 M de vistas», «1,2 mil de reproducciones»: el «de» no separa la cifra de su nombre */
+    const f = String(frase || '').toLowerCase().replace(/\s+de\s+(?=[a-záéíóúñ])/g, ' ');
     for (const [clave, palabra] of PALABRAS) {
       if (cifras[clave]) continue;
       const m = f.match(new RegExp(NUMERO + '\\s*' + palabra.source)) || f.match(new RegExp(palabra.source + '[:\\s]+' + NUMERO));
@@ -158,14 +159,33 @@
       datos.cifras.vistas = numeroDe('[data-e2e="video-views"]');
     } else if (es('youtube.com', 'youtu.be')) {
       datos.red = 'youtube'; datos.lector = 'youtube';
+      /* YouTube tampoco recarga al pasar de un vídeo a otro: las etiquetas meta/og: son
+         las del PRIMER vídeo que se abrió en la pestaña (y en la portada o la búsqueda, ni
+         existen). Solo se fían si nombran el mismo vídeo que la barra (11-11-2026). */
       const corto_ = location.pathname.startsWith('/shorts/');
+      const vid = new URLSearchParams(location.search).get('v') || (location.pathname.match(/^\/shorts\/([A-Za-z0-9_-]+)/) || [])[1] || '';
+      const ogUrl = meta('og:url');
+      const deEste = !!vid && ogUrl.includes(vid);
+      if (!deEste) {
+        descripcion = '';
+        datos.url = location.href;
+        datos.imagen = vid ? `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` : '';
+        datos.titulo = limpio(document.title).replace(/^\(\d+\)\s*/, '').replace(/\s*-\s*YouTube$/, '');
+      }
       const activo = corto_ ? (document.querySelector('ytd-reel-video-renderer[is-active]') || document) : document;
       const en = (...s) => { for (const x of s) { const el = activo.querySelector(x); if (el && limpio(el.innerText)) return limpio(el.innerText); } return ''; };
-      datos.titulo = en('h1.ytd-watch-metadata', '#title h1', 'h2.ytShortsVideoTitleViewModelShortsVideoTitle', '.title') || datos.titulo;
-      datos.autor = en('#owner #channel-name a', 'ytd-channel-name a', '.ytReelChannelBarViewModelChannelName', '#channel-name a');
-      datos.texto = largo((activo.querySelector('#description-inline-expander, ytd-text-inline-expander, #description') || {}).innerText || '') || descripcion;
-      const vistas = meta('interactionCount') || en('#info span', 'ytd-watch-info-text #info', '#view-count');
-      if (vistas) datos.cifras.vistas = /^\d+$/.test(vistas) ? vistas : (cifrasDeFrase(vistas, {}).vistas || vistas);
+      datos.titulo = en('h1.ytd-watch-metadata', 'ytd-watch-metadata #title h1', 'h2.ytShortsVideoTitleViewModelShortsVideoTitle') || datos.titulo;
+      datos.autor = en('#owner #channel-name a', 'ytd-watch-metadata ytd-channel-name a', '.ytReelChannelBarViewModelChannelName');
+      /* la descripción: el texto del desplegable de debajo del vídeo (no «#description»,
+         que también es el id de un dibujo de la página) */
+      const desc = activo.querySelector('ytd-watch-metadata ytd-text-inline-expander #attributed-snippet-text, '
+        + 'ytd-watch-metadata #description-inline-expander, ytd-text-inline-expander #attributed-snippet-text');
+      datos.texto = largo((desc || {}).innerText || (desc || {}).textContent || '').replace(/\s*…\s*más\s*$/i, '') || descripcion;
+      /* las vistas: el contador de debajo del vídeo se dibuja con cifras que giran («1 2 3 4…»):
+         su etiqueta para lectores de pantalla («230 M de vistas») es lo que vale */
+      const contador = activo.querySelector('#view-count');
+      const vistas = (contador && contador.getAttribute('aria-label')) || (deEste ? meta('interactionCount') : '') || en('ytd-watch-info-text #info span');
+      if (vistas && /\d/.test(vistas)) datos.cifras.vistas = /^\d+$/.test(limpio(vistas)) ? limpio(vistas) : (cifrasDeFrase(vistas, {}).vistas || '');
       const gusta = activo.querySelector('like-button-view-model button, #like-button button, button[aria-label*="gusta"], button[aria-label*="like"]');
       if (gusta) {
         /* el número se ve en el botón («1,2 K»); si no, va en su etiqueta («…junto con 1.234 personas») */
@@ -173,8 +193,10 @@
         const etiqueta = (gusta.getAttribute('aria-label') || '').match(/\d[\d.,]*(?:\s*(?:mil|k|m)\b)?/i);
         datos.cifras.me_gusta = /\d/.test(visto) ? visto : (etiqueta ? limpio(etiqueta[0]) : '');
       }
+      /* los comentarios: solo el número («23.133 Comentarios» → «23.133») */
       const comentarios = en('ytd-comments-header-renderer #count', '#comments-button .yt-spec-button-shape-with-label__label');
-      if (comentarios && /\d/.test(comentarios)) datos.cifras.comentarios = datos.cifras.comentarios || comentarios;
+      const n = comentarios.match(new RegExp(NUMERO, 'i'));
+      if (n && /\d/.test(n[1])) datos.cifras.comentarios = datos.cifras.comentarios || limpio(n[1]);
     } else if (es('x.com', 'twitter.com')) {
       datos.red = 'x'; datos.lector = 'x';
       const tuit = document.querySelector('article[data-testid="tweet"][tabindex="-1"]') || document.querySelector('article[data-testid="tweet"]');

@@ -312,6 +312,10 @@ PAGINAS = {
       <h1 data-e2e="browse-video-desc">Así quedó la fiesta 🎮 #consolas</h1>
       <strong data-e2e="like-count">12.5K</strong><strong data-e2e="comment-count">345</strong>
       <strong data-e2e="share-count">1,2 mil</strong><strong data-e2e="undefined-count">980</strong></body></html>""",
+    "https://www.tiktok.com/@bea/video/999": """<html><head><title>Bea en TikTok</title>
+      <meta property="og:url" content="https://www.tiktok.com/@ana_baila/video/7300">
+      <meta property="og:title" content="Ana en TikTok"><meta property="og:description" content="El primero que se abrió">
+      </head><body><a data-e2e="browse-username">bea</a></body></html>""",
     "https://www.instagram.com/reel/Cabc/": """<html><head><title>Instagram</title>
       <meta property="og:description" content='1.234 Me gusta, 56 comentarios - estadoplay el 3 de octubre de 2026: "Así quedó la fiesta 🎮"'>
       </head><body><article><span>12,3 mil reproducciones</span></article></body></html>""",
@@ -362,11 +366,26 @@ PAGINAS = {
       </head><body><div style="position:absolute;top:2000px"><span>99 mil reproducciones</span></div></body></html>""",
     "https://www.instagram.com/reels/Dvacio/": """<html><head><title>Instagram</title></head><body></body></html>""",
     "https://www.youtube.com/watch?v=abc": """<html><head><title>Vídeo - YouTube</title>
+      <meta property="og:url" content="https://www.youtube.com/watch?v=abc">
       <meta itemprop="interactionCount" content="45678"></head><body>
       <h1 class="ytd-watch-metadata">Cómo montar una fiesta gamer</h1>
-      <ytd-channel-name><a>Canal Ana</a></ytd-channel-name>
+      <div id="owner"><ytd-channel-name id="channel-name"><a>Canal Ana</a></ytd-channel-name></div>
       <like-button-view-model><button aria-label="Indicar que te gusta este vídeo junto con 1.234 personas más">1,2 K</button></like-button-view-model>
       <div id="description-inline-expander">Todo lo que necesitas para tu fiesta.</div></body></html>""",
+    "https://www.youtube.com/watch?v=NUEVO123&list=RD": """<html><head><title>(7) Self Control (Remix) - YouTube</title>
+      <meta property="og:url" content="https://www.youtube.com/watch?v=VIEJO999">
+      <meta property="og:title" content="El vídeo que se abrió primero">
+      <meta name="description" content="Nunca había hablado sobre estos 5 consejos">
+      <meta itemprop="interactionCount" content="11"></head><body>
+      <svg><g id="description"><path d="M0 0"></path></g></svg>
+      <ytd-watch-metadata><h1 class="ytd-watch-metadata">Self Control (Remix)</h1>
+        <div id="owner"><div id="channel-name"><a>Moreno J Remixes</a></div></div>
+        <ytd-text-inline-expander><span id="attributed-snippet-text">Remixer: Moreno J</span></ytd-text-inline-expander>
+      </ytd-watch-metadata>
+      <div id="view-count" aria-label="230 M de vistas"><span>1 2 3 4 5 6 7 8 9 0 1 2 3</span></div>
+      <like-button-view-model><button aria-label="Me gusta">932,220</button></like-button-view-model>
+      <ytd-comments-header-renderer><span id="count">23,133 Comentarios</span></ytd-comments-header-renderer>
+      </body></html>""",
     "https://x.com/ana_r/status/123": """<html><head><title>X</title></head><body>
       <article data-testid="tweet" tabindex="-1"><div data-testid="User-Name">Ana R @ana_r</div>
       <div data-testid="tweetText">Un hilo sobre fiestas gamer 🧵</div>
@@ -422,6 +441,9 @@ def prueba_lector():
     igual((t["red"], t["autor"], t["texto"]), ("tiktok", "ana_baila", "Así quedó la fiesta 🎮 #consolas"), "TikTok: autor y texto")
     igual(t["cifras"], {"me_gusta": "12.5K", "comentarios": "345", "compartidos": "1,2 mil", "guardados": "980"},
           "TikTok: sus cuatro cifras")
+    tb = resultados["https://www.tiktok.com/@bea/video/999"]
+    igual((tb["autor"], tb["titulo"], tb["texto"]), ("bea", "Bea en TikTok", ""),
+          "TikTok tras pasar a otro vídeo: sin el título ni el texto del primero")
     i = resultados["https://www.instagram.com/reel/Cabc/"]
     igual((i["red"], i["autor"], i["texto"]), ("instagram", "estadoplay", "Así quedó la fiesta 🎮"),
           "Instagram: autor y texto desde la descripción de la página")
@@ -450,6 +472,12 @@ def prueba_lector():
     y = resultados["https://www.youtube.com/watch?v=abc"]
     igual((y["red"], y["titulo"], y["autor"], y["cifras"].get("vistas"), y["cifras"].get("me_gusta")),
           ("youtube", "Cómo montar una fiesta gamer", "Canal Ana", "45678", "1,2 K"), "YouTube: título, canal, vistas y me gusta")
+    yn = resultados["https://www.youtube.com/watch?v=NUEVO123&list=RD"]
+    igual((yn["titulo"], yn["autor"], yn["texto"], yn["imagen"]),
+          ("Self Control (Remix)", "Moreno J Remixes", "Remixer: Moreno J", "https://i.ytimg.com/vi/NUEVO123/hqdefault.jpg"),
+          "YouTube tras pasar de un vídeo a otro: el de la barra, sin la descripción ni la imagen del primero (11-11)")
+    igual(yn["cifras"], {"vistas": "230 m", "me_gusta": "932,220", "comentarios": "23,133"},
+          "YouTube: vistas de la etiqueta del contador (no «1 2 3 4…») y solo el número de comentarios")
     x = resultados["https://x.com/ana_r/status/123"]
     igual((x["red"], x["autor"], x["texto"]), ("x", "ana_r", "Un hilo sobre fiestas gamer 🧵"), "X: autor y texto")
     igual(x["cifras"], {"vistas": "89012", "me_gusta": "560", "comentarios": "12", "compartidos": "34"},

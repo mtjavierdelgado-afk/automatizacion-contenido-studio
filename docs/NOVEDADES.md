@@ -29,6 +29,9 @@ vídeos, estilos, claves y contraseña no se tocan.
   de la bandeja sin borrarlo, y en «Archivados» está **Borrar todos los
   archivados**. Al pasar del tope de 300 se borran primero los archivados, luego
   lo suelto y lo de un proyecto lo último.
+- **YouTube, TikTok y X** (versión 1.3.1): al pasar de un vídeo a otro en la
+  misma pestaña ya no se cuelan el texto ni la imagen del primero; en YouTube las
+  vistas salen bien (antes «1 2 3 4…») y los comentarios solo con su número.
 - **✍️ Escribir el guion** (en un recibido con proyecto): abre el chat de ese
   proyecto con la referencia y le pide a Claude un guion con el formato de la
   Parrilla. Al guardarlo en la Parrilla, «🤖 Hacer el vídeo completo» sale ya con

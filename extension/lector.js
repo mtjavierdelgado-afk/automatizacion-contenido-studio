@@ -67,6 +67,16 @@
     if (canon.hostname !== location.hostname || canon.pathname === '/' && location.pathname !== '/') datos.url = location.href;
   } catch (e) { datos.url = location.href; }
   let descripcion = meta('og:description') || meta('description');
+  /* TikTok y X tampoco recargan al pasar de un post a otro: si su og:url es de otra
+     dirección, sus etiquetas son las del primero que se abrió y no valen (11-11-2026) */
+  if (es('tiktok.com', 'x.com', 'twitter.com') && meta('og:url')) {
+    try {
+      const deOg = new URL(meta('og:url')).pathname.replace(/\/$/, '');
+      if (deOg && deOg !== location.pathname.replace(/\/$/, '')) {
+        descripcion = ''; datos.imagen = ''; datos.url = location.href; datos.titulo = limpio(document.title);
+      }
+    } catch (e) { /* una og:url rara: se deja como está */ }
+  }
 
   try {
     if (es('instagram.com')) {

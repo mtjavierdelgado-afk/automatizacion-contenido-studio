@@ -45,12 +45,19 @@ def publicar_metricas_completas(navegador, datos):
     ok(pg.esperar(".cifras-grandes-publicar .cifra", "seguidores nuevos", 15),
        "Resultados: los seguidores nuevos en las cifras grandes")
     ok(pg.visible(".cifras-grandes-publicar .cifra", "guardados"), "y los guardados")
-    ok(pg.esperar(".cifras-aparte", "impresiones", 5) and pg.visible(".cifras-aparte", "(sumado)"),
+    ok(pg.esperar(".cifras-aparte", "impresiones", 5) and pg.visible(".cifras-aparte", "(sumado"),
        "y, aparte, las impresiones y el alcance «sumado»")
     # revisión del 12-11: cada total dice de cuántas publicaciones sale
     ok(pg.visible(".cifras-grandes-publicar .cifra", "seguidores nuevos · 1 de 2"),
        "los seguidores nuevos (solo TikTok) dicen de cuántas publicaciones salen")
-    ok(pg.visible(".cifras-aparte", "publicaciones)"), "y las impresiones (solo Instagram), también")
+    ok(pg.visible(".cifras-aparte", "impresiones (1 de 2 publicaciones)"), "y las impresiones (solo Instagram), también")
+    ok(pg.visible(".cifras-aparte", "(sumado; 1 de 2 publicaciones)") and not pg.visible(".cifras-aparte", ") ("),
+       "el alcance, en un solo paréntesis")
+    ok(pg.p.evaluate("() => [porcentaje(0), porcentaje(0.0999), porcentaje(0.00999)].join('|')") == "0 %|10 %|1,0 %",
+       "0 % es «0 %», y los decimales se eligen ya redondeado")
+    ok(pg.p.evaluate("() => textoMetricas({posts: 2, vistas: 9, vistas_posts: 2, nuevos_seguidores: 3, "
+                     "nuevos_seguidores_posts: 1}, true)") == "9 vistas · 3 seguidores nuevos (1 de 2)",
+       "una fila «Por red» dice de cuántas publicaciones sale cada cifra")
     ok(pg.visible(".cifras-aparte", "vistas de tus Reels en Facebook"),
        "lo visto de los Reels en Facebook sale en el total")
     ok(pg.p.evaluate("() => [porcentaje(0.0005), porcentaje(0.00001), porcentaje(0.05), porcentaje(0.184)].join('|')")

@@ -29009,11 +29009,13 @@ function tiempoLegible(segundos) {
   return `${Math.floor(minutos / 60)} h${resto ? ` ${resto} min` : ''}`;
 }
 
-function textoMetricas(m) {
+function textoMetricas(m, sumado) {
   if (!m) return '';
+  // `sumado`: la cifra junta varias publicaciones (una fila «Por red»): cada una
+  // dice de cuántas sale si no son todas (2.ª revisión, 12-11)
   return Object.keys(NOMBRES_METRICA)
     .filter(k => typeof m[k] === 'number')
-    .map(k => `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}`)
+    .map(k => `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}${sumado ? deCuantasPublicaciones(m, k).replace(' · ', ' (') + (deCuantasPublicaciones(m, k) ? ')' : '') : ''}`)
     .concat(textoRetencion(m) ? [textoRetencion(m)] : []).join(' · ');
 }
 
@@ -29025,17 +29027,19 @@ function textoMetricasAparte(m, sumado) {
   if (!m) return '';
   // en un total, cada cifra dice de cuántas publicaciones sale si no son todas
   // (TikTok no da impresiones; solo Instagram da lo visto en Facebook…)
-  const de = k => {
+  const cuantas = k => {
     const n = m[`${k}_posts`];
     return sumado && typeof n === 'number' && typeof m.posts === 'number' && n < m.posts
-      ? ` (${n} de ${m.posts} publicaciones)` : '';
+      ? `${n} de ${m.posts} publicaciones` : '';
   };
+  // un solo paréntesis: «(sumado; 1 de 2 publicaciones)», nunca dos seguidos
+  const entre = (...trozos) => { const t = trozos.filter(Boolean).join('; '); return t ? ` (${t})` : ''; };
   const partes = [];
-  if (typeof m.alcance === 'number') partes.push(`${numeroCorto(m.alcance)} personas alcanzadas${sumado ? ' (sumado)' : ''}${de('alcance')}`);
-  if (typeof m.impresiones === 'number') partes.push(`${numeroCorto(m.impresiones)} impresiones${de('impresiones')}`);
-  if (sumado && typeof m.vistas_facebook === 'number') partes.push(`${numeroCorto(m.vistas_facebook)} vistas de tus Reels en Facebook${de('vistas_facebook')}`);
-  if (sumado && typeof m.visitas_perfil === 'number') partes.push(`${numeroCorto(m.visitas_perfil)} visitas al perfil${de('visitas_perfil')}`);
-  if (typeof m.tiempo_total_s === 'number') partes.push(`${tiempoLegible(m.tiempo_total_s)} vistas en total${de('tiempo_total_s')}`);
+  if (typeof m.alcance === 'number') partes.push(`${numeroCorto(m.alcance)} personas alcanzadas${entre(sumado ? 'sumado' : '', cuantas('alcance'))}`);
+  if (typeof m.impresiones === 'number') partes.push(`${numeroCorto(m.impresiones)} impresiones${entre(cuantas('impresiones'))}`);
+  if (sumado && typeof m.vistas_facebook === 'number') partes.push(`${numeroCorto(m.vistas_facebook)} vistas de tus Reels en Facebook${entre(cuantas('vistas_facebook'))}`);
+  if (sumado && typeof m.visitas_perfil === 'number') partes.push(`${numeroCorto(m.visitas_perfil)} visitas al perfil${entre(cuantas('visitas_perfil'))}`);
+  if (typeof m.tiempo_total_s === 'number') partes.push(`${tiempoLegible(m.tiempo_total_s)} vistas en total${entre(cuantas('tiempo_total_s'))}`);
   return partes.join(' · ');
 }
 
@@ -29108,9 +29112,13 @@ function detalleMetricasEnvio(e) {
 function porcentaje(fraccion) {
   const f = Number(fraccion);
   // por debajo del 1 %, con dos decimales (0,05 %, no «0,0 %» ni «0,1 %»);
-  // por debajo del 0,01 %, «menos de 0,01 %» (revisión, 12-11)
+  // por debajo del 0,01 %, «menos de 0,01 %»; el 0, «0 %» (revisión, 12-11).
+  // Los decimales se eligen con el valor YA redondeado: 9,99 % es «10 %»
+  if (!f) return '0 %';
   if (f > 0 && f < 0.0001) return 'menos de 0,01 %';
-  return `${(f * 100).toFixed(f < 0.01 ? 2 : f < 0.1 ? 1 : 0).replace('.', ',')} %`;
+  const p = f * 100;
+  const decimales = p >= 9.95 ? 0 : p >= 0.995 ? 1 : 2;
+  return `${p.toFixed(decimales).replace('.', ',')} %`;
 }
 
 function textoRetencion(m) {
@@ -29913,7 +29921,7 @@ function seccionResultadosPublicar() {
     tabla.appendChild(h('div', { clase: 'fila fila-red' },
       h('b', { clase: 'nombre-red' }, NOMBRES_RED[red]),
       h('span', { clase: 'meta' }, `${pr.posts || 0} publicación(es)`),
-      h('span', { clase: 'crece' }, textoMetricas(pr) || ''),
+      h('span', { clase: 'crece' }, textoMetricas(pr, true) || ''),
       typeof seg.seguidores === 'number'
         ? h('span', { clase: 'pastilla' }, `${numeroCorto(seg.seguidores)} seguidores`)
         : (seg.error ? h('span', { clase: 'meta', title: seg.error }, 'sin seguidores') : null)));

@@ -553,24 +553,30 @@ class ClienteUploadPost:
     TOPE_MEDIA_VISTA = 10.0
 
     @staticmethod
-    def _numero(valor):
+    def _numero(valor, miles=False):
         """Un número de lo que manda Upload-Post, o None. Acepta texto: «3»,
-        «40%» (el signo se quita: la escala la decide quien lo lee), «1,234»
-        o «1.234.567» (miles) y «0,5» (coma decimal). Lo demás, None."""
+        «0.184», «0,5» (coma decimal), «40%» (el signo se quita: la escala la
+        decide quien lo lee) y «1,234.5» (con las dos marcas). Con `miles`
+        (solo los RECUENTOS: vistas, me gusta…) también «1,234» y «1.234.567»;
+        nunca si el primer grupo empieza por 0 («0.881» es siempre 0,881). Lo
+        demás («1e3», «1_000», «- 5»), None (2.ª revisión, 12-11)."""
         if isinstance(valor, bool) or not isinstance(valor, (int, float)):
             if not isinstance(valor, str) or not valor.strip():
                 return None
-            texto = valor.strip().replace("\u00a0", "").replace(" ", "").rstrip("%")
-            if re.fullmatch(r"-?\d{1,3}(,\d{3})+(\.\d+)?", texto):
+            texto = valor.strip().replace("\u00a0", "")
+            if texto.endswith("%"):
+                texto = texto[:-1].rstrip()
+            if re.fullmatch(r"-?[1-9]\d{0,2}(,\d{3})+\.\d+", texto):
                 texto = texto.replace(",", "")                 # 1,234.5
-            elif re.fullmatch(r"-?\d{1,3}(\.\d{3})+(,\d+)?", texto):
+            elif miles and re.fullmatch(r"-?[1-9]\d{0,2}(,\d{3})+", texto):
+                texto = texto.replace(",", "")                 # 1,234
+            elif miles and re.fullmatch(r"-?[1-9]\d{0,2}(\.\d{3})+(,\d+)?", texto):
                 texto = texto.replace(".", "").replace(",", ".")  # 1.234,5
             elif re.fullmatch(r"-?\d+,\d+", texto):
                 texto = texto.replace(",", ".")                 # 0,5
-            try:
-                valor = float(texto)
-            except ValueError:
+            if not re.fullmatch(r"-?\d+(\.\d+)?", texto, flags=re.ASCII):
                 return None
+            valor = float(texto)
         if valor is None or valor != valor or valor in (float("inf"), float("-inf")):
             return None
         return float(valor)
@@ -630,12 +636,15 @@ class ClienteUploadPost:
         -> [fraccion|None] en el mismo orden"""
         numeros = [cls._numero(v) for v in crudos]
         numeros = [v if v is not None and v >= 0 else None for v in numeros]
+        # «0.5%» es medio por ciento, no la fracción 0,5: un texto con «%»
+        # dice que la lista está en 0-100 (2.ª revisión, 12-11)
+        con_signo = any(isinstance(v, str) and v.strip().endswith("%") for v in crudos)
         # 1,5 y no 1: una lista 0-100 de verdad nunca tiene su maximo tan bajo
         # (la curva empieza cerca de 100, un reparto suma cerca de 100), y una
         # fraccion que se pasa un pelo de 1 (1,02) no divide la lista entera.
         # Upload-Post las manda en fracciones (docs, get-analytics: «fractions
         # of 1»); esto es por si algún día llegan en 0-100.
-        en_cien = any(v is not None and v > 1.5 for v in numeros)
+        en_cien = con_signo or any(v is not None and v > 1.5 for v in numeros)
         # un REPARTO de enteros que suma más de 1,5 ([1, 1]) solo puede estar en
         # 0-100: en fracciones, dos enteros serían dos «100 %» (revisión, 12-11)
         validos = [v for v in numeros if v is not None]
@@ -668,8 +677,11 @@ class ClienteUploadPost:
         # 40.218 vistas × 7,4 s de media = 297.613). Si un día llegara en
         # milisegundos, cuadraría mil veces por encima de vistas × tiempo medio:
         # se pasa a segundos en vez de enseñar «mil veces más».
-        vistas = cls._numero(bruto.get("views"))
+        vistas = next((x for x in (cls._numero(bruto.get(k), miles=True)
+                                   for k in cls.CAMPOS_METRICAS["vistas"]) if x), None)
         medio = cls._numero(cls._primero(bruto, cls.CAMPOS_TIEMPO_MEDIO))
+        if medio is not None and not 0 <= medio < 86400:
+            medio = None                     # el mismo filtro que en _retencion
         if total and vistas and medio and vistas > 0 and medio > 0 \
                 and total > 100 * vistas * medio:
             total = round(total / 1000, 1)
@@ -738,7 +750,7 @@ class ClienteUploadPost:
         for nuestro, suyos in cls.CAMPOS_METRICAS.items():
             valor = None
             for suyo in suyos:
-                v = cls._numero(bruto.get(suyo))
+                v = cls._numero(bruto.get(suyo), miles=True)
                 if v is not None and 0 <= v < cls.TOPE_RECUENTO:
                     valor = int(v)
                     break

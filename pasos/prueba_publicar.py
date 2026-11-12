@@ -2122,8 +2122,27 @@ def prueba_metricas_completas():
                                          {"audience_type": "Returning viewers", "percentage": 0.119}]})["publico"],
           [["New viewers", 0.881], ["Returning viewers", 0.119]], "el público con la clave de Upload-Post («audience_type»)")
     # 4) formas que antes se perdían
-    igual([C._numero(x) for x in ("40%", "1,234", "1.234,5", "0,5", " 7 ", "abc", "")],
-          [40.0, 1234.0, 1234.5, 0.5, 7.0, None, None], "«40%», «1,234», «1.234,5» y «0,5» se leen")
+    igual([C._numero(x) for x in ("40%", "0,5", " 7 ", "abc", "", "0.881", "0,881", "7.425", "0.184",
+                                  "1,234.5", "1e3", "1_000", "- 5", "١٢")],
+          [40.0, 0.5, 7.0, None, None, 0.881, 0.881, 7.425, 0.184, 1234.5, None, None, None, None],
+          "los decimales con tres cifras («0.881», «7.425») son decimales; lo raro, None")
+    igual([C._numero(x, miles=True) for x in ("1,234", "1.234.567", "1.234,5", "0.881", "12")],
+          [1234.0, 1234567.0, 1234.5, 0.881, 12.0], "en los recuentos, «1,234» y «1.234.567» son miles")
+    igual(C._numeros({"views": "1,234", "likes": "1.500"})["vistas"], 1234, "un recuento en texto con miles")
+    texto_crudo = C._detalle({"retention": [{"second": "0", "percentage": "1.000"}, {"second": "3", "percentage": "0.750"}],
+                              "audience_types": [{"audience_type": "New viewers", "percentage": "0.881"},
+                                                 {"audience_type": "Returning viewers", "percentage": "0.119"}]})
+    igual((texto_crudo["curva"], texto_crudo["publico"]),
+          ([[0.0, 1.0], [3.0, 0.75]], [["New viewers", 0.881], ["Returning viewers", 0.119]]),
+          "la curva y el público en texto («1.000», «0.881») se leen bien")
+    igual(C._retencion({"full_video_watched_rate": "0.184", "average_time_watched": "7.425"}),
+          {"vista_entera": 0.184, "media_vista": None, "tiempo_medio_s": 7.4},
+          "la retención en texto no se pierde ni se multiplica por mil")
+    igual(C._detalle({"impression_sources": [{"source": "A", "percentage": "0.5%"},
+                                             {"source": "B", "percentage": "1%"}]})["fuentes"],
+          [["B", 0.01], ["A", 0.005]], "«0.5%» es medio por ciento, no la mitad")
+    igual(C._detalle({"video_views": 1000, "average_time_watched": 10, "total_time_watched": 10_000_000})["tiempo_total_s"],
+          10000.0, "el aviso de milisegundos también con las vistas en «video_views»")
     igual(C._detalle({"retention": [{"second": None, "time": 3, "percentage": 0.5},
                                     {"second": 0, "percentage": 1.0}]})["curva"],
           [[0.0, 1.0], [3.0, 0.5]], "un «second» vacío no tapa el «time» de al lado")

@@ -13,7 +13,7 @@
   </header>
 
   <section id="config" hidden>
-    <p class="pista">En tu Studio, <b>Configuración → Enviar al Studio</b>, copia la <b>clave de conexión</b> y pégala en el primer campo: lleva la dirección y el código juntos. Se pone una sola vez.</p>
+    <p class="pista">En tu Studio, <b>Configuración → Enviar al Studio</b>, pulsa <b>«Crear el código de envío»</b>, copia la <b>clave de conexión</b> y pégala en el primer campo: lleva la dirección y el código juntos. Se pone una sola vez.</p>
     <p class="pista">Lo que escribes se guarda solo: si la ventanita se cierra, vuelve a abrirla y sigue ahí.</p>
     <label>Clave de conexión o dirección de tu Studio
       <input id="studio" type="text" placeholder="Pega aquí la clave de conexión (https://…#env_…)" autocomplete="off">
@@ -39,6 +39,7 @@
     <label>Proyecto
       <select id="proyecto"><option value="">Sin proyecto</option></select>
     </label>
+    <p id="pistaProyecto" class="pista" hidden></p>
     <label class="casilla"><input id="conCaptura" type="checkbox" checked> Incluir una captura de lo que se ve</label>
     <label>Tu nota (opcional)
       <textarea id="nota" rows="2" placeholder="Qué te gusta de esto o qué quieres hacer con ello"></textarea>

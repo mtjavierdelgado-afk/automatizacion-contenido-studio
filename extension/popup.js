@@ -17,6 +17,7 @@
  */
 const $ = id => document.getElementById(id);
 let leido = null;
+let enviando = false;
 
 function estado(id, texto, tipo) {
   const el = $(id);
@@ -33,7 +34,7 @@ function normalizar(direccion) {
   if (!(u.protocol === 'https:' || (u.protocol === 'http:' && local))) return null;
   /* la dirección del Studio puede llevar una carpeta (/v2/): la API cuelga de ahí. Si se
      pega la de una pantalla (…/login, …/index.html) se quita ese último trozo */
-  let carpeta = u.pathname.replace(/\/(login|studio|index\.html|[^/]*\.[a-z0-9]+)\/?$/i, '/');
+  let carpeta = u.pathname.replace(/\/(login|index\.html|[^/]*\.[a-z0-9]+)\/?$/i, '/');
   if (!carpeta.endsWith('/')) carpeta += '/';
   return { base: u.origin + carpeta, origen: u.origin, api: u.origin + carpeta + 'api/' };
 }
@@ -58,7 +59,7 @@ function repartirClave(texto) {
    haya añadido detrás de lo que ya había (se busca la ÚLTIMA clave entera). Un
    código a medio escribir («env») no es una dirección: solo se mueve lo que
    empieza por http. */
-const CLAVE_ENTERA = /https?:\/\/(?:(?!https?:\/\/)[^\s#"'«»])+#env_[A-Za-z0-9_-]+/g;
+const CLAVE_ENTERA = /https?:\/\/(?:(?!https?:\/\/)[^\s#"'«»])+#env_[A-Za-z0-9_-]+(?=\s|$)/g;
 
 function repartirCampos() {
   const claves = ($('studio').value + ' ' + $('codigo').value).match(CLAVE_ENTERA);
@@ -101,6 +102,27 @@ async function rellenarConfig() {
   const hayBorrador = 'borradorStudio' in c || 'borradorCodigo' in c;
   $('studio').value = (hayBorrador ? c.borradorStudio : c.studio) ?? '';
   $('codigo').value = (hayBorrador ? c.borradorCodigo : c.codigo) ?? '';
+  /* si Chrome cerró la ventanita al pedir el permiso, al volver se dice qué toca */
+  if (hayBorrador && $('studio').value && $('codigo').value) estado('estadoConfig', 'Está todo puesto: pulsa «Probar» para conectar.', '');
+}
+
+/* Pegar: si lo pegado es una clave entera (o un código), se reparte en los dos
+   campos en vez de entrar donde esté el cursor, que podía dejarlo a medias. */
+function alPegar(e) {
+  const t = String((e.clipboardData && e.clipboardData.getData('text')) || '').trim();
+  const claves = t.match(CLAVE_ENTERA);
+  if (claves) {
+    e.preventDefault();
+    const r = repartirClave(claves[claves.length - 1]);
+    $('studio').value = r.studio; $('codigo').value = r.codigo;
+  } else if (/^env_[A-Za-z0-9_-]+$/.test(t)) {
+    e.preventDefault();
+    $('codigo').value = t;
+  } else if (/^https?:\/\/\S+$/.test(t) && e.target.id === 'studio') {
+    e.preventDefault();
+    $('studio').value = t;
+  } else return;
+  guardarBorrador();
 }
 
 function mostrarConfig(mostrar) {
@@ -116,8 +138,10 @@ async function enviarDirecto(cfg, ruta, metodo, cuerpo) {
     headers: Object.assign({ 'X-Estudio-Envio': cfg.codigo }, cuerpo ? { 'Content-Type': 'application/json' } : {}),
     body: cuerpo || undefined,
   });
-  /* el login contesta con una redirección a /login (o con su página): no hay sesión aquí */
-  if (r.type === 'opaqueredirect' || (r.headers.get('content-type') || '').includes('text/html')) return { sinSesion: true };
+  /* el login contesta con una redirección a /login (o con su página): no hay sesión aquí.
+     Un 5xx en HTML es otra cosa: nginx diciendo que el Studio está caído */
+  if (r.type === 'opaqueredirect') return { sinSesion: true };
+  if ((r.headers.get('content-type') || '').includes('text/html')) return r.status >= 500 ? { caido: r.status } : { sinSesion: true };
   let datos = null;
   try { datos = await r.json(); } catch (e) { datos = null; }
   return { status: r.status, datos };
@@ -126,8 +150,11 @@ async function enviarDirecto(cfg, ruta, metodo, cuerpo) {
 async function enviarDesdeElStudio(cfg, ruta, metodo, cuerpo) {
   let pestanas = [];
   try { pestanas = await chrome.tabs.query({ url: cfg.origen + '/*' }); } catch (e) { pestanas = []; }
-  const pestana = pestanas.find(p => (p.url || '').startsWith(cfg.base)) || pestanas[0];
-  if (!pestana) return { sinPestana: true };
+  /* solo pestañas que de verdad son del Studio (sin el permiso «tabs» la dirección puede no
+     venir: esas no cuentan), y mejor una despierta: Chrome duerme las que llevan rato quietas */
+  const delStudio = pestanas.filter(p => p.url && p.url.startsWith(cfg.base));
+  const pestana = delStudio.find(p => !p.discarded) || null;
+  if (!pestana) return delStudio.length ? { dormida: true } : { sinPestana: true };
   const [res] = await chrome.scripting.executeScript({
     target: { tabId: pestana.id },
     args: [cfg.api + ruta, metodo, cfg.codigo, cuerpo || null],
@@ -147,21 +174,35 @@ async function enviarDesdeElStudio(cfg, ruta, metodo, cuerpo) {
   return v;
 }
 
+/* Los textos que ve el dueño dicen QUÉ pasa y QUÉ hacer, en castellano: nunca el
+   mensaje en inglés del navegador («Failed to fetch»). */
+const CAIDO = n => `Tu Studio no contesta ahora (error ${n}). Prueba otra vez en unos minutos.`;
+
 async function hablarConElStudio(cfg, ruta, metodo, cuerpo) {
+  /* un permiso quitado a mano en chrome://extensions: se dice, en vez de «la dirección está mal» */
+  const conPermiso = await chrome.permissions.contains({ origins: [cfg.origen + '/*'] }).catch(() => true);
+  if (!conPermiso) return { mal: 'La extensión ya no tiene permiso para hablar con tu Studio: pulsa ⚙ y luego «Probar» para volver a darlo.' };
   let r;
-  try { r = await enviarDirecto(cfg, ruta, metodo, cuerpo); } catch (e) { r = { error: e.message }; }
-  if (r.sinSesion || r.error) {
-    const otra = await enviarDesdeElStudio(cfg, ruta, metodo, cuerpo).catch(e => ({ error: e.message }));
+  try { r = await enviarDirecto(cfg, ruta, metodo, cuerpo); } catch (e) { r = { sinRed: true }; }
+  if (r.caido) return { mal: CAIDO(r.caido) };
+  if (r.sinSesion || r.sinRed) {
+    const otra = await enviarDesdeElStudio(cfg, ruta, metodo, cuerpo).catch(() => ({ fallo: true }));
     if (otra.sinPestana) {
-      return { mal: r.error ? `no se puede hablar con el Studio (${r.error}). ¿Está bien la dirección?`
+      return { mal: r.sinRed ? 'No se puede llegar a tu Studio. Mira que tienes internet y que la dirección (⚙) es la de tu Studio.'
         : 'Abre tu Studio en otra pestaña de este Chrome, inicia sesión y vuelve a pulsar.' };
     }
+    if (otra.dormida) return { mal: 'La pestaña de tu Studio está dormida: pulsa en ella, espera a que cargue y vuelve a pulsar aquí.' };
     if (otra.sinSesion) return { mal: 'Tu Studio pide iniciar sesión: entra en su pestaña y vuelve a pulsar.' };
-    if (otra.error) return { mal: `no se ha podido enviar: ${otra.error}` };
+    if (otra.fallo) return { mal: 'No se ha podido enviar desde la pestaña de tu Studio: recárgala (F5) y vuelve a pulsar.' };
     r = otra;
   }
-  if (r.status === 401) return { mal: 'El código de envío no vale. Crea uno nuevo en Configuración → Enviar al Studio y pégalo aquí (⚙).' };
-  if (r.status >= 400 || !r.datos) return { mal: (r.datos && (r.datos.error || r.datos.detail)) || `el Studio ha contestado ${r.status}` };
+  if (r.status === 401) return { mal: 'El código de envío no vale. Crea uno nuevo en Configuración → Enviar al Studio y pégalo aquí (⚙).', status: 401 };
+  if (r.status >= 500) return { mal: CAIDO(r.status), status: r.status };
+  if (r.status >= 400 || !r.datos) {
+    const error = (r.datos && (r.datos.error || r.datos.detail)) || '';
+    return { mal: error ? String(error).charAt(0).toUpperCase() + String(error).slice(1) + '.' : `Tu Studio ha contestado con un error (${r.status}).`,
+      status: r.status, error: String(error) };
+  }
   return { bien: r.datos };
 }
 
@@ -190,7 +231,8 @@ async function leerPestana() {
   $('cifras').textContent = Object.entries(leido.cifras || {}).map(([k, v]) => `${v} ${ETIQUETAS[k] || k}`).join(' · ')
     || 'No se ven cifras en esta página.';
   $('texto').textContent = (leido.seleccion || leido.texto || '').slice(0, 600);
-  if (leido.aviso) estado('estado', leido.aviso, 'mal');
+  if (leido.aviso) estado('estado', leido.aviso.charAt(0).toUpperCase() + leido.aviso.slice(1) + '.', 'mal');
+  $('enviar').disabled = false;   // hasta aquí no hay nada que enviar
 }
 
 /* El menú «Proyecto»: los proyectos del Studio (con el código de envío) y el
@@ -207,6 +249,10 @@ async function cargarProyectos() {
   const lista = (r.bien && r.bien.proyectos) || [];
   proyectosCargados = !!r.bien;
   sel.disabled = false;
+  /* sin la lista se puede enviar igual, pero que se sepa que irá sin proyecto */
+  const pista = $('pistaProyecto');
+  pista.hidden = proyectosCargados;
+  pista.textContent = proyectosCargados ? '' : `No he podido leer tus proyectos: se enviará sin proyecto y lo puedes anexar en el Studio. (${r.mal || 'sin respuesta'})`;
   while (sel.options.length > 1) sel.remove(1);   // al volver a cargarlos, sin repetir
   for (const p of lista) {
     const o = document.createElement('option');
@@ -217,11 +263,17 @@ async function cargarProyectos() {
 }
 
 async function enviar() {
-  const cfg = await config();
-  if (!cfg) { mostrarConfig(true); return; }
-  if (!leido) return;
+  /* lo primero, antes de ninguna espera: dos pulsaciones seguidas no mandan dos */
+  if (enviando || !leido) return;
+  enviando = true;
   $('enviar').disabled = true;
-  estado('estado', 'enviando…');
+  try { await enviarYa(); } finally { enviando = false; }
+}
+
+async function enviarYa() {
+  const cfg = await config();
+  if (!cfg) { $('enviar').disabled = false; await rellenarConfig(); mostrarConfig(true); return; }
+  estado('estado', 'Enviando…');
   let captura = '';
   if ($('conCaptura').checked) {
     try { captura = await chrome.tabs.captureVisibleTab(leido.windowId, { format: 'jpeg', quality: 72 }); }
@@ -232,13 +284,19 @@ async function enviar() {
     nota: $('nota').value.trim(), cifras: leido.cifras || {}, imagen: leido.imagen || '', captura,
     proyecto: $('proyecto').value,
   });
-  /* solo si la lista llegó: con el menú vacío, «Sin proyecto» no es una elección */
-  if (proyectosCargados) chrome.storage.local.set({ ultimoProyecto: $('proyecto').value }).catch(() => {});
   const r = await hablarConElStudio(cfg, 'recibidos', 'POST', cuerpo);
   if (r.bien) {
+    /* solo si la lista llegó (con el menú vacío, «Sin proyecto» no es una elección) y el envío fue bien */
+    if (proyectosCargados) chrome.storage.local.set({ ultimoProyecto: $('proyecto').value }).catch(() => {});
     const nombre = $('proyecto').value ? $('proyecto').selectedOptions[0].textContent : '';
     estado('estado', `✓ Enviado${nombre ? ` a ${nombre}` : ''}. Lo tienes en Automatizar → Recibidos de Chrome.`, 'bien');
+    $('enviar').disabled = false;
     $('nota').value = '';
+  } else if (r.status === 400 && /proyecto/i.test(r.error || '')) {
+    /* el proyecto se borró mientras tanto: se vuelve a pedir la lista */
+    await cargarProyectos();
+    estado('estado', 'Ese proyecto ya no está en tu Studio. Elige otro en el menú y vuelve a pulsar.', 'mal');
+    $('enviar').disabled = false;
   } else {
     estado('estado', r.mal, 'mal');
     $('enviar').disabled = false;
@@ -250,14 +308,24 @@ async function enviar() {
 /* ¿Esa dirección es un Studio? Se pregunta SIN el código: un Studio contesta a
    /api/recibidos/ping con un 401 suyo, o su login lo manda a /login. Así una
    errata en la dirección no le regala el código a otra web. */
+const ES_STUDIO = d => !!d && d.ok === true && /CrearIA/.test(String(d.producto || ''));
 async function esUnStudio(n) {
+  /* Lo que vale (12-11-2026: antes valía CUALQUIER redirección y cualquier JSON):
+     - el Studio sin sesión: su login redirige, y la página /login de ESA MISMA web es la de CrearIA
+       (no se sigue la redirección: se pide /login a la dirección escrita);
+     - el Studio con sesión: un 401 suyo que habla del código de envío, o su ping ({ok, producto}). */
   try {
     const r = await fetch(n.api + 'recibidos/ping', { credentials: 'include', redirect: 'manual' });
-    if (r.type === 'opaqueredirect') return true;
-    if (r.status === 401 || r.status === 200) {
-      const d = await r.json().catch(() => null);
-      return !!d && (r.status === 200 || /c[oó]digo de env[ií]o/.test(String(d.error || '')));
+    if (r.type === 'opaqueredirect') {
+      for (const login of [n.base + 'login', n.origen + '/login']) {
+        const l = await fetch(login, { credentials: 'include', redirect: 'manual' }).catch(() => null);
+        if (l && l.status === 200 && /CrearIA/.test(await l.text().catch(() => ''))) return true;
+      }
+      return false;
     }
+    const d = await r.json().catch(() => null);
+    if (r.status === 401) return !!d && /c[oó]digo de env[ií]o/.test(String(d.error || ''));
+    if (r.status === 200) return ES_STUDIO(d);
   } catch (e) { return false; }
   return false;
 }
@@ -289,7 +357,9 @@ async function probar() {
   if (!cfg) return;
   estado('estadoConfig', 'probando…');
   const r = await hablarConElStudio(cfg, 'recibidos/ping', 'GET', null);
-  if (r.bien) {
+  if (r.bien && !ES_STUDIO(r.bien)) {
+    estado('estadoConfig', 'En esa dirección no contesta un CrearIA Studio. Cópiala de Configuración → Enviar al Studio.', 'mal');
+  } else if (r.bien) {
     estado('estadoConfig', '✓ Conectado con tu Studio. No hace falta volver a ponerlo: sirve en todas las pestañas de este Chrome.', 'bien');
     setTimeout(() => { mostrarConfig(false); leerPestana(); cargarProyectos(); }, 2500);
   } else estado('estadoConfig', r.mal, 'mal');
@@ -303,15 +373,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!(await config())) return;
     mostrarConfig(false);
     leerPestana();
+    cargarProyectos();   // por si se cambió de Studio: su lista, no la del anterior
   });
   for (const id of ['studio', 'codigo']) {
     $(id).addEventListener('input', guardarBorrador);
+    $(id).addEventListener('paste', alPegar);
     /* al entrar en un campo se selecciona entero: pegar lo REEMPLAZA en vez de añadirse detrás */
     $(id).addEventListener('focus', e => setTimeout(() => e.target.select(), 0));   // tras soltar el ratón, o se deshace
   }
   $('guardar').addEventListener('click', guardar);
   $('probar').addEventListener('click', probar);
   $('enviar').addEventListener('click', enviar);
+  $('enviar').disabled = true;   // hasta que se haya leído la página
   if (await config()) { mostrarConfig(false); leerPestana(); cargarProyectos(); }
   else { await rellenarConfig(); mostrarConfig(true); }
 });

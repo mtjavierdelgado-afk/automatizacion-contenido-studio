@@ -273,7 +273,7 @@ def prueba_extension():
     igual(m.get("manifest_version"), 3, "Manifest V3 (lo que Chrome acepta hoy)")
     igual(sorted(m.get("permissions") or []), ["activeTab", "scripting", "storage"],
           "permisos mínimos: la pestaña que pulsas, inyectar el lector y guardar tus ajustes")
-    ok("host_permissions" not in m and set(m.get("optional_host_permissions") or []) <= {"https://*/*", "http://*/*"},
+    ok("host_permissions" not in m and set(m.get("optional_host_permissions") or []) <= {"https://*/*", "http://localhost/*", "http://127.0.0.1/*"},
        "ningún permiso fijo sobre webs: el de tu Studio se pide al guardar")
     nombrados = [m["action"]["default_popup"]] + list(m["icons"].values()) + list(m["action"]["default_icon"].values())
     ok(all(os.path.isfile(os.path.join(EXT, n)) for n in nombrados), "todo lo que nombra el manifiesto existe")
@@ -729,7 +729,7 @@ window.chrome = {
     ? [{ result: { url: 'https://www.tiktok.com/@ana/video/1', red: 'tiktok', autor: 'ana', titulo: 'Ana',
                    texto: 'Así quedó la fiesta', cifras: { me_gusta: '12K' } } }]
     : [{ result: await o.func(...o.args) }] },
-  permissions: { request: async () => true },
+  permissions: { request: async () => true, contains: async () => window.__estado.conPermiso !== false },
 };
 """
 
@@ -743,16 +743,33 @@ def prueba_boton():
         return
     llegadas = []
     respuestas = []
+    proyectos_mal = []
 
     def servir(ruta):
         url = ruta.request.url
+        if url.startswith("https://otra.web/"):
+            # una web que NO es un Studio: lo que reciba se apunta aparte
+            llegadas.append((ruta.request.method, url, ruta.request.headers.get("x-estudio-envio"), None))
+            if url.endswith("/login"):
+                return ruta.fulfill(status=200, headers={"Content-Type": "text/html"}, body="<h1>Entra en tu WordPress</h1>")
+            if url.startswith("https://otra.web/wp/"):   # un WordPress que añade la barra o cambia de idioma
+                return ruta.fulfill(status=301, headers={"Location": "https://otra.web/es/"}, body="")
+            return ruta.fulfill(status=200, headers={"Content-Type": "application/json"}, body='{"hola": 1}')
+        if url in ("https://studio.prueba/login", "https://studio.prueba/v2/login"):
+            return ruta.fulfill(status=200, headers={"Content-Type": "text/html"}, body="<title>CrearIA Studio</title>acceso")
         if url.startswith("https://studio.prueba/") and url.endswith("/api/recibidos/proyectos"):
+            if proyectos_mal:
+                proyectos_mal.pop(0)
+                return ruta.fulfill(status=502, headers={"Content-Type": "text/html"}, body="<html>502 Bad Gateway</html>")
             return ruta.fulfill(status=200, headers={"Content-Type": "application/json"}, body=json.dumps(
                 {"proyectos": [{"id": "estadoplay", "nombre": "EstadoPlay"}, {"id": "casas", "nombre": "Casas con Diseño"}]}))
         if url.startswith("https://studio.prueba/") and "/api/" in url:
             llegadas.append((ruta.request.method, url, ruta.request.headers.get("x-estudio-envio"),
                              ruta.request.post_data))
-            estado, cuerpo, cabeceras = respuestas.pop(0) if respuestas else (201, {"ok": True}, {})
+            siguiente = respuestas.pop(0) if respuestas else (201, {"ok": True}, {})
+            if siguiente == "sin red":
+                return ruta.abort("internetdisconnected")
+            estado, cuerpo, cabeceras = siguiente
             return ruta.fulfill(status=estado, headers=dict({"Content-Type": "application/json"}, **cabeceras),
                                 body=json.dumps(cuerpo))
         nombre = url.split("studio.prueba/", 1)[-1].split("?")[0] or "popup.html"
@@ -825,6 +842,114 @@ def prueba_boton():
             pagina.wait_for_function("document.getElementById('estado').classList.contains('mal')", timeout=5000)
             ok("código de envío no vale" in pagina.inner_text("#estado"), "un código que no vale: dice cómo arreglarlo")
             pagina.close()
+
+            # --- revisión del 12-11: lo que el revisor de la ventanita reprodujo ---
+            def config_nueva(cfg_js=""):
+                pg = navegador.new_page(viewport={"width": 360, "height": 640})
+                pg.add_init_script(CHROME_FALSO + "window.__estado.guardado = {};" + cfg_js)
+                pg.route("**/*", servir)
+                pg.goto("https://studio.prueba/popup.html")
+                pg.wait_for_selector("#config:not([hidden])", timeout=5000)
+                return pg
+
+            def probar_con(pg, studio, codigo="env_Bueno_1234567890"):
+                pg.fill("#studio", studio)
+                pg.fill("#codigo", codigo)
+                pg.click("#probar")
+                pg.wait_for_function("['mal','bien'].some(c => document.getElementById('estadoConfig').classList.contains(c))"
+                                     " && !document.getElementById('estadoConfig').textContent.includes('…')", timeout=5000)
+                return pg.inner_text("#estadoConfig")
+
+            # una web que redirige a otra (301 de un WordPress) no es un Studio, y no recibe el código
+            pg = config_nueva()
+            texto = probar_con(pg, "https://otra.web/wp/")
+            ok("no contesta un CrearIA Studio" in texto and not any(l[2] for l in llegadas if "otra.web" in l[1])
+               and pg.evaluate("window.__estado.guardado.studio") is None,
+               "una dirección que redirige a otra web no se da por Studio ni le llega el código")
+            # una web que contesta 200 con cualquier JSON tampoco
+            texto = probar_con(pg, "https://otra.web/hola/")
+            ok("no contesta un CrearIA Studio" in texto, "una web que contesta {«hola»: 1} no es un Studio")
+            # el Studio de verdad sin sesión: su login lo manda a /login de la MISMA web, con la página de CrearIA
+            respuestas.extend([(302, {}, {"Location": "https://studio.prueba/login"}),
+                               (200, {"ok": True, "producto": "CrearIA Studio"}, {})])
+            texto = probar_con(pg, "https://studio.prueba/")
+            ok("Conectado" in texto, "el Studio sin sesión (redirige a su /login) sí se acepta" + ("" if "Conectado" in texto else f" [{texto}]"))
+            pg.close()
+
+            # pegar con el cursor en medio de un campo lleno: la clave se reparte entera
+            pg = config_nueva()
+            pg.fill("#studio", "https://srv1.hstgr.cloud/v1/")
+            pg.evaluate("""() => { const el = document.getElementById('studio'); el.focus(); el.setSelectionRange(10, 10);
+                const dt = new DataTransfer(); dt.setData('text/plain', 'https://srv1.hstgr.cloud/v2/#env_NUEVO_abcdefgh12');
+                el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); }""")
+            igual((pg.input_value("#studio"), pg.input_value("#codigo")), ("https://srv1.hstgr.cloud/v2/", "env_NUEVO_abcdefgh12"),
+                  "pegar la clave con el cursor en medio de lo que había: dirección y código bien, sin trozos de más")
+            pg.fill("#codigo", "env_NUEVO_abcdefgh12v1")
+            pg.fill("#studio", "https://srv1.hstgr.cloud/v2/#env_NUEVO_abcdefgh12v1")
+            igual(pg.input_value("#codigo"), "env_NUEVO_abcdefgh12v1", "(y una clave escrita a mano entera también vale)")
+            pg.close()
+
+            # el Studio caído (502 de nginx en HTML), sin pestaña del Studio: lo dice así, en castellano
+            pg = abrir(navegador)
+            respuestas.append((502, "<html>502 Bad Gateway</html>", {"Content-Type": "text/html"}))
+            pg.click("#enviar")
+            pg.wait_for_function("document.getElementById('estado').classList.contains('mal')", timeout=5000)
+            ok("no contesta ahora (error 502)" in pg.inner_text("#estado"), "el Studio caído: «no contesta ahora (error 502)», no «inicia sesión»")
+            # sin red: sin el inglés del navegador
+            respuestas.append("sin red")
+            pg.click("#enviar")
+            try:
+                pg.wait_for_function("document.getElementById('estado').textContent.includes('internet')", timeout=5000)
+            except Exception:
+                print("   estado:", pg.inner_text("#estado"))
+                raise
+            ok("Failed" not in pg.inner_text("#estado"), "sin red: lo dice en castellano, sin «Failed to fetch»")
+            pg.close()
+
+            # la lista de proyectos no llega: se avisa de que irá sin proyecto
+            proyectos_mal.append(1)
+            pg = abrir(navegador)
+            pg.wait_for_selector("#pistaProyecto:not([hidden])", timeout=5000)
+            ok("se enviará sin proyecto" in pg.inner_text("#pistaProyecto"), "sin la lista de proyectos, avisa de que irá sin proyecto")
+            pg.close()
+
+            # dos pulsaciones en el mismo instante: un solo envío
+            pg = abrir(navegador)
+            antes = len([l for l in llegadas if l[0] == "POST"])
+            pg.evaluate("() => { const b = document.getElementById('enviar'); b.click(); b.click(); }")
+            pg.wait_for_function("document.getElementById('estado').textContent.includes('Enviado')", timeout=5000)
+            pg.wait_for_timeout(400)
+            igual(len([l for l in llegadas if l[0] == "POST"]) - antes, 1, "dos pulsaciones a la vez mandan UN recibido")
+            # un proyecto que se borró mientras tanto: lo dice y vuelve a pedir la lista
+            pg.wait_for_function("document.getElementById('proyecto').options.length === 3", timeout=5000)
+            pg.select_option("#proyecto", "casas")
+            respuestas.append((400, {"error": "ese proyecto no existe en tu Studio"}, {}))
+            pg.click("#enviar")
+            pg.wait_for_function("document.getElementById('estado').classList.contains('mal')", timeout=5000)
+            ok("Elige otro en el menú" in pg.inner_text("#estado") and not pg.is_disabled("#enviar"),
+               "un proyecto borrado entre medias: dice que elijas otro")
+            pg.close()
+
+            # el permiso quitado a mano: se dice cómo volver a darlo
+            pg = navegador.new_page(viewport={"width": 360, "height": 640})
+            pg.add_init_script(CHROME_FALSO + "window.__estado.conPermiso = false;")
+            pg.route("**/*", servir)
+            pg.goto("https://studio.prueba/popup.html")
+            pg.wait_for_selector("#envio:not([hidden])", timeout=5000)
+            pg.click("#enviar")
+            pg.wait_for_function("document.getElementById('estado').classList.contains('mal')", timeout=5000)
+            ok("permiso" in pg.inner_text("#estado") and "Probar" in pg.inner_text("#estado"), "sin el permiso: «pulsa ⚙ y Probar»")
+            pg.close()
+
+            # la pestaña del Studio dormida (el ahorro de memoria de Chrome): se dice que la despierte
+            pg = abrir(navegador)
+            pg.evaluate("window.__estado.pestanasStudio = [{id: 7, url: 'https://studio.prueba/', discarded: true},"
+                        " {id: 8, url: undefined}]")
+            respuestas.append((302, {}, {"Location": "https://studio.prueba/login"}))
+            pg.click("#enviar")
+            pg.wait_for_function("document.getElementById('estado').classList.contains('mal')", timeout=5000)
+            ok("dormida" in pg.inner_text("#estado"), "con la pestaña del Studio dormida (y otra sin dirección): pide despertarla")
+            pg.close()
 
             # sin ajustes: primero la dirección y el código; «Probar» llama al ping
             pagina = navegador.new_page(viewport={"width": 360, "height": 640})
@@ -901,7 +1026,7 @@ def prueba_boton():
                and all(l[2] is None for l in llegadas[antes:]), "una dirección que no es un Studio no recibe el código")
             # la de verdad, pegada desde una pantalla (…/v2/login): se queda en /v2/
             pagina.fill("#studio", "https://studio.prueba/v2/login")
-            respuestas.extend([(401, {"error": "el código de envío no vale: crea uno"}, {}), (200, {"ok": True}, {})])
+            respuestas.extend([(401, {"error": "el código de envío no vale: crea uno"}, {}), (200, {"ok": True, "producto": "CrearIA Studio"}, {})])
             pagina.click("#probar")
             try:
                 pagina.wait_for_function("document.getElementById('estadoConfig').textContent.includes('Conectado')",

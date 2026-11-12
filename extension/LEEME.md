@@ -11,7 +11,9 @@ Chrome**.
    esa carpeta donde está: Chrome la usa.
 2. En Chrome abre `chrome://extensions`, activa **Modo de desarrollador** y pulsa
    **Cargar extensión sin empaquetar**. Elige la carpeta que tiene dentro
-   `manifest.json`. Si tenías una versión anterior, pulsa **Quitar** en ella.
+   `manifest.json`. Si tenías una versión anterior, pulsa **Quitar** en ella:
+   al quitarla se borra lo que tenía guardado y tendrás que volver a pegar la
+   clave (paso 4). Para no perderlo, mejor actualízala (abajo).
 3. Fíjala: pieza de puzle (arriba a la derecha) → chincheta junto a «Enviar a
    CrearIA Studio».
 4. En el Studio pulsa **Crear el código de envío** (o «Crear uno nuevo») y
@@ -23,9 +25,17 @@ Chrome**.
 Se hace UNA vez por Chrome: después sirve en todas las pestañas. Lo que pegas
 se guarda solo, aunque la ventanita se cierre al ir a copiar algo.
 
+## Actualizarla sin perder la conexión
+
+Descarga el ZIP nuevo y extráelo. Copia **todos** sus archivos y pégalos en la
+carpeta de la extensión que ya tienes, eligiendo **Reemplazar los archivos**.
+Después, en `chrome://extensions`, pulsa la flecha redonda **⟳** de «Enviar a
+CrearIA Studio». La clave sigue puesta.
+
 ## Usarla
 
-Abre un post (mejor en su página, no en el muro), selecciona si quieres un
+Abre un post (en su página, no en el muro: en el inicio de una red no se sabe
+qué post es y solo va el enlace y la captura), selecciona si quieres un
 trozo de texto, pulsa el botón, escribe una nota si quieres y **Enviar al
 Studio**. Si tu Studio pide iniciar sesión, ábrelo en otra pestaña de ese
 Chrome, entra y vuelve a pulsar.

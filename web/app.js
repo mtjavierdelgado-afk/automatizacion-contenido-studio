@@ -34264,7 +34264,8 @@ function seccionEnviarAlStudio() {
       h('span', { clase: 'meta' }, 'En Descargas: clic derecho en el ZIP → «Extraer todo…» → «Extraer». Deja esa carpeta donde está: Chrome la usa.'))));
   caja.appendChild(paso(2, 'Cárgala en Chrome', h('ol', { clase: 'pasos-instalar' },
     h('li', {}, 'Abre chrome://extensions y activa «Modo de desarrollador» (arriba a la derecha).'),
-    h('li', {}, 'Si ya tenías una versión anterior de «Enviar a CrearIA Studio», pulsa «Quitar» en ella.'),
+    h('li', {}, 'Si ya tenías una versión anterior de «Enviar a CrearIA Studio», pulsa «Quitar» en ella (tendrás que volver a pegar la clave). '
+      + 'Para actualizarla sin perder la clave: copia los archivos nuevos encima de los de su carpeta y pulsa ⟳ en ella.'),
     h('li', {}, 'Pulsa «Cargar extensión sin empaquetar» y elige la carpeta del paso 1 (la que tiene dentro manifest.json).'),
     h('li', {}, 'Para tenerla a mano: pieza de puzle 🧩 (arriba a la derecha de Chrome) → chincheta junto a «Enviar a CrearIA Studio».'))));
   const direccion = h('input', { type: 'text', readonly: true, 'aria-label': 'La dirección de tu Studio' });

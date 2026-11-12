@@ -4337,7 +4337,50 @@ def editar_a_mano_conserva_la_pausa(navegador, datos):
                 {"params": params_antes, "reemplazar": True})
 
 
+#: Los escenarios de cada rama, en su fichero (rama ramas-sin-choques,
+#: 05-11-2026). Cada rama añadía su tramo AL FINAL de este fichero, y dos ramas
+#: abiertas a la vez escribían en las mismas líneas: un choque por unión. Ahora
+#: un escenario nuevo va en `pruebas/recorrido/<rama>.py` y se carga solo, detrás
+#: de los de aquí, en orden de nombre. Los de este fichero no se mueven.
+CARPETA_ESCENARIOS = os.path.join(RAIZ, "pruebas", "recorrido")
+
+
+def cargar_escenarios_de_ramas(carpeta=CARPETA_ESCENARIOS):
+    """Importa cada `pruebas/recorrido/*.py` (sin los que empiezan por «_»).
+
+    Se importan como módulos de verdad, pero ESTE fichero se registra antes como
+    `prueba_recorrido` en sys.modules: así su `from prueba_recorrido import …`
+    recibe estas mismas funciones (y la misma lista ESCENARIOS) en vez de cargar
+    una segunda copia del recorrido. Uno que no carga es un fallo, no se calla.
+    -> [nombres cargados]
+    """
+    import importlib.util  # noqa: PLC0415
+    sys.modules.setdefault("prueba_recorrido", sys.modules[__name__])
+    try:
+        nombres = sorted(n for n in os.listdir(carpeta)
+                         if n.endswith(".py") and not n.startswith("_"))
+    except OSError:
+        return []
+    cargados = []
+    for nombre in nombres:
+        modulo = f"recorrido_{nombre[:-3]}"
+        if modulo in sys.modules:
+            cargados.append(nombre)
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(modulo, os.path.join(carpeta, nombre))
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[modulo] = mod
+            spec.loader.exec_module(mod)
+            cargados.append(nombre)
+        except Exception as fallo:                       # noqa: BLE001
+            traceback.print_exc()
+            ok(False, f"pruebas/recorrido/{nombre} no carga: {type(fallo).__name__}: {fallo}")
+    return cargados
+
+
 def main():
+    cargar_escenarios_de_ramas()
     ap = argparse.ArgumentParser(description="El recorrido de la pantalla")
     ap.add_argument("--solo", default="", help="un escenario por nombre")
     ap.add_argument("--capturas", default="", help="carpeta para las capturas")
@@ -10490,6 +10533,171 @@ def _piloto_del_proyecto_y_portada(navegador, datos):
     pg.p.unroute("**/api/piloto**")
     pg.cerrar()
 
+
+
+# ============================================================== GV SITIOS
+# gv-sitios (11-11-2026): visto en ZV01. En modo guion, un reparto escrito
+# leyendo la VOZ pone en los planos un sitio que ninguna línea pide. El Encargo
+# lo avisa en «El reparto y los sitios» ANTES de generar, con «Volver a repartir
+# desde las líneas». El CLI falso no reparte sitios, así que la ficha se
+# completa con lo que diría el servidor (`sitios_de_lineas`, comprobado contra
+# el servidor de verdad en `pasos/prueba_gv_sitios.py`) y el reparto se
+# intercepta: se comprueba que se pide «desde las líneas» y no se lanza nada.
+# Va delante de gv_refresco (que regraba la voz y tiene que ser el último).
+@escenario
+def gv_sitios(navegador, datos):
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="gv sitios")
+    pedidos = []
+
+    def ficha_de_la_voz(ruta):
+        if ruta.request.method != "GET":
+            ruta.continue_()
+            return
+        respuesta = ruta.fetch()
+        cuerpo = respuesta.json()
+        cuerpo["sitios_de_lineas"] = {"de_la_voz": True, "lineas": 19}
+        ruta.fulfill(response=respuesta, body=json.dumps(cuerpo),
+                     content_type="application/json")
+
+    def reparto(ruta):
+        if ruta.request.method == "POST":
+            pedidos.append(ruta.request.post_data_json or {})
+            ruta.fulfill(status=409, content_type="application/json",
+                         body=json.dumps({"detail": "prueba: no se reparte nada"}))
+            return
+        ruta.continue_()
+    try:
+        pg.sin_trabajo(300)
+        antes = _huellas_de_planos(datos, pid)
+        pg.p.route("**/tipo_relato*", ficha_de_la_voz)
+        pg.p.route("**/escenarios", reparto)
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; "
+              "APP.light.video.relato = null; pintarLight();")
+        ok(pg.esperar(".aviso-sitios-lineas", "leyendo la voz", 20),
+           "(1) «El reparto y los sitios» avisa: se escribió leyendo la voz, no tus 19 líneas")
+        ok(pg.visible(".aviso-sitios-lineas button", "Volver a repartir desde las líneas"),
+           "(1) con «Volver a repartir desde las líneas»")
+        pg.captura("gv_sitios_aviso", entera=False)
+        ok(_huellas_de_planos(datos, pid) == antes, "(1) pintar el aviso no toca ninguna imagen")
+        ok(pg.visible(".aviso-sitios-lineas .meta", "quedarán por rehacer"),
+           "(1) con imágenes hechas, dice que quedarán por rehacer")
+        pg.pulsar(".aviso-sitios-lineas button", "Volver a repartir desde las líneas")
+        ok(any("quedarán por rehacer" in d for d in pg.dialogos),
+           "(2) y antes de repartir lo pregunta")
+        fin = time.time() + 10
+        while time.time() < fin and not pedidos:
+            pg.p.wait_for_timeout(300)
+        ok(pedidos and pedidos[0].get("desde_lineas") is True and pedidos[0].get("rehacer") is True,
+           f"(2) el botón pide repartir desde las líneas ({pedidos[:1]})")
+    finally:
+        pg.p.unroute("**/tipo_relato*")
+        pg.p.unroute("**/escenarios")
+        pg.js("APP.light.video.relato = null; pintarLight();")
+        # el 409 de mentira lo escribe `pedir` en la consola: es el esperado
+        pg.errores[:] = [e for e in pg.errores if "no se reparte nada" not in str(e)]
+        pg.sin_errores("gv sitios")
+        pg.cerrar()
+
+
+# ============================================================ PILOTO LISTA
+# piloto-lista (11-11-2026, pedido del dueño): «En marcha y en cola» arriba y en
+# el orden en que se lanzaron; lo ya publicado sale solo de la lista (y se ve con
+# «Ver los ya publicados»); una parada por «tiene algo en marcha» no ofrece
+# «Seguir igualmente». La lista se fabrica interceptando GET /api/piloto: el
+# servidor de prueba no tiene vídeos en esos estados. Lo del servidor (qué
+# cuenta como publicado, la retomada sola) lo prueba `pasos/prueba_piloto.py`.
+@escenario
+def piloto_lista(navegador, datos):
+    cid = datos["cliente"]
+    pg = Pagina(navegador, datos, nombre="piloto lista")
+
+    def ficha(vid, nombre, estado, **mas):
+        return dict({"id": vid, "cid": cid, "titulo": nombre, "nombre": nombre, "estado": estado,
+                     "portadas": [], "revisar": [], "vivo": None}, **mas)
+    # el servidor los da del más nuevo al más viejo
+    videos = [
+        ficha("v5", "L05 — en cola", "en_cola", mensaje="esperando su turno"),
+        ficha("v4", "L04 — listo", "listo", pid="p4"),
+        ficha("v3", "L03 — esperando", "parado", pid="p3", tipo_parada="ocupado", espera_sola=True,
+              porque="ese vídeo tiene algo en marcha", donde="el vídeo"),
+        ficha("v2", "L02 — ya publicado", "revisar", pid="p2", salio=True),
+        ficha("v1", "L01 — trabajando", "trabajando", etapa="imagenes", mensaje="dibujando"),
+    ]
+
+    def lista(ruta):
+        if ruta.request.method != "GET":
+            ruta.continue_()
+            return
+        respuesta = ruta.fetch()
+        cuerpo = respuesta.json()
+        cuerpo["videos"] = videos
+        ruta.fulfill(response=respuesta, body=json.dumps(cuerpo), content_type="application/json")
+    try:
+        pg.p.route("**/api/piloto", lista)
+        pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+        pg.js(f"elegirProyectoParrilla('{cid}'); PIL.datos = null; await cargarPiloto(); pintarModulo();")
+        ok(pg.esperar(".grupo-piloto .tarjeta-piloto", None, 15), "(1) la lista del piloto sale")
+        grupos = pg.p.evaluate("() => [...document.querySelectorAll('.panel-piloto .grupo-piloto')]"
+                               ".map(g => g.querySelector('.cab-grupo-piloto b').textContent)")
+        ok(grupos[:1] == ["En marcha y en cola"], f"(1) «En marcha y en cola» va arriba del todo ({grupos})")
+        vivos = pg.p.evaluate("() => [...document.querySelectorAll('.grupo-vivos .titulo-piloto')]"
+                              ".map(x => x.textContent.slice(0, 3))")
+        ok(vivos == ["L01", "L05"], f"(1) en el orden en que se lanzaron ({vivos})")
+        ok(not pg.visible(".tarjeta-piloto", "L02"), "(2) el ya publicado no sale en la lista")
+        ok(pg.visible(".ver-publicados-piloto", "Ver los ya publicados (1)"), "(2) con «Ver los ya publicados (1)»")
+        pg.pulsar(".ver-publicados-piloto")
+        ok(pg.esperar(".grupo-publicados .tarjeta-piloto", "L02", 5), "(2) y al pulsarlo se ve aparte")
+        tarjeta = pg.p.locator(".tarjeta-piloto").filter(has_text="L03").first
+        ok(tarjeta.count() and not tarjeta.locator("button", has_text="Seguir igualmente").count(),
+           "(3) la parada por «tiene algo en marcha» no ofrece «Seguir igualmente»")
+        ok(tarjeta.count() and tarjeta.locator("button", has_text="Reintentar").count() > 0,
+           "(3) pero sí «Reintentar»")
+        ok(tarjeta.count() and "sigue solo" in tarjeta.inner_text(),
+           "(3) y dice que no hay nada que decidir: sigue solo cuando acabe")
+        pg.captura("piloto_lista", entera=False)
+    finally:
+        pg.p.unroute("**/api/piloto")
+        pg.js("PIL.verPublicados = false; PIL.datos = null;")
+        pg.sin_errores("piloto lista")
+        pg.cerrar()
+
+
+# ========================================================= SESION Y SALTOS
+# sesion-y-saltos (11-11-2026): mientras se espera el acceso a Claude,
+# Configuración se repinta cada 2 s y volvía arriba (el dueño lo vio el 09-11).
+# Repintar tiene que dejar el cajón donde estaba.
+@escenario
+def repintar_no_salta(navegador, datos):
+    pg = Pagina(navegador, datos, nombre="repintar no salta")
+    try:
+        pg.pulsar("#btn-config")
+        ok(pg.esperar("#config", "Hora de tu región"), "(1) Configuración se abre")
+        cuerpo = "#cuerpo-config"
+        alto = pg.p.evaluate(f"() => document.querySelector('{cuerpo}').scrollHeight")
+        pg.p.evaluate(f"() => {{ document.querySelector('{cuerpo}').scrollTop = 900; }}")
+        antes = pg.p.evaluate(f"() => document.querySelector('{cuerpo}').scrollTop")
+        ok(antes > 100, f"(1) el cajón se baja ({antes} de {alto})")
+        for _ in range(3):
+            pg.js("repintarClaves();")
+        despues = pg.p.evaluate(f"() => document.querySelector('{cuerpo}').scrollTop")
+        ok(abs(despues - antes) < 4,
+           f"(2) repintarlo tres veces no lo devuelve arriba ({antes} → {despues})")
+        # (3) LO QUE PASABA: una pasada en la que las secciones aún están
+        # «cargando…» (el cajón, más corto) y la siguiente ya con todo
+        pg.js("const fuente = (typeof pintarConfigDentro === 'function' ? pintarConfigDentro : pintarConfig).toString(); "
+              "window.__nombres = [...new Set(fuente.match(/\\b(seccion|bloque)[A-Z]\\w*(?=\\()/g))]; "
+              "window.__reales = window.__nombres.map(n => window[n]); "
+              "window.__nombres.forEach(n => { window[n] = () => h('div', { clase: 'cargando' }, 'cargando…'); }); "
+              "repintarClaves();")
+        pg.js("window.__nombres.forEach((n, i) => { window[n] = window.__reales[i]; }); repintarClaves();")
+        luego = pg.p.evaluate(f"() => document.querySelector('{cuerpo}').scrollTop")
+        ok(abs(luego - antes) < 4,
+           f"(3) ni cuando una pasada sale más corta mientras carga ({antes} → {luego})")
+        pg.captura("repintar_no_salta", entera=False)
+    finally:
+        pg.sin_errores("repintar no salta")
+        pg.cerrar()
 
 
 # ============================================================== GV REFRESCO

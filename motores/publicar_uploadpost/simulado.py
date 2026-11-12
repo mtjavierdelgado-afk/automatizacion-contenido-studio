@@ -259,8 +259,10 @@ class SimuladoUploadPost:
                              "tiempo_medio_s": float(base % 20 + 3) if r == "tiktok" else None,
                              "url": f"https://{r}.example/{request_id[:10]}", "post_id": post_id,
                              "error": ""}
-                # METRICAS COMPLETAS: lo de mas, en la forma CRUDA de Upload-Post y
-                # pasado por el mismo lector que la respuesta de verdad
+                # METRICAS COMPLETAS: lo de mas, en la forma CRUDA de Upload-Post,
+                # leído con `_numeros`/`_detalle` y SIN el nulo de `_cifras`, a
+                # propósito: simula lo guardado antes del 12-11 (alcance 0 con
+                # vistas), que la pantalla tiene que seguir sin enseñar
                 crudo = {}
                 if r == "tiktok":
                     duracion = 30

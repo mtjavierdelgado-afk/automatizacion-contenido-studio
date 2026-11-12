@@ -4527,8 +4527,11 @@ def publicar_en_redes(navegador, datos):
     pg.js("await cargarPublicar();")
     # LA FICHA EN SEIS PASOS (rediseno-publicar): el carril y su barra de acción
     pasos = pg.p.locator(".pasos-publicar .paso-carril b").all_inner_texts()
-    ok([x.split(". ", 1)[-1] for x in pasos] == ["Redes", "Textos", "SEO", "Portada", "Cuándo", "Envíos"],
-       f"la ficha es un carril de seis pasos ({pasos})")
+    # «Envíos» solo sale cuando el vídeo ya tiene algún envío (publicar-ok-envios, 12-11)
+    sin_envios = not ficha.get("envios")
+    ok([x.split(". ", 1)[-1] for x in pasos] == ["Redes", "Textos", "SEO", "Portada", "Cuándo"]
+       + ([] if sin_envios else ["Envíos"]),
+       f"la ficha es un carril de pasos, sin «Envíos» mientras no se haya mandado nada ({pasos})")
     ok(pg.visible(".salida-publicar", "‹ Publicar"), "con su salida «‹ Publicar»")
     ok(pg.visible(".barra-publicar button.principal", "Programar para"), "y la barra de acción: «Programar para … ›»")
     _paso_ficha(pg, "redes")

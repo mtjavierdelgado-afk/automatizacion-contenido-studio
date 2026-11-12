@@ -1,0 +1,3 @@
+**Publicar: «OK» para el día y la hora, y «Envíos» solo cuando hay algo enviado (12 de noviembre)**
+- En el paso **Cuándo**, al lado del día y la hora, hay un botón **«OK»**: guarda lo elegido, cierra el selector y la barra de abajo dice al momento «Programar para …» con la hora nueva, más una línea «✓ Guardado». Ya no hace falta pulsar fuera de la ventanita (sobre todo en el móvil). La tecla Intro hace lo mismo.
+- El paso **Envíos** de la ficha solo aparece cuando el vídeo ya tiene algún envío (publicado, programado, subiéndose, fallido o marcado como subido a mano). Antes salía vacío y confundía.

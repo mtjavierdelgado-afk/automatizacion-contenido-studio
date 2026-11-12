@@ -5865,3 +5865,7 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .grupo-publicados .tarjeta-piloto { opacity: 0.75; }
 .ver-publicados-piloto { align-self: flex-start; }
 .relleno-repintado { pointer-events: none; }
+
+/* publicar-ok-envios: el «OK» del día y la hora, y su confirmación */
+.ok-cuando-publicar { align-self: flex-end; min-width: 48px; font-weight: 600; }
+.cuando-confirmado { color: var(--ok); margin-top: 4px; }

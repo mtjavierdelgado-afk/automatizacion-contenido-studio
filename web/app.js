@@ -27867,8 +27867,16 @@ function redesDeLaFichaPublicar(f) {
   return (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
 }
 
+/* Los pasos que se ven: «Envíos» solo cuando el vídeo YA tiene algún envío
+   (publicado, programado, en el aire, fallido o subido a mano); antes estaba
+   vacío y confundía (pedido del dueño, 12-11). */
+function pasosFichaPublicarDe(f) {
+  const hayEnvios = ((f || {}).envios || []).length > 0;
+  return PASOS_FICHA_PUBLICAR.filter(([id]) => id !== 'envios' || hayEnvios);
+}
+
 function pasoFichaPublicar(f) {
-  const ids = PASOS_FICHA_PUBLICAR.map(x => x[0]);
+  const ids = pasosFichaPublicarDe(f).map(x => x[0]);
   if (ids.includes(PUB.pasoFicha)) return PUB.pasoFicha;
   return (f.redes || []).length ? 'textos' : 'redes';
 }
@@ -27932,7 +27940,7 @@ function carrilFichaPublicar(f, actual) {
   const caja = h('aside', { clase: 'carril-crear carril-publicar', 'aria-label': 'Los pasos para publicar este vídeo' });
   caja.appendChild(h('div', { clase: 'carril-titulo' }, 'Publicar este vídeo', h('span', { clase: 'desliza' }, ' · desliza →')));
   const fila = h('nav', { clase: 'pasos-carril pasos-publicar' });
-  PASOS_FICHA_PUBLICAR.forEach(([id, nombre], i) => {
+  pasosFichaPublicarDe(f).forEach(([id, nombre], i) => {
     const p = estadoPasoFichaPublicar(id, f);
     const aqui = id === actual;
     fila.appendChild(h('button', {
@@ -28301,13 +28309,24 @@ function pasoCuandoPublicar(f) {
   }
   if (elegido === 'programar') {
     if (!PUB.cuandoEnvio) PUB.cuandoEnvio = f.hora_sugerida;
+    // «OK» (pedido del dueño, 12-11): mientras el campo tiene el foco la ficha
+    // no se repinta (repintarPublicarSinPisar), así que la barra seguía con la
+    // hora de antes hasta pulsar fuera. «OK» o Intro guardan, sueltan el foco
+    // (cierra el selector) y repintan.
+    const campo = h('input', { type: 'datetime-local', value: PUB.cuandoEnvio, datos: { foco: 'cuando' },
+      oninput: ev => { if (ev.target.value) PUB.cuandoEnvio = ev.target.value; },
+      onchange: ev => { if (ev.target.value) PUB.cuandoEnvio = ev.target.value; repintarPublicarSinPisar(); },
+      onkeydown: ev => { if (ev.key === 'Enter') { ev.preventDefault(); confirmarCuandoPublicar(campo); } } });
     caja.appendChild(h('div', { clase: 'bloque' },
       h('div', { clase: 'fila' },
-        h('label', { clase: 'etiqueta-campo' }, 'Día y hora',
-          h('input', { type: 'datetime-local', value: PUB.cuandoEnvio, datos: { foco: 'cuando' },
-            onchange: ev => { PUB.cuandoEnvio = ev.target.value; repintarPublicarSinPisar(); } })),
+        h('label', { clase: 'etiqueta-campo' }, 'Día y hora', campo),
+        h('button', { type: 'button', clase: 'mini ok-cuando-publicar',
+          title: 'Guarda el día y la hora elegidos', onclick: () => confirmarCuandoPublicar(campo) }, 'OK'),
         h('span', { clase: 'meta' }, 'hora de Lima')),
+      PUB.cuandoConfirmado ? h('div', { clase: 'meta cuando-confirmado', role: 'status' },
+        `✓ Guardado: ${cuandoLegible(PUB.cuandoEnvio)}`) : null,
       sugerenciasCuandoPublicar(f)));
+    PUB.cuandoConfirmado = false;
   } else if (elegido === 'ahora') {
     caja.appendChild(h('div', { clase: 'meta' }, '«Publicar ahora ›» lo sube en cuanto confirmes. Una vez publicado no se puede deshacer desde aquí.'));
   } else {
@@ -28319,6 +28338,14 @@ function pasoCuandoPublicar(f) {
       fila));
   }
   return caja;
+}
+
+function confirmarCuandoPublicar(campo) {
+  if (campo && campo.value) PUB.cuandoEnvio = campo.value;
+  if (campo) campo.blur();
+  PUB.cuandoConfirmado = !!PUB.cuandoEnvio;
+  PUB.repintar = false;
+  pintarModulo();
 }
 
 /* 6 · ENVÍOS: lo mandado de este vídeo, red por red, con sus cifras. */

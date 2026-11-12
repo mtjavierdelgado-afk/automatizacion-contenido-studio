@@ -317,8 +317,12 @@ PAGINAS = {
       <meta property="og:title" content="Ana en TikTok"><meta property="og:description" content="El primero que se abrió">
       </head><body><a data-e2e="browse-username">bea</a></body></html>""",
     "https://www.instagram.com/reel/Cabc/": """<html><head><title>Instagram</title>
+      <meta property="og:url" content="https://www.instagram.com/reel/Cabc/">
       <meta property="og:description" content='1.234 Me gusta, 56 comentarios - estadoplay el 3 de octubre de 2026: "Así quedó la fiesta 🎮"'>
-      </head><body><article><span>12,3 mil reproducciones</span></article></body></html>""",
+      </head><body><div style="position:absolute;top:10px;left:0;width:400px">
+        <div><video style="width:400px;height:700px;display:block"></video></div>
+        <div><div role="button"><svg aria-label="Comentario"></svg></div></div><span>12,3 mil reproducciones</span></div>
+      <div style="position:absolute;top:2000px"><a href="/reel/Cotro/"><span>99 mil reproducciones</span></a></div></body></html>""",
     "https://www.instagram.com/reels/Dsegundo/": """<html><head><title>Instagram</title>
       <meta property="og:url" content="https://www.instagram.com/otro.perfil/reel/Dprimero/">
       <meta property="og:title" content="Otro perfil en Instagram">
@@ -367,42 +371,45 @@ PAGINAS = {
     "https://www.instagram.com/reels/Dvacio/": """<html><head><title>Instagram</title></head><body></body></html>""",
     "https://www.youtube.com/watch?v=abc": """<html><head><title>Vídeo - YouTube</title>
       <meta property="og:url" content="https://www.youtube.com/watch?v=abc">
-      <meta itemprop="interactionCount" content="45678"></head><body>
+      <meta itemprop="interactionCount" content="45678"></head><body><ytd-watch-flexy video-id="abc">
       <h1 class="ytd-watch-metadata">Cómo montar una fiesta gamer</h1>
       <div id="owner"><ytd-channel-name id="channel-name"><a>Canal Ana</a></ytd-channel-name></div>
       <like-button-view-model><button aria-label="Indicar que te gusta este vídeo junto con 1.234 personas más">1,2 K</button></like-button-view-model>
-      <div id="description-inline-expander">Todo lo que necesitas para tu fiesta.</div></body></html>""",
+      <div id="description-inline-expander">Todo lo que necesitas para tu fiesta.</div></ytd-watch-flexy></body></html>""",
     "https://www.youtube.com/watch?v=NUEVO123&list=RD": """<html><head><title>(7) Self Control (Remix) - YouTube</title>
       <meta property="og:url" content="https://www.youtube.com/watch?v=VIEJO999">
       <meta property="og:title" content="El vídeo que se abrió primero">
       <meta name="description" content="Nunca había hablado sobre estos 5 consejos">
       <meta itemprop="interactionCount" content="11"></head><body>
       <svg><g id="description"><path d="M0 0"></path></g></svg>
-      <ytd-watch-metadata><h1 class="ytd-watch-metadata">Self Control (Remix)</h1>
+      <ytd-watch-flexy hidden video-id="VIEJO999"><h1 class="ytd-watch-metadata">El vídeo que se abrió primero</h1>
+        <span id="view-count" aria-label="11 vistas"></span></ytd-watch-flexy>
+      <ytd-watch-flexy video-id="NUEVO123"><ytd-watch-metadata><h1 class="ytd-watch-metadata">Self Control (Remix)</h1>
         <div id="owner"><div id="channel-name"><a>Moreno J Remixes</a></div></div>
         <ytd-text-inline-expander><span id="attributed-snippet-text">Remixer: Moreno J</span></ytd-text-inline-expander>
       </ytd-watch-metadata>
       <div id="view-count" aria-label="230 M de vistas"><span>1 2 3 4 5 6 7 8 9 0 1 2 3</span></div>
       <like-button-view-model><button aria-label="Me gusta">932,220</button></like-button-view-model>
       <ytd-comments-header-renderer><span id="count">23,133 Comentarios</span></ytd-comments-header-renderer>
-      </body></html>""",
+      </ytd-watch-flexy></body></html>""",
     "https://x.com/ana_r/status/123": """<html><head><title>X</title></head><body>
-      <article data-testid="tweet" tabindex="-1"><div data-testid="User-Name">Ana R @ana_r</div>
+      <article data-testid="tweet" tabindex="-1"><div data-testid="User-Name">Ana R @ana_r</div><a href="/ana_r/status/123"><time>3h</time></a>
       <div data-testid="tweetText">Un hilo sobre fiestas gamer 🧵</div>
       <div role="group" aria-label="12 respuestas, 34 reposts, 560 Me gusta, 89012 visualizaciones"></div>
       </article></body></html>""",
     "https://www.linkedin.com/feed/update/urn:li:activity:1/": """<html><head><title>LinkedIn</title></head><body>
-      <span class="update-components-actor__name">Empresa SAC</span>
+      <div data-urn="urn:li:activity:1"><span class="update-components-actor__name">Empresa SAC</span>
       <div class="update-components-text">Cinco ideas para eventos corporativos.</div>
       <div class="social-details-social-counts"><span class="social-details-social-counts__reactions-count">1.024</span>
-      <span>38 comentarios</span> · <span>12 veces compartido</span></div></body></html>""",
+      <span>38 comentarios</span> · <span>12 veces compartido</span></div></div>
+      <div data-urn="urn:li:activity:2"><span class="update-components-actor__name">Otro</span></div></body></html>""",
     "https://www.facebook.com/estadoplay/posts/1": """<html><head><title>Facebook</title>
       <meta property="og:description" content="Fiesta del sábado"></head><body>
-      <h2><strong><a>EstadoPlay</a></strong></h2><div data-ad-preview="message">Así fue la fiesta del sábado</div>
-      <span aria-label="345 reacciones"></span><span aria-label="28 comentarios"></span></body></html>""",
+      <div role="main"><h2><strong><a>EstadoPlay</a></strong></h2><div data-ad-preview="message">Así fue la fiesta del sábado</div>
+      <span aria-label="345 reacciones"></span><span aria-label="28 comentarios"></span></div></body></html>""",
     "https://www.facebook.com/otra/posts/2": """<html><head><title>Facebook</title></head><body>
-      <div data-ad-preview="message">Un post sin cifras</div>
-      <span aria-label="Ver comentarios 12 más"></span></body></html>""",
+      <div role="main"><div data-ad-preview="message">Un post sin cifras</div>
+      <span aria-label="Ver comentarios 12 más"></span></div></body></html>""",
     "https://blog.ejemplo.com/ideas-fiesta": """<html><head><title>Ideas para tu fiesta</title>
       <meta property="og:title" content="10 ideas para una fiesta gamer">
       <meta property="og:description" content="Las mejores ideas, probadas."></head>
@@ -467,11 +474,12 @@ def prueba_lector():
     igual((mg["autor"], mg["cifras"]), ("bea", {"me_gusta": "2.300", "comentarios": "40"}),
           "un reel que ya te gusta («Ya no me gusta») conserva sus me gusta; el autor con su enlace /bea/reels/")
     sv = resultados["https://www.instagram.com/reels/Dsinvideo/"]
-    ok(not sv["cifras"] and "no se ha podido leer este reel" in sv.get("aviso", ""),
+    ok(not sv["cifras"] and "no se ha podido leer este post" in sv.get("aviso", ""),
        "sin reel a la vista y con etiquetas de otro: ni cifras ajenas, y lo dice")
     y = resultados["https://www.youtube.com/watch?v=abc"]
     igual((y["red"], y["titulo"], y["autor"], y["cifras"].get("vistas"), y["cifras"].get("me_gusta")),
-          ("youtube", "Cómo montar una fiesta gamer", "Canal Ana", "45678", "1,2 K"), "YouTube: título, canal, vistas y me gusta")
+          ("youtube", "Cómo montar una fiesta gamer", "Canal Ana", "45678", "1.234"),
+          "YouTube: título, canal, vistas y me gusta (el número exacto de su etiqueta)")
     yn = resultados["https://www.youtube.com/watch?v=NUEVO123&list=RD"]
     igual((yn["titulo"], yn["autor"], yn["texto"], yn["imagen"]),
           ("Self Control (Remix)", "Moreno J Remixes", "Remixer: Moreno J", "https://i.ytimg.com/vi/NUEVO123/hqdefault.jpg"),
@@ -498,6 +506,193 @@ def prueba_lector():
     r = R.guardar(raiz, x)
     igual(r["cifras"], {"vistas": 89012, "me_gusta": 560, "comentarios": 12, "compartidos": 34},
           "lo que lee la extensión se guarda con sus cifras en número")
+
+
+# ------------------------------------- 5c. nunca lo de OTRO post (12-11-2026)
+
+#: Las páginas trampa del revisor del 12-11: la barra dice un post y la página
+#: (sus etiquetas og:, una caja oculta, el post de arriba) trae otro. Cada una
+#: falló con el lector del 11-11. La regla: o se demuestra que es el de la barra,
+#: o va solo el enlace y la captura, con un aviso.
+def _og(url="", desc="", titulo=""):
+    return ((f'<meta property="og:url" content="{url}">' if url else "")
+            + (f'<meta property="og:description" content="{desc}">' if desc else "")
+            + (f'<meta property="og:title" content="{titulo}">' if titulo else ""))
+
+
+_ALTO = '<div style="height:900px">relleno</div>'
+_REEL_A = _og("https://www.instagram.com/reel/AAA111/",
+              "1.234 Me gusta, 56 comentarios - ana el 3 de octubre de 2026: &quot;Reel de ana&quot;", "Reel de Ana")
+_WATCH_A = ("<ytd-watch-flexy VISIBLE video-id='AAAAAAAAAAA'><ytd-watch-metadata><h1 class='ytd-watch-metadata'>Vídeo A anterior</h1>"
+            "<div id='owner'><div id='channel-name'><a href='/@canalA'>CanalA</a></div></div>"
+            "<ytd-text-inline-expander><span id='attributed-snippet-text'>Descripción de A</span></ytd-text-inline-expander></ytd-watch-metadata>"
+            "<span id='view-count' aria-label='230 M de vistas'>230 M</span>"
+            "<like-button-view-model><button aria-label='Me gusta'>1,2 K</button></like-button-view-model></ytd-watch-flexy>")
+HOSTILES = {
+    "https://www.instagram.com/beto/": _REEL_A + "<body><header><h2>beto</h2></header></body>",
+    "https://www.instagram.com/stories/beto/3333/": _REEL_A + "<body>historia</body>",
+    "https://www.instagram.com/": _og("https://www.instagram.com/", "Instagram") + "<body>"
+        "<article><header><a role='link' href='/ana/'>ana</a></header><h1>post de ana (ya pasado)</h1></article>" + _ALTO
+        + "<article><header><a role='link' href='/beto/'>beto</a></header><h1>post de beto</h1><span>5.000 reproducciones</span></article></body>",
+    "https://www.instagram.com/ana/reel/CCC333/": _og("https://www.instagram.com/reels/ZZZ999/", "otro") +
+        "<body><article><div><video style='display:block;width:300px;height:700px'></video></div>"
+        "<div><a href='/ana/'>ana</a><span dir='auto'>Pie corto</span></div>"
+        "<div><a href='/troll/'>troll</a><span dir='auto'>Un comentario larguísimo de otra persona que no es el pie del reel</span></div>"
+        "<section><span><svg aria-label='Me gusta' style='height:24px;width:24px'></svg></span><span>812</span>"
+        "<span><svg aria-label='Comentario' style='height:24px;width:24px'></svg></span><span>40</span></section></article></body>",
+    "https://www.instagram.com/reels/DOTRO1/": "<body><div><div><video style='display:block;width:300px;height:700px'></video></div>"
+        "<a href='/ana/'>ana</a><div dir='auto'>pie del reel de otro código</div><a href='/reel/DDISTINTO/'>ver</a>"
+        "<div><svg aria-label='Comentario'></svg><span>7</span></div></div></body>",
+    "https://www.instagram.com/p/DDD444/": _og("https://www.instagram.com/p/DDD444/",
+        "beto el November 4, 2026: &quot;Promo - solo el sábado: 2x1 en consolas&quot;") + "<body></body>",
+    "https://www.instagram.com/p/DDE555/": _og("https://www.instagram.com/p/DDE555/",
+        "12 Me gusta, 3 comentarios - Ana García (@ana) el 3 de octubre: &quot;Gracias por las 100 mil vistas y 300 guardados&quot;") + "<body></body>",
+    "https://www.youtube.com/": "<title>YouTube</title><body><ytd-browse>portada</ytd-browse>" + _WATCH_A.replace("VISIBLE", "hidden") + "</body>",
+    "https://www.youtube.com/watch?v=BBBBBBBBBBB": _og("https://www.youtube.com/watch?v=BBBBBBBBBBB") +
+        "<title>Vídeo B - YouTube</title><body><ytd-shorts hidden><ytd-reel-video-renderer>"
+        "<like-button-view-model><button aria-label='Me gusta'>98 K</button></like-button-view-model>"
+        "<div id='comments-button'><span class='yt-spec-button-shape-with-label__label'>4,5 mil</span></div></ytd-reel-video-renderer></ytd-shorts>"
+        "<ytd-watch-flexy video-id='BBBBBBBBBBB'><ytd-watch-metadata><h1 class='ytd-watch-metadata'>Vídeo B</h1></ytd-watch-metadata>"
+        "<span id='view-count' aria-label='1.234 vistas'>1.234</span>"
+        "<like-button-view-model><button aria-label='Me gusta'>12</button></like-button-view-model></ytd-watch-flexy></body>",
+    "https://www.youtube.com/watch?v=GGGGGGGGGGG": "<title>YouTube</title><body>" + _WATCH_A.replace("VISIBLE", "") + "</body>",
+    "https://www.youtube.com/watch?v=LLLLLLLLLLL": _og("https://www.youtube.com/watch?v=LLLLLLLLLLL") +
+        "<body><ytd-watch-flexy video-id='LLLLLLLLLLL'><h1 class='ytd-watch-metadata'>L</h1><like-button-view-model>"
+        "<button aria-label='Me gusta este vídeo junto con 1,2 millones de personas más'></button></like-button-view-model></ytd-watch-flexy></body>",
+    # un Short como es de verdad (medido en el Chrome del dueño el 12-11): el botón no trae texto,
+    # vidIQ pinta «1x» al lado del número y el enlace del reproductor lleva su id
+    "https://www.youtube.com/shorts/SSSSSSSSSSS": "<title>Short - YouTube</title><body>"
+        "<ytd-shorts hidden><ytd-reel-video-renderer><a href='https://www.youtube.com/shorts/VIEJOVIEJO1'>v</a>"
+        "<h1>Short viejo</h1></ytd-reel-video-renderer></ytd-shorts>"
+        "<ytd-shorts><ytd-reel-video-renderer><a class='ytp-title-link' href='https://www.youtube.com/shorts/SSSSSSSSSSS'>t</a>"
+        "<yt-shorts-video-title-view-model><h1>#humor del short</h1></yt-shorts-video-title-view-model>"
+        "<div class='ytReelChannelBarViewModelChannelName'>@patricio</div>"
+        "<like-button-view-model><span>1x</span><button aria-label='poner Me gusta en este video, al igual que 140 mil personas más'></button><span>140 k</span></like-button-view-model>"
+        "<div id='comments-button'><button aria-label='Ver 1,206 comentarios'></button></div></ytd-reel-video-renderer></ytd-shorts></body>",
+    "https://www.tiktok.com/@ana/video/111": _og("https://www.tiktok.com/@ana/video/111") +
+        "<body><div><span data-e2e='browse-username'>ana</span><h1 data-e2e='browse-video-desc'>mi vídeo</h1>"
+        "<strong data-e2e='browse-like-count'>12</strong><strong data-e2e='browse-favorite-count'>4</strong></div>"
+        "<div><a href='/@x/video/9'><strong data-e2e='video-views'>8.5M</strong></a>"
+        "<a href='/@ana/video/1110'><strong data-e2e='video-views'>7K</strong></a>"
+        "<a href='/@ana/video/111'><strong data-e2e='video-views'>38.7K</strong></a></div></body>",
+    "https://www.tiktok.com/@ana": _og("https://www.tiktok.com/@ana") +
+        "<body><h1 data-e2e='user-title'>ana</h1><a><strong data-e2e='video-views'>3.2M</strong></a></body>",
+    "https://www.tiktok.com/foryou": _og("https://www.tiktok.com/foryou") + "<body>"
+        "<div><h3 data-e2e='video-author-uniqueid'>ana_pasada</h3><div data-e2e='video-desc'>vídeo ya pasado</div>"
+        "<strong data-e2e='like-count'>1M</strong></div></body>",
+    "https://www.tiktok.com/following": "<body><div style='position:absolute;top:2000px'><video style='display:block;width:300px;height:500px'></video>"
+        "<h3 data-e2e='video-author-uniqueid'>ana_pasada</h3><strong data-e2e='like-count'>1M</strong></div>"
+        "<div style='position:absolute;top:0'><video style='display:block;width:300px;height:700px'></video>"
+        "<a href='https://www.tiktok.com/@beto/video/222'><h3 data-e2e='video-author-uniqueid'>beto</h3></a>"
+        "<div data-e2e='video-desc'>el que se ve</div><strong data-e2e='like-count'>5</strong></div></body>",
+    "https://x.com/ana/status/1": _og("https://x.com/ana/status/1") + "<body>"
+        "<article data-testid='tweet'><div data-testid='User-Name'>Ana @ana</div><a href='/ana/status/1'><time>1h</time></a>"
+        "<div role='link'><div data-testid='User-Name'>Troll @troll</div><a href='/troll/status/10'><time>2h</time></a>"
+        "<div data-testid='tweetText'>texto del tuit CITADO</div></div>"
+        "<div role='group' aria-label='3 respuestas, 1 repost, 20 Me gusta'></div></article></body>",
+    "https://x.com/beto/status/2": "<body><article data-testid='tweet'><div data-testid='User-Name'>Ana @ana</div>"
+        "<a href='/ana/status/20'><time>1h</time></a><div data-testid='tweetText'>otro tuit que cita al de beto</div>"
+        "<div role='link'><a href='/beto/status/2'>cita</a></div></article></body>",
+    "https://x.com/home": "<body><article data-testid='tweet'><div data-testid='User-Name'>Ana @ana</div>"
+        "<div data-testid='tweetText'>tuit de arriba</div></article></body>",
+    "https://www.facebook.com/estadoplay/posts/123": _og("https://www.facebook.com/estadoplay/posts/123",
+        "¡Llegamos a 5 mil likes y 300 comentarios! Gracias por las 20 mil reproducciones") + "<body></body>",
+    "https://www.facebook.com/": "<body><div aria-label='Me gusta: 3 reacciones'>x</div><div data-ad-preview='message'>post A</div>"
+        "<div data-ad-preview='message'>post B</div><div aria-label='45 comentarios'>y</div></body>",
+    "https://www.linkedin.com/feed/": "<body><div class='update-components-actor__name'>Ana</div>"
+        "<div class='update-components-text'>post de Ana ya pasado</div></body>",
+    "https://www.threads.net/@beto/post/BBB": _og("https://www.threads.net/@ana/post/AAA", "texto del post de ana", "Ana en Threads")
+        + "<body>post de beto</body>",
+    "https://www.pinterest.com/pin/555/": _og("https://www.pinterest.com/pin/444/", "pin de otro", "Otro pin") + "<body></body>",
+    "https://blog.ejemplo.com/largo": "<body><div id='p'>" + ("palabra " * 200_000) + "</div></body>",
+}
+
+
+def prueba_lector_hostil():
+    seccion("5c] el lector nunca manda lo de OTRO post")
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  OMITIDA: falta Playwright en este entorno")
+        return
+    with open(os.path.join(EXT, "lector.js"), encoding="utf-8") as fh:
+        lector = fh.read()
+    res = {}
+    try:
+        with sync_playwright() as p:
+            navegador = p.chromium.launch()
+            pagina = navegador.new_page(viewport={"width": 1280, "height": 720})
+
+            def servir(ruta):
+                html = HOSTILES.get(ruta.request.url, "<body>nada</body>")
+                ruta.fulfill(status=200, content_type="text/html; charset=utf-8",
+                             body="<!doctype html><html><head>" + html.replace("<body>", "</head><body>", 1) + "</html>")
+            pagina.route("**/*", servir)
+            for url in HOSTILES:
+                pagina.goto(url)
+                if "largo" in url:
+                    pagina.evaluate("() => { const r = document.createRange(); r.selectNodeContents(document.getElementById('p'));"
+                                    " getSelection().removeAllRanges(); getSelection().addRange(r); }")
+                res[url] = pagina.evaluate(lector)
+            navegador.close()
+    except Exception as fallo:                          # noqa: BLE001
+        print(f"  OMITIDA: no arranca Chromium ({str(fallo)[:160]})")
+        return
+
+    def nada_de(url, *ajeno):
+        d = res[url]
+        todo = json.dumps(d, ensure_ascii=False)
+        return d, not any(a in todo for a in ajeno)
+
+    for url, ajenos, que in (
+        ("https://www.instagram.com/beto/", ("AAA111", "Reel de ana", "1.234"), "Instagram: del reel A a un perfil"),
+        ("https://www.instagram.com/stories/beto/3333/", ("AAA111", "Reel de ana"), "Instagram: una historia"),
+        ("https://www.instagram.com/", ("post de ana", "post de beto", "5.000"), "Instagram: el inicio"),
+        ("https://www.instagram.com/reels/DOTRO1/", ("pie del reel de otro", "ana"), "Instagram: una caja que enlaza a OTRO código"),
+        ("https://www.youtube.com/", ("Vídeo A", "CanalA", "230", "1,2 K"), "YouTube: la portada con la página de otro vídeo oculta"),
+        ("https://www.youtube.com/watch?v=GGGGGGGGGGG", ("Vídeo A", "CanalA", "230"), "YouTube: la barra en G y la página aún en A"),
+        ("https://www.tiktok.com/foryou", ("ana_pasada", "1M"), "TikTok: «Para ti» sin vídeo a la vista"),
+        ("https://x.com/home", ("tuit de arriba", '"ana"'), "X: el inicio"),
+        ("https://x.com/beto/status/2", ("otro tuit", '"ana"'), "X: el tuit que CITA al de la barra no es el de la barra"),
+        ("https://www.facebook.com/", ("post A", "post B", "45", '"3"'), "Facebook: el inicio"),
+        ("https://www.linkedin.com/feed/", ("post de Ana", '"Ana"'), "LinkedIn: el inicio"),
+        ("https://www.threads.net/@beto/post/BBB", ("@ana", "post de ana", "Ana en Threads"), "Threads: etiquetas de otro post"),
+        ("https://www.pinterest.com/pin/555/", ("444", "pin de otro", "Otro pin"), "Pinterest: etiquetas de otro pin"),
+    ):
+        d, limpio_ = nada_de(url, *ajenos)
+        ok(limpio_ and d["url"] == url and d.get("aviso"), f"{que}: nada del otro post, la dirección de la barra y un aviso")
+    i = res["https://www.instagram.com/ana/reel/CCC333/"]
+    igual((i["autor"], i["texto"], i["cifras"]), ("ana", "", {"me_gusta": "812", "comentarios": "40"}),
+          "Instagram: con un comentario fuera de la lista, el pie no se adivina (no sale el comentario)")
+    d = res["https://www.instagram.com/p/DDD444/"]
+    igual((d["autor"], d["texto"]), ("beto", "Promo - solo el sábado: 2x1 en consolas"), "Instagram: un « - » dentro del pie no cambia el autor")
+    d2 = res["https://www.instagram.com/p/DDE555/"]
+    ok(d2["cifras"] == {"me_gusta": "12", "comentarios": "3"} and "100 mil" not in json.dumps(d2["cifras"]),
+       "Instagram: las cifras salen de la cabecera, nunca del pie («gracias por las 100 mil vistas»)")
+    f = res["https://www.youtube.com/watch?v=BBBBBBBBBBB"]
+    igual(f["cifras"], {"vistas": "1.234", "me_gusta": "12"}, "YouTube: un Short visto antes no presta sus me gusta ni sus comentarios")
+    igual(res["https://www.youtube.com/watch?v=LLLLLLLLLLL"]["cifras"], {"me_gusta": "1,2 millones"},
+          "YouTube: «1,2 millones de personas» son 1,2 millones")
+    igual(R.numero_visto("1,2 millones"), 1_200_000, "…y el Studio lo cuenta como 1.200.000")
+    sh = res["https://www.youtube.com/shorts/SSSSSSSSSSS"]
+    igual((sh["titulo"], sh["autor"], sh["cifras"]), ("#humor del short", "patricio", {"me_gusta": "140 mil", "comentarios": "1,206"}),
+          "YouTube Shorts: el del enlace del reproductor, sin el «1x» de vidIQ")
+    tp = res["https://www.tiktok.com/@ana"]
+    ok("3.2M" not in json.dumps(tp) and tp["autor"] == "ana", "TikTok: un perfil no da las vistas de una de sus miniaturas")
+    t = res["https://www.tiktok.com/@ana/video/111"]
+    igual((t["autor"], t["texto"], t["cifras"]), ("ana", "mi vídeo", {"me_gusta": "12", "guardados": "4", "vistas": "38.7K"}),
+          "TikTok: las vistas de la miniatura de ESTE vídeo, no de la de al lado")
+    tf = res["https://www.tiktok.com/following"]
+    igual((tf["autor"], tf["texto"], tf["cifras"], tf["url"]),
+          ("beto", "el que se ve", {"me_gusta": "5"}, "https://www.tiktok.com/@beto/video/222"),
+          "TikTok: en el muro, el vídeo que se ve y su enlace")
+    x = res["https://x.com/ana/status/1"]
+    igual((x["autor"], x["texto"], x["cifras"]), ("ana", "", {"comentarios": "3", "compartidos": "1", "me_gusta": "20"}),
+          "X: un tuit sin texto que cita otro no se lleva el texto del citado")
+    fb = res["https://www.facebook.com/estadoplay/posts/123"]
+    igual(fb["cifras"], {}, "Facebook: las cifras nunca salen del texto del post")
+    igual(len(res["https://blog.ejemplo.com/largo"]["seleccion"]), 5000, "una selección enorme se recorta a 5.000 letras")
+    igual((R.numero_visto("2,5 mi"), R.numero_visto("140 mil")), (2_500_000, 140_000), "«2,5 mi» (portugués) son 2,5 millones")
 
 
 # ------------------------------------------------- 5b. el botón (popup.js)
@@ -823,6 +1018,7 @@ def main():
     prueba_recibidos()
     prueba_extension()
     prueba_lector()
+    prueba_lector_hostil()
     prueba_boton()
     try:
         import fastapi  # noqa: F401

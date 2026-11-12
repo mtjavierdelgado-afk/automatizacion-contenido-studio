@@ -93,7 +93,7 @@ def _multiplicador(sufijo):
     s = sufijo.replace(" ", "")
     if s.startswith("milmillones") or s in ("b", "bn"):
         return 1_000_000_000
-    if s.startswith("mill") or s.startswith("milh") or s in ("m", "mln"):
+    if s.startswith("mill") or s.startswith("milh") or s in ("m", "mi", "mln"):
         return 1_000_000
     if s in ("mil", "k"):
         return 1_000
@@ -108,7 +108,7 @@ def numero_visto(texto):
     punto es de miles (1.234 en español, 1,234 en inglés)."""
     t = str(texto or "").strip().lower().replace("\u00a0", " ").replace("\u202f", " ")
     m = re.search(r"(\d(?:[\d.,]|\s(?=\d{3}\b))*\d|\d)\s*"
-                  r"(mil\s+millones|mill(?:ones|\.)?|milh(?:ões|ão|oes|ao)|mln|bn|mil|[kmb])?(?![a-záéíóúñãõç])", t)
+                  r"(mil\s+millones|mill(?:ones|\.)?|milh(?:ões|ão|oes|ao)|mln|bn|mil|mi|[kmb])?(?![a-záéíóúñãõç])", t)
     if not m:
         return None
     cifra, sufijo = m.group(1).replace(" ", ""), (m.group(2) or "").strip()

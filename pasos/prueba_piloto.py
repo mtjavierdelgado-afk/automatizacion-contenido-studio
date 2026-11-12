@@ -242,6 +242,36 @@ def probar_la_lista(raiz_padre):
     # montaje, alguien lo arregló y lo montó; la tarjeta lo dice y no pide «Reintentar»
     igual(servidor._piloto_render_al_dia(libre), False, "un vídeo sin montar no tiene el montaje al día")
     igual(servidor._piloto_render_al_dia("no_existe_este_video"), False, "uno que no existe, tampoco")
+    # el de verdad, con un vídeo de mentira: render «listo», «obsoleto» y con algo en marcha
+    real_ctx = servidor.contexto
+    falso = {"render": "listo", "activos": []}
+
+    class _Est:
+        def estado_de(self, paso):
+            return falso["render"] if paso == "render" else "listo"
+
+    class _Ges:
+        def listar(self, activos=False):
+            return list(falso["activos"])
+
+    ctx_falso = type("Ctx", (), {"estado": _Est(), "gestor": _Ges()})()
+    try:
+        servidor.contexto = lambda _pid: ctx_falso
+        servidor._PILOTO_RENDER.clear()
+        igual(servidor._piloto_render_al_dia(libre), True, "con el render «listo» y nada en marcha, al día")
+        falso["activos"] = [{"id": "t1"}]
+        igual(servidor._piloto_render_al_dia(libre), False,
+              "con algo en marcha, NO (aunque su estado.json no haya cambiado: se mira cada vez)")
+        falso["activos"] = []
+        servidor._PILOTO_RENDER.clear()
+        falso["render"] = "obsoleto"
+        igual(servidor._piloto_render_al_dia(libre), False, "con el render «obsoleto», NO")
+        falso["render"] = "listo"
+        igual(servidor._piloto_render_al_dia(libre), False,
+              "(lo recuerda mientras su estado.json no cambie: no se abre en cada vuelta)")
+    finally:
+        servidor.contexto = real_ctx
+        servidor._PILOTO_RENDER.clear()
     t = P.encolar(base, {"cid": "c1", "gid": "gl5", "estilo": "e1"})
     P.cambiar(base, t["id"], estado="error", etapa="imagenes", pid=libre,
               porque="dos o mas planos han acabado con la MISMA imagen")

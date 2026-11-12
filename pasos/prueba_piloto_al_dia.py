@@ -73,6 +73,13 @@ def prueba_casar():
     igual(G.casar_estado("rojo", todos), "", "uno que no es ninguno: nada")
     igual(G.casar_estado("luz_blanco_frio_techo", todos), "blanco_frio", "uno más largo que contiene a uno solo")
     igual(G.casar_estado("antes", ["antes", "antes_de_pintar"]), "antes", "el exacto manda sobre el que lo contiene")
+    for linea, espacio in (("muebles", ["antes", "sin_muebles"]), ("sin_muebles", ["antes", "muebles"]),
+                           ("luz", ["sin_luz"]), ("no_blanco", ["blanco"]), ("pintar", ["antes_de_pintar"])):
+        igual(G.casar_estado(linea, espacio), "", f"«{linea}» NO casa con {espacio} (lo que sobra cambia el sentido)")
+    igual(G.estados_casados([{"id": "V001", "estado": "frio"}, {"id": "V002", "estado": "blanco_calido"},
+                             {"id": "V003", "estado": "rojo"}], todos),
+          [{"plano": "V001", "estado": "frio", "casa_con": "blanco_frio"}],
+          "las casaciones no exactas se enseñan antes de pagar («frio» → «blanco_frio»)")
     igual(G.estado_de_linea({"estado": "frio"}, {"blanco_frio": FRIO}, todos),
           {"cambio": FRIO, "estado": "blanco_frio"}, "la línea «frio» lleva el cambio de «blanco_frio»")
     igual(G.estado_de_linea({"estado": "antes"}, {"blanco_frio": FRIO}, todos), {"cambio": "", "estado": ""},
@@ -180,6 +187,20 @@ def prueba_el_plan(proyecto):
     ok(len(para) == 1 and "blanco_frio" in para[0]["opciones"], "y `planos_sin_estado` lo para antes de pagar")
     igual(P6.planos_sin_estado(plan, dirs, unidades=[f"escena:{frio['id']}"]), [],
           "rehacer solo otro plano no se bloquea por él")
+
+    seccion("3b] la tanda se para ANTES de pagar")
+    from PIL import Image                                             # noqa: PLC0415
+    ref = os.path.join(proyecto.raiz, "estilo.png")
+    Image.new("RGB", (64, 64), (200, 120, 40)).save(ref)
+    con_estilo = _params(LINEAS)
+    con_estilo["estilo"]["referencias"] = [ref]
+    try:
+        P6.ejecutar(proyecto, con_estilo)
+        ok(False, "con «rojo» la tanda se tenía que parar")
+    except RuntimeError as fallo:
+        texto = str(fallo)
+        ok("no es ninguno de los del espacio" in texto and "«rojo»" in texto and "V004" in texto and "blanco_frio" in texto,
+           f"se para antes de pagar, nombra el plano con su línea y dice los estados que valen ({texto[:160]})")
 
     seccion("4] lo de antes no se mueve")
     exactas = [dict(x, estado={"frio": "blanco_frio", "calido": "blanco_calido", "rojo": ""}.get(x["estado"], x["estado"]))

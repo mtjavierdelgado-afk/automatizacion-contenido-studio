@@ -1634,8 +1634,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
             # apunta y `ejecutar` para la tanda ANTES de pagar
             if principal and todos_los_estados and linea.get("estado") and not beat.get("estado") \
                     and guion_visual.estados_sin_casar([linea], todos_los_estados):
-                estados_sin_casar.append({"plano": escena["id"], "estado": linea["estado"],
-                                          "opciones": sorted(todos_los_estados)})
+                estados_sin_casar.append({"plano": escena["id"], "linea": linea.get("id") or "",
+                                          "estado": linea["estado"], "opciones": sorted(todos_los_estados)})
         if relato_edita:
             _marcar_edicion(escena, beat, relato, principal, modo, bases_rel)
         escena["prompt"] = _prompt_visual(escena, beat, catalogo, modo=modo)
@@ -1671,8 +1671,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
                 if principal else {}, todos_los_estados))
             if principal and todos_los_estados and nueva["linea_gv"].get("estado") and not beat.get("estado") \
                     and guion_visual.estados_sin_casar([nueva["linea_gv"]], todos_los_estados):
-                estados_sin_casar.append({"plano": nueva["id"], "estado": nueva["linea_gv"]["estado"],
-                                          "opciones": sorted(todos_los_estados)})
+                estados_sin_casar.append({"plano": nueva["id"], "linea": nueva["linea_gv"].get("id") or "",
+                                          "estado": nueva["linea_gv"]["estado"], "opciones": sorted(todos_los_estados)})
         # el encuadre lo dice su direccion: la carta del plano partido no es suya
         nueva.pop("encuadre", None)
         # «DIRIGIR» SOBRE LA INSERTADA (28-10): su direccion o su parrafo
@@ -5546,6 +5546,18 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
                                "no está aprobado o ya no casa con la voz: revísalo y "
                                "apruébalo en «Guion visual» (paso Imágenes) antes de "
                                "generar los planos")
+        # UN ESTADO QUE NO ES NINGUNO DEL ESPACIO NO SE PAGA (rama piloto-al-dia,
+        # Y05: «frio» no era «blanco_frio», el plano editaba la base sin cambio
+        # y salia igual que otro). Se para ANTES de gastar y se dice cual es.
+        sin_estado = planos_sin_estado(plan, dirs, unidades=unidades, rehacer=rehacer)
+        if sin_estado:
+            raise RuntimeError(
+                "en el guion visual hay planos con un estado que no es ninguno de los del espacio: "
+                + "; ".join(f"{x['plano']}" + (f" (línea {x['linea']})" if x.get("linea") else "") + f" pide «{x['estado']}»"
+                         for x in sin_estado[:6])
+                + (f" (y {len(sin_estado) - 6} más)" if len(sin_estado) > 6 else "")
+                + ". Los estados son: " + ", ".join(f"«{e}»" for e in sin_estado[0]["opciones"])
+                + ". Corrige el estado de esas líneas en «Guion visual» (paso Imágenes) antes de generar los planos")
         faltan = planos_sin_base(plan, dirs, unidades=unidades, rehacer=rehacer)
         if faltan:
             raise RuntimeError(
@@ -5555,17 +5567,6 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
                 + ": ve al paso «Imágenes» (bloque «La imagen base») o al Encargo "
                   "(«El tipo de relato»), genérala o usa la imagen subida del espacio "
                   "fijo, y apruébala (y la de cada estado) antes de generar los planos")
-        # UN ESTADO QUE NO ES NINGUNO DEL ESPACIO NO SE PAGA (rama piloto-al-dia,
-        # Y05: «frio» no era «blanco_frio», el plano editaba la base sin cambio
-        # y salia igual que otro). Se para ANTES de gastar y se dice cual es.
-        sin_estado = planos_sin_estado(plan, dirs, unidades=unidades, rehacer=rehacer)
-        if sin_estado:
-            raise RuntimeError(
-                "en el guion visual hay planos con un estado que no es ninguno de los del espacio: "
-                + "; ".join(f"{x['plano']} pide «{x['estado']}»" for x in sin_estado[:6])
-                + (f" (y {len(sin_estado) - 6} más)" if len(sin_estado) > 6 else "")
-                + ". Los estados son: " + ", ".join(f"«{e}»" for e in sin_estado[0]["opciones"])
-                + ". Corrige el estado de esas líneas en «Guion visual» (paso Imágenes) antes de generar los planos")
 
     # REHACER UNA COSA REHACE ESA COSA. Aqui habia siete lineas de CASCADA:
     # pedir un asset metia detras todas las escenas que lo usan, asi que pulsar

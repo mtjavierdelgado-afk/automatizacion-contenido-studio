@@ -44,7 +44,8 @@ def piloto_terminado_a_mano(navegador, datos):
         ok(pg.visible(f"{mano} .pastilla", "Terminado a mano"), "dice «Terminado a mano», no «Falló»")
         ok(pg.visible(f"{mano} button", "Publicar"), "ofrece «Publicar ›»")
         ok(not pg.visible(f"{mano} button", "Reintentar"), "y no «Reintentar» (podría volver a pagar el revisor)")
-        ok(pg.visible(".grupo-listos .tarjeta-piloto", "PM1"), "va con los listos para publicar")
+        ok(pg.visible(".grupo-listos .tarjeta-piloto", "PM1") and not pg.visible(".grupo-revisar .tarjeta-piloto", "PM1"),
+           "va con los listos para publicar, y no también en «Necesita revisión»")
         ok(pg.visible(".grupo-revisar .tarjeta-piloto", "PM2") and pg.visible(".tarjeta-piloto:has-text('PM2') button", "Reintentar"),
            "el que sigue fallando, igual que siempre")
         # el guion visual avisa de un estado que no es ninguno del espacio

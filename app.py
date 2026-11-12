@@ -6184,16 +6184,18 @@ def _ficha_guion_visual(ctx):
     estilo = params.get("estilo") if isinstance(params.get("estilo"), dict) else {}
     # LINEAS CON UN ESTADO QUE NO ES NINGUNO DEL ESPACIO (rama piloto-al-dia, Y05):
     # se avisan aqui, y `p6_assets.ejecutar` no las paga. Solo lee.
-    sin_casar = []
+    sin_casar, casados = [], []
     if estados:
         try:
             p6 = PASOS_MODULOS.p6_assets
             todos = list(_tipo_relato().estados_fijos(p6._catalogo_de(p6._con_defectos(params), ctx.proyecto)))
-            sin_casar = gv.estados_sin_casar(guardado.get("planos") or propuesta or _planos_ef, todos)
+            planos_ver = guardado.get("planos") or propuesta or _planos_ef
+            sin_casar = gv.estados_sin_casar(planos_ver, todos)
+            casados = gv.estados_casados(planos_ver, todos)
         except Exception:                                   # noqa: BLE001
-            sin_casar = []
+            sin_casar, casados = [], []
     return {"modo": gv.modo_de(params),
-            "estados_sin_casar": sin_casar,
+            "estados_sin_casar": sin_casar, "estados_casados": casados,
             "del_video": params.get("imagenes") or "",
             "del_estilo": estilo.get("imagenes") or "",
             "modos": [{"clave": k, "nombre": v} for k, v in gv.MODOS.items()],
@@ -13250,6 +13252,19 @@ def _impedimentos(ctx, pestana, pendientes):
             fuera.append({"tarea": "assets",
                           "que": "las imágenes siguen el guion y el guion visual no está "
                                  "aprobado: revísalo y apruébalo antes de dibujar",
+                          "donde": "Guion visual"})
+        # una linea con un estado que no es ninguno del espacio (rama piloto-al-dia):
+        # p6 tambien para, antes de pagar; aqui se dice antes de lanzar (y el
+        # piloto se DETIENE con su sitio, en vez de fallar)
+        try:
+            sin_casar = _ficha_guion_visual(ctx).get("estados_sin_casar") or []
+        except Exception:                                   # noqa: BLE001
+            sin_casar = []
+        if sin_casar:
+            fuera.append({"tarea": "assets",
+                          "que": "en el guion visual hay líneas con un estado que no es ninguno de los del "
+                                 "espacio (" + ", ".join(f"{x['plano']} «{x['estado']}»" for x in sin_casar[:4])
+                                 + "): corrígelas antes de dibujar",
                           "donde": "Guion visual"})
     return fuera
 
@@ -23537,8 +23552,9 @@ def _piloto_vivo(ficha):
             "segundos": t.get("segundos"), "cancelando": t.get("cancelando")}
 
 
-#: pid -> (marca de su estado.json, ¿montaje al dia?) (rama piloto-al-dia)
+#: pid -> (marca de su estado.json, ¿render «listo»?) (rama piloto-al-dia)
 _PILOTO_RENDER = {}
+_PILOTO_RENDER_LOCK = threading.Lock()
 #: las etapas hasta el montaje: si el piloto se paro en una de estas y el video
 #: ya esta montado, alguien lo termino a mano. Uno que fallo DESPUES (titulos,
 #: portadas) tiene su montaje hecho por el propio piloto: eso no es terminarlo.
@@ -23553,18 +23569,23 @@ def _piloto_render_al_dia(pid):
         marca = os.stat(os.path.join(raiz_proyectos(), str(pid), "estado.json")).st_mtime_ns
     except (OSError, ValueError):
         return False
-    guardado = _PILOTO_RENDER.get(pid)
-    if guardado and guardado[0] == marca:
-        return guardado[1]
     try:
         ctx = contexto(pid)
-        al_dia = ctx.estado.estado_de("render") == "listo" and not ctx.gestor.listar(activos=True)
+        # lo que tiene en marcha se mira SIEMPRE (un trabajo puede acabar sin tocar estado.json)
+        if ctx.gestor.listar(activos=True):
+            return False
+        with _PILOTO_RENDER_LOCK:
+            guardado = _PILOTO_RENDER.get(pid)
+        if guardado and guardado[0] == marca:
+            return guardado[1]
+        listo = ctx.estado.estado_de("render") == "listo"
     except Exception:                                       # noqa: BLE001
         return False
-    _PILOTO_RENDER[pid] = (marca, al_dia)
-    while len(_PILOTO_RENDER) > 2000:
-        _PILOTO_RENDER.pop(next(iter(_PILOTO_RENDER)))
-    return al_dia
+    with _PILOTO_RENDER_LOCK:
+        _PILOTO_RENDER[pid] = (marca, listo)
+        while len(_PILOTO_RENDER) > 2000:
+            _PILOTO_RENDER.pop(next(iter(_PILOTO_RENDER)))
+    return listo
 
 
 def _piloto_para_pantalla(ficha):

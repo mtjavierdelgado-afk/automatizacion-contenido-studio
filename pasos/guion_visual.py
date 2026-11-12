@@ -405,6 +405,13 @@ def fuera_de_la_voz(planos, bloques):
     return sorted({p["bloque"] for p in planos or [] if p.get("bloque") not in validos})
 
 
+#: Palabras que cambian el sentido de un estado: si son lo que sobra entre el
+#: nombre de la linea y el del espacio, no es el mismo estado («muebles» no es
+#: «sin_muebles», «pintar» no es «antes_de_pintar»). Revision del 12-11.
+_NO_CASAN = {"sin", "no", "non", "not", "without", "con", "with", "antes", "despues", "before", "after",
+             "pre", "post", "ex", "de", "del", "la", "el", "los", "las", "y", "o", "of", "the", "and", "or"}
+
+
 def _trozos(etiqueta):
     return [t for t in re.split(r"[_\s-]+", _llano(etiqueta)) if t]
 
@@ -432,8 +439,28 @@ def casar_estado(nombre, todos):
     mios = set(_trozos(nombre))
     if not mios:
         return ""
-    candidatos = [t for t in todos if mios <= set(_trozos(t)) or (set(_trozos(t)) and set(_trozos(t)) <= mios)]
+    candidatos = []
+    for t in todos:
+        suyos = set(_trozos(t))
+        if suyos and (mios <= suyos or suyos <= mios) and not ((mios ^ suyos) & _NO_CASAN):
+            candidatos.append(t)
     return candidatos[0] if len(candidatos) == 1 else ""
+
+
+def estados_casados(planos, todos):
+    """Las lineas cuyo estado se ha casado con OTRO nombre del espacio («frio» →
+    «blanco_frio»). -> [{plano, estado, casa_con}]. La pantalla lo enseña antes de
+    pagar, para que una casacion mala se vea."""
+    todos = [str(t) for t in (todos or []) if str(t).strip()]
+    salida = []
+    for i, p in enumerate(planos or []):
+        estado = str((p or {}).get("estado") or "").strip()
+        if not estado or estado in todos or sin_cambio(estado):
+            continue
+        casado = casar_estado(estado, todos)
+        if casado:
+            salida.append({"plano": (p or {}).get("id") or f"V{i + 1:03d}", "estado": estado, "casa_con": casado})
+    return salida
 
 
 def estado_de_linea(plano, estados, todos=None):
@@ -467,7 +494,7 @@ def estados_sin_casar(planos, todos):
     salida = []
     for i, p in enumerate(planos or []):
         estado = str((p or {}).get("estado") or "").strip()
-        if not estado or sin_cambio(estado) or _llano(estado).strip() in ("base", "la_base"):
+        if not estado or sin_cambio(estado):
             continue
         if not casar_estado(estado, todos):
             salida.append({"plano": (p or {}).get("id") or f"V{i + 1:03d}", "estado": estado,

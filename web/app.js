@@ -18199,6 +18199,13 @@ function editorGuionVisual() {
       + `. Los estados son: ${(sinCasar[0].opciones || []).map(e => `«${e}»`).join(', ')}. `
       + 'Corrige el estado de esas líneas («Usar estas líneas» si vienen de la Parrilla): hasta entonces no se dibujan.'));
   }
+  /* las que se han casado con OTRO nombre («frio» → «blanco_frio»): que se vean antes de pagar */
+  const casados = f.estados_casados || [];
+  if (casados.length) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Estados que se dibujan con el nombre del espacio: '
+      + casados.slice(0, 8).map(x => `${x.plano} «${x.estado}» → «${x.casa_con}»`).join(', ')
+      + (casados.length > 8 ? '…' : '') + '. Si alguno no es el que querías, cambia el estado de esa línea.'));
+  }
   const avisoDe = {};
   (f.comprobacion || []).forEach(a => { avisoDe[a.plano] = a.que; });
   sinCasar.forEach(x => { avisoDe[x.plano] = `pide el estado «${x.estado}», que no es ninguno de los del espacio`; });

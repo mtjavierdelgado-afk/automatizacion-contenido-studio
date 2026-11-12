@@ -511,7 +511,9 @@ def estados_sin_casar(planos, todos):
             continue
         if casar_estado(estado, todos):
             continue
-        parecidos = [t for t in todos if (set(_trozos(estado)) - _RELLENO) & (set(_trozos(t)) - _RELLENO)]
+        # palabras que solo dicen «la base» o niegan no cuentan como parecido («sin_cambios» no se parece a «sin_muebles»)
+        neutras = _RELLENO | {"sin", "base", "imagen", "igual", "que", "cambio", "cambios", "tal", "cual", "no", "nada"}
+        parecidos = [t for t in todos if (set(_trozos(estado)) - neutras) & (set(_trozos(t)) - neutras)]
         if sin_cambio(estado.replace("_", " ")) and not parecidos:
             continue
         salida.append({"plano": (p or {}).get("id") or f"V{i + 1:03d}", "estado": estado,

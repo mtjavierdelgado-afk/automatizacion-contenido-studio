@@ -85,6 +85,10 @@ def prueba_casar():
                            ("luces", ["luces_apagadas"]), ("pintado", ["pintado_a_medias"]),
                            ("limpio", ["nada_limpio"]), ("muebles", ["muebles_fuera"])):
         igual(G.casar_estado(linea, espacio), "", f"«{linea}» NO casa con {espacio}")
+    for base, espacio in (("sin_cambios", ["antes", "sin_muebles"]), ("la_imagen_base", ["base_pintada", "imagen_final"]),
+                          ("igual_que_la_base", ["igual_pero_rojo"])):
+        igual(G.estados_sin_casar([{"id": "V001", "estado": base}], espacio), [],
+              f"«{base}» sigue siendo la base aunque el espacio tenga {espacio}")
     igual(G.estados_sin_casar([{"id": "V001", "estado": "vacia"}], ["antes", "vacia_sin_muebles"]),
           [{"plano": "V001", "estado": "vacia", "opciones": ["antes", "vacia_sin_muebles"]}],
           "«vacia» con un estado «vacia_sin_muebles» no se da por la base: se para y se pregunta")

@@ -13271,7 +13271,7 @@ def _impedimentos(ctx, pestana, pendientes):
                 por_linea = {}
                 for e in plan.get("escenas") or []:
                     lid = (e.get("linea_gv") or {}).get("id")
-                    if lid:
+                    if lid and not p6._sin_imagen(e):        # una cartela no deja imagen: no cuenta
                         hecho = any(os.path.exists(os.path.join(c, "escenas", f"{e['id']}.png")) for c in carpetas)
                         por_linea[lid] = por_linea.get(lid, True) and hecho
                 hechas = {lid for lid, todo in por_linea.items() if todo}

@@ -345,9 +345,14 @@ def _correr_medida(cuenta):
     orden[i + 2:i + 2] = ["--verbose", "--no-session-persistence"]
     carpeta_vacia = tempfile.mkdtemp(prefix="medir_cupo_")
     try:
-        proceso = subprocess.Popen(orden, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, cwd=carpeta_vacia, env=cli.entorno(cuenta),
-                                   **getattr(cli, "SIN_VENTANA", {}), **getattr(cli, "GRUPO_PROPIO", {}))
+        # sin arrancar a la vez que otra llamada de esa cuenta (rama
+        # sesion-y-saltos: dos arranques a la vez rompian la sesion)
+        lanzar = getattr(cli, "lanzar_escalonado", None)
+        opciones = dict(stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, cwd=carpeta_vacia, env=cli.entorno(cuenta),
+                        **getattr(cli, "SIN_VENTANA", {}), **getattr(cli, "GRUPO_PROPIO", {}))
+        proceso = (lanzar(orden, cuenta, None, "la medida del cupo", **opciones) if lanzar
+                   else subprocess.Popen(orden, **opciones))
         if getattr(cli, "GRUPO_PROPIO", None):
             proceso._grupo_propio = True
         try:

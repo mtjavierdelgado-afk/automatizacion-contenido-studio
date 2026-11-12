@@ -2506,7 +2506,44 @@ function repintarClaves() {
   if (INICIO.abierta) pintarInicio();
 }
 
+/* REPINTAR SIN SALTAR (rama sesion-y-saltos, visto por el dueño el 09-11):
+   mientras se espera el acceso a Claude, Configuración se repinta cada 2 s, y
+   vaciar el cajón lo dejaba un instante sin altura: el navegador perdía dónde
+   estabas y el menú volvía arriba. Se apunta el desplazamiento de lo que se
+   desplaza (el cajón, su cuerpo y la página) y se devuelve al terminar. */
+function conservandoScroll(selectores, pintar, sostener) {
+  const nodos = selectores.map(s => (typeof s === 'string' ? $(s) : s))
+    .concat([document.scrollingElement]).filter(Boolean);
+  const antes = nodos.map(n => [n, n.scrollTop, n.scrollLeft]);
+  /* EL ALTO SE SOSTIENE UN MOMENTO: una sección que vuelve a pintarse
+     «cargando…» deja el cajón más corto, el navegador recorta el
+     desplazamiento al nuevo fondo y, cuando la sección se rellena, ya estabas
+     más arriba. Un relleno al final con lo que falta de alto, durante un
+     segundo y medio, deja sitio para volver a donde estabas. */
+  const caja = sostener ? $(sostener) : null;
+  // el relleno de un repintado anterior no cuenta como alto de verdad
+  if (caja) caja.querySelectorAll(':scope > .relleno-repintado').forEach(n => n.remove());
+  const alto = caja ? caja.scrollHeight : 0;
+  try { return pintar(); } finally {
+    // lo que falte de alto, como un relleno al final (que se va solo)
+    if (caja && caja.scrollHeight < alto) {
+      const relleno = h('div', { clase: 'relleno-repintado', 'aria-hidden': 'true' });
+      relleno.style.height = `${alto - caja.scrollHeight}px`;
+      caja.appendChild(relleno);
+      setTimeout(() => relleno.remove(), 1500);
+    }
+    antes.forEach(([n, arriba, izquierda]) => {
+      if (n.scrollTop !== arriba) n.scrollTop = arriba;
+      if (n.scrollLeft !== izquierda) n.scrollLeft = izquierda;
+    });
+  }
+}
+
 function pintarConfig() {
+  return conservandoScroll(['#config', '#cuerpo-config'], pintarConfigDentro, '#cuerpo-config');
+}
+
+function pintarConfigDentro() {
   const caja = vaciar($('#cuerpo-config'));
   const vista = estadoConfig();
   if (vista.error) {
@@ -9942,6 +9979,7 @@ function bloquePedidoSitiosDelVideo() {
   const est = relatoDelVideoLight();
   const corriendo = !!trabajoVideoLight();
   return h('div', { clase: 'pedido-sitios' },
+    avisoSitiosDeLineas(est, corriendo),
     campoTexto('Pedido para el reparto de sitios', est.pedido, x => { est.pedido = x; },
       { pista: 'todo en la cocina; el patio solo en el último tramo' }),
     h('div', { clase: 'fila' },
@@ -9949,6 +9987,66 @@ function bloquePedidoSitiosDelVideo() {
         onclick: () => repartirSitiosConPedido() }, 'Volver a repartir con este pedido'),
       h('span', { clase: 'meta' }, 'lo lee Claude (no se paga ninguna imagen); las imágenes '
         + 'hechas se quedan hasta que pidas rehacerlas')));
+}
+
+/* EL REPARTO Y LAS LÍNEAS VISUALES (rama gv-sitios, 11-11-2026). En modo
+   «guion», si el reparto y los sitios se escribieron leyendo la VOZ (un vídeo
+   de antes, o de cuando aún no había líneas), las imágenes pueden salir en un
+   sitio que ninguna línea pide (ZV01: un backstage en un vídeo de calle y
+   azotea). Se avisa ANTES de generar, con el botón para repartir desde las
+   líneas (lo lee Claude: no se paga ninguna imagen). Pintar no escribe nada. */
+function avisoSitiosDeLineas(est, corriendo) {
+  const s = ((est || {}).ficha || {}).sitios_de_lineas || {};
+  if (!s.lineas) return null;
+  const nuevas = (s.nuevas || []).length;
+  if (!s.de_la_voz && !nuevas) return null;
+  const texto = s.de_la_voz
+    ? `El reparto y los sitios se escribieron leyendo la voz, no tus ${s.lineas} líneas visuales: `
+      + 'las imágenes pueden salir en un sitio que ninguna línea pide, o sin la hoja de quien sale. '
+      + 'Repártelos desde las líneas antes de generar.'
+    : `${nuevas} línea(s) visual(es) son nuevas desde que se repartió (${s.nuevas.slice(0, 6).join(', ')}): `
+      + 'no tienen sitio ni reparto asignado. Vuelve a repartir desde las líneas.';
+  return h('div', { clase: 'caja-aviso aviso-sitios-lineas' },
+    h('div', {}, texto),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo, onclick: () => repartirSitiosDesdeLineas() },
+        'Volver a repartir desde las líneas'),
+      h('span', { clase: 'meta' }, videoConImagenesLight()
+        ? 'lo lee Claude; ojo: las imágenes ya hechas quedarán por rehacer, y rehacerlas se paga al generar'
+        : 'lo lee Claude: no se paga ninguna imagen')));
+}
+
+/* Si el vídeo abierto ya tiene alguna tanda de imágenes. */
+function videoConImagenesLight() {
+  const v = APP.light.video || {};
+  return !!versionDe((v.fichas || {}).assets || {});
+}
+
+async function repartirSitiosDesdeLineas() {
+  const est = relatoDelVideoLight();
+  const pid = est.pid;
+  /* CON IMÁGENES HECHAS, se pregunta (revisión de gv-sitios): repartir no
+     paga, pero cambia lo que pide cada plano y todas quedan por rehacer. */
+  if (videoConImagenesLight() && !window.confirm('Repartir desde las líneas cambia lo que pide cada '
+    + 'plano: las imágenes ya hechas quedarán por rehacer, y rehacerlas se paga al pulsar «Generar». '
+    + '¿Repartir igualmente?')) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(API.escenarios(pid), { method: 'POST', cuerpo: { rehacer: true, desde_lineas: true } });
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        toast('reparto y sitios repartidos desde las líneas visuales');
+        APP.light.video.relato = null;
+        APP.light.video.espacio = null;
+        await cargarVideoLight(pid);
+      }
+      pintarLight();
+    }, () => refrescarVivosLight(), pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
 }
 
 async function repartirSitiosConPedido() {
@@ -20127,6 +20225,19 @@ function irAInicio(paso) {
 }
 
 function pintarInicio() {
+  /* SOLO EN LA MISMA TARJETA (revisión): «Siguiente ›» y «‹ Atrás» llevan a
+     otra tarjeta, que empieza arriba como siempre. */
+  if (INICIO.pasoPintado !== INICIO.paso) {
+    INICIO.pasoPintado = INICIO.paso;
+    pintarInicioDentro();
+    const cuadro = $('#inicio .cuadro');
+    if (cuadro) cuadro.scrollTop = 0;
+    return;
+  }
+  return conservandoScroll(['#inicio', '#inicio .cuadro'], pintarInicioDentro, '#inicio .cuadro');
+}
+
+function pintarInicioDentro() {
   const capa = $('#inicio');
   if (!capa || !INICIO.abierta) return;
   const cuadro = vaciar(capa.querySelector('.cuadro'));
@@ -28354,6 +28465,18 @@ function avisoEmojisPublicar(red, campo) {
     + `(${dato.hay} de ${dato.minimo} como mínimo): pulsa «✨ Más emojis».`);
 }
 
+/* COPIAR PARA PUBLICAR A MANO (rama piloto-lista): además de copiarlo, se
+   apunta en el servidor que se copiaron los textos de esa red, y el vídeo sale
+   solo de la lista del piloto. Apuntarlo no cambia nada del vídeo ni de sus
+   envíos; si falla, el texto ya está copiado y no se dice nada. */
+async function copiarTextoParaPublicar(texto, red) {
+  const pid = PUB.pid;
+  try { await copiarTexto(texto); } catch (e) { return; }   // sin copiar, no se apunta
+  if (!pid) return;
+  pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/copiado`), { method: 'POST', cuerpo: { red } })
+    .catch(() => {});
+}
+
 /* EL TEXTO DE UNA RED, en su pestaña del paso Textos: los campos a la
    izquierda y, a la derecha, «Así sale» en un marco de teléfono (antes un
    plegable al final). La nota SEO, el primer comentario y los ganchos son
@@ -28368,8 +28491,8 @@ function bloqueTextoRed(red) {
     h('span', { clase: 'crece' }),
     h('button', { type: 'button', clase: 'mini', title: 'Copiar el texto tal como sale en la red',
       onclick: () => (String(textosDeFicha(red).descripcion || '').trim()
-        ? copiarTexto(compuesto.texto || '') : toast('Todavía no hay texto que copiar en esta red', true)) }, 'Copiar texto'),
-    compuesto.titulo ? h('button', { type: 'button', clase: 'mini', onclick: () => copiarTexto(compuesto.titulo) }, 'Copiar título') : null,
+        ? copiarTextoParaPublicar(compuesto.texto || '', red) : toast('Todavía no hay texto que copiar en esta red', true)) }, 'Copiar texto'),
+    compuesto.titulo ? h('button', { type: 'button', clase: 'mini', onclick: () => copiarTextoParaPublicar(compuesto.titulo, red) }, 'Copiar título') : null,
     h('button', { type: 'button', clase: 'mini fantasma', title: 'Que Claude reescriba solo esta red',
       disabled: f.escribiendo, onclick: () => escribirTextosPublicar([red]) }, 'Reescribir')));
   const campoTexto = () => document.querySelector(`.texto-red[data-red="${red}"] textarea`);
@@ -35161,16 +35284,26 @@ function panelPilotoParrilla() {
   }
   if (d.cupo) caja.appendChild(h('div', { clase: 'caja-aviso' }, `⏸ ${d.cupo}. Sigue solo cuando se libere.`));
   if (PIL.verAjustes) caja.appendChild(ajustesPiloto(d));
-  const revisar = videosPilotoDelProyecto(['revisar', 'parado', 'error', 'interrumpido']);
-  const vivos = videosPilotoDelProyecto(['trabajando', 'en_cola']).reverse();
-  const listos = videosPilotoDelProyecto(['listo']);
-  const cancelados = videosPilotoDelProyecto(['cancelado']);
+  /* EN EL ORDEN EN QUE SE LANZARON, y «En marcha y en cola» arriba del todo
+     (rama piloto-lista, pedido del dueño 11-11): el servidor los da del más
+     nuevo al más viejo; aquí se leen como una cadena, del primero al último.
+     Lo que ya salió (programado, publicado, subido a mano o con sus textos
+     copiados) se aparta solo a «Ya publicados». */
+  const enOrden = estados => videosPilotoDelProyecto(estados).reverse();
+  const yaSalio = v => !!v.salio;
+  const revisarTodos = enOrden(['revisar', 'parado', 'error', 'interrumpido']);
+  const revisar = revisarTodos.filter(v => !yaSalio(v));
+  const vivos = enOrden(['trabajando', 'en_cola']);
+  const listosTodos = enOrden(['listo']);
+  const listos = listosTodos.filter(v => !yaSalio(v));
+  const publicados = revisarTodos.concat(listosTodos).filter(yaSalio);
+  const cancelados = enOrden(['cancelado']);
   const deOtros = ((d.videos || []).filter(v => (v.cid || '') !== (PAR.cid || ''))).length;
   if (deOtros) {
     caja.appendChild(h('div', { clase: 'meta otros-proyectos-piloto' },
       `Aquí salen solo los de este proyecto; hay ${deOtros} ${deOtros === 1 ? 'vídeo' : 'vídeos'} de otros proyectos en el piloto.`));
   }
-  if (!revisar.length && !vivos.length && !listos.length && !cancelados.length) {
+  if (!revisar.length && !vivos.length && !listos.length && !cancelados.length && !publicados.length) {
     caja.appendChild(h('div', { clase: 'meta vacio-piloto' }, 'Todavía no has mandado ningún guion al piloto.'));
     return caja;
   }
@@ -35181,13 +35314,19 @@ function panelPilotoParrilla() {
         h('span', { clase: 'pastilla' }, String(lista.length)), h('span', { clase: 'meta' }, explica)),
       lista.map(v => tarjetaVideoPiloto(v)));
   };
-  const verListos = PIL.verListos ? listos : listos.slice(0, 3);
-  [grupo('Necesita revisión', revisar, 'mira lo apuntado y decide', 'grupo-revisar'),
-    grupo('En marcha y en cola', vivos, 'por orden de llegada'),
+  // sin desplegar, los TRES ÚLTIMOS lanzados (en su orden)
+  const verListos = PIL.verListos ? listos : listos.slice(-3);
+  [grupo('En marcha y en cola', vivos, 'en el orden en que los lanzaste', 'grupo-vivos'),
+    grupo('Necesita revisión', revisar, 'mira lo apuntado y decide', 'grupo-revisar'),
     grupo('Listos para publicar', verListos, 'vídeo montado, textos y portada puestos', 'grupo-listos'),
     listos.length > 3 ? h('button', { clase: 'mini fantasma', onclick: () => { PIL.verListos = !PIL.verListos; pintarModulo(); } },
       PIL.verListos ? 'Ver menos' : `Ver los ${listos.length} listos`) : null,
     grupo('Parados por ti', cancelados, '«Reintentar» sigue donde iba'),
+    publicados.length ? h('button', { clase: 'mini fantasma ver-publicados-piloto',
+      onclick: () => { PIL.verPublicados = !PIL.verPublicados; pintarModulo(); } },
+    PIL.verPublicados ? 'Ocultar los ya publicados' : `Ver los ya publicados (${publicados.length})`) : null,
+    PIL.verPublicados ? grupo('Ya publicados', publicados,
+      'programados, publicados o con sus textos copiados: salen solos de la lista', 'grupo-publicados') : null,
   ].filter(Boolean).forEach(n => caja.appendChild(n));
   return caja;
 }
@@ -35197,13 +35336,20 @@ function nombreEtapaPiloto(id) {
   return e ? e.nombre : (id || '');
 }
 
+/* Una parada que no espera al dueño (piloto-lista): se paró solo porque el
+   vídeo tenía otra cosa en marcha, y se retoma sola cuando acaba. */
+function esperaSolaPiloto(v) {
+  return v.estado === 'parado' && v.tipo_parada === 'ocupado' && !!v.espera_sola;
+}
+
 function tarjetaVideoPiloto(v) {
   const nombres = (PIL.datos || {}).estados || {};
   const marco = { trabajando: ' estado-trabajando', error: ' estado-error' }[v.estado] || '';
   const tarjeta = h('article', { clase: `tarjeta-piloto${marco}`, datos: { piloto: v.id } });
   tarjeta.appendChild(h('div', { clase: 'fila cab-tarjeta-piloto' },
     h('b', { clase: 'titulo-piloto' }, v.nombre || v.titulo || 'Vídeo del piloto'),
-    h('span', { clase: `pastilla ${CLASE_ESTADO_PILOTO[v.estado] || ''}`.trim() }, nombres[v.estado] || v.estado)));
+    h('span', { clase: `pastilla ${CLASE_ESTADO_PILOTO[v.estado] || ''}`.trim() },
+      esperaSolaPiloto(v) ? 'esperando: sigue solo' : (nombres[v.estado] || v.estado))));
   const lineas = h('div', { clase: 'lineas-piloto' });
   if (v.estado === 'trabajando' || v.estado === 'en_cola') {
     lineas.appendChild(h('span', { clase: 'meta' }, v.estado === 'trabajando'
@@ -35219,6 +35365,10 @@ function tarjetaVideoPiloto(v) {
   if (v.porque && ['parado', 'error', 'interrumpido'].includes(v.estado)) {
     lineas.appendChild(h('div', { clase: 'porque-piloto' }, h('b', {}, v.estado === 'error' ? 'Qué pasó: ' : 'Por qué se paró: '),
       v.porque, v.donde ? h('span', { clase: 'meta' }, ` · se arregla en ${v.donde}`) : null));
+  }
+  if (esperaSolaPiloto(v)) {
+    lineas.appendChild(h('div', { clase: 'meta' }, 'No tienes que decidir nada: en cuanto termine lo que tiene '
+      + 'en marcha, el piloto sigue solo. Si quieres verlo, «Abrir el vídeo» → la cola.'));
   }
   if (v.estado === 'error' && v.mensaje) lineas.appendChild(h('div', { clase: 'meta mensaje-error-piloto' }, String(v.mensaje).slice(0, 400)));
   if (v.estado === 'interrumpido') lineas.appendChild(h('div', { clase: 'meta' }, v.mensaje || ''));
@@ -35237,7 +35387,10 @@ function tarjetaVideoPiloto(v) {
   if (v.pid && ['listo', 'revisar'].includes(v.estado)) {
     botones.appendChild(h('button', { clase: 'mini primario', onclick: () => abrirPublicarVideo(v.pid) }, 'Publicar ›'));
   }
-  if (v.estado === 'parado' && v.tipo_parada) {
+  /* «Seguir igualmente» NO en una parada por «tiene algo en marcha»: el
+     piloto nunca se salta eso, así que hacía lo mismo que «Reintentar». Esa
+     parada se retoma sola cuando acaba lo que había en marcha (piloto-lista). */
+  if (v.estado === 'parado' && v.tipo_parada && v.tipo_parada !== 'ocupado') {
     botones.appendChild(h('button', { clase: 'mini primario', title: 'Ya lo has mirado: sigue desde donde se paró',
       onclick: () => seguirPiloto(v, true) }, 'Seguir igualmente'));
   }

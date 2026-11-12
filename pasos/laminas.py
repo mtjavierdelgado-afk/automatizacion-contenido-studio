@@ -183,7 +183,8 @@ def dibujar_suelta(estilo, destino, nombre, descripcion, calidad="medium",
         return {"ruta": ruta, "coste_usd": 0.0, "reutilizada": True}
     png, meta = imagen.generar(prompt, refs, quality=calidad, tamano="apaisado")
     ruta = os.path.join(destino, f"{nombre}.png")
-    with open(ruta, "wb") as fh:
-        fh.write(png)
+    if not medios.bytes_de_imagen_sanos(png):
+        raise RuntimeError(f"la lámina {nombre} llegó rota de OpenAI: no se ha guardado")
+    medios.escribir_bytes(ruta, png)          # entera o nada (rama png-seguro)
     moodboard.apuntar_lamina(destino, nombre, huella)
     return {"ruta": ruta, "coste_usd": float(meta.get("coste") or 0.0)}

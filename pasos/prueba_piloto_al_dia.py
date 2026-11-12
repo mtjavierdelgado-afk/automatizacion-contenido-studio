@@ -76,6 +76,15 @@ def prueba_casar():
     for linea, espacio in (("muebles", ["antes", "sin_muebles"]), ("sin_muebles", ["antes", "muebles"]),
                            ("luz", ["sin_luz"]), ("no_blanco", ["blanco"]), ("pintar", ["antes_de_pintar"])):
         igual(G.casar_estado(linea, espacio), "", f"«{linea}» NO casa con {espacio} (lo que sobra cambia el sentido)")
+    for linea, espacio, casa in (("despues", ["antes", "despues_de_pintar"], "despues_de_pintar"),
+                                 ("muebles", ["con_muebles"], "con_muebles"),
+                                 ("muebles", ["quitar_muebles"], ""), ("luz", ["luz_apagada"], ""),
+                                 ("terminado", ["casi_terminado"], "")):
+        igual(G.casar_estado(linea, espacio), casa, f"«{linea}» con {espacio}: {casa or 'no casa'}")
+    for base in ("la_base", "sin_cambios", "tal_cual", "la_imagen_base", "igual_que_la_base"):
+        etiqueta = G._etiqueta(base)                                   # noqa: SLF001  (como llega de la Parrilla)
+        igual(G.estados_sin_casar([{"id": "V001", "estado": etiqueta}], todos), [],
+              f"«{etiqueta}» es la base, no un estado desconocido (no detiene el vídeo)")
     igual(G.estados_casados([{"id": "V001", "estado": "frio"}, {"id": "V002", "estado": "blanco_calido"},
                              {"id": "V003", "estado": "rojo"}], todos),
           [{"plano": "V001", "estado": "frio", "casa_con": "blanco_frio"}],
@@ -213,11 +222,34 @@ def prueba_el_plan(proyecto):
     ok("estados_sin_casar" not in sin_estados, "sin estados en el espacio, nada que avisar")
 
 
+def prueba_el_aviso(proyecto, carpeta):
+    seccion("5] el aviso de antes de lanzar (el piloto se DETIENE en «Guion visual»)")
+    try:
+        import app as servidor                                    # noqa: PLC0415
+    except ImportError as fallo:
+        print(f"  (omitida: falta {fallo.name} en este entorno; en el servidor sí corre)")
+        return
+    if servidor.PASOS_MODULOS is None:
+        print(f"  (omitida: los pasos no cargan aquí: {servidor.ERROR_PASOS[:80]})")
+        return
+    servidor.fijar_raiz_proyectos(carpeta)
+    ctx = servidor.contexto(proyecto.id)
+    ctx.estado.set_params("assets", _params(LINEAS))
+    avisos = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+    ok(any(a.get("donde") == "Guion visual" and "«rojo»" in a.get("que", "") for a in avisos),
+       f"con una línea «rojo», se avisa antes de lanzar y dice dónde se arregla ({avisos})")
+    ctx.estado.set_params("assets", _params([dict(x, estado="blanco_frio") if x["estado"] == "rojo" else x for x in LINEAS]))
+    avisos = servidor._impedimentos(ctx, "video", [{"id": "assets"}])
+    ok(not any("no es ninguno" in a.get("que", "") for a in avisos), "con los estados bien, nada que avisar por eso")
+
+
 def main():
     carpeta = tempfile.mkdtemp(prefix="piloto_al_dia_")
     try:
         prueba_casar()
-        prueba_el_plan(_proyecto(os.path.join(carpeta, "video")))
+        proyecto = _proyecto(os.path.join(carpeta, "video"))
+        prueba_el_plan(proyecto)
+        prueba_el_aviso(proyecto, os.path.join(carpeta, "video"))
     finally:
         shutil.rmtree(carpeta, ignore_errors=True)
     print()

@@ -13256,9 +13256,23 @@ def _impedimentos(ctx, pestana, pendientes):
         # una linea con un estado que no es ninguno del espacio (rama piloto-al-dia):
         # p6 tambien para, antes de pagar; aqui se dice antes de lanzar (y el
         # piloto se DETIENE con su sitio, en vez de fallar)
+        # lo MISMO que mira p6: solo los planos que esta tanda va a dibujar (uno ya hecho
+        # con un estado raro no se paga y no bloquea); sin plan aun, todas las lineas
+        # las lineas de AHORA (un plan viejo puede traer un estado ya corregido), menos
+        # las que ya tienen su plano dibujado: ese no se paga y no tiene que bloquear
+        sin_casar = []
         try:
             sin_casar = _ficha_guion_visual(ctx).get("estados_sin_casar") or []
-        except Exception:                                   # noqa: BLE001
+            if sin_casar:
+                p6 = PASOS_MODULOS.p6_assets
+                plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+                carpetas = _carpetas_de_assets(ctx) or [""]
+                hechas = {(e.get("linea_gv") or {}).get("id") for e in plan.get("escenas") or []
+                          if (e.get("linea_gv") or {}).get("id")
+                          and os.path.exists(os.path.join(carpetas[-1], "escenas", f"{e['id']}.png"))}
+                sin_casar = [x for x in sin_casar if x.get("plano") not in hechas]
+        except Exception as fallo:                          # noqa: BLE001
+            print(f"[impedimentos] no se han podido mirar los estados del guion visual: {fallo}", flush=True)
             sin_casar = []
         if sin_casar:
             fuera.append({"tarea": "assets",

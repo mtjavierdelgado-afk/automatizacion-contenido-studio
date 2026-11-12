@@ -408,8 +408,12 @@ def fuera_de_la_voz(planos, bloques):
 #: Palabras que cambian el sentido de un estado: si son lo que sobra entre el
 #: nombre de la linea y el del espacio, no es el mismo estado («muebles» no es
 #: «sin_muebles», «pintar» no es «antes_de_pintar»). Revision del 12-11.
-_NO_CASAN = {"sin", "no", "non", "not", "without", "con", "with", "antes", "despues", "before", "after",
-             "pre", "post", "ex", "de", "del", "la", "el", "los", "las", "y", "o", "of", "the", "and", "or"}
+_NO_CASAN = {"sin", "no", "non", "not", "without", "antes", "before", "pre", "ex", "casi", "medio", "semi",
+             "quitar", "quitado", "quitada", "sacar", "sacado", "retirar", "retirado", "apagado", "apagada",
+             "apagar", "off", "falta", "faltan", "vacio", "vacia", "empty", "removed", "remove", "less"}
+#: Palabras que no dicen nada del estado: se quitan de los dos lados antes de comparar
+#: («con_muebles» es «muebles», «despues_de_pintar» contiene «despues»).
+_RELLENO = {"de", "del", "la", "el", "los", "las", "y", "o", "of", "the", "and", "or", "con", "with", "a", "en", "un", "una"}
 
 
 def _trozos(etiqueta):
@@ -436,12 +440,12 @@ def casar_estado(nombre, todos):
     iguales = [t for t in todos if "_".join(_trozos(t)) == llano]
     if len(iguales) == 1:
         return iguales[0]
-    mios = set(_trozos(nombre))
+    mios = set(_trozos(nombre)) - _RELLENO
     if not mios:
         return ""
     candidatos = []
     for t in todos:
-        suyos = set(_trozos(t))
+        suyos = set(_trozos(t)) - _RELLENO
         if suyos and (mios <= suyos or suyos <= mios) and not ((mios ^ suyos) & _NO_CASAN):
             candidatos.append(t)
     return candidatos[0] if len(candidatos) == 1 else ""
@@ -455,7 +459,7 @@ def estados_casados(planos, todos):
     salida = []
     for i, p in enumerate(planos or []):
         estado = str((p or {}).get("estado") or "").strip()
-        if not estado or estado in todos or sin_cambio(estado):
+        if not estado or estado in todos or sin_cambio(estado.replace("_", " ")):
             continue
         casado = casar_estado(estado, todos)
         if casado:
@@ -494,7 +498,7 @@ def estados_sin_casar(planos, todos):
     salida = []
     for i, p in enumerate(planos or []):
         estado = str((p or {}).get("estado") or "").strip()
-        if not estado or sin_cambio(estado):
+        if not estado or sin_cambio(estado.replace("_", " ")):
             continue
         if not casar_estado(estado, todos):
             salida.append({"plano": (p or {}).get("id") or f"V{i + 1:03d}", "estado": estado,

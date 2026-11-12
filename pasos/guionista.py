@@ -181,6 +181,11 @@ def anexos_del_turno(web, resultados_texto, imagenes, cuenta_texto="", vidiq=Fal
                       "di que activen «Buscar en internet» o que te peguen capturas.]")
     if vidiq:
         partes.append(AVISO_VIDIQ)
+        if isinstance(vidiq, str) and vidiq.strip():
+            # vidiq-2: dónde se busca en este proyecto («SEO de este proyecto»)
+            partes.append(f"[EL PÚBLICO DE ESTE PROYECTO ES {vidiq.strip()[:80].upper()}: en vidIQ "
+                          "pide las palabras clave y los títulos para ese sitio y en su idioma "
+                          "(sin país = la cifra mundial).]")
     if resultados_texto:
         partes.append("[MIS VÍDEOS QUE MEJOR FUNCIONARON, con cifras reales guardadas]\n"
                       + resultados_texto)
@@ -463,7 +468,8 @@ class Chat:
             sesion = self.session_id
         self.guardar()
         args = (texto or "Mira estas capturas.", bool(web), resultados_texto, rutas, respuesta,
-                avance, historia, sesion, cuenta_texto, bool(vidiq))
+                avance, historia, sesion, cuenta_texto,
+                vidiq if isinstance(vidiq, str) and vidiq.strip() else bool(vidiq))
         if en_hilo:
             threading.Thread(target=self._correr, args=args, daemon=True,
                              name=f"guionista-{self.id}").start()

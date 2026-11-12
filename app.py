@@ -21284,7 +21284,7 @@ def publicar_proyectos(peticion: Request):
         fila["palabras"] = P.estado_palabras(fila["id"])
     return {"proyectos": filas, "clave": P.estado_clave(), "seo_opciones": {
         "categorias": P.SEO.CATEGORIAS_YOUTUBE, "idiomas": P.SEO.IDIOMAS,
-        "idiomas_audio": P.SEO.IDIOMAS_AUDIO},
+        "idiomas_audio": P.SEO.IDIOMAS_AUDIO, "paises": P.SR.PAISES_BUSQUEDA},
         # publicar-mas: los desplegables de «Redes de este proyecto»
         "redes_opciones": {"redes": list(P.REDES), "clasicas": list(P.REDES_CLASICAS),
                            "cta_gbp": P.RD.CTA_GBP,
@@ -22368,6 +22368,16 @@ async def parrilla_chat_mensaje(cid: str, chid: str, peticion: Request):
     return await _en_hilo(_parrilla_chat_mensaje_en_hilo, cid, chid, campos, imagenes, peticion)
 
 
+def _vidiq_donde(cid):
+    """vidiq-2: dónde busca vidIQ en el chat de este proyecto, en palabras
+    («Perú», «todo el mundo hispano»…); sin elegir, Perú."""
+    try:
+        P = _publicar()
+        return P.SR.texto_publico(P.SR.publico_de(P.ajustes_de(raiz_proyectos(), cid or P.SIN_PROYECTO)))
+    except Exception:                                       # noqa: BLE001
+        return True          # sin saberlo, el turno con vidIQ sigue como antes
+
+
 def _parrilla_chat_mensaje_en_hilo(cid, chid, campos, imagenes, peticion):
     G = _guionista()
     chat = _por_guionista(G.obtener, raiz_proyectos(), cid, chid)
@@ -22390,7 +22400,7 @@ def _parrilla_chat_mensaje_en_hilo(cid, chid, campos, imagenes, peticion):
     vista = _por_guionista(chat.escribir, campos.get("texto") or "", web=campos.get("web") == "1",
                            resultados_texto=resultados, imagenes=imagenes,
                            modelo=campos.get("modelo") or None, cuenta_texto=cuenta_texto,
-                           cuenta=cuenta_nombre, vidiq=campos.get("vidiq") == "1")
+                           cuenta=cuenta_nombre, vidiq=_vidiq_donde(cid) if campos.get("vidiq") == "1" else False)
     anotar_global("parrilla_chat", {"proyecto": cid, "chat": chat.id,
                                     "web": campos.get("web") == "1", "capturas": len(imagenes)})
     return vista
@@ -22630,6 +22640,9 @@ def vidiq_mejorar_titulo(pid: str, peticion: Request):
              "titulo": titulo, "guion": guion or str(info.get("material") or ""),
              # vidIQ puntúa distinto un Short: hasta 120 s es corto (decisión del dueño)
              "formato": "short" if 0 < float(info.get("duracion_s") or 0) <= 120 else "long"}
+    # vidiq-2: el país y el idioma de «SEO de este proyecto» (sin elegir, Perú)
+    P = _publicar()
+    datos["publico"] = P.SR.publico_de(P.ajustes_de(raiz_proyectos(), info.get("cliente") or P.SIN_PROYECTO))
     vista = _por_vidiq(_vidiq().lanzar_titulo, raiz_proyectos(), ctx.id, datos, proyecto=ctx.proyecto)
     anotar_global("vidiq_titulo", {"proyecto": ctx.id})
     return vista

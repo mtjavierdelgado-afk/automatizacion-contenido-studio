@@ -753,7 +753,15 @@ botón está apagado y la barra dice por qué («Falta el texto de Instagram»,
   YouTube, y en un vídeo publicado sale **Cómo te encontraron en YouTube**. Si
   la app sigue «en prueba», Google corta cada 7 días: **Volver a conectar**.
 - La columna **Tendencia** (Google Trends, experimental) dice si la frase sube
-  o baja en Perú. Si Trends no contesta, queda en «—».
+  o baja en el sitio del proyecto. Si Trends no contesta, queda en «—».
+- **Dónde se mide lo que busca la gente** (12-11, en **Publicar → Ajustes →
+  tu proyecto → SEO**): Perú, otro país o **Todo el mundo**. Sin elegir nada es
+  Perú. «Todo el mundo» pregunta sin país y en el idioma del título de YouTube:
+  con un vídeo en español es todo el mundo hispano (útil si vendes online a
+  cualquier país). Lo usan «Investigar búsquedas», la tendencia, **Mejorar con
+  vidIQ** y **📈 Ideas con vidIQ**. Arriba de **Búsquedas reales** dice dónde
+  se midió; si cambias el sitio después, avisa y basta con **Volver a
+  investigar**. Cambiarlo no toca ningún vídeo ni cuesta nada.
 
 **vidIQ** (opcional, 25-10; solo sale con la clave en **Configuración → vidIQ**),
 también en el paso **SEO**:
@@ -766,7 +774,8 @@ también en el paso **SEO**:
   vídeo; **Usar en YouTube** (o en Facebook) pone ese título. Sin palabra clave
   no se consulta, para no gastar créditos a ciegas.
 - Si cambias la palabra clave después, te avisa de que lo de vidIQ era de la
-  otra: **Volver a consultar**.
+  otra: **Volver a consultar**. Lo mismo si cambias **dónde se mide** el
+  proyecto: dice para qué sitio se consultó.
 
 **Después de publicar**, al volver a la ficha, arriba dice **Ya publicado en** (con el enlace a cada post) y
 **En camino** (lo programado o subiendo), y al lado de cada red su último

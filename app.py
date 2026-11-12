@@ -22324,9 +22324,15 @@ def parrilla_chats(cid: str, peticion: Request):
 
 @app.post("/api/parrilla/proyectos/{cid}/chats", status_code=201)
 def parrilla_chat_nuevo(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """Una conversación nueva: {modelo?}. No se guarda hasta el primer mensaje."""
+    """Una conversación nueva: {modelo?, estilo?}. No se guarda hasta el primer mensaje.
+    Con `estilo` (uno de ESE proyecto), los guiones que se guarden desde ella llevan
+    ese estilo y el piloto lo usa (lo pide «✍️ Escribir el guion» de un recibido)."""
     cid = _proyecto_parrilla(cid, peticion)
-    chat = _por_guionista(_guionista().nueva, raiz_proyectos(), cid, _cuerpo(cuerpo).get("modelo"))
+    d = _cuerpo(cuerpo)
+    estilo = str(d.get("estilo") or "")
+    if estilo and estilo not in {e["id"] for e in _estilos_para_parrilla(peticion) if e.get("cliente") == cid}:
+        raise ErrorApi(400, "ese estilo no es de este proyecto")
+    chat = _por_guionista(_guionista().nueva, raiz_proyectos(), cid, d.get("modelo"), estilo)
     return chat.ver()
 
 
@@ -23720,6 +23726,11 @@ def _por_recibidos(fn, *args, **kwargs):
         raise ErrorApi(fallo.codigo, str(fallo)) from None
 
 
+def _ids_proyectos():
+    """Los ids de los proyectos de este Studio: un recibido solo se anexa a uno que exista."""
+    return {c["id"] for c in CLIENTES.listar(raiz_proyectos())["clientes"]}
+
+
 def _codigo_de_envio(peticion):
     """El código de la extensión, o 401. Nunca se repite en el mensaje."""
     R = _recibidos()
@@ -23760,19 +23771,34 @@ async def recibidos_guardar(peticion: Request):
             datos = json.loads(bytes(crudo).decode("utf-8") or "{}")
         except (ValueError, UnicodeDecodeError):
             raise ErrorApi(400, "lo enviado no es JSON") from None
-        guardado = _por_recibidos(R.guardar, raiz_proyectos(), datos if isinstance(datos, dict) else {})
-        anotar_global("recibido", {"red": guardado["red"], "captura": bool(guardado["captura"])})
+        guardado = _por_recibidos(R.guardar, raiz_proyectos(), datos if isinstance(datos, dict) else {},
+                                  _ids_proyectos())
+        anotar_global("recibido", {"red": guardado["red"], "captura": bool(guardado["captura"]),
+                                   "proyecto": guardado.get("proyecto", "")})
         return guardado
 
     r = await _en_hilo(_guardar)
     return {"ok": True, "id": r["id"], "red": r["red"]}
 
 
+@app.get("/api/recibidos/proyectos")
+def recibidos_proyectos(peticion: Request):
+    """Los proyectos, para el menú «Proyecto» de la extensión (pide el código de envío)."""
+    _codigo_de_envio(peticion)
+    return {"proyectos": [{"id": c["id"], "nombre": c.get("nombre") or c["id"]}
+                          for c in CLIENTES.listar(raiz_proyectos())["clientes"]]}
+
+
 @app.get("/api/recibidos")
-def recibidos_lista():
-    """Los recibidos (el más nuevo primero), el estado del código y la versión de la extensión."""
+def recibidos_lista(peticion: Request, filtro: str = "todos", proyecto: str = "", desde: int = 0):
+    """Los recibidos (el más nuevo primero), el estado del código y la versión de la extensión.
+
+    `filtro`: todos · proyecto (los del `proyecto`) · sin (sin proyecto) · archivados;
+    `cuentas` dice cuántos hay en cada uno; `desde` pasa página (de 100 en 100).
+    Los de un proyecto con clave sin abrir no salen."""
     R = _recibidos()
-    datos = _por_recibidos(R.listar, raiz_proyectos())
+    datos = _por_recibidos(R.listar, raiz_proyectos(), 100, filtro, proyecto, _ids_proyectos(),
+                           _cerrados(peticion), desde)
     datos.update({"codigo": R.estado_codigo(), "version_extension": R.version_extension()})
     return datos
 
@@ -23794,24 +23820,52 @@ def recibidos_extension():
         "Cache-Control": "no-store"})
 
 
+@app.post("/api/recibidos/borrar-archivados")
+def recibidos_borrar_archivados(peticion: Request):
+    """Borra todos los archivados (los que quien pide puede ver), mirándolos en el servidor."""
+    return {"borrados": _por_recibidos(_recibidos().borrar_archivados, raiz_proyectos(), _cerrados(peticion))}
+
+
 @app.get("/api/recibidos/{rid}/captura")
 def recibidos_captura(rid: str):
-    """La captura de lo que se veía al enviarlo (PNG, JPG o WEBP)."""
+    """La captura de lo que se veía al enviarlo (PNG, JPG o WEBP).
+
+    Sin mirar los proyectos con clave: la pide un <img>, que no lleva el pase de
+    los abiertos, y el id es al azar; las listas ya no enseñan los de uno cerrado."""
     ruta = _por_recibidos(_recibidos().ruta_captura, raiz_proyectos(), rid)
     tipo = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}.get(ruta.rsplit(".", 1)[-1], "image/jpeg")
     return FileResponse(ruta, media_type=tipo, headers={"Cache-Control": "private, max-age=3600"})
 
 
+@app.post("/api/recibidos/{rid}/proyecto")
+def recibidos_anexar(rid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{proyecto, estilo?} -> lo anexa a ese proyecto («» lo deja sin proyecto) y al
+    estilo con el que se hará su vídeo (uno de ese proyecto)."""
+    datos = cuerpo if isinstance(cuerpo, dict) else {}
+    cid = str(datos.get("proyecto") or "").strip()
+    estilos = {e["id"] for e in _estilos_para_parrilla(peticion) if e.get("cliente") == cid} if datos.get("estilo") else None
+    return _por_recibidos(_recibidos().anexar, raiz_proyectos(), rid, datos.get("proyecto"), _ids_proyectos(),
+                          datos.get("estilo") if "estilo" in datos else None, _cerrados(peticion), estilos)
+
+
+@app.post("/api/recibidos/{rid}/archivar")
+def recibidos_archivar(rid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{archivado: true|false} -> lo archiva o lo devuelve (no se borra)."""
+    datos = cuerpo if isinstance(cuerpo, dict) else {}
+    return _por_recibidos(_recibidos().archivar, raiz_proyectos(), rid, datos.get("archivado", True) is not False,
+                          _cerrados(peticion))
+
+
 @app.post("/api/recibidos/{rid}/usado")
-def recibidos_usado(rid: str):
+def recibidos_usado(rid: str, peticion: Request):
     """Lo marca como usado (lo hace «Usar en el chat»)."""
-    return _por_recibidos(_recibidos().marcar_usado, raiz_proyectos(), rid)
+    return _por_recibidos(_recibidos().marcar_usado, raiz_proyectos(), rid, _cerrados(peticion))
 
 
 @app.delete("/api/recibidos/{rid}")
-def recibidos_borrar(rid: str):
+def recibidos_borrar(rid: str, peticion: Request):
     """Lo borra, con su captura."""
-    _por_recibidos(_recibidos().borrar, raiz_proyectos(), rid)
+    _por_recibidos(_recibidos().borrar, raiz_proyectos(), rid, _cerrados(peticion))
     return {"ok": True}
 
 # ------------------------------- CUENTAS QUE TE GUSTAN 2 (rama cuentas-gustan-2)

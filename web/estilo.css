@@ -5681,6 +5681,12 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   border-radius: 6px; border: 1px solid var(--acento); background: var(--acento-relleno); color: var(--sobre-acento);
   font-weight: 600; }
 .mandos-recibido a { font-size: 12px; }
+/* 11-11-2026: el proyecto de cada recibido y los filtros de la bandeja */
+.filtros-recibidos { flex-wrap: wrap; gap: 6px; }
+.proyecto-recibido { display: grid; gap: 4px; min-width: 0; }
+.proyecto-recibido label { gap: 6px; align-items: center; min-width: 0; flex-wrap: nowrap; }
+.proyecto-recibido .meta { flex: 0 0 56px; }
+.proyecto-recibido select { flex: 1 1 auto; min-width: 0; max-width: 100%; }
 @media (max-width: 640px) {
   .rejilla-recibidos { grid-template-columns: minmax(0, 1fr); }
 }

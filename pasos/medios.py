@@ -1518,6 +1518,103 @@ def rehacer_carpeta(ruta):
     return resisten
 
 
+def _temporal_junto(destino):
+    """Un nombre temporal en la MISMA carpeta que `destino` (os.replace no
+    cruza discos) y que no acaba en .png: nada que liste imagenes lo coge."""
+    carpeta, nombre = os.path.split(os.path.abspath(destino))
+    return os.path.join(carpeta, f".{nombre}.{os.getpid()}.{threading.get_ident()}.parcial")
+
+
+def _colocar(temporal, destino):
+    """Pone `temporal` en `destino` de golpe (os.replace), aguantando un
+    bloqueo momentaneo. Si no se puede, borra el temporal y lanza."""
+    _, fallo = _insistiendo(lambda: os.replace(temporal, destino))
+    if fallo is not None:
+        borrar(temporal)
+        raise PermissionError(
+            f"no se ha podido escribir {destino}: sigue abierto por otro "
+            f"proceso ({fallo})")
+    return destino
+
+
+def escribir_bytes(destino, datos):
+    """Escribe un fichero ENTERO o nada (rama png-seguro, 11-11-2026). -> destino
+
+    Se escribe aparte y se pone en su sitio de golpe: quien lo lea a la vez
+    (el revisor, el montaje, otra tanda que lo coge del banco) ve el de antes o
+    el nuevo, nunca uno a medias. Escrito en su sitio poco a poco, una lectura a
+    destiempo veia una imagen con un trozo de ceros y el piloto se cortaba con
+    «broken PNG file (chunk b'\\x00\\x00\\x00\\x00')» (Y15, 11-11)."""
+    os.makedirs(os.path.dirname(os.path.abspath(destino)), exist_ok=True)
+    temporal = _temporal_junto(destino)
+    try:
+        with open(temporal, "wb") as fh:
+            fh.write(datos)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except BaseException:
+        borrar(temporal)
+        raise
+    return _colocar(temporal, destino)
+
+
+FIRMA_PNG = b"\x89PNG\r\n\x1a\n"
+
+
+def imagen_sana(ruta):
+    """Si la imagen PNG de `ruta` se lee entera. -> bool
+
+    `verify` mira la estructura y las sumas de cada trozo del PNG (ahi salta un
+    trozo de ceros) y `load` descomprime los pixeles (ahi salta uno cortado).
+    Un fichero que no existe, o vacio o solo de ceros, no esta sano.
+
+    ANTE LA DUDA, SANA: quien llama a esto puede BORRAR lo que no este sano, y
+    borrar una imagen buena es pagarla otra vez. Asi que:
+      - un fichero que no se puede abrir ahora (en Windows, el antivirus o la
+        pantalla lo tienen abierto; demasiados ficheros abiertos) no se juzga;
+      - uno que no es PNG (una imagen subida en otro formato, que quiza esta
+        Pillow no sepa abrir) no se toca;
+      - solo cuentan como rota las averias de un PNG (`bytes_de_imagen_sanos`)."""
+    try:
+        with open(ruta, "rb") as fh:
+            datos = fh.read()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return bytes_de_imagen_sanos(datos)
+
+
+def bytes_de_imagen_sanos(datos):
+    """Si estos bytes son una imagen PNG que se lee entera. -> bool
+
+    Mismas reglas que `imagen_sana`: vacio o solo ceros, roto; lo que no es PNG,
+    sano; y de lo que falla al descodificar, solo las averias de verdad (una
+    suma o un trozo mal, datos que se acaban, compresion rota). Un PNG con un
+    texto incrustado enorme (el limite de Pillow) o una falta de memoria no son
+    una imagen rota."""
+    import io                                               # noqa: PLC0415
+    import struct                                           # noqa: PLC0415
+    import zlib                                             # noqa: PLC0415
+    if not datos or not datos[:8].strip(b"\x00"):
+        return False
+    if datos[:8] != FIRMA_PNG:
+        return True
+    try:
+        from PIL import Image                               # noqa: PLC0415
+        with Image.open(io.BytesIO(datos)) as imagen:
+            imagen.verify()
+        with Image.open(io.BytesIO(datos)) as imagen:
+            imagen.load()
+        return True
+    except (SyntaxError, EOFError, zlib.error, struct.error):
+        return False
+    except OSError:                  # «image file is truncated», «broken data stream»
+        return False
+    except Exception:                                       # noqa: BLE001
+        return True
+
+
 def copiar(origen, destino):
     """Copia fichero o carpeta, creando el destino y pisando lo que hubiera.
 
@@ -1525,17 +1622,29 @@ def copiar(origen, destino):
     sobre se retira despues. Lo que no se pueda retirar por estar abierto se
     devuelve en la lista de sobrantes de `copiar_carpeta`, que es la version de
     esto que si los mira.
+
+    UN FICHERO SE PONE ENTERO O NO SE PONE (rama png-seguro, 11-11-2026): se
+    copia a un temporal al lado y se coloca con `os.replace`. Asi nadie lee una
+    copia a medias, ni en la carpeta del video ni en el banco de imagenes, que
+    comparten todos los proyectos. `os.replace` cambia la entrada de la carpeta,
+    asi que tampoco escribe a traves de un enlace duro (ver `romper_enlace`).
     """
     os.makedirs(os.path.dirname(os.path.abspath(destino)), exist_ok=True)
     if os.path.isdir(origen):
         copiar_carpeta(origen, destino)
     else:
-        romper_enlace(destino)
-        _, fallo = _insistiendo(lambda: shutil.copy2(origen, destino))
+        temporal = _temporal_junto(destino)
+        try:
+            _, fallo = _insistiendo(lambda: shutil.copy2(origen, temporal))
+        except BaseException:
+            borrar(temporal)
+            raise
         if fallo is not None:
+            borrar(temporal)
             raise PermissionError(
-                f"no se ha podido escribir {destino}: sigue abierto por otro "
+                f"no se ha podido copiar {origen}: sigue abierto por otro "
                 f"proceso ({fallo})")
+        _colocar(temporal, destino)
     return destino
 
 

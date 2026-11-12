@@ -441,15 +441,19 @@ def quitar(raiz, vid):
     raise ErrorPiloto("ese vídeo ya no está en el piloto", 404)
 
 
-def preparar_reintento(raiz, vid, forzar_seguir=False):
+def preparar_reintento(raiz, vid, forzar_seguir=False, solo_si_tipo=None):
     """«Seguir igualmente» / «Reintentar»: vuelve a la cola desde donde iba.
     Con `forzar_seguir`, la próxima decisión del interruptor se salta (lo has
-    mirado tú). -> la ficha"""
+    mirado tú). Con `solo_si_tipo` (la retomada sola de app.py), solo si sigue
+    parado por ESE motivo; si no, no toca nada y devuelve None. -> la ficha"""
     _vid(vid)
     with _LOCK:
         datos = _leer(raiz)
         for v in datos["videos"]:
             if v.get("id") == vid:
+                if solo_si_tipo is not None and (v.get("estado") != "parado"
+                                                 or v.get("tipo_parada") != solo_si_tipo):
+                    return None
                 if v.get("estado") not in RETOMABLES:
                     raise ErrorPiloto("este vídeo no está parado: no hay nada que retomar", 409)
                 v.update(estado="en_cola", mensaje="esperando su turno (retomado)",

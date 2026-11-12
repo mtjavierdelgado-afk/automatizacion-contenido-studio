@@ -4941,6 +4941,18 @@ def _lamina_estilo(rutas, destino):
     return destino
 
 
+#: El nombre de una lamina por eje del estilo («interior_1fb7539dba.png», o con
+#: el numero delante de `nombre_numerado`, «03_interior_1fb7539dba.png»)
+_LAMINA_POR_EJE = re.compile(r"^(?:\d{2}_)*(cara|cuerpos|interior|exterior|objeto|diagrama)_[0-9a-f]{10}\.",
+                             re.IGNORECASE)
+
+
+def _eje_de_lamina(ruta):
+    """El eje de una referencia del estilo si es una lamina por eje, o ""."""
+    casa = _LAMINA_POR_EJE.match(os.path.basename(str(ruta or "")))
+    return casa.group(1).lower() if casa else ""
+
+
 def _referencias_estilo(p, cache, escena=None):
     """La referencia de estilo de un plano: el moodboard si lo hay, si no los
     fotogramas.
@@ -4967,11 +4979,14 @@ def _referencias_estilo(p, cache, escena=None):
         # («interior_….png», «cara_….png»), fuera las que no toca; la
         # «interior» es una sala amueblada y su mueble de TV salio en las tres
         # pruebas. Ningun plano trae `ejes`: su lamina sale como siempre
-        fuera = [e for e in moodboard.EJES if e not in escena["ejes"]]
-        propias = [r for r in rutas
-                   if not os.path.basename(r).lower().startswith(tuple(f"{e}_" for e in fuera))]
-        if propias:
-            rutas = propias
+        # SOLO si el estilo es ENTERO un juego de laminas por eje (revision del
+        # arbitro): una foto subida que se llame «interior_salon.jpg» no es una
+        # lamina, y quitarla dejaba la base con una sola referencia
+        eje_de = {r: _eje_de_lamina(r) for r in rutas}
+        if rutas and all(eje_de.values()):
+            propias = [r for r in rutas if eje_de[r] in escena["ejes"]]
+            if len(propias) >= 2:
+                rutas = propias
     rutas = rutas[:MAX_REFERENCIAS_ESTILO]
 
     # Siempre que haya mas de una. No es una opcion: mandar ocho imagenes

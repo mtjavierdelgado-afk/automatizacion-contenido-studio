@@ -677,8 +677,22 @@ def prueba_base_fiel():
     plano_l = P6._referencias_estilo(est_l, cache_l, dict(plano))         # noqa: SLF001
     igual(ref_l[0].get("cuantas"), 2, "sin moodboard, la referencia solo lleva las láminas exterior y objeto")
     igual(plano_l[0].get("cuantas"), 6, "y un plano, las seis como siempre")
-    ok("no TV cabinet" in T.prompt_imagen_base({"descripcion": "a living room"}, {"modo": "recorrido"}),
+    ok("no television or TV cabinet" in T.prompt_imagen_base({"descripcion": "a living room"},
+                                                             {"modo": "recorrido"}),
        "la base prohíbe lo que la descripción no nombra (la tele, el mueble de TV)")
+    ok("television" not in T.prompt_imagen_base({"descripcion": "a gaming room with two TVs"},
+                                                {"modo": "recorrido"}),
+       "pero no la tele si la descripción la pide (una sala gamer)")
+    fotos = []
+    for nombre in ("interior_salon.jpg", "interior_cocina.jpg", "exterior_fachada.jpg"):
+        ruta_f = os.path.join(carpeta_l, nombre)
+        Image.new("RGB", (64, 40), (90, 60, 30)).save(ruta_f)
+        fotos.append(ruta_f)
+    ref_f = P6._referencias_estilo({"estilo": {"referencias": fotos, "modo": "foto"}},  # noqa: SLF001
+                                   cache_l, ref_escena)
+    igual(ref_f[0].get("cuantas"), 3, "unas fotos subidas que se llaman «interior_…» no se filtran")
+    igual(P6._eje_de_lamina("03_interior_1fb7539dba.png"), "interior",  # noqa: SLF001
+          "una lámina numerada también se reconoce")
     ok("cara" in moodboard.ejes_de_plano({"set": "sala"}),
        "la de un plano, como siempre")
     amb = dict(ref_escena, referencia="ambiente")

@@ -654,8 +654,10 @@ CUADRO_REFERENCIA = (
     "reference of a whole room, so it is {que} from the entrance at eye height, with a "
     "wide-angle view: show the whole room, with every wall, door and window the "
     "description names fully inside the frame, none of them cropped at the edges, and "
-    "exactly as many windows and doors as it says. Never draw black bars, borders or a "
-    "landscape picture inside the tall frame.")
+    "exactly as many windows and doors as it says, each on the wall it names. If a side "
+    "wall carries a window, a door or fixed furniture, angle the camera so that wall is "
+    "clearly seen along its side of the frame instead of moving them to the back wall. "
+    "Never draw black bars, borders or a landscape picture inside the tall frame.")
 
 #: Lo que es la imagen de referencia, segun el modo (revision del arbitro: en un
 #: video de dibujo, «photograph» empujaba la base, y con ella todos los planos
@@ -782,12 +784,19 @@ PROMPT_BASE = (
     "furniture must be exactly where this description puts it, with the materials and "
     "colours it names, and nothing it does not name: {descripcion}. Before finishing, check "
     "the description item by item against the picture (what is on the left, what is on "
-    "the back wall, what is on the right, where the door is). Add NOTHING the description "
-    "does not name: no television, no TV cabinet, no shelves, no extra door and no extra "
-    "window. The colours and materials "
+    "the back wall, what is on the right, where the door is). {nada_mas}The colours and materials "
     "named here WIN over any palette of the style (its references and its description): "
     "take only the look and the rendering from the style, never its colours or finishes. Light: {luz}. {antes}"
     "{encuadre} No people, no text, no letters.")
+
+#: LO QUE NO SE NOMBRA NO ESTA (rama base-fiel, pruebas del 09, 11 y 12-11: un
+#: mueble de TV en la sala que nadie pedia). La tele y su mueble se nombran
+#: solo si la descripcion no habla de ninguna pantalla: una sala gamer o un
+#: producto que es una pantalla los pide (revision del arbitro).
+NADA_MAS = "Add NOTHING the description does not name: no extra furniture, door or window{tele}. "
+NADA_MAS_TELE = ", and no television or TV cabinet"
+_PANTALLAS = re.compile(r"\b(tv|tvs|television|televisions|televisor\w*|tele|screens?|monitors?|"
+                        r"pantallas?|displays?)\b", re.IGNORECASE)
 
 #: El encuadre de la base de siempre (el sitio principal, o el unico)
 ENCUADRE_BASE = ("Frame it as a clear, level, eye-height view from the entrance that shows the "
@@ -864,6 +873,7 @@ def prompt_imagen_base(espacio, relato, cabecera="", inicial="", ambiente=False)
     inicial = inicial_de(inicial or (relato or {}).get("inicial"))
     if antes and inicial and (relato or {}).get("cambia") in ("objeto", "estado"):
         antes += INICIAL.format(inicial=inicial)
+    nada_mas = NADA_MAS.format(tele="" if _PANTALLAS.search(descripcion) else NADA_MAS_TELE)
     return PROMPT_BASE.format(cabecera=_texto(cabecera, 400), descripcion=descripcion,
-                              luz=luz, antes=antes,
+                              luz=luz, antes=antes, nada_mas=nada_mas,
                               encuadre=ENCUADRE_AMBIENTE if ambiente else ENCUADRE_BASE).strip()

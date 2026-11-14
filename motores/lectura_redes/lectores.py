@@ -400,6 +400,33 @@ def leer_items_apify(red, usuario, items):
             "seguidores": seguidores, "fuente": "apify", "videos": videos}
 
 
+#: Lo que el actor de TikTok pone en «note» cuando TikTok no le deja ver los
+#: vídeos (código PROFILE_EMPTY de su página; visto en real el 12-11-2026 con
+#: @ikeausa y @sodimacperu, que sí tienen vídeos) -> lo que se le dice al dueño
+MURO_DE_LOGIN = ("login wall", "no videos")
+AVISO_MURO = ("TikTok no le ha dejado ver los vídeos al lector de Apify (le pide iniciar sesión; "
+              "la cuenta puede tener vídeos). Prueba más tarde u otra cuenta")
+
+
+def _error_de_items(items):
+    """El error que el actor puso en sus resultados («error», «errorMessage»,
+    «message», «note»), en una línea y corto. "" si no trae ninguno."""
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        # la frase antes que el código («errorDescription» antes que «error»)
+        for clave in ("errorDescription", "errorMessage", "message", "note", "error"):
+            valor = it.get(clave)
+            if isinstance(valor, dict):
+                valor = valor.get("message") or valor.get("type")
+            if valor:
+                texto = " ".join(str(valor).split())[:200]
+                if all(trozo in texto.lower() for trozo in MURO_DE_LOGIN):
+                    return f"{AVISO_MURO} (Apify: «{texto}»)"
+                return texto
+    return ""
+
+
 def coste_apify(red, resultados):
     """Lo que cuesta (aprox.) traer `resultados` vídeos de esa red."""
     _actor, por_mil = ACTORES.get(red, ("", 5.0))
@@ -527,6 +554,22 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
     items = datos if isinstance(datos, list) else []
     cobrado = _cobrado_apify(run, red, len(items))
     salida = leer_items_apify(red, usuario, items)
+    if not salida["videos"] and items:
+        # EL ACTOR CONTESTÓ, PERO CON UN ERROR (prueba real del 12-11: TikTok
+        # devolvía un resultado que se tiraba y se decía «¿existe?, ¿es
+        # privada?»). Se dice lo que dijo Apify y NO como «no existe», que
+        # además cortaba los demás intentos.
+        dicho = _tachar(_error_de_items(items) or str(run.get("statusMessage") or ""), token)[:300]
+        claves = sorted({k for it in items if isinstance(it, dict) for k in it})[:12]
+        codigos = {str(it.get("error") or "").strip().lower() for it in items if isinstance(it, dict)}
+        if codigos & {"not_found", "no_items"}:
+            # el actor dice que la cuenta no existe (Instagram): se dice así, como antes
+            raise ErrorLectura(f"no se ha encontrado ningún vídeo público de «{usuario}» en {red} "
+                               f"(¿existe?, ¿es privada?; Apify: {dicho})", "no_encontrada", cobrado=True,
+                               resultados=len(items), coste_usd=cobrado)
+        raise ErrorLectura(f"Apify ha devuelto {len(items)} resultado(s) sin ningún vídeo de «{usuario}» "
+                           f"en {red}" + (f": {dicho}" if dicho else f" (campos: {', '.join(claves)})"),
+                           "red", cobrado=True, resultados=len(items), coste_usd=cobrado)
     if not salida["videos"]:
         raise ErrorLectura(f"no se ha encontrado ningún vídeo público de «{usuario}» en {red} "
                            "(¿existe?, ¿es privada?)", "no_encontrada", cobrado=bool(items) or bool(cobrado),

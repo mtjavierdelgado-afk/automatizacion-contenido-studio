@@ -487,6 +487,8 @@ ESPERA_APIFY_S = 60
 #: No se aplica cuando lo cobrado sale de los eventos con su evento principal
 #: marcado y resultados traídos (`_cobrado_apify`): esa cuenta ya los incluye.
 MINIMO_FIABLE_APIFY = 0.25
+#: Los eventos de arranque de un actor: nunca cuentan por resultado.
+ARRANQUES_APIFY = ("actor-start", "apify-actor-start")
 #: Ningún contador de eventos se cree por encima de esto (uno absurdo, como
 #: mil millones, dejaría el tope del mes bloqueado con una sola lectura).
 MAXIMO_EVENTOS_APIFY = 10000
@@ -533,9 +535,9 @@ def _precio_evento(evento):
 def _cobrado_por_eventos(run, traidos=0):
     """Lo cobrado contando los eventos: Σ `chargedEventCounts` × su precio de
     `pricingInfo.pricingPerEvent.actorChargeEvents`. Devuelve (total, principal):
-    `principal` dice si hay un evento principal (el marcado con `isPrimaryEvent`
-    o, sin marca, el más contado o el más barato de los que van por resultado).
-    (None, False) si el actor no es de pago por evento o no trae precios.
+    `principal` dice de dónde sale el evento principal: «marcado» (con
+    `isPrimaryEvent`), «respaldo» (sin marca: el más contado o el más barato de
+    los que van por resultado) o None. (None, None) si el actor no es de pago por evento o no trae precios.
 
     PRUEBA REAL DEL 17-11 (ejecución M0SNHIDnvtzhPh8ch, clockworks/tiktok-scraper):
     Apify cobró 0,0047 $ (1 «result» a 0,0037 + 1 «actor-start» a 0,001) y el
@@ -548,7 +550,7 @@ def _cobrado_por_eventos(run, traidos=0):
     eventos = ((info.get("pricingPerEvent") or {}).get("actorChargeEvents")
                if isinstance(info.get("pricingPerEvent"), dict) else None)
     if not isinstance(eventos, dict) or not eventos:
-        return None, False
+        return None, None
     contados = run.get("chargedEventCounts") if isinstance(run.get("chargedEventCounts"), dict) else {}
     precios = {nombre: _precio_evento(evento) for nombre, evento in eventos.items()}
     precios = {nombre: precio for nombre, precio in precios.items() if precio is not None}
@@ -559,11 +561,12 @@ def _cobrado_por_eventos(run, traidos=0):
     # podía contar un extra caro, como una transcripción, por cada vídeo)
     marcados = [n for n in precios if eventos[n].get("isPrimaryEvent") is True]
     por_resultado = [n for n in precios if eventos[n].get("isOneTimeEvent") is not True
-                     and "start" not in str(n).lower()]
+                     and str(n).lower() not in ARRANQUES_APIFY]
     contado = {n: min(max(_numero(contados.get(n)) or 0, 0), MAXIMO_EVENTOS_APIFY) for n in por_resultado}
     principal_de = marcados[0] if marcados else (
         min(por_resultado, key=lambda n: (-contado[n], precios[n])) if por_resultado else None)
-    total, alguno, principal = 0.0, False, principal_de is not None
+    total, alguno = 0.0, False
+    principal = "marcado" if marcados else ("respaldo" if principal_de else None)
     for nombre, precio in precios.items():
         cuantos = min(max(_numero(contados.get(nombre)) or 0, 0), MAXIMO_EVENTOS_APIFY)
         if nombre == principal_de:
@@ -600,7 +603,11 @@ def _cobrado_apify(run, red=None, pedidos=0, traidos=0, techo=None):
     valor = round(max(uso or 0.0, eventos or 0.0), 4)
     if valor <= 0:
         return None
-    fiable = eventos is not None and principal and traidos > 0
+    if principal == "respaldo" and red and traidos > 0:
+        # el principal es una suposición (el actor no lo marca): nunca menos que
+        # la tabla para los vídeos traídos (revisión del 17-11)
+        valor = round(max(valor, coste_apify(red, traidos)), 4)
+    fiable = eventos is not None and principal is not None and traidos > 0
     if not fiable and red and pedidos and valor < MINIMO_FIABLE_APIFY * coste_apify(red, pedidos):
         return None
     tope = _numero(techo)

@@ -473,6 +473,12 @@ def prueba_fuentes(bases):
     igual(F._cobrado_apify(dict(extra_caro, chargedEventCounts={"actor-start": 1, "transcripcion": 3}),
                            "tiktok", pedidos=3, traidos=3), 0.065,
           "y si Apify ya contó uno, manda el contado (3 × 0,02 + 0,005)")
+    extra_barato = {"status": "SUCCEEDED", "usageTotalUsd": 0.001, "chargedEventCounts": {"actor-start": 1},
+                    "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {
+                        "actor-start": {"eventPriceUsd": 0.001}, "portada": {"eventPriceUsd": 0.0005},
+                        "result": {"eventPriceUsd": 0.0037}}}}}
+    igual(F._cobrado_apify(extra_barato, "tiktok", pedidos=30, traidos=30), F.coste_apify("tiktok", 30),
+          "sin marca y con un extra barato: nunca menos que la tabla para los vídeos traídos (no 0,016)")
     solo_arranque = {"status": "SUCCEEDED", "usageTotalUsd": 0.001, "chargedEventCounts": {"actor-start": 1},
                      "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {
                          "actor-start": {"eventPriceUsd": 0.001, "isOneTimeEvent": True}}}}}

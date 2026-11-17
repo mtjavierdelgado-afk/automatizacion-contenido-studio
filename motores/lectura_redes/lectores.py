@@ -45,6 +45,7 @@ varios nombres por campo. Si un actor cambia de nombres, se arregla aquí.
 import http.client
 import json
 import math
+import os
 import re
 import socket
 import time
@@ -430,21 +431,44 @@ def _error_de_items(items):
     return ""
 
 
+#: Cómo se nombra cada red en los avisos al dueño.
+NOMBRES_RED = {"tiktok": "TikTok", "instagram": "Instagram", "youtube": "YouTube"}
+
+
+def _videos_del_autor(autor):
+    """Cuántos vídeos dice el actor que tiene la cuenta (`authorMeta.video`),
+    o None si no lo dice o no es un número entero (True, 0.4, «x»: None)."""
+    valor = autor.get("video") if isinstance(autor, dict) else None
+    if isinstance(valor, bool):
+        return None
+    if isinstance(valor, int):
+        return valor
+    if isinstance(valor, str) and valor.strip().isdigit():
+        return int(valor.strip())
+    return None
+
+
 def _sin_videos_publicos(items):
     """Los datos del autor cuando el actor dice que la cuenta tiene 0 vídeos
-    (`authorMeta.video == 0`), o None si no lo dice (no trae el autor o dice
-    que sí tiene). Prueba real del 17-11: @ikeausa es un perfil personal con
-    0 vídeos y 0 seguidores, no la cuenta de IKEA."""
+    (`authorMeta.video == 0`), o None si no lo dice: no trae el autor, o alguna
+    entrada dice que sí tiene vídeos. Prueba real del 17-11: @ikeausa es un
+    perfil personal con 0 vídeos y 0 seguidores, no la cuenta de IKEA."""
+    vacio = None
     for it in items or []:
         autor = it.get("authorMeta") if isinstance(it, dict) else None
-        if not isinstance(autor, dict) or "video" not in autor:
+        videos = _videos_del_autor(autor)
+        if videos is None:
             continue
-        try:
-            if int(autor.get("video")) == 0:
-                return autor
-        except (TypeError, ValueError):
-            continue
-    return None
+        if videos > 0:
+            return None                    # el actor dice que tiene vídeos: no está vacía
+        vacio = vacio or autor
+    return vacio
+
+
+def _traidos_de_pago(items):
+    """Los resultados del dataset que el actor cobra como resultado: las
+    entradas con un error («not_found», «Profile could not be loaded») no."""
+    return sum(1 for it in items or [] if isinstance(it, dict) and not it.get("error"))
 
 
 def coste_apify(red, resultados):
@@ -459,99 +483,119 @@ TERMINADOS_APIFY = ("SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED")
 ESPERA_APIFY_S = 60
 #: Por debajo de esta parte de la tabla, la cifra de Apify no se da por buena:
 #: un cuarto o menos de lo que la tabla dice para esos resultados es que el
-#: campo no trae el precio por resultado (y se queda la reserva o la tabla)
+#: campo no trae el precio por resultado (y se queda la reserva o la tabla).
+#: No se aplica cuando lo cobrado sale de los eventos con su evento principal
+#: marcado y resultados traídos (`_cobrado_apify`): esa cuenta ya los incluye.
 MINIMO_FIABLE_APIFY = 0.25
+#: Ningún contador de eventos se cree por encima de esto (uno absurdo, como
+#: mil millones, dejaría el tope del mes bloqueado con una sola lectura).
+MAXIMO_EVENTOS_APIFY = 10000
 
 
 #: El nivel de precios de la cuenta de Apify cuando un evento tiene precios
-#: por niveles (`eventTieredPricingUsd`): la cuenta del dueño es la gratuita.
-#: Si ese nivel no sale, se toma el precio más alto (mejor apuntar de más).
+#: por niveles (`eventTieredPricingUsd`): la cuenta del dueño es la gratuita
+#: (FREE; se cambia con ESTUDIO_APIFY_NIVEL si pasa a un plan de pago). Si
+#: ese nivel no sale, se toma el precio más alto (mejor apuntar de más).
 NIVEL_APIFY = "FREE"
 
 
 def _numero(valor):
+    """Un número de verdad, o None (ni True/False, ni NaN, ni infinito)."""
+    if isinstance(valor, bool):
+        return None
     try:
         numero = float(valor)
     except (TypeError, ValueError):
         return None
-    return numero if math.isfinite(numero) else None   # NaN e infinito fuera
+    return numero if math.isfinite(numero) else None
 
 
 def _precio_evento(evento):
-    """El precio en $ de un evento de un actor de pago por evento, o None."""
+    """El precio en $ de un evento de un actor de pago por evento (mayor que 0),
+    o None."""
     if not isinstance(evento, dict):
         return None
     precio = _numero(evento.get("eventPriceUsd"))
     if precio is not None:
-        return precio
+        return precio if precio > 0 else None
     niveles = evento.get("eventTieredPricingUsd")
     if not isinstance(niveles, dict) or not niveles:
         return None
     precios = {str(k).upper(): _numero((v or {}).get("tieredEventPriceUsd") if isinstance(v, dict) else v)
                for k, v in niveles.items()}
-    if precios.get(NIVEL_APIFY) is not None:
-        return precios[NIVEL_APIFY]
-    validos = [p for p in precios.values() if p is not None]
-    return max(validos) if validos else None
+    precios = {k: p for k, p in precios.items() if p is not None and p > 0}
+    nivel = (os.environ.get("ESTUDIO_APIFY_NIVEL") or NIVEL_APIFY).strip().upper()
+    if nivel in precios:
+        return precios[nivel]
+    return max(precios.values()) if precios else None
 
 
-def _cobrado_por_eventos(run, resultados=0):
+def _cobrado_por_eventos(run, traidos=0):
     """Lo cobrado contando los eventos: Σ `chargedEventCounts` × su precio de
-    `pricingInfo.pricingPerEvent.actorChargeEvents`. None si el actor no es de
-    pago por evento o no trae los precios.
+    `pricingInfo.pricingPerEvent.actorChargeEvents`. Devuelve (total, principal):
+    `principal` dice si el actor marca su evento principal (`isPrimaryEvent`).
+    (None, False) si el actor no es de pago por evento o no trae precios.
 
     PRUEBA REAL DEL 17-11 (ejecución M0SNHIDnvtzhPh8ch, clockworks/tiktok-scraper):
     Apify cobró 0,0047 $ (1 «result» a 0,0037 + 1 «actor-start» a 0,001) y el
     Studio apuntó 0,001: al leer la ejecución recién terminada solo estaba
-    contado el arranque. Por eso el evento PRINCIPAL (`isPrimaryEvent`, el
-    resultado) cuenta al menos tantos como resultados ha traído el dataset."""
+    contado el arranque. Por eso el evento PRINCIPAL cuenta al menos tantos
+    como resultados de pago ha TRAÍDO el dataset (`traidos`; nunca los pedidos,
+    revisión del 17-11: en un fallo con 0 traídos eso apuntaba 30 resultados)."""
     run = run or {}
     info = run.get("pricingInfo") if isinstance(run.get("pricingInfo"), dict) else {}
     eventos = ((info.get("pricingPerEvent") or {}).get("actorChargeEvents")
                if isinstance(info.get("pricingPerEvent"), dict) else None)
     if not isinstance(eventos, dict) or not eventos:
-        return None
+        return None, False
     contados = run.get("chargedEventCounts") if isinstance(run.get("chargedEventCounts"), dict) else {}
-    total, alguno = 0.0, False
+    total, alguno, principal = 0.0, False, False
     for nombre, evento in eventos.items():
         precio = _precio_evento(evento)
         if precio is None:
             continue
-        cuantos = _numero(contados.get(nombre)) or 0
-        if isinstance(evento, dict) and evento.get("isPrimaryEvent"):
-            cuantos = max(cuantos, int(resultados or 0))
-        if cuantos > 0:
-            total += cuantos * precio
+        cuantos = min(max(_numero(contados.get(nombre)) or 0, 0), MAXIMO_EVENTOS_APIFY)
+        if evento.get("isPrimaryEvent") is True:
+            principal = True
+            cuantos = max(cuantos, min(int(traidos or 0), MAXIMO_EVENTOS_APIFY))
+        total += cuantos * precio
         alguno = True
-    return round(total, 4) if alguno else None
+    total = round(total, 4)
+    return (total if alguno and total > 0 else None), principal
 
 
-def _cobrado_apify(run, red=None, resultados=0):
+def _cobrado_apify(run, red=None, pedidos=0, traidos=0, techo=None):
     """Lo que la ejecución ha cobrado de verdad, o None si no se puede fiar uno
     de la cifra (y entonces manda la reserva o la tabla).
 
     Es lo mayor de `usageTotalUsd` («lo que pagas») y de lo que suman los
-    eventos cobrados (`_cobrado_por_eventos`): en un actor de pago por evento
-    `usageTotalUsd` puede ir por detrás al terminar (prueba real del 17-11).
+    eventos cobrados (`_cobrado_por_eventos`, con los `traidos`): en un actor
+    de pago por evento `usageTotalUsd` puede ir por detrás al terminar (prueba
+    real del 17-11). Nunca más que `techo` (el `maxTotalChargeUsd` que se le
+    mandó a Apify: más no puede cobrar).
 
     SOLO DE UNA EJECUCIÓN TERMINADA (revisión del 12-11): mientras corre (o se
     está abortando) la cifra es una foto que aún va a crecer; apuntarla devolvía
     la reserva y el tope dejaba de ver un gasto que seguía corriendo. Y una cifra
-    de 0, o muy por debajo de la tabla con resultados, tampoco se toma, SALVO
-    si sale de los eventos con sus precios (esa cuenta es la de Apify, no una
-    suposición). El suelo se mide contra los resultados que se le pasan: en el
-    fallo del 17-11 era 1 resultado (0,0017 $ en la tabla, un cuarto 0,0004), y
-    por eso los 0,001 pasaron."""
+    de 0, o por debajo de un cuarto de la tabla para los `pedidos`, tampoco se
+    toma, SALVO si sale de los eventos con su evento principal marcado y con
+    resultados traídos (esa cuenta ya los lleva). Por eso los 0,001 del 17-11
+    pasaron: se medían contra 1 resultado (0,0017 $ en la tabla, un cuarto
+    0,0004) y el principal aún no estaba contado."""
     run = run or {}
     if str(run.get("status") or "") not in TERMINADOS_APIFY:
         return None
     uso = _numero(run.get("usageTotalUsd"))
-    eventos = _cobrado_por_eventos(run, resultados)
+    eventos, principal = _cobrado_por_eventos(run, traidos)
     valor = round(max(uso or 0.0, eventos or 0.0), 4)
     if valor <= 0:
         return None
-    if eventos is None and red and resultados and valor < MINIMO_FIABLE_APIFY * coste_apify(red, resultados):
+    fiable = eventos is not None and principal and traidos > 0
+    if not fiable and red and pedidos and valor < MINIMO_FIABLE_APIFY * coste_apify(red, pedidos):
         return None
+    tope = _numero(techo)
+    if tope is not None and tope > 0:
+        valor = min(valor, round(tope, 4))
     return valor
 
 
@@ -622,10 +666,10 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
             pass
         # sin terminar, la cifra no vale: se queda la reserva (`_cobrado_apify`)
         raise ErrorLectura("Apify ha tardado demasiado: prueba con menos vídeos", "red", cobrado=True,
-                           coste_usd=_cobrado_apify(run, red, cuantos))
+                           coste_usd=_cobrado_apify(run, red, pedidos=cuantos, techo=max_usd))
     # en los fallos se mide contra lo pedido (`cuantos`): una cifra por debajo de
     # un cuarto de la tabla no se cree y se queda la reserva (revisión del 12-11)
-    cobrado = _cobrado_apify(run, red, cuantos)
+    cobrado = _cobrado_apify(run, red, pedidos=cuantos, techo=max_usd)
     if run.get("status") != "SUCCEEDED":
         motivo = "Apify ha tardado demasiado: prueba con menos vídeos" \
             if run.get("status") == "TIMED-OUT" else f"la ejecución de Apify ha acabado en {run.get('status')}"
@@ -650,7 +694,7 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
             run = datos["data"]
     except ErrorLectura:
         pass
-    cobrado = _cobrado_apify(run, red, len(items))
+    cobrado = _cobrado_apify(run, red, pedidos=len(items), traidos=_traidos_de_pago(items), techo=max_usd)
     salida = leer_items_apify(red, usuario, items)
     if not salida["videos"] and items:
         # EL ACTOR CONTESTÓ, PERO CON UN ERROR (prueba real del 12-11: TikTok
@@ -665,8 +709,12 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
                 f"{int(_numero(autor.get('fans')))} seguidores" if _numero(autor.get("fans")) is not None else "",
                 "verificada" if autor.get("verified") else "",
                 "privada" if autor.get("privateAccount") else "") if t)
-            raise ErrorLectura(f"la cuenta «{usuario}» de {red} no tiene vídeos públicos (Apify la ve con 0 vídeos"
-                               + (f", {datos_autor}" if datos_autor else "") + "): ¿es la cuenta que buscas?",
+            # con 0 seguidores no se distingue de un perfil que TikTok no deja ver
+            dudoso = not (_numero(autor.get("fans")) or 0) > 0
+            raise ErrorLectura(f"la cuenta «{usuario}» de {NOMBRES_RED.get(red, red)} no tiene vídeos públicos "
+                               "(Apify la ve con 0 vídeos" + (f", {datos_autor}" if datos_autor else "") + ")"
+                               + (", o TikTok no ha dejado verla" if dudoso and red == "tiktok" else "")
+                               + ": ¿es la cuenta que buscas?",
                                "no_encontrada", cobrado=True, resultados=len(items), coste_usd=cobrado)
         dicho = _tachar(_error_de_items(items) or str(run.get("statusMessage") or ""), token)[:300]
         claves = sorted({k for it in items if isinstance(it, dict) for k in it})[:12]

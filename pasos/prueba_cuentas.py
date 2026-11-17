@@ -416,7 +416,8 @@ def prueba_fuentes(bases):
     # y Apify cobró 0,0047 $ (1 resultado a 0,0037 + el arranque a 0,001)
     f = lanza(F.apify, TOKEN_APIFY, "tiktok", "ikeausa", 10, bases=bases)
     ok(f is not None and f.motivo == "no_encontrada" and "no tiene vídeos públicos" in str(f)
-       and "¿es la cuenta que buscas?" in str(f) and "0 seguidores" in str(f) and "iniciar sesión" not in str(f),
+       and "¿es la cuenta que buscas?" in str(f) and "0 seguidores" in str(f) and "iniciar sesión" not in str(f)
+       and "TikTok" in str(f) and "o TikTok no ha dejado verla" in str(f),
        f"una cuenta con 0 vídeos se dice así, sin hablar del muro de login: {f}")
     igual(getattr(f, "coste_usd", None), 0.0047,
           "y lo cobrado es el de la consola de Apify (0,0047), no los 0,001 de usageTotalUsd")
@@ -446,6 +447,40 @@ def prueba_fuentes(bases):
           "con eventos o sin ellos, una ejecución que aún corre no vale")
     igual(F._cobrado_apify({"status": "SUCCEEDED", "usageTotalUsd": "NaN"}, "tiktok", 1), None,
           "una cifra rara (NaN) no vale")
+    # REVISIÓN DEL 17-11 (árbitro): los casos de dinero que se escapaban
+    fallido = dict(run_ppe, status="FAILED", usageTotalUsd=0.001,
+                   chargedEventCounts={"result": 0, "actor-start": 1})
+    igual(F._cobrado_apify(fallido, "tiktok", pedidos=30, techo=1.0), None,
+          "un fallo con 0 traídos no apunta los 30 pedidos (0,112 $): con solo el arranque se queda la reserva")
+    igual(F._cobrado_apify(dict(fallido, chargedEventCounts={"result": 30, "actor-start": 1}), "tiktok",
+                           pedidos=30), 0.112, "un fallo con los 30 ya contados por Apify, sí los apunta")
+    sin_marca = {"status": "SUCCEEDED", "usageTotalUsd": 0.001,
+                 "chargedEventCounts": {"result": 0, "actor-start": 1},
+                 "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {
+                     "result": {"eventPriceUsd": 0.0037}, "actor-start": {"eventPriceUsd": 0.001}}}}}
+    igual(F._cobrado_apify(sin_marca, "tiktok", pedidos=30, traidos=30), None,
+          "un actor sin evento principal marcado: el suelo sigue protegiendo (no 0,001 con 30 vídeos)")
+    igual(F._cobrado_apify(dict(run_ppe, chargedEventCounts={"result": 10 ** 9}), "tiktok", 1, 1, techo=4.5), 4.5,
+          "un contador absurdo no pasa de lo que se le dejó cobrar a Apify (maxTotalChargeUsd)")
+    igual(F._cobrado_apify(dict(run_ppe, chargedEventCounts={"result": 10 ** 9}), "tiktok", 1, 1), 37.0,
+          "y sin techo, cada contador se queda en 10.000 como mucho")
+    negativo = {"status": "SUCCEEDED", "usageTotalUsd": 0.001, "chargedEventCounts": {"result": 0},
+                "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {
+                    "result": {"eventPriceUsd": -1, "isPrimaryEvent": True}}}}}
+    igual(F._cobrado_apify(negativo, "tiktok", pedidos=30, traidos=30), None,
+          "un precio negativo no cuenta y no quita el suelo")
+    raro = {"status": "SUCCEEDED", "usageTotalUsd": 0.001, "chargedEventCounts": {"result": 0, "x": 2},
+            "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {
+                "result": {"eventPriceUsd": 0.0037, "isPrimaryEvent": "false"},
+                "x": {"eventPriceUsd": True}}}}}
+    igual(F._cobrado_apify(raro, "tiktok", pedidos=20, traidos=20), None,
+          "un precio True no vale 1 $ y un «false» escrito no marca el evento principal")
+    igual(F._sin_videos_publicos([{"authorMeta": {"video": False}}, {"authorMeta": {"video": 0.4}}]), None,
+          "«video: False» o «0.4» no son 0 vídeos")
+    igual(F._sin_videos_publicos([{"authorMeta": {"video": 0}}, {"authorMeta": {"video": 12}}]), None,
+          "si una entrada dice que tiene vídeos, la cuenta no se da por vacía")
+    igual(F._traidos_de_pago([{"id": 1}, {"error": "not_found"}, "x"]), 1,
+          "las entradas de error no se cuentan como resultados cobrados")
     f = lanza(F.apify, TOKEN_APIFY, "instagram", "noexiste_ig", 4, bases=bases)
     ok(f is not None and f.motivo == "no_encontrada" and "Profile does not exist" in str(f) and "¿existe?" in str(f),
        f"una cuenta que el actor dice que no existe se dice así, con su frase (no el código): {f}")

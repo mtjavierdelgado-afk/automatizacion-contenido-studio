@@ -686,6 +686,16 @@ def prueba_base_fiel():
     ok("television" not in T.prompt_imagen_base({"descripcion": "sala con televisión grande"},
                                                 {"modo": "recorrido"}),
        "«televisión» con tilde también cuenta como pantalla")
+    ec_obj = {"modo": "espacio_que_cambia", "cambia": "objeto"}
+    con_tele = T.prompt_imagen_base({"descripcion": "a small living room"}, ec_obj,
+                                    inicial="a wall-mounted TV on the left wall")
+    ok("MUST already be in this picture" in con_tele and "no television" not in con_tele,
+       "lo que ya está en la base (una tele) no se prohíbe a la vez que se pide (H1 del tren)")
+    con_mampara = T.prompt_imagen_base({"descripcion": "a narrow bathroom"}, ec_obj,
+                                       inicial="a hinged glass shower door, closed")
+    ok("or the starting state below does not name" in con_mampara,
+       "la mampara del estado inicial cuenta como nombrada: no choca con «nada de más»")
+    ok("no television or TV cabinet" in con_mampara, "y sin pantallas, la tele sigue prohibida")
     fotos = []
     for nombre in ("interior_salon.jpg", "interior_cocina.jpg", "exterior_fachada.jpg"):
         ruta_f = os.path.join(carpeta_l, nombre)

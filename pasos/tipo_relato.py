@@ -795,7 +795,8 @@ PROMPT_BASE = (
 #: mueble de TV en la sala que nadie pedia). La tele y su mueble se nombran
 #: solo si la descripcion no habla de ninguna pantalla: una sala gamer o un
 #: producto que es una pantalla los pide (revision del arbitro).
-NADA_MAS = "Add NOTHING the description does not name: no extra furniture, door or window{tele}. "
+NADA_MAS = ("Add NOTHING the description or the starting state below does not name: no extra "
+            "furniture, door or window{tele}. ")
 NADA_MAS_TELE = ", and no television or TV cabinet"
 _PANTALLAS = re.compile(r"\b(tv|tvs|televisi\w*|televisor\w*|tele|screens?|monitors?|"
                         r"pantallas?|displays?)\b", re.IGNORECASE)
@@ -873,10 +874,14 @@ def prompt_imagen_base(espacio, relato, cabecera="", inicial="", ambiente=False)
     antes = ANTES.get((relato or {}).get("cambia") or "", "") \
         if (relato or {}).get("modo") == "espacio_que_cambia" else ""
     inicial = inicial_de(inicial or (relato or {}).get("inicial"))
-    if antes and inicial and (relato or {}).get("cambia") in ("objeto", "estado"):
+    con_inicial = bool(antes and inicial and (relato or {}).get("cambia") in ("objeto", "estado"))
+    if con_inicial:
         antes += INICIAL.format(inicial=inicial)
-    nada_mas = NADA_MAS.format(tele="" if _PANTALLAS.search(descripcion + " " + luz)
-                               else NADA_MAS_TELE)
+    # LO QUE YA ESTA EN LA BASE (`inicial`) tambien cuenta como nombrado: si es
+    # una tele, la base no puede pedirla y prohibirla a la vez (revision del
+    # tren, 17-11, H1)
+    nombrado = descripcion + " " + luz + (" " + inicial if con_inicial else "")
+    nada_mas = NADA_MAS.format(tele="" if _PANTALLAS.search(nombrado) else NADA_MAS_TELE)
     return PROMPT_BASE.format(cabecera=_texto(cabecera, 400), descripcion=descripcion,
                               luz=luz, antes=antes, nada_mas=nada_mas,
                               encuadre=ENCUADRE_AMBIENTE if ambiente else ENCUADRE_BASE).strip()

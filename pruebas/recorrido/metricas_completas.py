@@ -1,5 +1,6 @@
 """Recorrido de la rama metricas-completas (11-11-2026): las cifras que
 Upload-Post ya daba y no se veían, en Resultados y en «Más cifras» de un envío."""
+import re
 import time
 
 from prueba_recorrido import Pagina, escenario, ok, _paso_ficha  # noqa: F401
@@ -48,10 +49,19 @@ def publicar_metricas_completas(navegador, datos):
     ok(pg.esperar(".cifras-aparte", "impresiones", 5) and pg.visible(".cifras-aparte", "(sumado"),
        "y, aparte, las impresiones y el alcance «sumado»")
     # revisión del 12-11: cada total dice de cuántas publicaciones sale
-    ok(pg.visible(".cifras-grandes-publicar .cifra", "seguidores nuevos · 1 de 2"),
-       "los seguidores nuevos (solo TikTok) dicen de cuántas publicaciones salen")
-    ok(pg.visible(".cifras-aparte", "impresiones (1 de 2 publicaciones)"), "y las impresiones (solo Instagram), también")
-    ok(pg.visible(".cifras-aparte", "(sumado; 1 de 2 publicaciones)") and not pg.visible(".cifras-aparte", ") ("),
+    # «N de M» y no «1 de 2»: en el recorrido ENTERO los escenarios de antes
+    # dejan más publicaciones en el proyecto (tren del 17-11: salía «1 de 3»)
+    grandes = " | ".join(pg.p.locator(".cifras-grandes-publicar .cifra").all_inner_texts())
+    aparte = pg.p.locator(".cifras-aparte").first.inner_text()
+
+    def parcial(texto, patron):
+        m = re.search(patron, texto)
+        return bool(m) and 0 < int(m.group("n")) < int(m.group("m"))
+    ok(parcial(grandes, r"seguidores nuevos · (?P<n>\d+) de (?P<m>\d+)"),
+       f"los seguidores nuevos (solo TikTok) dicen de cuántas publicaciones salen: {grandes!r}")
+    ok(parcial(aparte, r"impresiones \((?P<n>\d+) de (?P<m>\d+) publicaciones\)"),
+       f"y las impresiones (solo Instagram), también: {aparte!r}")
+    ok(parcial(aparte, r"\(sumado; (?P<n>\d+) de (?P<m>\d+) publicaciones\)") and ") (" not in aparte,
        "el alcance, en un solo paréntesis")
     ok(pg.p.evaluate("() => [porcentaje(0), porcentaje(0.0999), porcentaje(0.00999)].join('|')") == "0 %|10 %|1,0 %",
        "0 % es «0 %», y los decimales se eligen ya redondeado")

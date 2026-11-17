@@ -2292,21 +2292,42 @@ CAMARA_DE_CERCA = re.compile(
     r"\bprimer(?:isimo)? plano\b|\bplano (?:de )?detalle\b|\bdetalle de(?:l)?\b|\bde cerca\b|"
     r"\bplano (?:corto|cerrado)\b|\binserto\b",
     re.IGNORECASE)
-#: «medium close-up» y «plano medio corto» enseñan el sitio: no son de cerca.
+#: Los planos MEDIOS. En «un espacio que cambia» respetan su camara como los de
+#: cerca (rama base-fiel, decision del dueño del 12-11); en «producto» siguen
+#: editando la base, que es lo que copia el producto aprobado (`_familia_del_plano`).
 CAMARA_MEDIA = re.compile(r"\bmedium close|\bplano medio\b|\bmcu\b", re.IGNORECASE)
+#: Los medios que cuentan en «un espacio que cambia» (rama base-fiel, X01:
+#: «medium shot from the shower side»). Fuera de ese modo se usa SOLO la de
+#: arriba, la de siempre, y la familia sale byte a byte como antes (revision del
+#: arbitro, 12-11). «medium-wide» no: es casi un general y enseña la habitacion.
+CAMARA_MEDIA_ESPACIO = re.compile(r"\bmedium close|\bplano medio\b|\bmcu\b|\bmedium shot\b|"
+                                  r"\bmid[- ]?shot\b|\bplano americano\b", re.IGNORECASE)
 
 
-def _familia_del_plano(escena, modo):
+def _familia_del_plano(escena, modo, relato=None):
     """La familia que decide si el plano edita la base. En modo guion (rama
     tipo-de-relato-2) manda la CAMARA de su linea: un primer plano o un detalle
     es «cerca» y no edita la base -- editar fija la camara de la base, y el
     detalle pedido salia como el plano general de siempre (prueba real del
     23-10) --; cualquier otra camara escrita es un plano del sitio y la edita.
-    Sin linea o sin camara, la de su carta, como siempre."""
+    Sin linea o sin camara, la de su carta, como siempre.
+
+    UN PLANO MEDIO TAMBIEN RESPETA SU CAMARA (rama base-fiel, decision del
+    dueño del 12-11): editar la imagen del estado fija su camara y el FINAL
+    CHECK dice «keep exactly its camera»; en X01, «medium shot from the shower
+    side» y «medium close-up of the mirror» salian iguales a la imagen del
+    estado. Ahora es «cerca»: lleva esa imagen de referencia y su angulo manda.
+    SOLO en «un espacio que cambia» (`relato`): en «producto» el plano medio
+    sigue editando la base, porque editarla es lo que copia el producto
+    aprobado (revision del arbitro, 12-11). Sin `relato`, como antes."""
+    medio_cerca = (relato or {}).get("modo") == "espacio_que_cambia"
     camara = str(((escena.get("linea_gv") or {}).get("camara")) or "")
     if camara.strip():
         llano = unicodedata.normalize("NFKD", camara.lower())
         llano = "".join(c for c in llano if not unicodedata.combining(c))
+        if medio_cerca:
+            return "cerca" if (CAMARA_MEDIA_ESPACIO.search(llano)
+                               or CAMARA_DE_CERCA.search(llano)) else "lejos"
         if CAMARA_MEDIA.search(llano):
             return "lejos"
         return "cerca" if CAMARA_DE_CERCA.search(llano) else "lejos"
@@ -2316,6 +2337,9 @@ def _familia_del_plano(escena, modo):
         # parrilla-estados): lo dice la propia linea («Close-up of the mirror»)
         llano = unicodedata.normalize("NFKD", str(linea.get("visual") or "").lower())
         llano = "".join(c for c in llano if not unicodedata.combining(c))
+        if medio_cerca:
+            return "cerca" if (CAMARA_MEDIA_ESPACIO.search(llano)
+                               or CAMARA_DE_CERCA.search(llano)) else ""
         if CAMARA_DE_CERCA.search(llano) and not CAMARA_MEDIA.search(llano):
             return "cerca"
         return ""
@@ -2329,7 +2353,7 @@ def _marcar_edicion(escena, beat, relato, principal, modo, bases_rel):
     el, el plano no gana ni una clave y el plan sale como siempre. `base` es la
     ruta RELATIVA de la base aprobada: viaja en el plan para la V2.0 fase 5, que
     arrancara los clips de ese sitio desde la misma imagen."""
-    familia = _familia_del_plano(escena, modo)
+    familia = _familia_del_plano(escena, modo, relato)
     if not tipo_relato.plano_se_edita(escena, relato, principal, familia):
         for clave in ("editar_base", "cambio", "estado", "base", "base_clave", "ref_clave"):
             escena.pop(clave, None)
@@ -3316,6 +3340,12 @@ def contexto_de_reglas(estilo, escena=None, feedback=""):
     return " ".join(t for t in trozos if t)
 
 
+def _es_referencia(escena):
+    """True en la imagen base de un sitio o la de un estado (rama base-fiel):
+    solo `prompt_y_refs_de_base` y `prompt_y_refs_de_estado` ponen `referencia`."""
+    return bool((escena or {}).get("referencia"))
+
+
 def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
                      formato="", fichas_reparto=None):
     """Prompt final citando cada referencia por su posicion, como espera la API.
@@ -3332,7 +3362,12 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     modo = modo_de(estilo)
     foto = modo == "foto"
     lineas = [CABECERA_PLANO[modo]]
-    if p2_brief.comun.normalizar_formato(formato) == "vertical":
+    if p2_brief.comun.normalizar_formato(formato) == "vertical" and _es_referencia(escena):
+        # LA IMAGEN DE REFERENCIA de un sitio (rama base-fiel): la habitacion
+        # entera, sin recortar los lados; los planos siguen con la de abajo
+        lineas.append(tipo_relato.CUADRO_ESTADO if escena.get("referencia") == "estado"
+                      else tipo_relato.cuadro_referencia(modo, escena.get("referencia") == "ambiente"))
+    elif p2_brief.comun.normalizar_formato(formato) == "vertical":
         # EL CUADRO ES VERTICAL, y hay que decirlo: las referencias de estilo
         # son apaisadas y sin esta linea el generador compone un plano apaisado
         # dentro de un lienzo alto, con el sujeto pequeno en medio y aire arriba
@@ -4937,6 +4972,18 @@ def _lamina_estilo(rutas, destino):
     return destino
 
 
+#: El nombre de una lamina por eje del estilo («interior_1fb7539dba.png», o con
+#: el numero delante de `nombre_numerado`, «03_interior_1fb7539dba.png»)
+_LAMINA_POR_EJE = re.compile(r"^(?:\d{2}_)*(cara|cuerpos|interior|exterior|objeto|diagrama)_[0-9a-f]{10}\.",
+                             re.IGNORECASE)
+
+
+def _eje_de_lamina(ruta):
+    """El eje de una referencia del estilo si es una lamina por eje, o ""."""
+    casa = _LAMINA_POR_EJE.match(os.path.basename(str(ruta or "")))
+    return casa.group(1).lower() if casa else ""
+
+
 def _referencias_estilo(p, cache, escena=None):
     """La referencia de estilo de un plano: el moodboard si lo hay, si no los
     fotogramas.
@@ -4957,6 +5004,20 @@ def _referencias_estilo(p, cache, escena=None):
             return [{"papel": "lamina", "ruta": imagen.normalizar(tile, cache),
                      "cuantas": len(moodboard.ejes_de_plano(escena)),
                      "moodboard": True}]
+    if escena is not None and escena.get("ejes"):
+        # UNA IMAGEN DE REFERENCIA SIN MOODBOARD (rama base-fiel, prueba real del
+        # 12-11): si las referencias del estilo son sus laminas por eje
+        # («interior_….png», «cara_….png»), fuera las que no toca; la
+        # «interior» es una sala amueblada y su mueble de TV salio en las tres
+        # pruebas. Ningun plano trae `ejes`: su lamina sale como siempre
+        # SOLO si el estilo es ENTERO un juego de laminas por eje (revision del
+        # arbitro): una foto subida que se llame «interior_salon.jpg» no es una
+        # lamina, y quitarla dejaba la base con una sola referencia
+        eje_de = {r: _eje_de_lamina(r) for r in rutas}
+        if rutas and all(eje_de.values()):
+            propias = [r for r in rutas if eje_de[r] in escena["ejes"]]
+            if len(propias) >= 2:
+                rutas = propias
     rutas = rutas[:MAX_REFERENCIAS_ESTILO]
 
     # Siempre que haya mas de una. No es una opcion: mandar ocho imagenes
@@ -6152,7 +6213,9 @@ def prompt_y_refs_de_base(proyecto, params, cache, sitio=None, nota=""):
     p = _con_defectos(params)
     principal, espacio = espacio_del_relato(proyecto, params)
     casa = []
-    if sitio and sitio != principal:
+    # UN AMBIENTE SECUNDARIO (rama base-fiel): la camara dentro de el
+    secundario = bool(sitio and sitio != principal)
+    if secundario:
         ambiente = next((a for a in ambientes_del_relato(proyecto, params)
                          if a["sitio"] == sitio), None)
         if not ambiente:
@@ -6171,12 +6234,13 @@ def prompt_y_refs_de_base(proyecto, params, cache, sitio=None, nota=""):
     relato = tipo_relato.resolver(params)
     catalogo = _catalogo_de(p, proyecto) if proyecto is not None else (p.get("catalogo") or {})
     inicial = ((catalogo or {}).get("relato") or {}).get("inicial") or ""
-    texto = tipo_relato.prompt_imagen_base(espacio, relato, inicial=inicial)
+    texto = tipo_relato.prompt_imagen_base(espacio, relato, inicial=inicial, ambiente=secundario)
     # LA NOTA DE ESTA VEZ (rama relato-sin-cortes): «Otra imagen base» con una
     # corrección que no se guarda en ningún sitio, solo para este intento
     texto = (texto + " " + tipo_relato.nota_base(nota)).strip() if nota else texto
     escena = {"id": "BASE", "prompt": texto, "personajes": [], "set": sitio,
-              "narracion": ""}
+              "narracion": "", "referencia": "ambiente" if secundario else "base",
+              "ejes": list(tipo_relato.EJES_REFERENCIA)}
     refs = list(_referencias_estilo(p, cache, escena))
     if not refs:
         raise RuntimeError("sin referencias de estilo no se puede hacer la imagen base")
@@ -6224,7 +6288,7 @@ def estados_del_relato(proyecto, params):
     return sitio, tipo_relato.estados_del_catalogo(catalogo, sitio)
 
 
-def prompt_y_refs_de_estado(proyecto, params, estado, cache):
+def prompt_y_refs_de_estado(proyecto, params, estado, cache, nota=""):
     """El prompt y las referencias de la imagen de un ESTADO. -> (sitio, cambio, prompt, refs)
 
     Es la base APROBADA del sitio, editada una vez con el cambio de ese estado
@@ -6244,17 +6308,25 @@ def prompt_y_refs_de_estado(proyecto, params, estado, cache):
     espacio = p.get("espacio_fijo") or {}
     base = [{"papel": "base", "principal": True, "nombre": espacio.get("sitio") or sitio,
              "ruta": imagen.normalizar(ruta, cache), "modo": relato["modo"],
-             "cambia": relato.get("cambia") or "", "cambio": cambio}]
+             "cambia": relato.get("cambia") or "", "cambio": cambio,
+             # en «acabados», lo que el cambio no nombra conserva su acabado
+             # (rama base-fiel); los planos no llevan esta clave
+             "fijos": True}]
     escena = {"id": f"ESTADO_{estado}", "prompt": tipo_relato.prompt_imagen_estado(cambio),
-              "personajes": [], "set": sitio, "narracion": ""}
+              "personajes": [], "set": sitio, "narracion": "", "referencia": "estado",
+              "ejes": list(tipo_relato.EJES_REFERENCIA)}
     refs = base + list(_referencias_estilo(p, cache, escena))
     formato = p2_brief.comun.ficha_formato(p4_voz.formato_de_salida(proyecto)) \
         if proyecto is not None else {"id": ""}
     prompt = _prompt_completo(escena, refs, p["estilo"], formato=formato.get("id") or "")
+    if nota:
+        # LA CORRECCION DE ESTA VEZ (rama base-fiel), como la de la base y sin
+        # guardarse; va la ULTIMA, detras del FINAL CHECK, que si no la anulaba
+        prompt = (prompt + " " + tipo_relato.nota_base(nota)).strip()
     return sitio, cambio, prompt, refs
 
 
-def generar_imagen_estado(proyecto, params, estado, rehacer=False):
+def generar_imagen_estado(proyecto, params, estado, rehacer=False, nota=""):
     """Genera (y paga) la imagen de un estado. -> {sitio, estado, cambio, imagen, coste}
 
     Como la base: se guarda por huella en la carpeta del espacio fijo y NO se
@@ -6262,7 +6334,8 @@ def generar_imagen_estado(proyecto, params, estado, rehacer=False):
     p = _con_defectos(params)
     cache = proyecto.ruta("espacio_fijo", "_refs")
     os.makedirs(cache, exist_ok=True)
-    sitio, cambio, prompt, refs = prompt_y_refs_de_estado(proyecto, params, estado, cache)
+    sitio, cambio, prompt, refs = prompt_y_refs_de_estado(proyecto, params, estado, cache,
+                                                          nota=nota)
     temporal = proyecto.ruta("espacio_fijo", "_estado_nuevo.png")
     formato = p2_brief.comun.ficha_formato(p4_voz.formato_de_salida(proyecto))
     meta = _producir_imagen(f"estado_{sitio}_{estado}", prompt, [r["ruta"] for r in refs],

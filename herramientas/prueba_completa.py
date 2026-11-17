@@ -425,7 +425,9 @@ def main():
         for prov in ("openai", "cartesia", "claude"):
             p = estados.get(prov) or {}
             informe.comprueba(p.get("estado") in ("ok", None), f"clave de {prov}",
-                              f"{p.get('estado')}: {p.get('mensaje')}", solo_aviso=args.sin_claves)
+                              f"{p.get('estado')}: {p.get('mensaje')}",
+                              # la de Claude, aviso: como en prueba_relato (rama base-fiel)
+                              solo_aviso=args.sin_claves or prov == "claude")
         if est["publicar"]:
             _c, r = api.post("/api/publicar/probar")
             informe.comprueba(bool((r or {}).get("ok")), "Upload-Post acepta la clave",

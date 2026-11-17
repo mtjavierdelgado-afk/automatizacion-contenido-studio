@@ -537,7 +537,8 @@ def _cobrado_por_eventos(run, traidos=0):
     `pricingInfo.pricingPerEvent.actorChargeEvents`. Devuelve (total, principal):
     `principal` dice de dónde sale el evento principal: «marcado» (con
     `isPrimaryEvent`), «respaldo» (sin marca: el más contado o el más barato de
-    los que van por resultado) o None. (None, None) si el actor no es de pago por evento o no trae precios.
+    los que van por resultado) o None. (None, None) si el actor no es de pago
+    por evento o no trae precios.
 
     PRUEBA REAL DEL 17-11 (ejecución M0SNHIDnvtzhPh8ch, clockworks/tiktok-scraper):
     Apify cobró 0,0047 $ (1 «result» a 0,0037 + 1 «actor-start» a 0,001) y el

@@ -9,7 +9,16 @@
   siga cobrando, y apunta lo reservado (nunca 0), porque la cifra de una lectura
   a medias todavía puede crecer.
 - El tope de gasto al mes funciona igual que antes.
-- **Si TikTok no deja leer una cuenta**, el aviso lo dice claro: «TikTok no le ha
-  dejado ver los vídeos al lector de Apify (le pide iniciar sesión)». Antes
-  decía que la cuenta no existía o era privada. Pasó de verdad con @ikeausa y
-  @sodimacperu el 12-11: es un bloqueo de TikTok, no un fallo del Studio.
+- **En los lectores que cobran por evento** (el de TikTok cobra 0,001 $ por
+  arrancar y unos 0,0037 $ por cada resultado), el gasto se calcula sumando lo
+  que cuesta cada evento, y se apunta lo mayor entre esa suma y la cifra de
+  Apify. Pasó de verdad el 17-11: Apify cobró 0,0047 $ y el Studio apuntó
+  0,001 $ porque leyó la cifra justo al terminar, antes de que Apify contara el
+  resultado.
+- **Si la cuenta no tiene ningún vídeo**, el aviso lo dice así: «la cuenta no
+  tiene vídeos públicos (Apify la ve con 0 vídeos, 0 seguidores): ¿es la cuenta
+  que buscas?». Pasó con @ikeausa, que no es la cuenta de IKEA sino un perfil
+  personal vacío.
+- **Si TikTok no deja leer una cuenta que sí tiene vídeos**, o el lector no trae
+  los datos de la cuenta, el aviso dice: «TikTok no le ha dejado ver los vídeos
+  al lector de Apify (le pide iniciar sesión)».

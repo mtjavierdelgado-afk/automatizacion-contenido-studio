@@ -211,6 +211,8 @@ class Falso(http.server.BaseHTTPRequestHandler):
                         run["usageTotalUsd"] = run["_cobrado"]
                     else:
                         run.pop("usageTotalUsd", None)
+            elif run.get("_luego") and run["status"] == run["_final"]:
+                run.update(run.pop("_luego"))           # Apify termina de contar los eventos
             return self._json(200, {"data": {k: v for k, v in run.items() if not k.startswith("_")}})
         if url.path.startswith("/apify/datasets/"):     # los resultados
             if self._portador() != TOKEN_APIFY:
@@ -247,6 +249,7 @@ class Falso(http.server.BaseHTTPRequestHandler):
                 return self._json(402, {"error": {"message": "Not enough credit"}})
             # LA EJECUCIÓN (rama apify-coste-real): estado, dataset y lo cobrado
             final, preguntas, cobrado, caida = "SUCCEEDED", 0, 0.0042, False
+            eventos, luego = None, None
             if usuario == "tarda":                 # el actor se pasa de su tiempo
                 final, cobrado = "TIMED-OUT", 0.009
             elif usuario == "lenta":               # aún corre: tarda dos preguntas
@@ -265,10 +268,27 @@ class Falso(http.server.BaseHTTPRequestHandler):
             elif usuario == "noexiste_ig":         # el actor de Instagram con una cuenta que no existe
                 items = [{"error": "not_found", "errorDescription": "Profile does not exist"}]
                 cobrado = 0.0026
-            elif usuario == "muro":                # lo que devolvió de verdad el 12-11 (@ikeausa)
+            elif usuario == "muro":                # el actor no trae los datos del autor: puede ser el muro
                 items = [{"authorMeta": {"name": usuario}, "input": usuario,
                           "note": "Profile has no videos (or is behind a login wall)"}]
                 cobrado = 0.005
+            elif usuario == "murovideos":          # el autor dice que tiene vídeos y no llega ninguno: muro
+                items = [{"authorMeta": {"name": usuario, "video": 37, "fans": 900}, "input": usuario,
+                          "note": "Profile has no videos (or is behind a login wall)"}]
+                cobrado = 0.005
+            elif usuario == "ikeausa":             # lo que devolvió de verdad el 17-11 (run M0SNHIDnvtzhPh8ch)
+                items = [{"authorMeta": {"name": usuario, "nickName": "8", "video": 0, "fans": 0, "verified": False,
+                                         "privateAccount": False}, "input": usuario,
+                          "note": "Profile has no videos (or is behind a login wall)"}]
+                cobrado, eventos = 0.001, {"result": 0, "actor-start": 1}
+            elif usuario == "poreventos":          # pago por evento, con el «result» aún sin contar al acabar
+                items = [{"id": str(i), "text": f"tiktok {i}", "playCount": 50 + i, "createTimeISO":
+                          "2026-10-01T00:00:00Z", "authorMeta": {"nickName": usuario, "video": 4}} for i in range(4)]
+                cobrado, eventos = 0.001, {"result": 0, "actor-start": 1}
+            elif usuario == "cuentatarde":         # Apify da la cifra buena en la segunda lectura
+                items = [{"id": str(i), "text": f"tiktok {i}", "playCount": 50 + i, "createTimeISO":
+                          "2026-10-01T00:00:00Z", "authorMeta": {"nickName": usuario}} for i in range(4)]
+                cobrado, luego = 0.001, {"usageTotalUsd": 0.0201}
             elif usuario == "bloqueada":           # el actor contesta con un error en el resultado
                 items = [{"url": f"https://www.tiktok.com/@{usuario}", "error": "Profile could not be loaded"}]
                 cobrado = 0.0017
@@ -290,6 +310,15 @@ class Falso(http.server.BaseHTTPRequestHandler):
                    "usageTotalUsd": 0.0001 if preguntas else cobrado}
             if run["usageTotalUsd"] is None:
                 run.pop("usageTotalUsd")
+            if eventos is not None:                # como clockworks/tiktok-scraper (consola, 17-11)
+                run["chargedEventCounts"] = dict(eventos)
+                run["pricingInfo"] = {"pricingModel": "PAY_PER_EVENT", "pricingPerEvent": {"actorChargeEvents": {
+                    "result": {"eventTitle": "Result", "eventPriceUsd": 0.0037, "isPrimaryEvent": True,
+                               "isOneTimeEvent": False},
+                    "video-download": {"eventTitle": "Add-on: video download", "eventPriceUsd": 0.0013},
+                    "actor-start": {"eventTitle": "Actor start", "eventPriceUsd": 0.001, "isOneTimeEvent": True}}}}
+            if luego:
+                run["_luego"] = luego
             Falso.ejecuciones[rid] = run
             return self._json(201, {"data": {k: v for k, v in run.items() if not k.startswith("_")}})
         return self._json(404, {})
@@ -380,6 +409,43 @@ def prueba_fuentes(bases):
     f = lanza(F.apify, TOKEN_APIFY, "tiktok", "muro", 4, bases=bases)
     ok(f is not None and f.motivo == "red" and "le pide iniciar sesión" in str(f) and f.coste_usd == 0.005,
        f"el muro de login de TikTok (lo que pasó de verdad el 12-11) se dice claro, con lo cobrado: {f}")
+    f = lanza(F.apify, TOKEN_APIFY, "tiktok", "murovideos", 4, bases=bases)
+    ok(f is not None and f.motivo == "red" and "le pide iniciar sesión" in str(f),
+       f"si el autor dice que tiene vídeos y no llega ninguno, sí es el muro: {f}")
+    # LA PRUEBA REAL DEL 17-11 (@ikeausa, run M0SNHIDnvtzhPh8ch): 0 vídeos de verdad
+    # y Apify cobró 0,0047 $ (1 resultado a 0,0037 + el arranque a 0,001)
+    f = lanza(F.apify, TOKEN_APIFY, "tiktok", "ikeausa", 10, bases=bases)
+    ok(f is not None and f.motivo == "no_encontrada" and "no tiene vídeos públicos" in str(f)
+       and "¿es la cuenta que buscas?" in str(f) and "0 seguidores" in str(f) and "iniciar sesión" not in str(f),
+       f"una cuenta con 0 vídeos se dice así, sin hablar del muro de login: {f}")
+    igual(getattr(f, "coste_usd", None), 0.0047,
+          "y lo cobrado es el de la consola de Apify (0,0047), no los 0,001 de usageTotalUsd")
+    r = F.apify(TOKEN_APIFY, "tiktok", "poreventos", 4, bases=bases)
+    igual((r["coste_usd"], r["coste_real"]), (round(0.001 + 4 * 0.0037, 4), True),
+          "pago por evento: los resultados del dataset cuentan aunque Apify aún no los haya contado")
+    r = F.apify(TOKEN_APIFY, "tiktok", "cuentatarde", 4, bases=bases)
+    igual(r["coste_usd"], 0.0201, "se vuelve a leer la ejecución al final: manda la cifra ya completa")
+    run_ppe = {"status": "SUCCEEDED", "usageTotalUsd": 0.0047,
+               "chargedEventCounts": {"result": 1, "actor-start": 1},
+               "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {
+                   "result": {"eventPriceUsd": 0.0037, "isPrimaryEvent": True},
+                   "actor-start": {"eventPriceUsd": 0.001}}}}}
+    igual(F._cobrado_apify(run_ppe, "tiktok", 1), 0.0047, "con los eventos ya contados, cuadra con usageTotalUsd")
+    igual(F._cobrado_apify(dict(run_ppe, usageTotalUsd=0.009), "tiktok", 1), 0.009,
+          "si usageTotalUsd dice más que los eventos, manda usageTotalUsd (lo mayor)")
+    escalones = {"status": "SUCCEEDED", "chargedEventCounts": {"result": 10},
+                 "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {"result": {"eventTieredPricingUsd": {
+                     "FREE": {"tieredEventPriceUsd": 0.005}, "BRONZE": {"tieredEventPriceUsd": 0.004}}}}}}}
+    igual(F._cobrado_apify(escalones, "tiktok", 10), 0.05, "precios por niveles: el del plan gratuito")
+    igual(F._cobrado_apify({"status": "SUCCEEDED", "chargedEventCounts": {"result": 2},
+                            "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {"result": {
+                                "eventTieredPricingUsd": {"GOLD": {"tieredEventPriceUsd": 0.002},
+                                                          "SILVER": {"tieredEventPriceUsd": 0.003}}}}}}},
+                           "tiktok", 2), 0.006, "sin el nivel gratuito, el precio más alto")
+    igual(F._cobrado_apify(dict(run_ppe, status="RUNNING"), "tiktok", 1), None,
+          "con eventos o sin ellos, una ejecución que aún corre no vale")
+    igual(F._cobrado_apify({"status": "SUCCEEDED", "usageTotalUsd": "NaN"}, "tiktok", 1), None,
+          "una cifra rara (NaN) no vale")
     f = lanza(F.apify, TOKEN_APIFY, "instagram", "noexiste_ig", 4, bases=bases)
     ok(f is not None and f.motivo == "no_encontrada" and "Profile does not exist" in str(f) and "¿existe?" in str(f),
        f"una cuenta que el actor dice que no existe se dice así, con su frase (no el código): {f}")
@@ -480,6 +546,12 @@ def prueba_orden(bases):
         ok(f is not None and "iniciar sesión" in str(f), f"el muro de login llega a la pantalla dicho claro: {f}")
         igual((round(C.gasto_del_mes(raiz) - antes, 4), len([v for v in Falso.vistas if v[0] == "POST"]) - posts),
               (0.005, 1), "una sola ejecución de Apify, con lo que cobró de verdad")
+        # la prueba real del 17-11 por el camino de verdad: 0,0047 apuntado, y no se sigue intentando
+        antes, posts = C.gasto_del_mes(raiz), len([v for v in Falso.vistas if v[0] == "POST"])
+        f = lanza(C.leer, raiz, "tiktok", "ikeausa", 10, pagar=True)
+        ok(f is not None and "no tiene vídeos públicos" in str(f), f"0 vídeos llega a la pantalla así: {f}")
+        igual((round(C.gasto_del_mes(raiz) - antes, 4), len([v for v in Falso.vistas if v[0] == "POST"]) - posts),
+              (0.0047, 1), "se apunta lo que cobró Apify (0,0047 $), con una sola ejecución")
         antes = C.gasto_del_mes(raiz)
         C.guardar_claves({"apify_token": "apify_api_malo_000000"})
         lanza(C.leer, raiz, "tiktok", "otra", 10, pagar=True)

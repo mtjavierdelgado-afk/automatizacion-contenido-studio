@@ -696,6 +696,9 @@ def prueba_base_fiel():
     ok("or the starting state below does not name" in con_mampara,
        "la mampara del estado inicial cuenta como nombrada: no choca con «nada de más»")
     ok("no television or TV cabinet" in con_mampara, "y sin pantallas, la tele sigue prohibida")
+    ok("starting state" not in T.prompt_imagen_base({"descripcion": "a bathroom"},
+                                                    {"modo": "espacio_que_cambia", "cambia": "acabados"}),
+       "sin estado inicial, la frase no nombra uno que no existe")
     fotos = []
     for nombre in ("interior_salon.jpg", "interior_cocina.jpg", "exterior_fachada.jpg"):
         ruta_f = os.path.join(carpeta_l, nombre)

@@ -795,8 +795,9 @@ PROMPT_BASE = (
 #: mueble de TV en la sala que nadie pedia). La tele y su mueble se nombran
 #: solo si la descripcion no habla de ninguna pantalla: una sala gamer o un
 #: producto que es una pantalla los pide (revision del arbitro).
-NADA_MAS = ("Add NOTHING the description or the starting state below does not name: no extra "
-            "furniture, door or window{tele}. ")
+NADA_MAS = ("Add NOTHING the description{y_inicial} does not name: no extra furniture, door or "
+            "window{tele}. ")
+NADA_MAS_INICIAL = " or the starting state below"
 NADA_MAS_TELE = ", and no television or TV cabinet"
 _PANTALLAS = re.compile(r"\b(tv|tvs|televisi\w*|televisor\w*|tele|screens?|monitors?|"
                         r"pantallas?|displays?)\b", re.IGNORECASE)
@@ -881,7 +882,8 @@ def prompt_imagen_base(espacio, relato, cabecera="", inicial="", ambiente=False)
     # una tele, la base no puede pedirla y prohibirla a la vez (revision del
     # tren, 17-11, H1)
     nombrado = descripcion + " " + luz + (" " + inicial if con_inicial else "")
-    nada_mas = NADA_MAS.format(tele="" if _PANTALLAS.search(nombrado) else NADA_MAS_TELE)
+    nada_mas = NADA_MAS.format(y_inicial=NADA_MAS_INICIAL if con_inicial else "",
+                               tele="" if _PANTALLAS.search(nombrado) else NADA_MAS_TELE)
     return PROMPT_BASE.format(cabecera=_texto(cabecera, 400), descripcion=descripcion,
                               luz=luz, antes=antes, nada_mas=nada_mas,
                               encuadre=ENCUADRE_AMBIENTE if ambiente else ENCUADRE_BASE).strip()

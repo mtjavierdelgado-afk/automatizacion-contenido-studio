@@ -424,6 +424,8 @@ def prueba_fuentes(bases):
     r = F.apify(TOKEN_APIFY, "tiktok", "poreventos", 4, bases=bases)
     igual((r["coste_usd"], r["coste_real"]), (round(0.001 + 4 * 0.0037, 4), True),
           "pago por evento: los resultados del dataset cuentan aunque Apify aún no los haya contado")
+    r = F.apify(TOKEN_APIFY, "tiktok", "poreventos", 4, bases=bases, max_usd=0.004)
+    igual(r["coste_usd"], 0.01, "el techo es lo que se le mandó a Apify (0,01, su mínimo), no los 0,004 que quedaban")
     r = F.apify(TOKEN_APIFY, "tiktok", "cuentatarde", 4, bases=bases)
     igual(r["coste_usd"], 0.0201, "se vuelve a leer la ejecución al final: manda la cifra ya completa")
     run_ppe = {"status": "SUCCEEDED", "usageTotalUsd": 0.0047,
@@ -458,8 +460,15 @@ def prueba_fuentes(bases):
                  "chargedEventCounts": {"result": 0, "actor-start": 1},
                  "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {
                      "result": {"eventPriceUsd": 0.0037}, "actor-start": {"eventPriceUsd": 0.001}}}}}
-    igual(F._cobrado_apify(sin_marca, "tiktok", pedidos=30, traidos=30), None,
-          "un actor sin evento principal marcado: el suelo sigue protegiendo (no 0,001 con 30 vídeos)")
+    igual(F._cobrado_apify(sin_marca, "tiktok", pedidos=30, traidos=30), 0.112,
+          "un actor sin evento principal marcado: cuenta como principal el más caro (no 0,001 con 30 vídeos)")
+    igual(F._cobrado_apify(sin_marca, "tiktok", pedidos=1, traidos=1), 0.0047,
+          "y con 1 solo vídeo también (el suelo de la tabla no lo paraba)")
+    solo_arranque = {"status": "SUCCEEDED", "usageTotalUsd": 0.001, "chargedEventCounts": {"actor-start": 1},
+                     "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {
+                         "actor-start": {"eventPriceUsd": 0.001, "isOneTimeEvent": True}}}}}
+    igual(F._cobrado_apify(solo_arranque, "tiktok", pedidos=30, traidos=30), None,
+          "sin ningún evento por resultado, el suelo sigue protegiendo")
     igual(F._cobrado_apify(dict(run_ppe, chargedEventCounts={"result": 10 ** 9}), "tiktok", 1, 1, techo=4.5), 4.5,
           "un contador absurdo no pasa de lo que se le dejó cobrar a Apify (maxTotalChargeUsd)")
     igual(F._cobrado_apify(dict(run_ppe, chargedEventCounts={"result": 10 ** 9}), "tiktok", 1, 1), 37.0,
@@ -473,8 +482,8 @@ def prueba_fuentes(bases):
             "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {
                 "result": {"eventPriceUsd": 0.0037, "isPrimaryEvent": "false"},
                 "x": {"eventPriceUsd": True}}}}}
-    igual(F._cobrado_apify(raro, "tiktok", pedidos=20, traidos=20), None,
-          "un precio True no vale 1 $ y un «false» escrito no marca el evento principal")
+    igual(F._cobrado_apify(raro, "tiktok", pedidos=20, traidos=20), 0.074,
+          "un precio True no vale 1 $ (serían 2 $ más): solo cuentan los 20 resultados a 0,0037")
     igual(F._sin_videos_publicos([{"authorMeta": {"video": False}}, {"authorMeta": {"video": 0.4}}]), None,
           "«video: False» o «0.4» no son 0 vídeos")
     igual(F._sin_videos_publicos([{"authorMeta": {"video": 0}}, {"authorMeta": {"video": 12}}]), None,

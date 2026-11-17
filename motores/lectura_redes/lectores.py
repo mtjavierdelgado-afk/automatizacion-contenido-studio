@@ -533,7 +533,8 @@ def _precio_evento(evento):
 def _cobrado_por_eventos(run, traidos=0):
     """Lo cobrado contando los eventos: Σ `chargedEventCounts` × su precio de
     `pricingInfo.pricingPerEvent.actorChargeEvents`. Devuelve (total, principal):
-    `principal` dice si el actor marca su evento principal (`isPrimaryEvent`).
+    `principal` dice si hay un evento principal (el marcado con `isPrimaryEvent`
+    o, sin marca, el más caro que no sea de una sola vez).
     (None, False) si el actor no es de pago por evento o no trae precios.
 
     PRUEBA REAL DEL 17-11 (ejecución M0SNHIDnvtzhPh8ch, clockworks/tiktok-scraper):
@@ -549,14 +550,18 @@ def _cobrado_por_eventos(run, traidos=0):
     if not isinstance(eventos, dict) or not eventos:
         return None, False
     contados = run.get("chargedEventCounts") if isinstance(run.get("chargedEventCounts"), dict) else {}
-    total, alguno, principal = 0.0, False, False
-    for nombre, evento in eventos.items():
-        precio = _precio_evento(evento)
-        if precio is None:
-            continue
+    precios = {nombre: _precio_evento(evento) for nombre, evento in eventos.items()}
+    precios = {nombre: precio for nombre, precio in precios.items() if precio is not None}
+    # el evento principal: el marcado; si el actor no marca ninguno, el más caro
+    # que no sea de una sola vez (revisión del 17-11: sin marca, una lectura de
+    # pocos vídeos volvía a apuntar solo el arranque)
+    marcados = [n for n in precios if eventos[n].get("isPrimaryEvent") is True]
+    por_resultado = [n for n in precios if eventos[n].get("isOneTimeEvent") is not True]
+    principal_de = marcados[0] if marcados else (max(por_resultado, key=precios.get) if por_resultado else None)
+    total, alguno, principal = 0.0, False, principal_de is not None
+    for nombre, precio in precios.items():
         cuantos = min(max(_numero(contados.get(nombre)) or 0, 0), MAXIMO_EVENTOS_APIFY)
-        if evento.get("isPrimaryEvent") is True:
-            principal = True
+        if nombre == principal_de:
             cuantos = max(cuantos, min(int(traidos or 0), MAXIMO_EVENTOS_APIFY))
         total += cuantos * precio
         alguno = True
@@ -622,8 +627,13 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
     limite = time.monotonic() + plazo
     parametros = {"timeout": max(10, plazo - 20), "maxItems": cuantos,
                   "waitForFinish": min(ESPERA_APIFY_S, max(1, int(plazo)))}
+    # el techo de lo apuntado es lo que de verdad se le manda a Apify (redondeado
+    # y con su mínimo de 0,01): más no puede cobrar un actor de pago por evento o
+    # por resultado, que son los tres de ACTORES (revisión del 17-11)
+    techo = None
     if max_usd is not None:
         parametros["maxTotalChargeUsd"] = f"{max(0.01, float(max_usd)):.2f}"
+        techo = float(parametros["maxTotalChargeUsd"])
     url = f"{BASE_APIFY}/acts/{actor}/runs?" + urllib.parse.urlencode(parametros)
     try:
         codigo, datos = _pedir(url, "POST", entrada_apify(red, usuario, cuantos), plazo=ESPERA_APIFY_S + 15,
@@ -666,10 +676,10 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
             pass
         # sin terminar, la cifra no vale: se queda la reserva (`_cobrado_apify`)
         raise ErrorLectura("Apify ha tardado demasiado: prueba con menos vídeos", "red", cobrado=True,
-                           coste_usd=_cobrado_apify(run, red, pedidos=cuantos, techo=max_usd))
+                           coste_usd=_cobrado_apify(run, red, pedidos=cuantos, techo=techo))
     # en los fallos se mide contra lo pedido (`cuantos`): una cifra por debajo de
     # un cuarto de la tabla no se cree y se queda la reserva (revisión del 12-11)
-    cobrado = _cobrado_apify(run, red, pedidos=cuantos, techo=max_usd)
+    cobrado = _cobrado_apify(run, red, pedidos=cuantos, techo=techo)
     if run.get("status") != "SUCCEEDED":
         motivo = "Apify ha tardado demasiado: prueba con menos vídeos" \
             if run.get("status") == "TIMED-OUT" else f"la ejecución de Apify ha acabado en {run.get('status')}"
@@ -694,7 +704,7 @@ def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_
             run = datos["data"]
     except ErrorLectura:
         pass
-    cobrado = _cobrado_apify(run, red, pedidos=len(items), traidos=_traidos_de_pago(items), techo=max_usd)
+    cobrado = _cobrado_apify(run, red, pedidos=len(items), traidos=_traidos_de_pago(items), techo=techo)
     salida = leer_items_apify(red, usuario, items)
     if not salida["videos"] and items:
         # EL ACTOR CONTESTÓ, PERO CON UN ERROR (prueba real del 12-11: TikTok

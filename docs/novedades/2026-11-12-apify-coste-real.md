@@ -15,10 +15,13 @@
   Apify. Pasó de verdad el 17-11: Apify cobró 0,0047 $ y el Studio apuntó
   0,001 $ porque leyó la cifra justo al terminar, antes de que Apify contara el
   resultado.
-- **Si la cuenta no tiene ningún vídeo**, el aviso lo dice así: «la cuenta no
-  tiene vídeos públicos (Apify la ve con 0 vídeos, 0 seguidores): ¿es la cuenta
-  que buscas?». Pasó con @ikeausa, que no es la cuenta de IKEA sino un perfil
-  personal vacío.
+- **Si la cuenta no tiene ningún vídeo**, el aviso lo dice así: «la cuenta
+  «ikeausa» de TikTok no tiene vídeos públicos (Apify la ve con 0 vídeos, 0
+  seguidores), o TikTok no ha dejado verla: ¿es la cuenta que buscas?». Lo de
+  «o TikTok no ha dejado verla» solo sale cuando la cuenta tiene 0 seguidores,
+  porque entonces no se puede saber cuál de las dos cosas pasa. Pasó con
+  @ikeausa, que no es la cuenta de IKEA sino un perfil personal vacío.
+- Cada lectura nunca apunta más de lo que se le dejó cobrar a Apify en ella.
 - **Si TikTok no deja leer una cuenta que sí tiene vídeos**, o el lector no trae
   los datos de la cuenta, el aviso dice: «TikTok no le ha dejado ver los vídeos
   al lector de Apify (le pide iniciar sesión)».

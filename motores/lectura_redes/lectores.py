@@ -534,7 +534,7 @@ def _cobrado_por_eventos(run, traidos=0):
     """Lo cobrado contando los eventos: Σ `chargedEventCounts` × su precio de
     `pricingInfo.pricingPerEvent.actorChargeEvents`. Devuelve (total, principal):
     `principal` dice si hay un evento principal (el marcado con `isPrimaryEvent`
-    o, sin marca, el más caro que no sea de una sola vez).
+    o, sin marca, el más contado o el más barato de los que van por resultado).
     (None, False) si el actor no es de pago por evento o no trae precios.
 
     PRUEBA REAL DEL 17-11 (ejecución M0SNHIDnvtzhPh8ch, clockworks/tiktok-scraper):
@@ -552,12 +552,17 @@ def _cobrado_por_eventos(run, traidos=0):
     contados = run.get("chargedEventCounts") if isinstance(run.get("chargedEventCounts"), dict) else {}
     precios = {nombre: _precio_evento(evento) for nombre, evento in eventos.items()}
     precios = {nombre: precio for nombre, precio in precios.items() if precio is not None}
-    # el evento principal: el marcado; si el actor no marca ninguno, el más caro
-    # que no sea de una sola vez (revisión del 17-11: sin marca, una lectura de
-    # pocos vídeos volvía a apuntar solo el arranque)
+    # el evento principal: el marcado; si el actor no marca ninguno, de los que no
+    # son de una sola vez ni de arranque, el que Apify ya ha contado más veces y,
+    # si no ha contado ninguno, el más BARATO (revisión del 17-11: sin marca, una
+    # lectura de pocos vídeos apuntaba solo el arranque; y tomar el más caro
+    # podía contar un extra caro, como una transcripción, por cada vídeo)
     marcados = [n for n in precios if eventos[n].get("isPrimaryEvent") is True]
-    por_resultado = [n for n in precios if eventos[n].get("isOneTimeEvent") is not True]
-    principal_de = marcados[0] if marcados else (max(por_resultado, key=precios.get) if por_resultado else None)
+    por_resultado = [n for n in precios if eventos[n].get("isOneTimeEvent") is not True
+                     and "start" not in str(n).lower()]
+    contado = {n: min(max(_numero(contados.get(n)) or 0, 0), MAXIMO_EVENTOS_APIFY) for n in por_resultado}
+    principal_de = marcados[0] if marcados else (
+        min(por_resultado, key=lambda n: (-contado[n], precios[n])) if por_resultado else None)
     total, alguno, principal = 0.0, False, principal_de is not None
     for nombre, precio in precios.items():
         cuantos = min(max(_numero(contados.get(nombre)) or 0, 0), MAXIMO_EVENTOS_APIFY)

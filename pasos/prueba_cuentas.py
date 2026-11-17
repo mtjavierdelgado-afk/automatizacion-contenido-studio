@@ -464,6 +464,15 @@ def prueba_fuentes(bases):
           "un actor sin evento principal marcado: cuenta como principal el más caro (no 0,001 con 30 vídeos)")
     igual(F._cobrado_apify(sin_marca, "tiktok", pedidos=1, traidos=1), 0.0047,
           "y con 1 solo vídeo también (el suelo de la tabla no lo paraba)")
+    extra_caro = {"status": "SUCCEEDED", "usageTotalUsd": 0.001, "chargedEventCounts": {"actor-start": 1},
+                  "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {
+                      "actor-start": {"eventPriceUsd": 0.005},
+                      "transcripcion": {"eventPriceUsd": 0.02}, "result": {"eventPriceUsd": 0.0037}}}}}
+    igual(F._cobrado_apify(extra_caro, "tiktok", pedidos=30, traidos=30), 0.116,
+          "sin marca, ni un extra caro ni el arranque cuentan por vídeo: el más barato (30 × 0,0037 + 0,005)")
+    igual(F._cobrado_apify(dict(extra_caro, chargedEventCounts={"actor-start": 1, "transcripcion": 3}),
+                           "tiktok", pedidos=3, traidos=3), 0.065,
+          "y si Apify ya contó uno, manda el contado (3 × 0,02 + 0,005)")
     solo_arranque = {"status": "SUCCEEDED", "usageTotalUsd": 0.001, "chargedEventCounts": {"actor-start": 1},
                      "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {
                          "actor-start": {"eventPriceUsd": 0.001, "isOneTimeEvent": True}}}}}

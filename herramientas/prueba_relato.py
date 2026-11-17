@@ -346,8 +346,12 @@ def main():
     _c, claves = api.post("/api/claves/probar", {"claude": True})
     estados = {p.get("proveedor"): p.get("estado") for p in (claves or {}).get("pruebas") or []}
     for prov in ("openai", "cartesia", "claude"):
+        # LA DE CLAUDE ES UN AVISO (rama base-fiel, prueba del 12-11 17:03): con el
+        # cupo al 99 % la prueba rapida de «Probar» dio «mal» y la prueba entera
+        # salio CON FALLOS aunque el juez (Claude) contesto en todos los pasos. Si
+        # Claude de verdad no responde, falla el juez y eso SI es un fallo
         informe.comprueba(estados.get(prov) in ("ok", None), f"clave de {prov}", str(estados.get(prov)),
-                          solo_aviso=args.sin_claves)
+                          solo_aviso=args.sin_claves or prov == "claude")
     if not args.sin_claves and any(estados.get(x) not in ("ok", None) for x in ("openai", "cartesia")):
         informe.apunta("fallo", "sin las claves de OpenAI y Cartesia no se puede seguir")
         return cerrar()

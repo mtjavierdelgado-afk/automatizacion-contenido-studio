@@ -1010,11 +1010,17 @@ def guardar_pieza(raiz, cid, datos, pieza_id=None, logo=None, logo_oscuro=None):
     return ficha
 
 
-def ruta_final(raiz, cid, pieza_id, extension):
+def ruta_final(raiz, cid, pieza_id, extension, antes=False):
+    """El PNG o JPG de la pieza: la versión en capas si vale. Con `antes`, la
+    pieza de siempre aunque haya una en capas («Ver la versión anterior» del
+    editor con capas; una pieza nacida en capas no tiene versión anterior)."""
     if extension not in ("png", "jpg"):
         raise ErrorGraficas("eso solo se descarga en PNG o JPG")
+    if antes:
+        if leer_pieza(raiz, cid, pieza_id).get("nacida_en_capas"):
+            raise ErrorNoEsta("esta pieza nació en capas: no tiene una versión anterior")
     # si tiene versión en capas vigente, esa es la última que se guardó
-    if capas_vigentes(raiz, cid, pieza_id):
+    elif capas_vigentes(raiz, cid, pieza_id):
         ruta = os.path.join(_carpeta_pieza(raiz, cid, pieza_id), f"capas.{extension}")
         if os.path.isfile(ruta):
             return ruta
@@ -1022,6 +1028,14 @@ def ruta_final(raiz, cid, pieza_id, extension):
     if not os.path.isfile(ruta):
         raise ErrorGraficas("esa pieza no está")
     return ruta
+
+
+def ruta_tipografia(fichero):
+    """La ruta de una letra de la lista, para servirla al editor; None si no
+    es de la lista o aún no ha bajado. Solo nombres de la lista: nada de rutas."""
+    if not any(fichero == f[1] for _, ficheros in FUENTES.values() for f in ficheros):
+        return None
+    return _ruta_fuente(fichero)
 
 
 def borrar_pieza(raiz, cid, pieza_id):
@@ -1037,5 +1051,10 @@ def catalogo():
         "campos": {k: {"etiqueta": v[0], "largo": v[1]} for k, v in CAMPOS.items()},
         "capas_extra": CAPAS_EXTRA,
         "fuentes": [{"id": k, "nombre": v[0]} for k, v in sorted(FUENTES.items(), key=lambda x: x[1][0])],
+        # las letras para el editor con capas (graficas-2-editor): cada cara con
+        # su fichero, que sirve /api/graficas/tipografia/<fichero> si ya bajó
+        "caras": {k: [{"fichero": fichero, "pesos": pesos, "estilo": estilo, "lista": bool(_ruta_fuente(fichero))}
+                      for _, fichero, pesos, estilo in v[1]] for k, v in FUENTES.items()},
+        "familias": {k: v[0] for k, v in FUENTES.items()},
         "colores_defecto": COLORES_DEFECTO, "roles": list(ROLES),
     }

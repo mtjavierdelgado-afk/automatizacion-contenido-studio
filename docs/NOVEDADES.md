@@ -32,8 +32,8 @@ vídeos, estilos, claves y contraseña no se tocan.
 - **YouTube, TikTok y X** (versión 1.3.1): al pasar de un vídeo a otro en la
   misma pestaña ya no se cuelan el texto ni la imagen del primero; en YouTube las
   vistas salen bien (antes «1 2 3 4…») y los comentarios solo con su número.
-- **✍️ Escribir el guion** (en un recibido con proyecto): abre el chat de ese
-  proyecto con la referencia y le pide a Claude un guion con el formato de la
+- **✍️ Escribir el guion** (en un recibido con proyecto): abre una conversación
+  NUEVA en el chat de ese proyecto, con la referencia y le pide a Claude un guion con el formato de la
   Parrilla. Al guardarlo en la Parrilla, «🤖 Hacer el vídeo completo» sale ya con
   el estilo que elegiste en el recibido.
 - **Instagram Reels** (versión 1.2.0): al ir pasando reels en el muro, se lee el

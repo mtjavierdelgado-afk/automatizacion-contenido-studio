@@ -849,6 +849,7 @@ function nombreDe(id) {
   // el agente de capturas y la guia de estilo no son pasos del grafo pero si
   // lanzan trabajos, y salen por su nombre en avisos y en el faro
   if (/^exportar_/.test(String(id))) return 'Descarga por partes';
+  if (/^otro_idioma_/.test(String(id))) return 'El vídeo en otro idioma';
   if (/^efectos_/.test(String(id))) return 'Efectos';
   return NOMBRES_FUERA_DEL_GRAFO[id] || pasoDe(id).nombre || id;
 }
@@ -8255,6 +8256,7 @@ async function cargarVideoLight(pid) {
       v.planos = [];
       v.firmaPlanos = '';
       v.subtitulosRotos = undefined;
+      v.traduccionDe = null;
       /* Y LOS PLANES DE CADA TANDA: son los de OTRO video. Con ellos, el aviso
          de «N imágenes en otra calidad» o el precio de regenerar eran los del
          que acababas de cerrar hasta que llegaba el de este. */
@@ -8264,6 +8266,7 @@ async function cargarVideoLight(pid) {
     v.pid = pid;
     v.nombre = (proyecto.proyecto || {}).nombre || pid;
     v.estilo = ((proyecto.proyecto || {}).config || {}).estilo_light || '';
+    v.traduccionDe = ((proyecto.proyecto || {}).config || {}).traduccion_de || null;
     v.fichas = {};
     for (const ficha of (proyecto.pasos || [])) v.fichas[ficha.id] = ficha;
     alDiaConElMontaje(pid);
@@ -11052,10 +11055,13 @@ async function rehacerSubtitulosLight() {
   }
 }
 
-async function lanzarTandaLight(tanda, modo) {
+async function lanzarTandaLight(tanda, modo, avisado) {
   const v = APP.light.video;
   if (!v.pid) return;
   const pid = v.pid;
+  // escribir el guion con Claude en un vídeo traducido lo devuelve al idioma
+  // de origen: cualquier botón que lance esa tanda avisa antes
+  if (tanda === 'guion' && !avisado && !seguirConGuionTraducido('el guion')) return;
   /* UN DOBLE CLIC NO LANZA DOS TANDAS (y las de pago se pagarían dos veces si
      el servidor no frenara la segunda): mientras la primera no contesta, los
      botones de la barra se apagan (`botonDeBarra`) y esta no sale. */
@@ -11775,6 +11781,214 @@ function abrirDescargaPorPartes(pid) {
   pintar();
 }
 
+/* EL VÍDEO EN OTRO IDIOMA (11-11-2026, rama otro-idioma): duplica el vídeo,
+   traduce el MISMO guion plano a plano, graba la voz en ese idioma y monta con
+   las MISMAS imágenes. Primero se ve lo que cuesta y nada se hace sin el OK.
+   El vídeo de origen no se toca: todo va a la copia (`/otro_idioma`,
+   pasos/otro_idioma.py). */
+const OTRO_IDIOMA = {};
+
+function bloqueOtroIdioma(v) {
+  if (!v || !v.pid) return null;
+  return h('div', { clase: 'caja-video otro-idioma-video' },
+    h('h3', {}, 'En otro idioma'),
+    h('div', { clase: 'fila' },
+      conAyuda('Crea un vídeo nuevo con este mismo guion traducido, la voz en el otro idioma y las mismas imágenes (no se vuelven a pagar). Antes te dice lo que cuesta y espera tu OK. Este vídeo no cambia.',
+        h('button', { clase: 'mini', onclick: () => abrirOtroIdioma(v.pid) },
+          '🌐 Hacer este vídeo en otro idioma'))),
+    h('div', { clase: 'meta' }, 'inglés, portugués, francés… con las mismas imágenes; solo se paga la voz'));
+}
+
+function dolaresOtroIdioma(valor) {
+  if (valor == null) return '—';
+  const n = Number(valor) || 0;
+  return n < 0.01 && n > 0 ? 'menos de 0,01 $' : `${n.toFixed(2).replace('.', ',')} $`;
+}
+
+function abrirOtroIdioma(pid) {
+  if (!pid) return;
+  const est = OTRO_IDIOMA[pid] = { pid, info: null, idioma: '', estimacion: null, voces: null,
+    vozId: '', nombre: '', cargando: true, error: '', lanzando: false, trabajo: null };
+  const viejo = document.getElementById('coste-video');
+  if (viejo) viejo.remove();
+  const cuerpo = h('div', { clase: 'cuerpo otro-idioma' });
+  /* Mientras corre se puede cerrar: el trabajo sigue en el servidor (y su
+     barra en la cabecera); al acabar avisa igual */
+  const cerrar = () => { if (!est.lanzando || est.trabajo) capa.remove(); };
+  const capa = h('div', { id: 'coste-video', onclick: ev => { if (ev.target === capa) cerrar(); } },
+    h('div', { clase: 'cuadro' },
+      h('div', { clase: 'cab' }, h('b', {}, 'Hacer este vídeo en otro idioma'),
+        h('span', { clase: 'meta' }, 'el original no cambia'),
+        h('span', { clase: 'crece' }),
+        h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: () => cerrar() }, '×')),
+      cuerpo));
+  document.body.appendChild(capa);
+
+  const elegir = async idioma => {
+    est.idioma = idioma;
+    est.estimacion = null;
+    est.voces = null;
+    est.vozId = '';
+    est.error = '';
+    est.cargando = true;
+    pintar();
+    try {
+      const [info, voces] = await Promise.all([
+        pedir(`${API.proyecto(pid)}/otro_idioma?idioma=${encodeURIComponent(idioma)}`),
+        // SIN CLAVE DE CARTESIA no hay catálogo: se ofrece la misma voz y ya
+        pedir(`${BASE}/api/voces?idioma=${encodeURIComponent(idioma)}&nativas=1`).catch(() => ({ voces: [] })),
+      ]);
+      if (est.idioma !== idioma) return;
+      est.estimacion = info.estimacion || null;
+      est.nombre = info.nombre_sugerido || '';
+      est.voces = (voces.voces || []).slice(0, 60);
+    } catch (e) {
+      est.error = e.message;
+    }
+    est.cargando = false;
+    pintar();
+  };
+
+  const lanzar = async () => {
+    if (est.lanzando) return;
+    est.lanzando = true;
+    est.error = '';
+    pintar();
+    try {
+      const r = await pedir(`${API.proyecto(pid)}/otro_idioma`, { method: 'POST', cuerpo: {
+        idioma: est.idioma, voz_id: est.vozId, nombre: est.nombre, confirmado: true,
+        visto: { a_dibujar: (est.estimacion && est.estimacion.imagenes || {}).a_dibujar,
+          usd: est.estimacion ? est.estimacion.usd_total : null } } });
+      est.trabajo = { id: r.trabajo_id, progreso: 0, mensaje: 'empezando…' };
+      pintar();
+      seguirTrabajo(`otro_idioma_${pid}`, r.trabajo_id, async t => {
+        est.lanzando = false;
+        if (t.estado === 'listo' && t.resultado && t.resultado.copia) {
+          est.trabajo = null;
+          const res = t.resultado;
+          if (res.aviso) toast(res.aviso, true);
+          else toast(`«${res.nombre}» creado: grabando la voz y montando`);
+          const abierto = document.body.contains(capa);
+          capa.remove();
+          if (!abierto) return;
+          await cargarGaleriaLight(true).catch(() => null);
+          try {
+            await abrirVideoLight(res.copia);
+          } catch (e) {
+            toast(`«${res.nombre}» está creado, pero no se ha podido abrir: búscalo en tus vídeos (${e.message})`, true);
+          }
+          return;
+        }
+        est.trabajo = null;
+        est.error = t.error || (t.estado === 'cancelado' ? 'cancelado' : 'no se ha podido hacer');
+        if (!document.body.contains(capa)) toast(`El vídeo en otro idioma: ${est.error}`, true);
+        pintar();
+      }, t => {
+        if (est.trabajo) {
+          est.trabajo.progreso = Number(t.progreso) || 0;
+          est.trabajo.mensaje = t.publico || t.mensaje || '';
+        }
+        pintar();
+      });
+    } catch (e) {
+      est.lanzando = false;
+      est.error = e.message;
+      pintar();
+    }
+  };
+
+  function pintar() {
+    if (!document.body.contains(capa)) return;
+    vaciar(cuerpo);
+    if (est.error) cuerpo.appendChild(cajaError(est.error));
+    if (est.trabajo) {
+      const pct = Math.round((Number(est.trabajo.progreso) || 0) * 100);
+      cuerpo.appendChild(h('div', { clase: 'caja-info trabajo-laminas' },
+        h('div', {}, `${est.trabajo.mensaje || 'trabajando…'} · ${pct} %`),
+        h('progress', { max: 100, value: pct }),
+        h('div', { clase: 'meta' }, 'Al acabar se abre el vídeo nuevo y sigue solo con la voz y el montaje. Puedes cerrar esto: sigue en el servidor.'),
+        h('div', { clase: 'fila' },
+          h('button', { clase: 'mini', onclick: async ev => {
+            if (!confirm('¿Parar? Todavía no se ha grabado nada: no se pierde dinero.')) return;
+            ev.target.disabled = true;
+            try { await pedir(API.cancelar(est.trabajo.id), { method: 'POST' }); }
+            catch (e) { toast(e.message, true); ev.target.disabled = false; }
+          } }, 'Parar'),
+          h('button', { clase: 'mini fantasma', onclick: () => cerrar() }, 'Cerrar (sigue solo)'))));
+      return;
+    }
+    if (!est.info) {
+      cuerpo.appendChild(h('div', { clase: 'cargando' }, 'mirando el vídeo…'));
+      return;
+    }
+    const info = est.info;
+    cuerpo.appendChild(h('h2', {}, `Sale del ${info.nombre_origen}. ¿A qué idioma?`));
+    cuerpo.appendChild(h('div', { clase: 'herramientas otro-idioma-idiomas' },
+      ...(info.idiomas || []).map(i => h('button', {
+        clase: 'mini' + (est.idioma === i.id ? ' activo' : ''), disabled: est.lanzando,
+        onclick: () => { if (est.idioma !== i.id) elegir(i.id); } }, i.nombre))));
+    if (!est.idioma) {
+      cuerpo.appendChild(h('div', { clase: 'meta' },
+        `${info.planos} planos y ${info.palabras} palabras. Elige el idioma y te digo lo que cuesta antes de hacer nada.`));
+      return;
+    }
+    if (est.cargando) {
+      cuerpo.appendChild(h('div', { clase: 'cargando' }, 'calculando lo que cuesta…'));
+      return;
+    }
+    const e = est.estimacion;
+    if (!e) return;
+    const nombreIdioma = e.nombre_idioma;
+    cuerpo.appendChild(h('h2', {}, 'Lo que se hace'));
+    cuerpo.appendChild(h('ol', { clase: 'otro-idioma-pasos' },
+      h('li', {}, 'Se crea un vídeo nuevo: ',
+        h('input', { type: 'text', clase: 'otro-idioma-nombre', value: est.nombre, maxlength: 80,
+          disabled: est.lanzando, oninput: ev => { est.nombre = ev.target.value; } })),
+      h('li', {}, `Claude traduce el guion al ${nombreIdioma}, plano a plano y sin reescribirlo (${e.claude.palabras} palabras${info.cartelas ? `, y ${info.cartelas} texto(s) de cartela` : ''}).`),
+      h('li', {}, `Se graba la voz en ${nombreIdioma}, con subtítulos en ${nombreIdioma}.`),
+      h('li', {}, `Se monta con las mismas ${e.imagenes.reutilizadas} imágenes, sin volver a dibujarlas. Si con la voz nueva no salieran los mismos planos, se para antes de montar y no dibuja nada.`)));
+    const voces = est.voces || [];
+    cuerpo.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'La voz'),
+      h('select', { disabled: est.lanzando, onchange: ev => { est.vozId = ev.target.value; } },
+        h('option', { value: '', selected: !est.vozId }, 'La misma voz de ahora (habla los dos idiomas)'),
+        ...voces.map(voz => h('option', { value: voz.id, selected: est.vozId === voz.id },
+          voz.nombre || voz.name || voz.id)))));
+    cuerpo.appendChild(h('h2', {}, 'Lo que cuesta'));
+    const filas = [
+      ['La voz', e.voz.usd == null
+        ? `unos ${e.voz.caracteres} caracteres (el precio por carácter no está puesto en Configuración)`
+        : `unos ${e.voz.caracteres} caracteres · ≈ ${dolaresOtroIdioma(e.voz.usd)}`],
+      ['Claude', `0 $ · va con tu suscripción (${e.claude.llamadas} llamada${e.claude.llamadas === 1 ? '' : 's'})`],
+      ['Las imágenes', e.imagenes.a_dibujar
+        ? `${e.imagenes.reutilizadas} reutilizadas (0 $) · ${e.imagenes.a_dibujar} sin dibujar todavía: ≈ ${dolaresOtroIdioma(e.imagenes.usd)}`
+        : `${e.imagenes.reutilizadas} reutilizadas · 0 $`],
+    ];
+    cuerpo.appendChild(h('table', { clase: 'tabla otro-idioma-coste' },
+      ...filas.map(([a, b]) => h('tr', {}, h('th', {}, a), h('td', {}, b))),
+      h('tr', { clase: 'total' }, h('th', {}, 'En total'),
+        h('td', {}, e.usd_total != null ? `≈ ${dolaresOtroIdioma(e.usd_total)}`
+          : (e.imagenes.usd ? `≈ ${dolaresOtroIdioma(e.imagenes.usd)} de imágenes, más la voz (sin precio puesto)`
+            : 'lo de la voz (sin precio puesto)')))));
+    const avisos = (info.avisos || []).concat([
+      'El texto que vaya dibujado DENTRO de una imagen (un cartel, una pizarra) se queda como está: cambiarlo es redibujar esa imagen con una nota, y eso sí se paga.',
+      'Los textos de Publicar (título, descripción, hashtags) no se traducen aquí: tienen su propio botón.',
+    ]);
+    cuerpo.appendChild(h('ul', { clase: 'otro-idioma-avisos meta' }, ...avisos.map(a => h('li', {}, a))));
+    cuerpo.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', disabled: est.lanzando, onclick: lanzar },
+        est.lanzando ? 'Empezando…'
+          : `Sí, hacerlo${e.usd_total == null ? '' : ` (≈ ${dolaresOtroIdioma(e.usd_total)})`}`),
+      h('button', { clase: 'mini fantasma', disabled: est.lanzando, onclick: () => cerrar() }, 'Ahora no')));
+  }
+
+  pintar();
+  pedir(`${API.proyecto(pid)}/otro_idioma`).then(info => {
+    est.info = info;
+    est.cargando = false;
+    pintar();
+  }).catch(e => { est.error = e.message; est.cargando = false; pintar(); });
+}
+
 /* --------------------------------------------------------------- el guion */
 
 function vistaGuionLight() {
@@ -11902,10 +12116,29 @@ function promptGeneralLight() {
       + (v.audio ? ' (la voz queda por regrabar).' : '.')));
 }
 
+/* UN VÍDEO TRADUCIDO («🌐 Hacer este vídeo en otro idioma», pasos/otro_idioma.py):
+   su guion es una traducción puesta como corrección a mano, y el redactor
+   escribe en el idioma del vídeo de origen. Pedirle a Claude que reescriba el
+   guion o un bloque lo devolvería a ese idioma y se perdería la traducción:
+   antes de hacerlo, se avisa. Editar a mano o grabar tu texto no avisa. */
+const NOMBRES_IDIOMA_TRADUCIDO = {
+  es: 'español', en: 'inglés', pt: 'portugués', fr: 'francés', it: 'italiano', de: 'alemán',
+};
+function seguirConGuionTraducido(que) {
+  const t = (APP.light.video || {}).traduccionDe;
+  if (!t || !t.idioma) return true;
+  const idioma = NOMBRES_IDIOMA_TRADUCIDO[t.idioma] || t.idioma;
+  return confirm(`Ojo: este vídeo es una traducción al ${idioma}. Si Claude reescribe ${que}, `
+    + `lo escribirá en el idioma del vídeo original (no en ${idioma}) y la traducción `
+    + `se perderá o quedará mezclada con ese idioma.\n\nPara cambiar una frase sin perderla, edítala a mano en su bloque.`
+    + `\n\n¿Reescribir igualmente?`);
+}
+
 async function reescribirGuionLight() {
   const v = APP.light.video;
   const texto = String(v.promptGeneral || '').trim();
   if (!texto) { toast('escribe qué cambiarías', true); return; }
+  if (!seguirConGuionTraducido('el guion')) return;
   try {
     /* EN SU PROPIO CAJÓN, no en `prompt_general`: ahí viven las indicaciones
        del Encargo (ENSEÑA, ÁNGULO…), y escribir aquí las borraba (17-10-2026).
@@ -11918,7 +12151,7 @@ async function reescribirGuionLight() {
     // prompt general deja el guion obsoleto —es un param suyo—, así que ya
     // entra; el material sigue al día y se salta. Con 'todo'
     // esto volvería a salir a internet seis minutos para reescribir una frase.
-    await lanzarTandaLight('guion', 'pendientes');
+    await lanzarTandaLight('guion', 'pendientes', true);
   } catch (err) { toast(`no se ha podido: ${err.message}`, true); }
 }
 
@@ -12501,6 +12734,7 @@ async function cambiarBloqueLight(bloque, sec, soloGrabar) {
     toast('escribe qué cambiarías de este bloque', true);
     return;
   }
+  if (!soloGrabar && !seguirConGuionTraducido('este bloque')) return;
   limpiarError(CLAVE_VIDEO_LIGHT);
   try {
     await guardarBloquesPendientesLight();
@@ -15356,6 +15590,7 @@ function vistaVideoLight() {
       h('div', { clase: 'meta' }, 'el MP4 tal y como está ahora mismo, o sin música, sin efectos, sin subtítulos… gratis'));
     caja.appendChild(apagadoSiMonta(h('div', { clase: 'rejilla-video' }, descargar,
       bloquePublicarEnVideo(v) || h('span', {}))));  // Publicar en redes (rama publicar-redes-1)
+    caja.appendChild(apagadoSiMonta(bloqueOtroIdioma(v)));  // en otro idioma (rama otro-idioma)
   }
   ponerBarra(barraDelVideo);
   return caja;
@@ -18188,8 +18423,29 @@ function editorGuionVisual() {
     caja.appendChild(h('div', { clase: 'caja-aviso' }, `El guion cambió: los bloques ${f.fuera_de_la_voz.join(', ')} `
       + 'ya no están en la voz. Corrige esos planos (o pide otro guion visual) y vuelve a aprobarlo.'));
   }
+  /* UN ESTADO QUE NO ES NINGUNO DEL ESPACIO (rama piloto-al-dia, Y05): sin esto
+     el plano editaba la base sin cambio y salía igual que otro. Las imágenes no
+     se pagan hasta corregirlo. */
+  const sinCasar = f.estados_sin_casar || [];
+  if (sinCasar.length) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      `${sinCasar.length === 1 ? 'Un plano pide' : `${sinCasar.length} planos piden`} un estado que no es ninguno de los del espacio: `
+      + sinCasar.slice(0, 6).map(x => `${x.plano} («${x.estado}»)`).join(', ') + (sinCasar.length > 6 ? '…' : '')
+      + ((sinCasar[0].opciones || []).length
+        ? `. Los estados son: ${sinCasar[0].opciones.map(e => `«${e}»`).join(', ')}. `
+        : '. Este espacio no tiene estados con nombre: deja la línea sin estado (la base). ')
+      + 'Corrige el estado de esas líneas («Usar estas líneas» si vienen de la Parrilla): hasta entonces no se dibujan.'));
+  }
+  /* las que se han casado con OTRO nombre («frio» → «blanco_frio»): que se vean antes de pagar */
+  const casados = f.estados_casados || [];
+  if (casados.length) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Estados que se dibujan con el nombre del espacio: '
+      + casados.slice(0, 8).map(x => `${x.plano} «${x.estado}» → «${x.casa_con}»`).join(', ')
+      + (casados.length > 8 ? '…' : '') + '. Si alguno no es el que querías, cambia el estado de esa línea.'));
+  }
   const avisoDe = {};
   (f.comprobacion || []).forEach(a => { avisoDe[a.plano] = a.que; });
+  sinCasar.forEach(x => { avisoDe[x.plano] = `pide el estado «${x.estado}», que no es ninguno de los del espacio`; });
   est.copia.forEach((p, i) => {
     const fila = h('div', { clase: 'plano-gv' },
       h('div', { clase: 'plano-gv-cabeza' },
@@ -29046,20 +29302,163 @@ function numeroCorto(n) {
 const NOMBRES_METRICA = {
   vistas: 'vistas', me_gusta: 'me gusta', comentarios: 'comentarios',
   compartidos: 'compartidos', guardados: 'guardados',
+  // metricas-completas: lo demás que da cada red (lo que no da no se escribe)
+  nuevos_seguidores: 'seguidores nuevos', visitas_perfil: 'visitas al perfil',
+  vistas_facebook: 'vistas en Facebook',
 };
 
-function textoMetricas(m) {
+/* «3 h 20 min», «12 min», «45 s»: el tiempo total visto de TikTok. */
+function tiempoLegible(segundos) {
+  const s = Math.round(Number(segundos) || 0);
+  if (s < 60) return `${s} s`;
+  const minutos = Math.round(s / 60);
+  if (minutos < 60) return `${minutos} min`;
+  const resto = minutos % 60;
+  return `${Math.floor(minutos / 60)} h${resto ? ` ${resto} min` : ''}`;
+}
+
+function textoMetricas(m, sumado) {
   if (!m) return '';
+  // `sumado`: la cifra junta varias publicaciones (una fila «Por red»): cada una
+  // dice de cuántas sale si no son todas (2.ª revisión, 12-11)
   return Object.keys(NOMBRES_METRICA)
     .filter(k => typeof m[k] === 'number')
-    .map(k => `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}`)
+    .map(k => { const c = sumado ? cuantasDe(m, k) : ''; return `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}${c ? ` (${c})` : ''}`; })
     .concat(textoRetencion(m) ? [textoRetencion(m)] : []).join(' · ');
+}
+
+/* Lo que va APARTE de las vistas (metricas-completas): las impresiones (veces
+   que la red lo ENSEÑÓ, no que se reprodujo), el alcance (personas distintas)
+   y el tiempo total visto. Sumados entre varios posts, el alcance cuenta dos
+   veces a quien vio dos: por eso dice «sumado». */
+function textoMetricasAparte(m, sumado) {
+  if (!m) return '';
+  // en un total, cada cifra dice de cuántas publicaciones sale si no son todas
+  // (TikTok no da impresiones; solo Instagram da lo visto en Facebook…)
+  const cuantas = k => {
+    const n = m[`${k}_posts`];
+    return sumado && typeof n === 'number' && typeof m.posts === 'number' && n < m.posts
+      ? `${n} de ${m.posts} publicaciones` : '';
+  };
+  // un solo paréntesis: «(sumado; 1 de 2 publicaciones)», nunca dos seguidos
+  const entre = (...trozos) => { const t = trozos.filter(Boolean).join('; '); return t ? ` (${t})` : ''; };
+  const partes = [];
+  if (typeof m.alcance === 'number') partes.push(`${numeroCorto(m.alcance)} personas alcanzadas${entre(sumado ? 'sumado' : '', cuantas('alcance'))}`);
+  if (typeof m.impresiones === 'number') partes.push(`${numeroCorto(m.impresiones)} impresiones${entre(cuantas('impresiones'))}`);
+  if (sumado && typeof m.vistas_facebook === 'number') partes.push(`${numeroCorto(m.vistas_facebook)} vistas de tus Reels en Facebook${entre(cuantas('vistas_facebook'))}`);
+  if (sumado && typeof m.visitas_perfil === 'number') partes.push(`${numeroCorto(m.visitas_perfil)} visitas al perfil${entre(cuantas('visitas_perfil'))}`);
+  if (typeof m.tiempo_total_s === 'number') partes.push(`${tiempoLegible(m.tiempo_total_s)} vistas en total${entre(cuantas('tiempo_total_s'))}`);
+  return partes.join(' · ');
+}
+
+/* «2 de 5» si la cifra `k` de un total no sale de todas sus publicaciones; ''. */
+function cuantasDe(total, k) {
+  const n = (total || {})[`${k}_posts`];
+  return typeof n === 'number' && typeof total.posts === 'number' && n < total.posts && k !== 'posts'
+    ? `${n} de ${total.posts}` : '';
+}
+
+/* Bajo una cifra grande de Resultados: « · 2 de 5». */
+function deCuantasPublicaciones(total, k) {
+  const c = cuantasDe(total, k);
+  return c ? ` · ${c}` : '';
+}
+
+/* La curva de retención de TikTok (qué parte sigue viendo en cada segundo),
+   dibujada en un SVG pequeño sin estilos en línea (CSP). */
+function curvaRetencionPublicar(curva) {
+  const puntos = (curva || []).filter(p => Array.isArray(p) && p.length === 2);
+  if (puntos.length < 2) return null;
+  const NS = 'http://www.w3.org/2000/svg';
+  const ancho = 240, alto = 60;
+  const ultimo = puntos[puntos.length - 1][0] || 1;
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${ancho} ${alto}`);
+  svg.setAttribute('class', 'curva-retencion');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'Qué parte sigue viendo en cada segundo');
+  const linea = document.createElementNS(NS, 'polyline');
+  linea.setAttribute('points', puntos.map(([s, f]) =>
+    `${(s / ultimo * (ancho - 4) + 2).toFixed(1)},${((1 - f) * (alto - 4) + 2).toFixed(1)}`).join(' '));
+  linea.setAttribute('class', 'curva-linea');
+  svg.appendChild(linea);
+  return svg;
+}
+
+/* Lo que TikTok dice en inglés, en español. Llega de dos formas («New viewers»
+   y «NEW_VIEWER», «Direct Message»…): se compara en minúsculas, con «_» y «-»
+   como espacios y sin «percent» (prueba del servidor, 12-11). */
+const NOMBRES_REPARTO_TIKTOK = {
+  'for you': 'Para ti', 'personal profile': 'Tu perfil', 'search': 'Búsqueda', 'follow': 'Siguiendo',
+  'following': 'Siguiendo', 'sound': 'Sonido', 'hashtag': 'Hashtag', 'others': 'Otros', 'other': 'Otros',
+  'direct message': 'Mensajes directos', 'direct messages': 'Mensajes directos',
+  'video detail': 'Detalle del vídeo', 'external': 'Fuera de TikTok', 'share': 'Compartido',
+  'new viewers': 'Espectadores nuevos', 'new viewer': 'Espectadores nuevos',
+  'returning viewers': 'Ya habían visto tus vídeos', 'returning viewer': 'Ya habían visto tus vídeos',
+  'return viewers': 'Ya habían visto tus vídeos', 'return viewer': 'Ya habían visto tus vídeos',
+  'followers': 'Seguidores', 'follower': 'Seguidores',
+  'non followers': 'No seguidores', 'non follower': 'No seguidores',
+};
+
+/* El nombre de un reparto de TikTok en español. Lo que no se conoce no sale
+   en MAYÚSCULAS_CON_GUIONES: «Algo nuevo», con la inicial en mayúscula. */
+function nombreRepartoTiktok(nombre) {
+  const crudo = String(nombre || '').trim();
+  const clave = crudo.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+percent[a-z]*$/, '')
+    .replace(/\s+/g, ' ').trim();
+  if (NOMBRES_REPARTO_TIKTOK[clave]) return NOMBRES_REPARTO_TIKTOK[clave];
+  if (/^[A-Z0-9_ ]+$/.test(crudo) && clave) return clave.charAt(0).toUpperCase() + clave.slice(1);
+  return crudo;
+}
+
+/* «Más cifras» de un envío: la curva, de dónde vinieron las vistas y qué público. */
+function detalleMetricasEnvio(e) {
+  const m = e.metricas || {};
+  const aparte = textoMetricasAparte(m, false);
+  const curva = curvaRetencionPublicar(m.curva);
+  // un 0 % no dice nada (TikTok manda «NEW_VIEWER 0» cuando no lo sabe): fuera
+  const reparto = (todos, titulo) => { const lista = (todos || []).filter(([, f]) => f > 0); return lista.length
+    ? h('div', { clase: 'meta' }, `${titulo}: ${lista.map(([n, f]) =>
+      `${nombreRepartoTiktok(n)} ${porcentaje(f)}`).join(' · ')}`) : null; };
+  const fuentes = reparto(m.fuentes, 'De dónde vinieron las vistas');
+  // TikTok mezcla DOS repartos en «público» (seguidores o no; nuevos o que
+  // vuelven): juntos sumaban 200 % y parecían uno (2.ª revisión, 12-11)
+  const deNuevos = ([n]) => /viewer/i.test(String(n));
+  const publicoSeguidores = reparto((m.publico || []).filter(p => !deNuevos(p)), 'Quién lo vio');
+  const publicoNuevos = reparto((m.publico || []).filter(deNuevos), 'Nuevos o que vuelven');
+  const publico = publicoSeguidores || publicoNuevos
+    ? h('div', {}, publicoSeguidores, publicoNuevos) : null;
+  if (!aparte && !curva && !fuentes && !publico) return null;
+  // el segundo en que se va la mitad viene calculado con la curva ENTERA
+  // (la guardada puede ir aligerada); en los envíos de antes, de la curva
+  const mitadS = typeof m.mitad_s === 'number' ? m.mitad_s
+    : ((m.curva || []).find(p => Array.isArray(p) && p[1] <= 0.5) || [])[0];
+  const mitad = typeof mitadS === 'number' ? [mitadS] : null;
+  return h('details', { clase: 'mas-cifras-envio' },
+    h('summary', {}, 'Más cifras'),
+    aparte ? h('div', { clase: 'meta' }, aparte) : null,
+    curva ? h('div', { clase: 'fila curva-envio' }, curva,
+      h('span', { clase: 'meta' }, mitad
+        ? `La mitad deja de verlo en el segundo ${Math.round(mitad[0])}.`
+        // lo último que da TikTok, no «hasta el final»: la curva puede acabar
+        // antes que el vídeo y chocar con «X % lo vio hasta el final» (12-11)
+        : `Más de la mitad sigue viéndolo en el segundo ${Math.round(((m.curva || []).slice(-1)[0] || [0])[0])}, lo último que da TikTok.`)) : null,
+    fuentes, publico);
 }
 
 /* La retención (publicar-redes-2): solo la dan TikTok y YouTube. Lo que no
    llega no se escribe (nunca «0 %»: sería mentir). */
 function porcentaje(fraccion) {
-  return `${(Number(fraccion) * 100).toFixed(Number(fraccion) < 0.1 ? 1 : 0).replace('.', ',')} %`;
+  if (typeof fraccion !== 'number' || !Number.isFinite(fraccion) || fraccion < 0) return '—';
+  const f = fraccion;
+  // por debajo del 1 %, con dos decimales (0,05 %, no «0,0 %» ni «0,1 %»);
+  // por debajo del 0,01 %, «menos de 0,01 %»; el 0, «0 %» (revisión, 12-11).
+  // Los decimales se eligen con el valor YA redondeado: 9,99 % es «10 %»
+  if (f === 0) return '0 %';
+  if (f > 0 && f < 0.0001) return 'menos de 0,01 %';
+  const p = f * 100;
+  const decimales = p >= 9.95 ? 0 : p >= 0.995 ? 1 : 2;
+  return `${p.toFixed(decimales).replace('.', ',')} %`;
 }
 
 function textoRetencion(m) {
@@ -29149,6 +29548,8 @@ function filasEnvioFicha(e) {
     filas.push(h('div', { clase: 'caja-aviso aviso-recortado' },
       `⚠ ${CORTOS_RED[e.red] || e.red}: ${e.recortado}. Mira el post y, si hace falta, pega el texto a mano.`));
   }
+  const masCifras = detalleMetricasEnvio(e);
+  if (masCifras) filas.push(masCifras);
   filas.push(loMandadoPublicar(e));
   return filas;
 }
@@ -29835,9 +30236,16 @@ function seccionResultadosPublicar() {
   const total = r.total || {};
   caja.appendChild(h('div', { clase: 'cifras-publicar cifras-grandes-publicar' },
     ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],
-      ['comentarios', 'comentarios'], ['compartidos', 'compartidos']].map(([k, t]) =>
+      ['comentarios', 'comentarios'], ['compartidos', 'compartidos'], ['guardados', 'guardados'],
+      ['nuevos_seguidores', 'seguidores nuevos']].map(([k, t]) =>
       h('div', { clase: 'cifra' }, h('b', {}, typeof total[k] === 'number' ? numeroCorto(total[k]) : '—'),
-        h('span', { clase: 'meta' }, t)))));
+        h('span', { clase: 'meta' }, typeof total[k] === 'number' ? t + deCuantasPublicaciones(total, k) : t)))));
+  // metricas-completas: lo que no son reproducciones, aparte y dicho como es
+  const aparteTotal = textoMetricasAparte(total, true);
+  if (aparteTotal) {
+    caja.appendChild(h('div', { clase: 'meta cifras-aparte', title: 'Impresiones: veces que la red lo enseñó (no que se reprodujo). '
+      + 'Alcance sumado: cuenta dos veces a quien vio dos publicaciones.' }, `Además: ${aparteTotal}`));
+  }
   if (r.sin_cifras) {
     caja.appendChild(h('div', { clase: 'meta' }, `${r.sin_cifras} publicación(es) sin cifras todavía: `
       + 'las subidas a mano no se pueden medir desde aquí, y TikTok tarda unas horas en darlas.'));
@@ -29858,7 +30266,7 @@ function seccionResultadosPublicar() {
     tabla.appendChild(h('div', { clase: 'fila fila-red' },
       h('b', { clase: 'nombre-red' }, NOMBRES_RED[red]),
       h('span', { clase: 'meta' }, `${pr.posts || 0} publicación(es)`),
-      h('span', { clase: 'crece' }, textoMetricas(pr) || ''),
+      h('span', { clase: 'crece' }, textoMetricas(pr, true) || ''),
       typeof seg.seguidores === 'number'
         ? h('span', { clase: 'pastilla' }, `${numeroCorto(seg.seguidores)} seguidores`)
         : (seg.error ? h('span', { clase: 'meta', title: seg.error }, 'sin seguidores') : null)));
@@ -33891,10 +34299,10 @@ function seccionInformePublicar() {
   const a = r.anterior || {};
   caja.appendChild(h('div', { clase: 'cifras-publicar' },
     ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],
-      ['comentarios', 'comentarios'], ['compartidos', 'compartidos']].map(([k, nombre]) => {
+      ['comentarios', 'comentarios'], ['compartidos', 'compartidos'], ['guardados', 'guardados']].map(([k, nombre]) => {
       const cambio = variacion(t[k], a[k]);
       return h('div', { clase: 'cifra' }, h('b', {}, typeof t[k] === 'number' ? numeroCorto(t[k]) : '—'),
-        h('span', { clase: 'meta' }, nombre),
+        h('span', { clase: 'meta' }, typeof t[k] === 'number' ? nombre + deCuantasPublicaciones(t, k) : nombre),
         cambio ? h('span', { clase: 'meta' }, `${cambio} vs. ${r.en_curso ? 'los mismos días del mes anterior' : 'mes anterior'}`) : null);
     })));
   caja.appendChild(h('div', { clase: 'meta' }, `${r.videos} vídeo(s) · ${r.dias_con_publicacion} día(s) con publicación`
@@ -35492,11 +35900,12 @@ function panelPilotoParrilla() {
   const enOrden = estados => videosPilotoDelProyecto(estados).reverse();
   const yaSalio = v => !!v.salio;
   const revisarTodos = enOrden(['revisar', 'parado', 'error', 'interrumpido']);
-  const revisar = revisarTodos.filter(v => !yaSalio(v));
+  /* uno que falló pero se terminó a mano ya no necesita revisión: va con los listos (piloto-al-dia) */
+  const revisar = revisarTodos.filter(v => !yaSalio(v) && !v.terminado_a_mano);
   const vivos = enOrden(['trabajando', 'en_cola']);
-  const listosTodos = enOrden(['listo']);
+  const listosTodos = enOrden(['listo']).concat(revisarTodos.filter(v => v.terminado_a_mano));
   const listos = listosTodos.filter(v => !yaSalio(v));
-  const publicados = revisarTodos.concat(listosTodos).filter(yaSalio);
+  const publicados = revisarTodos.concat(enOrden(['listo'])).filter(yaSalio);
   const cancelados = enOrden(['cancelado']);
   const deOtros = ((d.videos || []).filter(v => (v.cid || '') !== (PAR.cid || ''))).length;
   if (deOtros) {
@@ -35544,12 +35953,28 @@ function esperaSolaPiloto(v) {
 
 function tarjetaVideoPiloto(v) {
   const nombres = (PIL.datos || {}).estados || {};
-  const marco = { trabajando: ' estado-trabajando', error: ' estado-error' }[v.estado] || '';
+  /* TERMINADO A MANO (rama piloto-al-dia): falló o se paró, pero su vídeo ya está
+     montado y al día. La tarjeta lo dice y ofrece Publicar; «Reintentar» no
+     (podría volver a pagar el revisor). */
+  const aMano = !!v.terminado_a_mano;
+  const marco = aMano ? '' : ({ trabajando: ' estado-trabajando', error: ' estado-error' }[v.estado] || '');
   const tarjeta = h('article', { clase: `tarjeta-piloto${marco}`, datos: { piloto: v.id } });
   tarjeta.appendChild(h('div', { clase: 'fila cab-tarjeta-piloto' },
     h('b', { clase: 'titulo-piloto' }, v.nombre || v.titulo || 'Vídeo del piloto'),
-    h('span', { clase: `pastilla ${CLASE_ESTADO_PILOTO[v.estado] || ''}`.trim() },
-      esperaSolaPiloto(v) ? 'esperando: sigue solo' : (nombres[v.estado] || v.estado))));
+    h('span', { clase: `pastilla ${aMano ? (CLASE_ESTADO_PILOTO.listo || '') : (CLASE_ESTADO_PILOTO[v.estado] || '')}`.trim() },
+      aMano ? 'Terminado a mano' : esperaSolaPiloto(v) ? 'esperando: sigue solo' : (nombres[v.estado] || v.estado))));
+  if (aMano) {
+    tarjeta.appendChild(h('div', { clase: 'lineas-piloto' },
+      h('span', { clase: 'meta' }, `El piloto se paró en «${nombreEtapaPiloto(v.etapa)}», pero el vídeo ya está montado y al día: `
+        + (v.salio ? 'ya salió o está programado.' : 'solo falta publicarlo (revisa sus títulos y su portada en Publicar).'))));
+    const botonesMano = h('div', { clase: 'fila botones-piloto' },
+      h('button', { clase: 'mini', onclick: () => abrirVideoDeLaCola(v.pid) }, 'Abrir el vídeo'),
+      v.salio ? null : h('button', { clase: 'mini primario', onclick: () => abrirPublicarVideo(v.pid) }, 'Publicar ›'),
+      h('button', { clase: 'mini fantasma', title: 'Quitar de esta lista (el vídeo se queda en Tus proyectos)',
+        onclick: () => quitarPiloto(v) }, 'Quitar de la lista'));
+    tarjeta.appendChild(botonesMano);
+    return tarjeta;
+  }
   const lineas = h('div', { clase: 'lineas-piloto' });
   if (v.estado === 'trabajando' || v.estado === 'en_cola') {
     lineas.appendChild(h('span', { clase: 'meta' }, v.estado === 'trabajando'
@@ -36007,12 +36432,71 @@ function botonNuevaGrafica(cid) {
     onclick: () => abrirEditorGrafica(cid, null) }, '+ Nueva gráfica');
 }
 
+/* EL EDITOR CON CAPAS (rama graficas-2-editor, 12-11-2026): su propia página y
+   sus propios ficheros (web/graficas_editor.js y .css), que solo se cargan al
+   abrirlo. index.html los nombra en <body data-editor-js/-css> y el servidor les
+   pone el sello, así que se cachean como app.js. */
+let CARGA_EDITOR_CAPAS = null;
+
+function cargarEditorCapas() {
+  if (window.EditorCapas) return Promise.resolve(window.EditorCapas);
+  if (CARGA_EDITOR_CAPAS) return CARGA_EDITOR_CAPAS;
+  const js = document.body.dataset.editorJs || 'graficas_editor.js';
+  const css = document.body.dataset.editorCss || 'graficas_editor.css';
+  CARGA_EDITOR_CAPAS = new Promise((ok, mal) => {
+    document.head.appendChild(h('link', { rel: 'stylesheet', href: css }));
+    const guion = h('script', { src: js });
+    guion.addEventListener('load', () => (window.EditorCapas ? ok(window.EditorCapas) : mal(new Error('el editor no ha arrancado'))));
+    guion.addEventListener('error', () => mal(new Error('no se ha podido cargar el editor')));
+    document.head.appendChild(guion);
+  }).catch(e => { CARGA_EDITOR_CAPAS = null; throw e; });
+  return CARGA_EDITOR_CAPAS;
+}
+
+/* `pieza`: la ficha de la lista, o null para una nueva. Una pieza de antes solo
+   se abre en capas si sale IGUAL (la comparación del servidor): si no, se
+   queda con el editor de siempre y no se toca. */
+let ABRIENDO_CAPAS = false;
+
+async function abrirEditorCapas(cid, pieza, extra) {
+  // un segundo clic mientras se comprueba (unos segundos) no abre otro editor
+  if (ABRIENDO_CAPAS) return;
+  ABRIENDO_CAPAS = true;
+  try { await abrirEditorCapasYa(cid, pieza, extra); } finally { ABRIENDO_CAPAS = false; }
+}
+
+async function abrirEditorCapasYa(cid, pieza, extra) {
+  let cat, editor;
+  try {
+    [cat, editor] = await Promise.all([catalogoGraficas(), cargarEditorCapas()]);
+    if (GRAF.kits[cid] === undefined) GRAF.kits[cid] = (await pedir(apiGraficas(cid, '/kit'))).kit || null;
+    if (pieza && pieza.id && !pieza.en_capas && !pieza.nacida_en_capas) {
+      toast('Comprobando que la pieza sale igual en capas…');
+      const r = await pedir(apiGraficas(cid, `/piezas/${pieza.id}/comparar`), { method: 'POST' });
+      if (!r.igual) {
+        toast(`Esta pieza no sale idéntica en capas (cambia un ${(r.visible * 100).toFixed(2)} % de lo que se ve), así que sigue con el editor de siempre. No se ha tocado nada.`, true);
+        return;
+      }
+    }
+  } catch (e) { toast(e.message, true); return; }
+  const ficha = fichaCliente(cid);
+  editor.abrir(Object.assign({
+    cid, pieza, catalogo: cat, kit: GRAF.kits[cid] || {}, nombreCliente: ficha ? ficha.nombre : '',
+    base: BASE, api: apiGraficas, pedir, toast,
+    pases: () => (typeof cabeceraDePases === 'function' ? cabeceraDePases() : ''),
+    alCerrar: cambio => { if (cambio) { GRAF.piezas[cid] = undefined; pintarLight(); } },
+  }, extra || {}));
+}
+
 function seccionGraficasDelProyecto(cid) {
   const caja = h('div', { clase: 'seccion-graficas' });
   const lista = GRAF.piezas[cid];
   caja.appendChild(h('div', { clase: 'light-cab' },
     h('h3', {}, 'Gráficas'),
-    h('span', { clase: 'meta' }, lista ? plural(lista.length, 'pieza', 'piezas') : '')));
+    h('span', { clase: 'meta' }, lista ? plural(lista.length, 'pieza', 'piezas') : ''),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini nueva-en-capas', title: 'Un diseño libre: añade textos, fotos, logo y formas donde quieras',
+      onclick: () => abrirEditorCapas(cid, null) }, '+ Diseño en capas')));
   if (lista === undefined) {
     if (!GRAF.pidiendo[cid]) {
       GRAF.pidiendo[cid] = true;
@@ -36035,15 +36519,23 @@ function seccionGraficasDelProyecto(cid) {
   }
   caja.appendChild(h('div', { clase: 'rejilla-piezas' }, ...lista.map(p => {
     const img = h('img', { alt: `Gráfica ${p.nombre}`, loading: 'lazy' });
-    ponerImagenPublicar(img, apiGraficas(cid, `/piezas/${p.id}/fichero.jpg?v=${p.sello}`));
+    // el sello y la fecha: una pieza en capas recién guardada estrena miniatura
+    ponerImagenPublicar(img, apiGraficas(cid, `/piezas/${p.id}/fichero.jpg?v=${encodeURIComponent(`${p.sello}-${p.cambiada || ''}`)}`));
+    // lo que ya está en capas se abre SIEMPRE con el editor de capas (el de
+    // siempre no puede guardarlo sin perder la versión en capas)
+    const enCapas = !!(p.en_capas || p.nacida_en_capas);
+    const abrir = () => (enCapas ? abrirEditorCapas(cid, p) : abrirEditorGrafica(cid, p));
     return h('div', { clase: 'tarjeta-pieza' },
-      h('button', { clase: 'abrir-pieza', title: 'Abrir para cambiarla', onclick: () => abrirEditorGrafica(cid, p) }, img),
+      h('button', { clase: 'abrir-pieza', title: 'Abrir para cambiarla', onclick: abrir }, img),
       h('b', {}, p.nombre),
-      h('span', { clase: 'meta' }, p.medida),
+      h('span', { clase: 'meta' }, enCapas ? `${p.medida} · en capas` : p.medida),
       h('div', { clase: 'fila' },
         h('button', { clase: 'mini', onclick: () => descargarGrafica(cid, p.id, 'png') }, 'PNG'),
         h('button', { clase: 'mini', onclick: () => descargarGrafica(cid, p.id, 'jpg') }, 'JPG'),
-        h('button', { clase: 'mini', onclick: () => abrirEditorGrafica(cid, Object.assign({}, p, { id: '' })) }, 'Duplicar'),
+        enCapas ? null : h('button', { clase: 'mini abrir-en-capas', title: 'Moverla, añadir textos, fotos y formas donde quieras. La versión de antes se queda guardada.',
+          onclick: () => abrirEditorCapas(cid, p) }, 'Abrir en capas'),
+        h('button', { clase: 'mini', onclick: () => (enCapas ? abrirEditorCapas(cid, p, { duplicar: true })
+          : abrirEditorGrafica(cid, Object.assign({}, p, { id: '' }))) }, 'Duplicar'),
         h('button', { clase: 'mini fantasma', onclick: async () => {
           if (!window.confirm(`¿Borrar «${p.nombre}»? No se puede deshacer.`)) return;
           try {

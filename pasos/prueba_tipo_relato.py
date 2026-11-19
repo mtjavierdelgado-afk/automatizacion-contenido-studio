@@ -512,8 +512,24 @@ def prueba_ambientes_y_camara():
           "cerca", "un primer plano pedido no edita la base")
     igual(P6._familia_del_plano({"linea_gv": {"camara": "wide shot from the doorway"}}, "foto"),  # noqa: SLF001
           "lejos", "un plano general la edita")
-    igual(P6._familia_del_plano({"linea_gv": {"camara": "medium shot, detailed tiles"}}, "foto"),  # noqa: SLF001
+    igual(P6._familia_del_plano({"linea_gv": {"camara": "wide shot, detailed tiles"}}, "foto"),  # noqa: SLF001
           "lejos", "«detailed» no es un detalle")
+    ec = {"modo": "espacio_que_cambia", "cambia": "estado"}
+    igual(P6._familia_del_plano({"linea_gv": {"camara": "medium shot, detailed tiles"}}, "foto", ec),  # noqa: SLF001
+          "cerca", "un plano medio de un espacio que cambia respeta su cámara (decisión del 12-11)")
+    igual(P6._familia_del_plano({"linea_gv": {"camara": "medium shot of the jar"}}, "foto",  # noqa: SLF001
+                                {"modo": "producto"}),
+          "lejos", "en «producto» el plano medio sigue editando la base (copia el producto)")
+    igual(P6._familia_del_plano({"linea_gv": {"camara": "medium-wide shot of the room"}}, "foto", ec),  # noqa: SLF001
+          "lejos", "un «medium-wide» enseña la habitación: edita")
+    igual(P6._familia_del_plano({"linea_gv": {"visual": "Medium close-up of the mirror"}}, "foto"),  # noqa: SLF001
+          "", "sin relato y sin cámara, un medio como antes")
+    for camara, esperada in (("medium shot moving into a close-up of the label", "cerca"),
+                             ("close-up of the label, mid-shot framing", "cerca"),
+                             ("medium close-up of the jar", "lejos")):
+        igual(P6._familia_del_plano({"linea_gv": {"camara": camara}}, "foto",  # noqa: SLF001
+                                    {"modo": "producto"}), esperada,
+              f"en «producto», «{camara}» sale como en main ({esperada})")
     igual(P6._familia_del_plano({"carta": "detalle"}, "ilustracion"), "cerca",  # noqa: SLF001
           "sin línea, la familia de su carta, como siempre")
     rel = T.resolver({"tipo_relato": {"modo": "espacio_que_cambia", "cambia": "objeto"}})
@@ -534,9 +550,10 @@ def prueba_revision_03_11():
     seccion("15] lo que encontró la revisión del 03-11")
     for camara, esperada in (("detalle de la bisagra", "cerca"), ("tight shot of the handle", "cerca"),
                              ("insert of the key", "cerca"), ("ECU of the hinge", "cerca"),
-                             ("plano corto del grifo", "cerca"), ("medium close-up of Ana in the kitchen", "lejos"),
-                             ("plano medio de la cocina", "lejos"), ("wide shot from the door", "lejos")):
-        igual(P6._familia_del_plano({"linea_gv": {"camara": camara}}, "foto"), esperada,  # noqa: SLF001
+                             ("plano corto del grifo", "cerca"), ("medium close-up of Ana in the kitchen", "cerca"),
+                             ("plano medio de la cocina", "cerca"), ("medium shot from the shower side", "cerca"), ("wide shot from the door", "lejos")):
+        igual(P6._familia_del_plano({"linea_gv": {"camara": camara}}, "foto",  # noqa: SLF001
+                                    {"modo": "espacio_que_cambia"}), esperada,
               f"la cámara «{camara}» es {esperada}")
     # el principal de un recorrido es el primero que declaró Claude, aunque otro tenga más tramos
     cat = {"sets": {"cocina": {"descripcion": "an oak kitchen", "luz": "day"},
@@ -605,6 +622,109 @@ def prueba_retoque_acotado():
     igual(filtradas[0].get("de_edicion"), 1, "y la rechazada, como intento anterior")
 
 
+def prueba_base_fiel():
+    seccion("17] las imágenes de referencia siguen la descripción (rama base-fiel)")
+    import inspect                                           # noqa: PLC0415
+    import moodboard                                         # noqa: PLC0415
+    P6, carpeta, dirs, estilo, base = _p6_y_dirs()
+    est = {"referencias": [estilo], "modo": "foto"}
+    refs_estilo = [{"papel": "estilo", "ruta": estilo}]
+    ref_escena = {"id": "BASE", "prompt": "the empty room", "personajes": [], "set": "sala",
+                  "narracion": "", "referencia": "base", "ejes": list(T.EJES_REFERENCIA)}
+    plano = {"id": "S001", "prompt": "the room", "personajes": [], "set": "sala", "narracion": "x"}
+    t_ref = P6._prompt_completo(ref_escena, refs_estilo, est, formato="vertical")   # noqa: SLF001
+    t_plano = P6._prompt_completo(plano, refs_estilo, est, formato="vertical")      # noqa: SLF001
+    ok(T.cuadro_referencia("foto") in t_ref and "middle two thirds" not in t_ref,
+       "la imagen de referencia pide la habitación entera, sin el «tercio central»")
+    ok("middle two thirds" in t_plano and "reference of a whole room" not in t_plano,
+       "un plano sigue con la línea del cuadro vertical de siempre")
+    t_apaisado = P6._prompt_completo(ref_escena, refs_estilo, est, formato="apaisado")  # noqa: SLF001
+    ok("reference of a whole room" not in t_apaisado, "y en apaisado no hay línea de cuadro")
+    t_dibujo = P6._prompt_completo(ref_escena, refs_estilo, {"referencias": [estilo]},  # noqa: SLF001
+                                   formato="vertical")
+    ok(T.cuadro_referencia("ilustracion") in t_dibujo and "photograph" not in T.cuadro_referencia("ilustracion"),
+       "en un vídeo de dibujo la referencia no se pide como fotografía")
+    cambio = "the walls are warm white and the vanity is light oak"
+    ref_base = {"papel": "base", "principal": True, "nombre": "Baño", "ruta": base,
+                "modo": "espacio_que_cambia", "cambia": "acabados", "cambio": cambio}
+    estado_esc = {"id": "ESTADO_paleta_1", "prompt": T.prompt_imagen_estado(cambio),
+                  "personajes": [], "set": "bano", "narracion": "", "referencia": "estado"}
+    con = P6._prompt_completo(estado_esc, [dict(ref_base, fijos=True)] + refs_estilo, est)  # noqa: SLF001
+    sin = P6._prompt_completo(estado_esc, [ref_base] + refs_estilo, est)                    # noqa: SLF001
+    fijos = T.FIJOS_ACABADOS.format(indice=1)
+    igual(con.count(fijos), 2, "el estado de acabados: lo que no se nombra conserva su acabado "
+                                "(en la presentación de la base y en el FINAL CHECK)")
+    ok(fijos not in sin, "sin la clave `fijos` (los planos) no se añade nada")
+    t_estado = P6._prompt_completo(estado_esc, [ref_base] + refs_estilo, est, formato="vertical")  # noqa: SLF001
+    ok(T.CUADRO_ESTADO in t_estado and "reference of a whole room" not in t_estado,
+       "un estado conserva el cuadro de la imagen que edita (sin gran angular nuevo)")
+    otro = P6._prompt_completo(estado_esc, [dict(ref_base, fijos=True, cambia="estado")]  # noqa: SLF001
+                               + refs_estilo, est)
+    ok(fijos not in otro, "y en un estado que no es de acabados tampoco")
+    igual(moodboard.ejes_de_plano(ref_escena), list(T.EJES_REFERENCIA),
+          "la lámina de una referencia: exterior y objeto, sin caras, cuerpos ni la sala amueblada")
+    import tempfile                                          # noqa: PLC0415
+    from PIL import Image                                    # noqa: PLC0415
+    carpeta_l = tempfile.mkdtemp()
+    laminas = []
+    for eje in ("cara", "cuerpos", "interior", "exterior", "objeto", "diagrama"):
+        ruta_l = os.path.join(carpeta_l, f"{eje}_ab12cd34ef.png")
+        Image.new("RGB", (64, 40), (30, 60, 90)).save(ruta_l)
+        laminas.append(ruta_l)
+    est_l = {"estilo": {"referencias": laminas, "modo": "foto"}}
+    cache_l = tempfile.mkdtemp()
+    ref_l = P6._referencias_estilo(est_l, cache_l, ref_escena)            # noqa: SLF001
+    plano_l = P6._referencias_estilo(est_l, cache_l, dict(plano))         # noqa: SLF001
+    igual(ref_l[0].get("cuantas"), 2, "sin moodboard, la referencia solo lleva las láminas exterior y objeto")
+    igual(plano_l[0].get("cuantas"), 6, "y un plano, las seis como siempre")
+    ok("no television or TV cabinet" in T.prompt_imagen_base({"descripcion": "a living room"},
+                                                             {"modo": "recorrido"}),
+       "la base prohíbe lo que la descripción no nombra (la tele, el mueble de TV)")
+    ok("television" not in T.prompt_imagen_base({"descripcion": "a gaming room with two TVs"},
+                                                {"modo": "recorrido"}),
+       "pero no la tele si la descripción la pide (una sala gamer)")
+    ok("television" not in T.prompt_imagen_base({"descripcion": "sala con televisión grande"},
+                                                {"modo": "recorrido"}),
+       "«televisión» con tilde también cuenta como pantalla")
+    ec_obj = {"modo": "espacio_que_cambia", "cambia": "objeto"}
+    con_tele = T.prompt_imagen_base({"descripcion": "a small living room"}, ec_obj,
+                                    inicial="a wall-mounted TV on the left wall")
+    ok("MUST already be in this picture" in con_tele and "no television" not in con_tele,
+       "lo que ya está en la base (una tele) no se prohíbe a la vez que se pide (H1 del tren)")
+    con_mampara = T.prompt_imagen_base({"descripcion": "a narrow bathroom"}, ec_obj,
+                                       inicial="a hinged glass shower door, closed")
+    ok("or the starting state below does not name" in con_mampara,
+       "la mampara del estado inicial cuenta como nombrada: no choca con «nada de más»")
+    ok("no television or TV cabinet" in con_mampara, "y sin pantallas, la tele sigue prohibida")
+    ok("starting state" not in T.prompt_imagen_base({"descripcion": "a bathroom"},
+                                                    {"modo": "espacio_que_cambia", "cambia": "acabados"}),
+       "sin estado inicial, la frase no nombra uno que no existe")
+    fotos = []
+    for nombre in ("interior_salon.jpg", "interior_cocina.jpg", "exterior_fachada.jpg"):
+        ruta_f = os.path.join(carpeta_l, nombre)
+        Image.new("RGB", (64, 40), (90, 60, 30)).save(ruta_f)
+        fotos.append(ruta_f)
+    ref_f = P6._referencias_estilo({"estilo": {"referencias": fotos, "modo": "foto"}},  # noqa: SLF001
+                                   cache_l, ref_escena)
+    igual(ref_f[0].get("cuantas"), 3, "unas fotos subidas que se llaman «interior_…» no se filtran")
+    igual(P6._eje_de_lamina("03_interior_1fb7539dba.png"), "interior",  # noqa: SLF001
+          "una lámina numerada también se reconoce")
+    ok("cara" in moodboard.ejes_de_plano({"set": "sala"}),
+       "la de un plano, como siempre")
+    amb = dict(ref_escena, referencia="ambiente")
+    t_amb = P6._prompt_completo(amb, refs_estilo, est, formato="vertical")  # noqa: SLF001
+    ok(T.cuadro_referencia("foto", True) in t_amb and "from the entrance" not in t_amb,
+       "un ambiente secundario: la cámara dentro de él, no en la entrada (la cocina abierta)")
+    igual(T.prompt_imagen_base({"descripcion": "a kitchen"}, {"modo": "recorrido"}).count(T.ENCUADRE_BASE), 1,
+          "la base de siempre conserva su encuadre")
+    ok(T.ENCUADRE_AMBIENTE in T.prompt_imagen_base({"descripcion": "a kitchen"}, {"modo": "recorrido"},
+                                                   ambiente=True),
+       "y la de un ambiente secundario lleva el suyo")
+    ok("nota" in inspect.signature(P6.generar_imagen_estado).parameters
+       and "nota" in inspect.signature(P6.prompt_y_refs_de_estado).parameters,
+       "la imagen de un estado acepta la corrección de esta vez")
+
+
 def main():
     print("PRUEBA DEL TIPO DE RELATO")
     prueba_modos_y_lineas()
@@ -618,6 +738,7 @@ def main():
     prueba_imagen_base()
     prueba_ambientes_y_camara()
     prueba_retoque_acotado()
+    prueba_base_fiel()
     prueba_revision_03_11()
     import shutil                                            # noqa: PLC0415
     shutil.rmtree(_TEMPORAL, ignore_errors=True)

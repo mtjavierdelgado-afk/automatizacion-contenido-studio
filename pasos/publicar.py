@@ -2903,7 +2903,7 @@ def _envio_publico(e):
 
 
 def _envio_publico_campos(e):
-    return {k: e.get(k) for k in (
+    return {k: (sin_ceros_imposibles(e.get(k)) if k == "metricas" else e.get(k)) for k in (
         "id", "red", "estado", "modo", "cuando", "creado", "actualizado", "url",
         "error", "lote", "perfil", "mp4_huella", "nota", "programado_para", "sin_hora",
         "metricas", "enviado", "texto_publicado", "recortado", "tipo", "portada",
@@ -3759,6 +3759,41 @@ METRICAS = ("vistas", "me_gusta", "comentarios", "compartidos", "guardados")
 #: fraccion que lo vio hasta el final), `media_vista` (YouTube: que parte se ve
 #: de media; pasa de 1 si se vuelve a ver) y `tiempo_medio_s`.
 RETENCION = ("vista_entera", "media_vista", "tiempo_medio_s")
+#: METRICAS COMPLETAS (rama `metricas-completas`, 11-11-2026): las demas cuentas
+#: que Upload-Post ya trae. Se SUMAN como las de arriba, pero van aparte para no
+#: cambiar lo que otros leen de METRICAS (el informe, la Parrilla, el piloto).
+#: Las impresiones NO son vistas (veces que se enseño, no que se reprodujo) y el
+#: alcance sumado cuenta dos veces a quien vio dos posts: la pantalla lo dice.
+EXTRAS = ("alcance", "impresiones", "nuevos_seguidores", "visitas_perfil", "vistas_facebook",
+          "tiempo_total_s")
+#: Lo que no es una cuenta: la curva de retencion de TikTok y los repartos (de
+#: donde vinieron las vistas, que publico). Se guarda por envio y no se suma.
+DETALLE = ("curva", "mitad_s", "fuentes", "publico")
+#: Todo lo que se apunta de un envio
+CAMPOS_ENVIO = METRICAS + EXTRAS + RETENCION + DETALLE
+#: Cifras que NO pueden ser 0 si el post tiene vistas: un post visto 200 veces
+#: llegó al menos a una persona y alguien lo vio algún segundo. Y sin vistas
+#: todavía (TikTok las completa en horas), un 0 suelto tampoco dice nada. Ese 0 es el
+#: «no lo sé» de la red (TikTok da `reach: 0`; un Short, `average_time_watched:
+#: 0`), y enseñarlo como «0 personas alcanzadas» o «0 % visto de media» era
+#: mentir (prueba del servidor, 12-11). `vista_entera` sí puede ser 0 (nadie
+#: llegó al final) y queda fuera.
+SIN_CERO_CON_VISTAS = ("alcance", "impresiones", "tiempo_total_s", "media_vista", "tiempo_medio_s")
+
+
+def sin_ceros_imposibles(m):
+    """Las cifras de un envío con los ceros que no pueden ser (ver
+    `SIN_CERO_CON_VISTAS`) en None: «no lo dice», no «cero». No cambia el
+    dict que recibe. -> dict (o lo mismo si no es un dict)"""
+    if not isinstance(m, dict):
+        return m
+    vistas = m.get("vistas")
+    # solo con «0 vistas» de verdad un 0 de alcance es un cero (2.ª revisión, 12-11)
+    if isinstance(vistas, (int, float)) and not isinstance(vistas, bool) and vistas <= 0:
+        return m
+    ceros = [k for k in SIN_CERO_CON_VISTAS
+             if isinstance(m.get(k), (int, float)) and not isinstance(m.get(k), bool) and m[k] == 0]
+    return dict(m, **{k: None for k in ceros}) if ceros else m
 LOTES_POR_VUELTA = 30
 RESPIRO_METRICAS_S = float(os.environ.get("ESTUDIO_METRICAS_RESPIRO") or 600)
 
@@ -3888,12 +3923,17 @@ def _apuntar_metricas(raiz, envios, cifras, error=""):
                     e["metricas"] = dict(viejas, al=al,
                                          error="Upload-Post no trae cifras de esta red")
                     continue
-                nuevas = {k: propias.get(k) for k in METRICAS + ("alcance",) + RETENCION}
+                nuevas = {k: propias.get(k) for k in CAMPOS_ENVIO}
                 # una consulta sin cifras (TikTok las completa en horas) no
                 # borra las que ya se sabian
                 for k in nuevas:
                     if nuevas[k] is None and viejas.get(k) is not None:
                         nuevas[k] = viejas[k]
+                # la curva y su «mitad» van JUNTAS (2.ª revision, 11-11): una
+                # curva nueva que no baja del 50 % trae mitad_s None, y eso es
+                # una respuesta, no un «no lo se»
+                if propias.get("curva") is not None:
+                    nuevas["mitad_s"] = propias.get("mitad_s")
                 nuevas.update(al=al, error=propias.get("error") or "")
                 # el reloj de la lectura guardada es suyo: una lectura en vivo no
                 # lo borra (sin el, una guardada MAS VIEJA volvia a pisar la
@@ -3901,7 +3941,8 @@ def _apuntar_metricas(raiz, envios, cifras, error=""):
                 for k in ("guardada_al", "guardada"):
                     if k in viejas:
                         nuevas[k] = viejas[k]
-                e["metricas"] = nuevas
+                # los ceros que no pueden ser, fuera también de lo ya guardado
+                e["metricas"] = sin_ceros_imposibles(nuevas)
                 if propias.get("url") and not e.get("url"):
                     e["url"] = propias["url"]
                 if propias.get("post_id"):
@@ -4028,7 +4069,9 @@ def _apuntar_guardadas(raiz, envios, indice):
                 retencion_nueva = guardada is None or cuando >= guardada
                 nuevas = dict(viejas)
                 tocado = False
-                for k in METRICAS + ("alcance",) + RETENCION:
+                for k in CAMPOS_ENVIO:
+                    if k == "mitad_s":
+                        continue        # solo se escribe junto a su curva (abajo)
                     valor = post.get(k)
                     if valor is None:
                         continue
@@ -4037,8 +4080,16 @@ def _apuntar_guardadas(raiz, envios, indice):
                     if (manda or viejas.get(k) is None) and nuevas.get(k) != valor:
                         nuevas[k] = valor
                         tocado = True
+                        if k == "curva":
+                            # su «mitad» con ella, aunque sea None (ver arriba)
+                            nuevas["mitad_s"] = post.get("mitad_s")
                 if retencion_nueva and nuevas.get("guardada_al") != _iso_lima(cuando):
                     nuevas["guardada_al"] = _iso_lima(cuando)
+                # un 0 que la limpieza vuelve a quitar no es un cambio (árbitro, 12-11)
+                if tocado and all(sin_ceros_imposibles(nuevas).get(k) == viejas.get(k)
+                                  for k in CAMPOS_ENVIO):
+                    tocado = False
+                    nuevas = dict(nuevas, **{k: viejas.get(k) for k in CAMPOS_ENVIO})
                 if not tocado:
                     if nuevas != viejas:
                         e["metricas"] = nuevas      # solo el reloj: sin contarlo
@@ -4048,7 +4099,7 @@ def _apuntar_guardadas(raiz, envios, indice):
                     nuevas["al"] = _iso_lima(cuando)
                     nuevas["error"] = ""
                 nuevas["guardada"] = True
-                e["metricas"] = nuevas
+                e["metricas"] = sin_ceros_imposibles(nuevas)
                 if post.get("post_id") and not e.get("post_id"):
                     e["post_id"] = post["post_id"]
                 cambio = True
@@ -4133,10 +4184,15 @@ def actualizar_seguidores(raiz, cid):
 
 
 def _suma(destino, metricas):
-    for k in METRICAS:
+    # lo guardado antes del arreglo puede traer esos ceros: no suman (12-11)
+    metricas = sin_ceros_imposibles(metricas)
+    for k in METRICAS + EXTRAS:
         v = (metricas or {}).get(k)
-        if isinstance(v, (int, float)):
-            destino[k] = (destino.get(k) or 0) + int(v)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            destino[k] = (destino.get(k) or 0) + (round(float(v), 1) if k == "tiempo_total_s" else int(v))
+            # cuántas publicaciones entran en esa cifra (revisión, 12-11): no
+            # todas las redes dan todo, y un total de 2 de 5 tiene que decirlo
+            destino[f"_c_{k}"] = (destino.get(f"_c_{k}") or 0) + 1
     vistas = (metricas or {}).get("vistas")
     peso = float(vistas) if isinstance(vistas, (int, float)) and vistas > 0 else 0.0
     for k in RETENCION:
@@ -4153,7 +4209,12 @@ def _suma(destino, metricas):
 
 def _medias(destino):
     """Cierra una suma: la retencion pasa a ser la media de los posts que la
-    dan (no de todos: los que no la dan no cuentan como cero)."""
+    dan (no de todos: los que no la dan no cuentan como cero). Y cada cifra
+    sumada dice de cuántas publicaciones sale (`<cifra>_posts`)."""
+    for k in METRICAS + EXTRAS:
+        n = destino.pop(f"_c_{k}", None)
+        if n is not None:
+            destino[f"{k}_posts"] = n
     for k in RETENCION:
         n = destino.pop(f"_n_{k}", 0)
         suma = destino.pop(f"_s_{k}", 0)
@@ -4229,7 +4290,7 @@ def resultados(raiz, videos, cid, dias=30):
         suma = _medias(fila.pop("_suma"))
         for propia in fila["redes"].values():
             _medias(propia)
-        lista.append(dict(fila, **{k: suma.get(k) for k in METRICAS + RETENCION}))
+        lista.append(dict(fila, **{k: suma.get(k) for k in METRICAS + EXTRAS + RETENCION}))
     lista.sort(key=lambda f: (f.get("vistas") or 0), reverse=True)
     for r in por_red.values():
         _medias(r)
@@ -4338,7 +4399,10 @@ def lo_que_funciono(raiz, videos, cid=None, dias=30, red=None, por="vistas", cua
     for v, e in _publicados(raiz, _de_proyecto(videos, cid), desde):
         if red and e["red"] != red:
             continue
-        m = e.get("metricas") or {}
+        # los ceros que son «no lo sé» (12-11) no ordenan ni se enseñan: un Short
+        # con «0 % visto de media» guardado antes no entra en ese ranking, y
+        # esto se le da a Claude como ejemplo
+        m = sin_ceros_imposibles(e.get("metricas") or {})
         vistas = m.get("vistas")
         if not isinstance(vistas, (int, float)):
             continue
@@ -4360,7 +4424,7 @@ def lo_que_funciono(raiz, videos, cid=None, dias=30, red=None, por="vistas", cua
             "hora": momento.strftime("%H:%M"), "url": e.get("url") or "",
             "titulo": str(texto.get("titulo") or "")[:200],
             "descripcion": str(texto.get("descripcion") or "")[:600],
-            "metricas": {k: m.get(k) for k in METRICAS + RETENCION},
+            "metricas": {k: m.get(k) for k in METRICAS + EXTRAS + RETENCION},
             "interaccion": interaccion, "mirado": m.get("al") or ""}))
     filas.sort(key=lambda x: x[0], reverse=True)
     return {"por": por, "dias": dias, "red": red or "", "desde": desde.strftime("%Y-%m-%d"),

@@ -607,6 +607,16 @@ class Proyecto:
             if os.path.isdir(self.ruta(carpeta)):
                 shutil.copytree(self.ruta(carpeta), copia.ruta(carpeta),
                                 dirs_exist_ok=True)
+        # Y LAS IMAGENES DEL ESPACIO FIJO: la subida, la base aprobada y la de
+        # cada estado (`espacio_fijo/<huella>.png`). Los params las nombran con
+        # ruta RELATIVA, asi que sin la carpeta la copia decia tener su base
+        # aprobada y no la tenia: 404 al pedirla y una base nueva que pagar para
+        # rehacer un estado (tren del 12-11, la copia de Y05). Sin la cache de
+        # referencias (`_refs`) ni lo que se estaba escribiendo a medias.
+        if os.path.isdir(self.ruta("espacio_fijo")):
+            shutil.copytree(self.ruta("espacio_fijo"), copia.ruta("espacio_fijo"),
+                            dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns("_refs", "_*.png", "*.tmp"))
 
         estado = leer_json(self.ruta("estado.json"))
         if isinstance(estado, dict):

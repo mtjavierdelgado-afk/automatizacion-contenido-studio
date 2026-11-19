@@ -1044,7 +1044,7 @@ def sintetizar_bloques(bloques, destino, cfg, avisar=None,
     # COMO SE PRONUNCIA (Configuracion): lo que se MANDA lleva cada palabra de
     # la lista escrita como suena; las marcas que vuelven se devuelven a la
     # palabra escrita antes de repartirlas (ver pasos/pronunciacion.py).
-    lista_pron = pronunciacion.cargar()
+    lista_pron = pronunciacion.cargar(cfg.get("idioma"))
     para_voz = [dict(b, texto=pronunciacion.aplicar(b["texto"], lista_pron)) for b in para_voz]
     texto = " ".join(b["texto"].strip() for b in para_voz)
 
@@ -1316,7 +1316,7 @@ def previsualizar(proyecto, params, segundos=20):
     # La firma va sobre lo que se MANDA, no sobre lo escrito: cambiar la lista
     # «Como se pronuncia» tiene que dar otra escucha, o seguiria sonando la vieja.
     # Si no cambia nada, la firma es la de siempre y las escuchas ya pagadas valen.
-    lista_pron = pronunciacion.cargar()
+    lista_pron = pronunciacion.cargar(cfg.get("idioma"))
     para_voz = texto_para_voz(texto, lista_pron)
     firma = hashlib.sha256(json.dumps(
         [texto, cfg["modelo"], cfg["voz_id"], cfg["idioma"],
@@ -1864,7 +1864,7 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
     # la pausa del final de cada bloque, al montaje, como en la toma entera
     pausa_de, para_voz = pausas_de_final([b for b in nuevos if b["id"] in dentro])
     # como en la toma entera: lo que se manda, como suena (pasos/pronunciacion.py)
-    lista_pron = pronunciacion.cargar()
+    lista_pron = pronunciacion.cargar(cfg.get("idioma"))
     para_voz = [dict(b, texto=pronunciacion.aplicar(b["texto"], lista_pron)) for b in para_voz]
     trozo = " ".join(b["texto"].strip() for b in para_voz)
 

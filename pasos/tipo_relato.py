@@ -636,6 +636,67 @@ SUBTIPO = {
             "put.",
 }
 
+#: LO QUE LA PALETA NO NOMBRA CONSERVA SU ACABADO (rama base-fiel, prueba
+#: real del 09-11: la imagen de la «paleta 1» aclaro tambien la puerta, su marco
+#: y el marco del espejo). Solo la lleva la referencia «base» de la imagen de un
+#: ESTADO de acabados (`fijos`): los planos no la traen y su prompt no cambia.
+FIJOS_ACABADOS = (" Doors, door frames, window frames, the mirror and its frame, taps, "
+                  "handles and fittings keep exactly the colour, material and shape they "
+                  "have in reference image {indice}, unless the change above names them.")
+
+#: EL CUADRO DE UNA IMAGEN DE REFERENCIA (rama base-fiel). La linea del cuadro
+#: vertical de los planos pide el sujeto grande y lo importante en el tercio
+#: central: en una habitacion vacia eso es recortar los lados (en la prueba
+#: real del 09-11, de tres ventanas en la pared izquierda salieron dos). Solo
+#: la llevan la imagen base y la de cada estado.
+CUADRO_REFERENCIA = (
+    "The frame is PORTRAIT (9:16, vertical, for a phone screen). This picture is the "
+    "reference of a whole room, so it is {que} from the entrance at eye height, with a "
+    "wide-angle view: show the whole room, with every wall, door and window the "
+    "description names fully inside the frame, none of them cropped at the edges, and "
+    "exactly as many windows and doors as it says, each on the wall it names. If a side "
+    "wall carries a window, a door or fixed furniture, angle the camera so that wall is "
+    "clearly seen along its side of the frame instead of moving them to the back wall. "
+    "Never draw black bars, borders or a landscape picture inside the tall frame.")
+
+#: Lo que es la imagen de referencia, segun el modo (revision del arbitro: en un
+#: video de dibujo, «photograph» empujaba la base, y con ella todos los planos
+#: que la editan, hacia la foto)
+CUADRO_QUE = {"foto": "an architectural interior photograph taken",
+              "ilustracion": "a wide interior view drawn in the style of the references, seen"}
+
+#: El cuadro vertical de la base de un AMBIENTE SECUNDARIO: este ambiente solo,
+#: con la camara dentro (ver `ENCUADRE_AMBIENTE`)
+CUADRO_AMBIENTE = (
+    "The frame is PORTRAIT (9:16, vertical, for a phone screen). This picture is the "
+    "reference of ONE room of a home, so it is {que} from inside that room at eye height, "
+    "with a wide-angle view: show this room whole, with every wall, door and window the "
+    "description names for it inside the frame, and nothing of the rooms it opens onto. "
+    "If a side wall carries a window, a door or fixed furniture, angle the camera so that "
+    "wall is clearly seen along its side of the frame instead of moving them to the back "
+    "wall. Never draw black bars, borders or a landscape picture inside the tall frame.")
+
+
+def cuadro_referencia(modo_imagen="ilustracion", ambiente=False):
+    que = CUADRO_QUE.get(modo_imagen, CUADRO_QUE["ilustracion"])
+    return (CUADRO_AMBIENTE if ambiente else CUADRO_REFERENCIA).format(que=que)
+
+
+#: El cuadro de la imagen de un ESTADO: es una EDICION de la base, asi que ni
+#: gran angular nuevo ni «tercio central»: el mismo cuadro, sin reencuadrar.
+CUADRO_ESTADO = (
+    "The frame is PORTRAIT (9:16, vertical, for a phone screen), exactly the frame of "
+    "the image being edited: never crop, zoom or reframe it, and keep every wall, door "
+    "and window it shows fully inside the frame. Never draw black bars, borders or a "
+    "landscape picture inside the tall frame.")
+
+#: Los ejes del moodboard de una imagen de referencia: sin caras ni cuerpos (es
+#: una habitacion vacia) y SIN la lamina «interior», que es una sala amueblada:
+#: su mueble de TV salio en la sala de las pruebas del 09-11, 11-11 y 12-11
+#: aunque ninguna descripcion lo pedia. El exterior y el objeto dan la luz, el
+#: color y el grano, que es lo unico que se quiere del estilo aqui.
+EJES_REFERENCIA = ("exterior", "objeto")
+
 #: Lo que se cambia en un plano cuyo tramo no trae cambio (el «antes»).
 SIN_CAMBIO = ("nothing in the room itself: only what the scene description below "
               "shows happening in it (people, gestures, small loose objects)")
@@ -651,11 +712,14 @@ def frase_edicion(indice, ref, modo_imagen="ilustracion"):
         cambio = (_texto(ref.get("cambio"), CAMBIO_ANTERIOR)
                   or "only the product and what the scene description below shows "
                      "of it; the background, surface and light stay exactly the same")
+    subtipo = SUBTIPO.get(cambia, "") if ref.get("modo") == "espacio_que_cambia" else ""
+    if ref.get("fijos") and cambia == "acabados":
+        subtipo += FIJOS_ACABADOS.format(indice=indice)
     return FRASE_EDICION.format(
         indice=indice, sitio=ref.get("nombre") or "the set",
         acabados="" if cambia == "acabados" else " and finishes",
         cambio=cambio,
-        subtipo=SUBTIPO.get(cambia, "") if ref.get("modo") == "espacio_que_cambia" else "",
+        subtipo=subtipo,
         estilo=(" Keep the photographic style of the style references."
                 if modo_imagen == "foto" else
                 " Keep it drawn in the art style of the style references, never "
@@ -707,8 +771,11 @@ def rechazada_edicion(indice, base):
 def cierre_edicion(indice, ref):
     cambia = ref.get("cambia") or ""
     cambio = _texto(ref.get("cambio"), CAMBIO_ANTERIOR) or SIN_CAMBIO   # ver `frase_edicion`
-    return CIERRE_EDICION.format(indice=indice, cambio=cambio,
-                                 acabados="" if cambia == "acabados" else " and finishes")
+    texto = CIERRE_EDICION.format(indice=indice, cambio=cambio,
+                                  acabados="" if cambia == "acabados" else " and finishes")
+    if ref.get("fijos") and cambia == "acabados":
+        texto += FIJOS_ACABADOS.format(indice=indice)
+    return texto
 
 
 # ------------------------------------------------------------ imagen base
@@ -719,12 +786,35 @@ PROMPT_BASE = (
     "furniture must be exactly where this description puts it, with the materials and "
     "colours it names, and nothing it does not name: {descripcion}. Before finishing, check "
     "the description item by item against the picture (what is on the left, what is on "
-    "the back wall, what is on the right, where the door is). The colours and materials "
+    "the back wall, what is on the right, where the door is). {nada_mas}The colours and materials "
     "named here WIN over any palette of the style (its references and its description): "
-    "take only the look and the rendering from the style, never its colours or finishes. Light: {luz}. {antes}Frame "
-    "it as a clear, level, eye-height view from the entrance that shows the whole layout, "
-    "as the reference shot every other shot of this place will be edited from. No people, "
-    "no text, no letters.")
+    "take only the look and the rendering from the style, never its colours or finishes. Light: {luz}. {antes}"
+    "{encuadre} No people, no text, no letters.")
+
+#: LO QUE NO SE NOMBRA NO ESTA (rama base-fiel, pruebas del 09, 11 y 12-11: un
+#: mueble de TV en la sala que nadie pedia). La tele y su mueble se nombran
+#: solo si la descripcion no habla de ninguna pantalla: una sala gamer o un
+#: producto que es una pantalla los pide (revision del arbitro).
+NADA_MAS = ("Add NOTHING the description{y_inicial} does not name: no extra furniture, door or "
+            "window{tele}. ")
+NADA_MAS_INICIAL = " or the starting state below"
+NADA_MAS_TELE = ", and no television or TV cabinet"
+_PANTALLAS = re.compile(r"\b(tv|tvs|televisi\w*|televisor\w*|tele|screens?|monitors?|"
+                        r"pantallas?|displays?)\b", re.IGNORECASE)
+
+#: El encuadre de la base de siempre (el sitio principal, o el unico)
+ENCUADRE_BASE = ("Frame it as a clear, level, eye-height view from the entrance that shows the "
+                 "whole layout, as the reference shot every other shot of this place will be "
+                 "edited from.")
+
+#: EL DE UN AMBIENTE SECUNDARIO de un recorrido o una clase (rama base-fiel,
+#: prueba real del 11-11): «desde la entrada» ponia la camara en la sala, que
+#: es por donde se entra a una cocina abierta, y la cocina salia dos veces con
+#: el sofa, la mesa y el mueble de TV delante. La camara va DENTRO del ambiente.
+ENCUADRE_AMBIENTE = ("Frame it as a clear, level, eye-height view taken from INSIDE this room, "
+                     "facing its main wall, that shows only this room: if it opens onto another "
+                     "room, that other room stays behind the camera and out of the frame. It is "
+                     "the reference shot every other shot of this room will be drawn from.")
 
 ANTES = {
     "objeto": "Show it in its INITIAL state, before anything changes. ",
@@ -776,7 +866,7 @@ def nota_base(nota):
     return NOTA_BASE.format(nota=nota) if nota else ""
 
 
-def prompt_imagen_base(espacio, relato, cabecera="", inicial=""):
+def prompt_imagen_base(espacio, relato, cabecera="", inicial="", ambiente=False):
     """El prompt de la imagen base generada de un sitio (vacio, estado inicial).
 
     `inicial` (o el de `relato`): como esta y donde lo que luego cambia."""
@@ -785,7 +875,15 @@ def prompt_imagen_base(espacio, relato, cabecera="", inicial=""):
     antes = ANTES.get((relato or {}).get("cambia") or "", "") \
         if (relato or {}).get("modo") == "espacio_que_cambia" else ""
     inicial = inicial_de(inicial or (relato or {}).get("inicial"))
-    if antes and inicial and (relato or {}).get("cambia") in ("objeto", "estado"):
+    con_inicial = bool(antes and inicial and (relato or {}).get("cambia") in ("objeto", "estado"))
+    if con_inicial:
         antes += INICIAL.format(inicial=inicial)
+    # LO QUE YA ESTA EN LA BASE (`inicial`) tambien cuenta como nombrado: si es
+    # una tele, la base no puede pedirla y prohibirla a la vez (revision del
+    # tren, 17-11, H1)
+    nombrado = descripcion + " " + luz + (" " + inicial if con_inicial else "")
+    nada_mas = NADA_MAS.format(y_inicial=NADA_MAS_INICIAL if con_inicial else "",
+                               tele="" if _PANTALLAS.search(nombrado) else NADA_MAS_TELE)
     return PROMPT_BASE.format(cabecera=_texto(cabecera, 400), descripcion=descripcion,
-                              luz=luz, antes=antes).strip()
+                              luz=luz, antes=antes, nada_mas=nada_mas,
+                              encuadre=ENCUADRE_AMBIENTE if ambiente else ENCUADRE_BASE).strip()

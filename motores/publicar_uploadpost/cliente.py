@@ -521,7 +521,22 @@ class ClienteUploadPost:
         "compartidos": ("shares", "share_count"),
         "guardados": ("saves", "saved", "favorites"),
         "alcance": ("reach",),
+        # METRICAS COMPLETAS (rama `metricas-completas`, 11-11-2026): lo que
+        # Upload-Post ya trae y no se guardaba. Las impresiones van APARTE de las
+        # vistas (veces que se ENSEÑÓ, no que se reprodujo); de TikTok, los
+        # seguidores que trajo el post y las visitas al perfil; de Instagram, lo
+        # que se vio del mismo Reel en Facebook.
+        "impresiones": ("impressions",),
+        "nuevos_seguidores": ("new_followers",),
+        "visitas_perfil": ("profile_views", "profileViews"),
+        "vistas_facebook": ("facebook_views",),
     }
+    #: Tiempo TOTAL visto (TikTok), en segundos: no es una cuenta de veces
+    CAMPOS_TIEMPO_TOTAL = ("total_time_watched",)
+    #: Cuántos puntos de la curva de retención se guardan como mucho
+    TOPE_CURVA = 120
+    #: Cuántas fuentes / tipos de público se guardan como mucho
+    TOPE_REPARTO = 12
 
     #: LA RETENCION (publicar-redes-2, 17-10-2026). Son DOS medidas distintas y
     #: van en campos distintos, porque no se pueden comparar ni promediar juntas:
@@ -534,16 +549,36 @@ class ClienteUploadPost:
     CAMPOS_FRACCION = ("full_video_watched_rate",)
     CAMPOS_PORCENTAJE = ("average_view_percentage",)
     CAMPOS_TIEMPO_MEDIO = ("average_time_watched", "average_view_duration_seconds")
+    #: Con vistas, no pueden ser 0 (ver `_cifras`)
+    SIN_CERO_CON_VISTAS = ("alcance", "impresiones", "tiempo_total_s", "media_vista", "tiempo_medio_s")
     #: Mas de 10 veces el video de media no es una cifra, es un error
     TOPE_MEDIA_VISTA = 10.0
 
     @staticmethod
-    def _numero(valor):
+    def _numero(valor, miles=False):
+        """Un número de lo que manda Upload-Post, o None. Acepta texto: «3»,
+        «0.184», «0,5» (coma decimal), «40%» (el signo se quita: la escala la
+        decide quien lo lee) y «1,234.5» (con las dos marcas). Con `miles`
+        (solo los RECUENTOS: vistas, me gusta…) también «1,234» y «1.234.567»;
+        nunca si el primer grupo empieza por 0 («0.881» es siempre 0,881). Lo
+        demás («1e3», «1_000», «- 5»), None (2.ª revisión, 12-11)."""
         if isinstance(valor, bool) or not isinstance(valor, (int, float)):
-            try:
-                valor = float(str(valor).strip()) if isinstance(valor, str) and valor.strip() else None
-            except ValueError:
+            if not isinstance(valor, str) or not valor.strip():
                 return None
+            texto = valor.strip().replace("\u00a0", "")
+            if texto.endswith("%"):
+                texto = texto[:-1].rstrip()
+            if re.fullmatch(r"-?[1-9]\d{0,2}(,\d{3})+\.\d+", texto):
+                texto = texto.replace(",", "")                 # 1,234.5
+            elif miles and re.fullmatch(r"-?[1-9]\d{0,2}(,\d{3})+", texto):
+                texto = texto.replace(",", "")                 # 1,234
+            elif miles and re.fullmatch(r"-?[1-9]\d{0,2}(\.\d{3})+(,\d+)?", texto):
+                texto = texto.replace(".", "").replace(",", ".")  # 1.234,5
+            elif re.fullmatch(r"-?\d+,\d+", texto):
+                texto = texto.replace(",", ".")                 # 0,5
+            if not re.fullmatch(r"-?\d+(\.\d+)?", texto, flags=re.ASCII):
+                return None
+            valor = float(texto)
         if valor is None or valor != valor or valor in (float("inf"), float("-inf")):
             return None
         return float(valor)
@@ -581,17 +616,162 @@ class ClienteUploadPost:
     def _cifras(cls, bruto):
         datos = cls._numeros(bruto)
         datos.update(cls._retencion(bruto))
+        datos.update(cls._detalle(bruto))
+        # con vistas, un 0 de alcance, impresiones o tiempo visto es el «no lo
+        # sé» de la red, no un cero (TikTok manda `reach: 0`; prueba del
+        # servidor, 12-11). La misma lista que `publicar.SIN_CERO_CON_VISTAS`
+        # solo con «0 vistas» de verdad un 0 de alcance es un cero; sin vistas
+        # todavía (TikTok las completa en horas), tampoco (2.ª revisión, 12-11)
+        vistas = datos.get("vistas")
+        if not (isinstance(vistas, (int, float)) and vistas <= 0):
+            for k in cls.SIN_CERO_CON_VISTAS:
+                if datos.get(k) == 0:
+                    datos[k] = None
         return datos
+
+    @staticmethod
+    def _primero(item, claves):
+        """El primer valor de `claves` que no es None ni vacío (un «second»
+        null no tapa el «time» de al lado)."""
+        for k in claves:
+            if item.get(k) not in (None, ""):
+                return item.get(k)
+        return None
+
+    @classmethod
+    def _escala_comun(cls, crudos, reparto=False):
+        """Porcentajes de UNA lista como fracciones (0..1). La escala se decide
+        una vez POR LISTA, no punto a punto (revision independiente, 11-11): si
+        algun valor pasa de 1, la lista viene en 0-100 y se dividen TODOS. Punto
+        a punto, el 1 % del final de una curva en 0-100 se leia como 100 % y la
+        curva volvia a subir. Lo que no es un numero >= 0 queda en None.
+        -> [fraccion|None] en el mismo orden"""
+        numeros = [cls._numero(v) for v in crudos]
+        numeros = [v if v is not None and v >= 0 else None for v in numeros]
+        # «0.5%» es medio por ciento, no la fracción 0,5: un texto con «%»
+        # dice que la lista está en 0-100 (2.ª revisión, 12-11)
+        con_signo = any(isinstance(v, str) and v.strip().endswith("%") for v in crudos)
+        # 1,5 y no 1: una lista 0-100 de verdad nunca tiene su maximo tan bajo
+        # (la curva empieza cerca de 100, un reparto suma cerca de 100), y una
+        # fraccion que se pasa un pelo de 1 (1,02) no divide la lista entera.
+        # Upload-Post las manda en fracciones (docs, get-analytics: «fractions
+        # of 1»); esto es por si algún día llegan en 0-100.
+        en_cien = con_signo or any(v is not None and v > 1.5 for v in numeros)
+        # un REPARTO de enteros que suma más de 1,5 ([1, 1]) solo puede estar en
+        # 0-100: en fracciones, dos enteros serían dos «100 %» (revisión, 12-11)
+        validos = [v for v in numeros if v is not None]
+        if reparto and not en_cien and len(validos) >= 2 and sum(validos) > 1.5 \
+                and all(float(v).is_integer() for v in validos):
+            en_cien = True
+        salida = []
+        for v in numeros:
+            if v is not None and en_cien:
+                v = v / 100
+            salida.append(round(v, 6) if v is not None and v <= 1 else None)
+        return salida
+
+    @classmethod
+    def _detalle(cls, bruto):
+        """Lo que no es una cuenta (rama `metricas-completas`): el tiempo total
+        visto, la CURVA de retencion de TikTok (que parte sigue viendo en cada
+        segundo), de donde vinieron las vistas y que publico lo vio. Cada red
+        trae lo suyo y con su forma: lo que no se entiende se deja fuera (None),
+        nunca se inventa.
+        -> {"tiempo_total_s", "curva", "mitad_s", "fuentes", "publico"}"""
+        bruto = bruto if isinstance(bruto, dict) else {}
+        total = None
+        vistas = next((x for x in (cls._numero(bruto.get(k), miles=True)
+                                   for k in cls.CAMPOS_METRICAS["vistas"]) if x), None)
+        medio = cls._numero(cls._primero(bruto, cls.CAMPOS_TIEMPO_MEDIO))
+        if medio is not None and not 0 <= medio < 86400:
+            medio = None                     # el mismo filtro que en _retencion
+        for suyo in cls.CAMPOS_TIEMPO_TOTAL:
+            # en texto, «297,613» puede ser miles o decimales: se lee de las
+            # dos formas y manda la que cuadra con vistas × tiempo medio; sin
+            # eso, miles (es una cifra grande) (3.ª revisión, 12-11)
+            a, b = cls._numero(bruto.get(suyo)), cls._numero(bruto.get(suyo), miles=True)
+            v = b if b is not None else a
+            if a is not None and b is not None and a != b and vistas and medio:
+                esperado = vistas * medio
+                v = min((a, b), key=lambda x: abs(x - esperado))
+            if v is not None and 0 <= v < 10 ** 10:
+                total = round(v, 1)
+                break
+        # En SEGUNDOS (docs de Upload-Post, get-analytics, comprobado el 12-11:
+        # 40.218 vistas × 7,4 s de media = 297.613). Si un día llegara en
+        # milisegundos, cuadraría mil veces por encima de vistas × tiempo medio:
+        # se pasa a segundos en vez de enseñar «mil veces más».
+        if total and vistas and medio and vistas > 0 and medio > 0 \
+                and total > 100 * vistas * medio:
+            total = round(total / 1000, 1)
+        curva, mitad = [], None
+        crudo = bruto.get("retention")
+        if isinstance(crudo, dict):
+            crudo = [{"second": k, "percentage": v} for k, v in crudo.items()]
+        if isinstance(crudo, list):
+            puntos = [p for p in crudo if isinstance(p, dict)]
+            segundos = [cls._numero(cls._primero(p, ("second", "time", "seconds"))) for p in puntos]
+            partes = cls._escala_comun([cls._primero(p, ("percentage", "rate", "value")) for p in puntos])
+            por_segundo = {}
+            for segundo, parte in zip(segundos, partes):
+                if segundo is None or parte is None or segundo < 0 or segundo > 86400:
+                    continue
+                # a la milésima: a la décima, el segundo 0,04 pisaba al 0 (12-11)
+                por_segundo[round(segundo, 3)] = parte      # un segundo repetido: manda el ultimo
+            curva = [[sg, round(pt, 4)] for sg, pt in sorted(por_segundo.items())]
+            # EN QUE SEGUNDO SE VA LA MITAD, con la curva ENTERA (antes de
+            # aligerarla): la pantalla lo dice en una frase y no puede mentir
+            mitad = next((sg for sg, pt in curva if pt <= 0.5), None)
+            if len(curva) > cls.TOPE_CURVA:
+                # se aligera repartiendo los puntos por TODO el video (no los
+                # primeros 120: un video de 200 s se cortaba en el segundo 119) y
+                # conservando siempre el ultimo
+                paso = -(-len(curva) // cls.TOPE_CURVA)
+                ligera = curva[::paso]
+                if ligera[-1] != curva[-1]:
+                    ligera = ligera[:cls.TOPE_CURVA - 1] + [curva[-1]]
+                curva = ligera
+
+        def reparto(crudo, claves):
+            if isinstance(crudo, dict):
+                crudo = [{"nombre": k, "percentage": v} for k, v in crudo.items()]
+            if not isinstance(crudo, list):
+                return None
+            items = [i for i in crudo if isinstance(i, dict)]
+            partes = cls._escala_comun([cls._primero(i, ("percentage", "value")) for i in items],
+                                       reparto=True)
+            salida = []
+            for item, parte in zip(items, partes):
+                nombre = next((str(item[k]) for k in claves if item.get(k) not in (None, "")), "")
+                if nombre and parte is not None:
+                    salida.append([nombre[:60], round(parte, 4)])
+            salida.sort(key=lambda x: -x[1])
+            return salida[:cls.TOPE_REPARTO] or None
+
+        return {"tiempo_total_s": total, "curva": curva or None,
+                "mitad_s": mitad if curva else None,
+                "fuentes": reparto(bruto.get("impression_sources"),
+                                   ("impression_source", "source", "nombre", "name")),
+                # «audience_type» es como lo llama Upload-Post (docs, 12-11)
+                "publico": reparto(bruto.get("audience_types"),
+                                   ("audience_type", "type", "nombre", "name"))}
+
+    #: Un recuento por encima de esto no es una cifra, es un error
+    TOPE_RECUENTO = 10 ** 12
 
     @classmethod
     def _numeros(cls, bruto):
+        """Los recuentos (vistas, me gusta…): numeros >= 0 y razonables; un
+        numero en texto («3») vale, un negativo o un 1e30 no (no se sumarian
+        bien en los totales de Resultados)."""
         bruto = bruto if isinstance(bruto, dict) else {}
         salida = {}
         for nuestro, suyos in cls.CAMPOS_METRICAS.items():
             valor = None
             for suyo in suyos:
-                if isinstance(bruto.get(suyo), (int, float)) and not isinstance(bruto.get(suyo), bool):
-                    valor = int(bruto[suyo])
+                v = cls._numero(bruto.get(suyo), miles=True)
+                if v is not None and 0 <= v < cls.TOPE_RECUENTO:
+                    valor = int(v)
                     break
             salida[nuestro] = valor
         return salida

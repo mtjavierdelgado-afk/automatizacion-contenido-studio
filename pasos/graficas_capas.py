@@ -53,6 +53,7 @@ MAX_CAPAS = 60
 MAX_FOTOS = 8
 MAX_LOGOS = 4
 MAX_TEXTO = 600
+MAX_ALT = 400
 MAX_PUNTOS = 12
 MAX_SOMBRAS = 4
 
@@ -70,6 +71,11 @@ _TESTIGO_VAR = {"kit:principal": "a", "kit:secundario": "b", "kit:oscuro": "d", 
 _DE_TESTIGO = {v: k for k, v in TESTIGOS.items()}
 
 TIPOS = ("texto", "imagen", "logo", "forma")
+#: Los tipos de lámina de un carrusel (graficas-3-carrusel). «blanco» es la que
+#: no sale de ninguna familia: «Volver a montar a todas» la deja como está.
+TIPOS_LAMINA = ("portada", "punto", "lista", "dato", "antes_despues", "pasos", "cita", "cierre", "blanco")
+#: Dónde NO sale una capa «en todas» (se calcula al pintar, por la posición).
+SALVO = ("primera", "ultima")
 _RE_ID = re.compile(r"^[a-z0-9]{1,12}$")
 _RE_ROL = re.compile(r"^[a-z0-9_]{0,20}$")
 _RE_REF = re.compile(r"^(?:#[0-9A-F]{6}|kit:(?:principal|secundario|oscuro|claro|acento)"
@@ -249,6 +255,18 @@ def _limpiar_capa(capa, vistos):
         limpia.update({"figura": figura, "puntos": puntos, "relleno": _relleno(capa.get("relleno")),
                        "borde": _borde(capa.get("borde")), "radio": _radio(capa.get("radio")),
                        "sombra": _sombras(capa.get("sombra"))})
+    # lo del carrusel (graficas-3-carrusel) solo se escribe si está: una pieza
+    # de siempre se guarda y se pinta exactamente igual que antes
+    enlace = str(capa.get("enlace") or "")
+    if _RE_ID.fullmatch(enlace):
+        limpia["enlace"] = enlace
+    salvo = capa.get("salvo")
+    if isinstance(salvo, list):
+        salvo = [s for s in SALVO if s in salvo]
+        if salvo:
+            limpia["salvo"] = salvo
+    if _bool(capa.get("solo_horizontal")):
+        limpia["solo_horizontal"] = True
     return limpia
 
 
@@ -266,6 +284,7 @@ def limpiar_doc(datos):
     if not isinstance(laminas, list) or not 1 <= len(laminas) <= MAX_LAMINAS:
         raise ErrorGraficas(f"una pieza tiene de 1 a {MAX_LAMINAS} láminas")
     vistos = set()
+    ids_lamina = set()
     limpias = []
     for lamina in laminas:
         capas = (lamina or {}).get("capas") if isinstance(lamina, dict) else None
@@ -282,9 +301,36 @@ def limpiar_doc(datos):
             raise ErrorGraficas(f"una lámina admite hasta {MAX_FOTOS} fotos")
         if sum(1 for c in capas if c["tipo"] == "logo") > MAX_LOGOS:
             raise ErrorGraficas(f"una lámina admite hasta {MAX_LOGOS} logos")
-        limpias.append({"capas": capas})
+        limpia = {"capas": capas}
+        # id, tipo y familia de la lámina: solo si llegan (o si hay varias
+        # láminas, el id), así una pieza de siempre se guarda igual
+        lid = str(lamina.get("id") or "")
+        if _RE_ID.fullmatch(lid) and lid not in ids_lamina:
+            limpia["id"] = lid
+            ids_lamina.add(lid)
+        if lamina.get("tipo") in TIPOS_LAMINA:
+            limpia["tipo"] = lamina["tipo"]
+        familia = lamina.get("familia")
+        if type(familia) is int and familia in G._PL.PLANTILLAS:
+            limpia["familia"] = familia
+        alt = " ".join(_RE_CONTROL.sub("", str(lamina.get("alt") or "")[:MAX_ALT * 2]).split())[:MAX_ALT]
+        if alt:
+            limpia["alt"] = alt
+        limpias.append(limpia)
+    if len(limpias) > 1:
+        # con varias láminas, cada una con su id (lo usan la tira del editor y
+        # la huella de lo ya pintado). Uno fijo por posición, no al azar: el
+        # mismo documento se limpia siempre igual
+        for n, limpia in enumerate(limpias, 1):
+            if "id" not in limpia:
+                lid = f"l{n}"
+                while lid in ids_lamina:
+                    lid += "x"
+                limpia["id"] = lid
+                ids_lamina.add(lid)
     origen = datos.get("origen") if isinstance(datos.get("origen"), dict) else {}
     plantilla = origen.get("plantilla")
+    envio = re.sub(r"[^0-9a-f]", "", str(origen.get("envio") or "")[:64])[:16]
     return {
         "version": VERSION, "formato": datos.get("formato") or G.FORMATO_DEFECTO,
         "nombre": " ".join(str(datos.get("nombre") or "")[:400].split())[:80],
@@ -296,7 +342,8 @@ def limpiar_doc(datos):
         "origen": {"plantilla": plantilla if type(plantilla) is int and plantilla in G._PL.PLANTILLAS else None,
                    "sello": re.sub(r"[^0-9a-f]", "", str(origen.get("sello") or "")[:64])[:16],
                    "guardado": re.sub(r"[^0-9a-f]", "", str(origen.get("guardado") or "")[:64])[:16],
-                   "nacida": _bool(origen.get("nacida"))},
+                   "nacida": _bool(origen.get("nacida")),
+                   **({"envio": envio} if envio else {})},
         "laminas": limpias,
     }
 
@@ -537,6 +584,31 @@ def _html_capa(capa, doc, kit, colores, f, imagen_de, logos, usadas, memo):
             f'style="{estilo}">{html_mod.escape(capa["txt"].strip())}</div>')
 
 
+def es_vertical(f):
+    """Historias y TikTok (9:16): ahí no se pinta lo marcado «solo_horizontal»
+    (el número y el «Desliza →» de un carrusel)."""
+    return f["H"] / f["W"] > 1.7
+
+
+def capas_de_lamina(doc, lamina, f):
+    """Las capas de una lámina tal como se pintan: sin las que su posición
+    excluye («salvo» primera o última, «solo_horizontal» en vertical) y con
+    {n}/{total} puestos. Con una sola lámina, {n} y {total} se dejan tal cual:
+    una pieza de siempre nunca cambia."""
+    total = len(doc["laminas"])
+    salida = []
+    for c in doc["laminas"][lamina]["capas"]:
+        salvo = c.get("salvo") or ()
+        if ("primera" in salvo and lamina == 0) or ("ultima" in salvo and lamina == total - 1):
+            continue
+        if c.get("solo_horizontal") and es_vertical(f):
+            continue
+        if total > 1 and c["tipo"] == "texto" and "{" in c["txt"]:
+            c = dict(c, txt=c["txt"].replace("{n}", str(lamina + 1)).replace("{total}", str(total)))
+        salida.append(c)
+    return salida
+
+
 def html_capas(doc, kit=None, imagen_de=None, logo=None, logo_oscuro=None, lamina=0):
     """El documento de una lámina. `imagen_de(nombre) -> ruta o None`."""
     doc = limpiar_doc(doc)
@@ -549,7 +621,7 @@ def html_capas(doc, kit=None, imagen_de=None, logo=None, logo_oscuro=None, lamin
     imagen_de = imagen_de or (lambda _n: None)
     memo = {}
     cuerpo = "".join(_html_capa(c, doc, kit, colores, f, imagen_de, (logo, logo_oscuro), usadas, memo)
-                     for c in doc["laminas"][lamina]["capas"])
+                     for c in capas_de_lamina(doc, lamina, f))
     faltan = [G.FUENTES[u][0] for u in usadas if not G.fuente_lista(u)]
     caras = "".join(G._css_de_fuente(u) for u in sorted(usadas))
     documento = (

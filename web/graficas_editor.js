@@ -391,9 +391,27 @@
 
   /* ================================================================ pintar */
 
+  /** `capas_de_lamina` del servidor: lo que la posición de la lámina quita
+   * («salvo» primera o última; «solo_horizontal» en historias y TikTok). */
+  function fueraDeLamina(c, i, total, f) {
+    const salvo = c.salvo || [];
+    if (salvo.includes('primera') && i === 0) return true;
+    if (salvo.includes('ultima') && i === total - 1) return true;
+    return !!c.solo_horizontal && f.H / f.W > 1.7;
+  }
+  function fueraDeAqui(c) { return fueraDeLamina(c, ED.lamina, ED.doc.laminas.length, formato()); }
+
+  /** El texto como se pinta: {n}/{total} puestos solo si hay varias láminas. */
+  function textoDeLamina(c, i, total) {
+    const txt = String(c.txt || '');
+    if (total < 2 || !txt.includes('{')) return txt;
+    return txt.split('{n}').join(String(i + 1)).split('{total}').join(String(total));
+  }
+  function textoVisto(c) { return textoDeLamina(c, ED.lamina, ED.doc.laminas.length); }
+
   /** El nodo de una capa: el mismo CSS que `_html_capa` del servidor. */
   function nodoCapa(c, col) {
-    if (c.oculto) return null;
+    if (c.oculto || fueraDeAqui(c)) return null;
     if (c.recorte) {
       const r = c.recorte;
       const dentro = nodoCapa(Object.assign({}, c, { recorte: null, x: c.x - r.x, y: c.y - r.y }), col);
@@ -472,7 +490,7 @@
         s += cssSombras(c.sombra, col, 'box-shadow') + cssSombras(c.sombra_texto, col, 'text-shadow');
         n = el('div');
         n.style.cssText = s;
-        n.textContent = String(c.txt).trim();
+        n.textContent = textoVisto(c).trim();
         if (c.ajusta) n.dataset.ajusta = '1';
       }
     }
@@ -2105,7 +2123,7 @@
   window.EditorCapas = {
     abrir, version: 1, _estado: () => ED,
     // para pasos/prueba_graficas_editor.py: que la pantalla haga las mismas cuentas que el servidor
-    _cuentas: { f6, luz, tintaPara, coloresFinales, resolver, cssColor, cssRelleno, cssBorde, cssRadio, cssSombras, cssCaja,
+    _cuentas: { fueraDeLamina, textoDeLamina, f6, luz, tintaPara, coloresFinales, resolver, cssColor, cssRelleno, cssBorde, cssRadio, cssSombras, cssCaja,
       LIMITES, CAMPOS_DE_MUESTRA },
   };
 }());

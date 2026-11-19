@@ -29,9 +29,63 @@ def _por_rol(pg, rol):
     return next((c for c in _capas(pg) if c["rol"] == rol), None)
 
 
-def _centro(pg, selector):
-    caja = pg.p.locator(selector).first.bounding_box()
-    return caja["x"] + caja["width"] / 2, caja["y"] + caja["height"] / 2
+def _esperar_js(pg, expresion, segundos=20, arg=None):
+    try:
+        pg.p.wait_for_function(expresion, arg=arg, timeout=segundos * 1000)
+        return True
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+# El editor está «quieto»: nada arrastrándose, ninguna letra a medio llegar y nada guardándose.
+QUIETO = """() => { const e = window.EditorCapas && EditorCapas._estado();
+  return !!e && !e.arrastre && !e.guardando && Object.values(e.letras).every(v => v !== 'cargando'); }"""
+
+# El centro de un elemento, cuando lleva dos fotogramas sin moverse y (si se pide) es lo que
+# de verdad hay encima en ese punto. Así no se pulsa donde ESTABA un asa (17-11, en el
+# servidor: el giro cayó en un hueco y, con Mayús, eso es un recuadro que suelta la selección).
+PUNTO = """([sel, encima]) => { const n = document.querySelector(sel);
+  const e = window.EditorCapas && EditorCapas._estado();
+  if (!n || !e || e.arrastre || Object.values(e.letras).some(v => v === 'cargando')) { window.__pt = null; return false; }
+  let r = n.getBoundingClientRect();
+  if (r.top < 0 || r.left < 0 || r.bottom > innerHeight || r.right > innerWidth) {
+    n.scrollIntoView({ block: 'center', inline: 'center' }); window.__pt = null; return false; }
+  const p = [r.left + r.width / 2, r.top + r.height / 2], antes = window.__pt;
+  window.__pt = p;
+  if (!antes || Math.abs(antes[0] - p[0]) > 0.5 || Math.abs(antes[1] - p[1]) > 0.5) return false;
+  if (encima) { const t = document.elementFromPoint(p[0], p[1]); if (!t || !(t === n || n.contains(t))) return false; }
+  return p; }"""
+
+
+def _quieto(pg, segundos=20):
+    return _esperar_js(pg, QUIETO, segundos)
+
+
+def _punto(pg, selector, encima=True, segundos=20):
+    """El sitio donde pulsar `selector`, ya quieto; si no llega, falla con lo que hay debajo."""
+    try:
+        h = pg.p.wait_for_function(PUNTO, arg=[selector, encima], polling="raf", timeout=segundos * 1000)
+        return tuple(h.json_value())
+    except Exception:                                        # noqa: BLE001
+        debajo = pg.p.evaluate("""sel => { const n = document.querySelector(sel); if (!n) return 'no está';
+          const r = n.getBoundingClientRect(); const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return t ? (t.className || t.tagName) : 'nada'; }""", selector)
+        ok(False, f"{selector} no se queda quieto ni a la vista (debajo: {debajo})")
+        raise
+
+
+def _elegida(pg, cid):
+    return _esperar_js(pg, "id => { const e = EditorCapas._estado(); return e.sel.length === 1 && e.sel[0] === id"
+                           " && !!document.querySelector('.ce-marcas .ce-elegida'); }", 5, arg=cid)
+
+
+def _elegir(pg, cid):
+    """Deja elegida SOLO la capa `cid` (por la lista de capas, que no depende de qué tape a qué)."""
+    if pg.p.evaluate("id => { const e = EditorCapas._estado(); return e.sel.length === 1 && e.sel[0] === id && !e.editando; }", cid):
+        return _elegida(pg, cid)
+    _quieto(pg)
+    pg.p.locator(f".ce-capas [data-id='{cid}'] .ce-capa-nombre").click()
+    return _elegida(pg, cid)
 
 
 def _arrastrar(pg, x0, y0, x1, y1, pasos=6, tecla=None):
@@ -43,15 +97,7 @@ def _arrastrar(pg, x0, y0, x1, y1, pasos=6, tecla=None):
     pg.p.mouse.up()
     if tecla:
         pg.p.keyboard.up(tecla)
-    pg.p.wait_for_timeout(150)
-
-
-def _esperar_js(pg, expresion, segundos=20):
-    try:
-        pg.p.wait_for_function(expresion, timeout=segundos * 1000)
-        return True
-    except Exception:                                        # noqa: BLE001
-        return False
+    _quieto(pg)
 
 
 def _png_de_uri(uri):
@@ -87,7 +133,8 @@ def graficas_2_editor(navegador, datos):
 
     # 1. LA PANTALLA PINTA LO MISMO QUE EL PNG (a tamaño real: zoom 100 %)
     pg.p.evaluate("() => { EditorCapas._estado().zoom = 1; window.dispatchEvent(new Event('resize')); }")
-    pg.p.wait_for_timeout(800)
+    _esperar_js(pg, "() => document.querySelector('.ce-lienzo').clientWidth === 1080", 10)
+    _quieto(pg)
     ancho = pg.p.evaluate("() => document.querySelector('.ce-lienzo').clientWidth")
     ok(ancho == 1080, f"a zoom 100 % el lienzo mide lo que la pieza ({ancho} px)")
     pantalla = pg.p.locator(".ce-lienzo").screenshot()
@@ -107,15 +154,16 @@ def graficas_2_editor(navegador, datos):
         ok(False, f"comparar la pantalla con el PNG: {fallo}")
     ok(isinstance(vista.get("lineas"), dict) and vista["lineas"], "la vista dice cuántas líneas ocupa cada texto")
     pg.p.locator(".ce-barra button[title='Que quepa entero']").click()
-    pg.p.wait_for_timeout(400)
+    _esperar_js(pg, "() => document.querySelector('.ce-lienzo').clientWidth < 1080", 10)
 
     # 2. ELEGIR Y MOVER, CON IMÁN; DESHACER Y REHACER
     titulo = _por_rol(pg, "titulo")
     ok(titulo is not None, "el titular es una capa")
-    sel_t = f".ce-lienzo [data-c='{titulo['id']}']"
-    x, y = _centro(pg, sel_t)
+    tid = titulo["id"]
+    sel_t = f".ce-lienzo [data-c='{tid}']"
+    x, y = _punto(pg, sel_t)
     pg.p.mouse.click(x, y)
-    ok(pg.esperar(".ce-marcas .ce-elegida", segundos=3), "pulsar una capa la elige (con su recuadro)")
+    ok(_elegida(pg, tid), "pulsar una capa la elige (con su recuadro)")
     ok(pg.esperar(".ce-der h2", "Texto", 3), "y enseña sus propiedades")
     antes = _por_rol(pg, "titulo")
     _arrastrar(pg, x, y, x + 60, y + 40)
@@ -128,19 +176,20 @@ def graficas_2_editor(navegador, datos):
     pg.p.keyboard.press("Control+y")
     ok(abs(_por_rol(pg, "titulo")["x"] - despues["x"]) < 1e-6, "Ctrl+Y la vuelve a mover")
     pasos = pg.p.evaluate("() => EditorCapas._estado().hist.length")
-    pg.p.mouse.click(x + 60, y + 40)
+    pg.p.mouse.click(*_punto(pg, ".ce-marcas .ce-elegida"))
+    _quieto(pg)
     ok(pg.p.evaluate("() => EditorCapas._estado().hist.length") == pasos, "pulsar sin mover no cuenta como un cambio")
     # el imán: cerca del centro se pega al centro
+    ok(_elegir(pg, tid), "el titular sigue elegido")
+    sx, sy = _punto(pg, ".ce-marcas .ce-elegida")
     lienzo = pg.p.locator(".ce-lienzo").bounding_box()
-    k = pg.p.locator(".ce-marcas .ce-elegida").bounding_box()
-    cx_capa = k["x"] + k["width"] / 2
     objetivo = lienzo["x"] + lienzo["width"] / 2 + 3
-    sx, sy = _centro(pg, ".ce-marcas .ce-elegida")
     pg.p.mouse.move(sx, sy)
     pg.p.mouse.down()
-    pg.p.mouse.move(sx + (objetivo - cx_capa), sy + 1, steps=8)
+    pg.p.mouse.move(objetivo, sy + 1, steps=8)
     guias = pg.p.locator(".ce-guia").count()
     pg.p.mouse.up()
+    _quieto(pg)
     k = pg.p.locator(".ce-marcas .ce-elegida").bounding_box()
     ok(guias > 0, "al arrastrar salen las guías")
     ok(abs(k["x"] + k["width"] / 2 - (lienzo["x"] + lienzo["width"] / 2)) < 1.5, "y el imán la pega al centro")
@@ -148,7 +197,8 @@ def graficas_2_editor(navegador, datos):
     x_antes = _por_rol(pg, "titulo")["x"]
     pg.p.keyboard.press("ArrowRight")
     pg.p.keyboard.press("Shift+ArrowRight")
-    pg.p.wait_for_timeout(600)
+    _esperar_js(pg, "([id, x0]) => { const c = EditorCapas._estado().doc.laminas[0].capas.find(c => c.id === id);"
+                    " return Math.abs((c.x - x0) / 100 * 1080 - 11) < 0.05; }", 5, arg=[tid, x_antes])
     ok(abs((_por_rol(pg, "titulo")["x"] - x_antes) / 100 * 1080 - 11) < 0.05, "las flechas mueven 1 px y 10 con Mayús")
     # las teclas del editor no llegan a los atajos del Studio (árbitro, 12-11)
     pg.p.evaluate("() => { window.__teclasStudio = 0; document.addEventListener('keydown', () => { window.__teclasStudio++; }); }")
@@ -156,44 +206,52 @@ def graficas_2_editor(navegador, datos):
         pg.p.keyboard.press(tecla)
     pg.p.locator(".ce-der input, .ce-der textarea").first.press("Escape")
     ok(pg.p.evaluate("() => window.__teclasStudio") == 0, "las teclas del editor no llegan a los atajos del Studio")
-    pg.p.wait_for_timeout(500)
-    pg.p.mouse.click(*_centro(pg, sel_t))
+    _quieto(pg)
 
     # 3. ASAS: la esquina de un texto cambia la letra; el lado, el ancho
+    ok(_elegir(pg, tid), "el titular vuelve a estar elegido")
     tam0, w0 = _por_rol(pg, "titulo")["tam"], _por_rol(pg, "titulo")["w"]
-    ax, ay = _centro(pg, ".ce-asa-se")
+    ax, ay = _punto(pg, ".ce-marcas .ce-asa-se")
     _arrastrar(pg, ax, ay, ax + 40, ay + 20)
     t = _por_rol(pg, "titulo")
     ok(t["tam"] > tam0 * 1.03 and t["w"] > w0, f"la esquina de un texto agranda la letra y la caja ({tam0} -> {t['tam']}, {w0} -> {t['w']})")
-    ax, ay = _centro(pg, ".ce-asa-e")
+    ok(_elegir(pg, tid), "y sigue elegido")
+    ax, ay = _punto(pg, ".ce-marcas .ce-asa-e")
     tam1, w1 = t["tam"], t["w"]
     _arrastrar(pg, ax, ay, ax - 50, ay)
     t = _por_rol(pg, "titulo")
     ok(t["w"] < w1 and abs(t["tam"] - tam1) < 1e-6, "el lado de un texto solo cambia el ancho")
 
     # 4. GIRAR (con Mayús, de 15 en 15)
-    gx, gy = _centro(pg, ".ce-girar")
+    ok(_elegir(pg, tid), "el titular sigue elegido antes de girar")
+    gx, gy = _punto(pg, ".ce-marcas .ce-girar")
     k = pg.p.locator(".ce-marcas .ce-elegida").bounding_box()
     _arrastrar(pg, gx, gy, k["x"] + k["width"] + 80, k["y"] + k["height"] / 2, tecla="Shift")
     giro = _por_rol(pg, "titulo")["giro"]
     ok(giro and abs(giro / 15 - round(giro / 15)) < 1e-6, f"girar con Mayús va de 15 en 15° ({giro}°)")
+    ok(_elegida(pg, tid), "y el titular sigue elegido después de girar")
 
     # 5. ESCRIBIR EN EL LIENZO (doble clic)
-    x, y = _centro(pg, ".ce-marcas .ce-elegida")
+    x, y = _punto(pg, ".ce-marcas .ce-elegida")
     pg.p.mouse.dblclick(x, y)
     ok(pg.esperar(".ce-lienzo .ce-escribiendo", segundos=3), "doble clic en un texto deja escribirlo ahí")
     pg.p.keyboard.type("Hola de nuevo")
     pg.p.keyboard.press("Control+Enter")
     ok(_por_rol(pg, "titulo")["txt"] == "Hola de nuevo", "lo escrito queda en la capa")
-    pg.p.mouse.dblclick(*_centro(pg, ".ce-marcas .ce-elegida"))
+    ok(_elegir(pg, tid), "el titular sigue elegido tras escribir")
+    pg.p.mouse.dblclick(*_punto(pg, ".ce-marcas .ce-elegida"))
+    ok(pg.esperar(".ce-lienzo .ce-escribiendo", segundos=3), "otro doble clic vuelve a dejar escribir")
     pg.p.keyboard.type("se descarta")
     pg.p.keyboard.press("Escape")
     ok(_por_rol(pg, "titulo")["txt"] == "Hola de nuevo", "Escape deja el texto como estaba")
     # una letra o una foto que llega mientras se escribe repinta el lienzo: no corta la edición (árbitro, 12-11)
-    pg.p.mouse.dblclick(*_centro(pg, ".ce-marcas .ce-elegida"))
+    ok(_elegir(pg, tid), "el titular sigue elegido tras Escape")
+    pg.p.mouse.dblclick(*_punto(pg, ".ce-marcas .ce-elegida"))
+    ok(pg.esperar(".ce-lienzo .ce-escribiendo", segundos=3), "y otra vez")
     pg.p.keyboard.type("ABC")
-    pg.p.evaluate("() => window.dispatchEvent(new Event('resize'))")
-    pg.p.wait_for_timeout(300)
+    # el repinte llega en el siguiente fotograma: se espera a él, no a un tiempo
+    pg.p.evaluate("() => new Promise(ok => { window.dispatchEvent(new Event('resize'));"
+                  " requestAnimationFrame(() => requestAnimationFrame(ok)); })")
     pg.p.keyboard.type("XYZ")
     ok(pg.p.evaluate("() => EditorCapas._estado().editando") is not None, "repintar mientras se escribe no corta la edición")
     pg.p.keyboard.press("Control+Enter")
@@ -332,12 +390,12 @@ def graficas_2_editor(navegador, datos):
     # dos clics seguidos al abrir: un solo editor (árbitro, 12-11)
     pg.p.evaluate(f"() => {{ abrirEditorCapas({json.dumps(cid)}, null); abrirEditorCapas({json.dumps(cid)}, null); }}")
     ok(pg.esperar("#editor-capas .ce-lienzo [data-c]", segundos=40), "abrir dos veces seguidas")
-    pg.p.wait_for_timeout(1500)
+    # se espera a que la apertura termine del todo (no a un tiempo): ahí ya no puede salir otro editor
+    _esperar_js(pg, "() => !ABRIENDO_CAPAS", 40)
+    _quieto(pg)
     ok(pg.p.locator("#editor-capas").count() == 1 and pg.p.evaluate("() => EditorCapas._estado().hist.length") == 1,
        "abre un solo editor, con su historial limpio")
     pg.pulsar(".ce-barra .ce-volver", "Volver")
-    pg.p.evaluate("() => window.dispatchEvent(new Event('resize'))")
-    pg.p.wait_for_timeout(300)
     ok(pg.esperar(".tarjeta-pieza .meta", "en capas", 15), "la lista dice qué piezas están en capas")
     pg.pulsar(".seccion-graficas .nueva-en-capas", "Diseño en capas")
     ok(pg.esperar("#editor-capas .ce-lienzo [data-c]", segundos=40), "«+ Diseño en capas» abre una pieza nueva")

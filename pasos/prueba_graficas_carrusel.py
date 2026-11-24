@@ -338,6 +338,240 @@ def descargas(carpeta):
         ok("Preparar las láminas" in str(fallo), "sin las láminas pintadas, pide prepararlas (y no pinta nada)")
 
 
+# ================================================================ las familias
+
+KITS = {
+    "de siempre": None,
+    "oscuro": {"colores": {"principal": "#0E7C66", "secundario": "#F2B705", "acento": "#E4572E", "oscuro": "#0B0B0F", "claro": "#FAFAF7"}},
+    # el que más cuesta: principal y secundario casi iguales, acento flojo
+    "poco contraste": {"colores": {"principal": "#7A6FF0", "secundario": "#8C83F2", "acento": "#C9C3FF", "oscuro": "#2B2A40", "claro": "#EEEDFB"}},
+}
+
+#: Lo que la pantalla mide de cada texto de una lámina: su caja de letras,
+#: si se sale de su caja, su letra, su color y el del fondo que tiene debajo.
+_MEDIR_LAMINA = r"""(() => {
+  const W = innerWidth, H = innerHeight;
+  const rgb = s => { const m = (s || '').match(/rgba?\(([^)]+)\)/); if (!m) return null;
+    const p = m[1].split(/[ ,\/]+/).filter(Boolean).map(Number); return { c: p.slice(0, 3), a: p.length > 3 ? p[3] : 1 }; };
+  const fondoDe = (n, x, y) => {
+    for (const e of document.elementsFromPoint(x, y)) {
+      if (e === n || n.contains(e)) continue;
+      const b = rgb(getComputedStyle(e).backgroundColor);
+      if (b && b.a > 0.5) return b.c;
+    }
+    return null;
+  };
+  const textos = [], adornos = [];
+  for (const n of document.querySelectorAll('[data-c]')) {
+    const cs = getComputedStyle(n);
+    if (n.tagName === 'DIV' && n.textContent.trim() && !n.querySelector('img')) {
+      const r = document.createRange(); r.selectNodeContents(n);
+      const b = r.getBoundingClientRect();
+      const fs = parseFloat(cs.fontSize);
+      const caja = { l: b.left, r: b.right, t: b.top + fs * 0.2, b: b.bottom - fs * 0.2 };
+      const propio = rgb(cs.backgroundColor);
+      textos.push({ id: n.dataset.c, rol: n.dataset.r, txt: n.textContent.trim().slice(0, 30), caja, fs,
+        // se sale si las letras (sin su aire) pasan de su caja, o si no caben a lo ancho
+        // (con una décima de la letra de margen: hay letras, como Anton, que dibujan por encima de su línea)
+        sale: n.scrollWidth > n.clientWidth + 2 || caja.b > n.getBoundingClientRect().bottom + fs * 0.12 || caja.t < n.getBoundingClientRect().top - fs * 0.12,
+        color: rgb(cs.color).c, fondo: propio && propio.a > 0.5 ? propio.c : fondoDe(n, (b.left + b.right) / 2, (b.top + b.bottom) / 2) });
+    }
+  }
+  return { W, H, textos };
+})()"""
+
+
+def _lum(c):
+    def k(v):
+        v /= 255
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    return 0.2126 * k(c[0]) + 0.7152 * k(c[1]) + 0.0722 * k(c[2])
+
+
+def _contraste(a, b):
+    la, lb = sorted((_lum(a), _lum(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def familias(pincel):
+    print("las 14 familias: cada tipo, en cada tamaño y con 3 Kits")
+    import graficas_carrusel as K                           # noqa: PLC0415
+    cat = K.catalogo()
+    ok(len(cat["familias"]) == 14 and [t["id"] for t in cat["tipos"]] == list(K.TIPOS), "14 familias y 8 tipos")
+    combinaciones, malas = 0, []
+    adornos_vistos = set()
+    formatos = [("v45", list(KITS)), ("c11", ["de siempre"]), ("h916", ["de siempre"]), ("h19", ["de siempre"])]
+    for fid, kits in formatos:
+        f = G.formato(fid)
+        horiz = f["W"] / f["H"] > 1.3
+        m = K._Lienzo(K.familia(1), fid, G.COLORES_DEFECTO, "").m
+        seguro = {"l": m["l"] / 100 * f["W"] - 1, "r": f["W"] - m["r"] / 100 * f["W"] + 1,
+                  "t": m["t"] / 100 * f["H"] - 1, "b": f["H"] - m["b"] / 100 * f["H"] + 1}
+        for kit_n in kits:
+            kit = KITS[kit_n]
+            for n in sorted(K.FAMILIAS):
+                for tipo in K.TIPOS[1:]:
+                    if horiz and tipo not in K.TIPOS_HORIZONTAL:
+                        try:
+                            K.lamina(n, tipo, fid, G.colores_finales(kit, {}), None, "Marca")
+                            malas.append(f"{n}/{tipo}/{fid}: en horizontal debía decir que no cabe")
+                        except C.ErrorGraficas:
+                            pass
+                        continue
+                    colores = G.colores_finales(kit, {})
+                    lam = K.lamina(n, tipo, fid, colores, None, "EstadoPlay")
+                    lam["capas"] += [dict(c) for c in K.en_todas(K._Lienzo(K.familia(n), fid, colores, "EstadoPlay"))]
+                    # el cierre se pinta como la ÚLTIMA lámina (lo «salvo última» no sale), el resto en medio
+                    laminas = [{"capas": []}, lam] + ([] if tipo == "cierre" else [{"capas": []}])
+                    doc = C.limpiar_doc({"version": 2, "formato": fid, "laminas": laminas})
+                    documento, ff, margenes, faltan = C.html_capas(doc, kit, lambda _n: None, None, None, 1)
+                    pincel.abrir(documento, ff["W"], ff["H"])
+                    pincel.evaluar(C._AJUSTAR)
+                    medida = pincel.evaluar(_MEDIR_LAMINA)
+                    combinaciones += 1
+                    adornos = [c for c in lam["capas"] if c["tipo"] == "forma" and c.get("nombre") in
+                               ("Círculo", "Sello", "Franja", "Barra", "Filete")]
+                    adornos_vistos |= {c["nombre"] for c in adornos}
+                    etiqueta = f"{K.familia(n)['nombre']} · {tipo} · {fid} · Kit {kit_n}"
+                    tx = medida["textos"]
+                    minimo = K.LETRA_MINIMA / 100 * min(ff["W"], ff["H"]) * 0.95
+                    for t in tx:
+                        c = t["caja"]
+                        if c["l"] < seguro["l"] or c["r"] > seguro["r"] or c["t"] < seguro["t"] or c["b"] > seguro["b"]:
+                            malas.append(f"{etiqueta}: «{t['txt']}» se sale de lo útil")
+                        if t.get("sale"):
+                            malas.append(f"{etiqueta}: «{t['txt']}» no cabe en su caja")
+                        if t["fs"] < minimo:
+                            malas.append(f"{etiqueta}: «{t['txt']}» con letra de {t['fs']:.0f} px (mínimo {minimo:.0f})")
+                        if t.get("fondo"):
+                            grande = t["fs"] >= 0.05 * min(ff["W"], ff["H"]) or t["rol"] in ("numero", "cifra", "titulo", "cita")
+                            if _contraste(t["color"], t["fondo"]) < (3 if grande else 4.5):
+                                malas.append(f"{etiqueta}: «{t['txt']}» con poco contraste ({_contraste(t['color'], t['fondo']):.1f}:1)")
+                        for a in adornos:
+                            ax0, ay0 = a["x"] / 100 * ff["W"], a["y"] / 100 * ff["H"]
+                            ax1, ay1 = ax0 + a["w"] / 100 * ff["W"], ay0 + a["h"] / 100 * ff["H"]
+                            if a["nombre"] == "Franja" and t["rol"] == "en_desliza":
+                                continue                  # el «Desliza» va sobre la franja, con su color
+                            dx = min(c["r"], ax1) - max(c["l"], ax0)
+                            dy = min(c["b"], ay1) - max(c["t"], ay0)
+                            if dx > 3 and dy > 3 and (a["figura"] != "elipse" or _dentro_de_elipse(c, ax0, ay0, ax1, ay1)):
+                                malas.append(f"{etiqueta}: «{t['txt']}» cruza el adorno «{a['nombre']}»")
+                    for i in range(len(tx)):
+                        for j in range(i + 1, len(tx)):
+                            a, b = tx[i]["caja"], tx[j]["caja"]
+                            dx = min(a["r"], b["r"]) - max(a["l"], b["l"])
+                            dy = min(a["b"], b["b"]) - max(a["t"], b["t"])
+                            if dx > 4 and dy > 4:
+                                malas.append(f"{etiqueta}: «{tx[i]['txt']}» pisa a «{tx[j]['txt']}»")
+    ok(combinaciones >= 500, f"{combinaciones} láminas pintadas y medidas")
+    for mala in malas[:25]:
+        print("   ", mala)
+    ok(not malas, f"ningún texto se sale, pisa a otro, cruza un adorno, se lee mal ni baja de la letra mínima ({len(malas)} fallos)")
+    ok(adornos_vistos >= {"Círculo", "Sello", "Franja", "Barra", "Filete"}, f"y se midieron todos los adornos ({sorted(adornos_vistos)})")
+
+
+def _dentro_de_elipse(c, x0, y0, x1, y1):
+    """¿Toca la caja `c` la elipse (no solo su recuadro)? Por el punto de la caja más cercano al centro."""
+    cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+    px, py = min(max(cx, c["l"]), c["r"]), min(max(cy, c["t"]), c["b"])
+    return ((px - cx) / rx) ** 2 + ((py - cy) / ry) ** 2 < 0.96
+
+
+def partir_y_montar(pincel):
+    print("partir un texto, montar por tipo y la nota del carrusel")
+    import graficas_carrusel as K                           # noqa: PLC0415
+    texto = ("5 errores al alquilar una consola\nY cómo evitarlos\n\n"
+             "No probar los mandos\nPruébalos antes.\n\n"
+             "Lo que no falta\n- Uno\n- Dos\n- Tres\n- Cuatro\n- Cinco\n- Seis\n- Siete\n\n"
+             "8 de 10\nfiestas terminan tarde\n\n"
+             "Otro punto\nCon su texto.")
+    piezas, avisos = K.partir(texto)
+    ok([p[0] for p in piezas] == ["portada", "punto", "lista", "lista", "dato", "punto", "cierre"],
+       f"cada párrafo a su tipo, y al final el cierre ({[p[0] for p in piezas]})")
+    ok(piezas[1][1]["numero"] == "01" and piezas[5][1]["numero"] == "02", "los puntos, numerados 01, 02…")
+    ok(piezas[2][1]["v5"] == "Cinco" and piezas[3][1]["v1"] == "Seis" and "(sigue)" in piezas[3][1]["titulo"],
+       "más de 5 viñetas se reparten en otra lámina")
+    ok(any("7 viñetas" in a for a in avisos), "y lo avisa")
+    ok(piezas[4][1]["cifra"] == "8 de 10", "«8 de 10» es un dato")
+    ok(not K._es_cifra("Hola 1 2 3 4 5 6 7 8") and K._es_cifra("-20 %") and K._es_cifra("S/ 190"), "qué es una cifra corta")
+    _p, av = K.partir("\n\n".join(f"Punto {i}\nTexto" for i in range(30)))
+    ok(len(_p) == 20 and _p[-1][0] == "cierre" and any("caben 20" in a for a in av), "más de 20 láminas: se cortan, con el cierre, y se avisa")
+    try:
+        K.partir("   ")
+        ok(False, "un texto vacío se rechaza")
+    except C.ErrorGraficas:
+        ok(True, "un texto vacío se rechaza")
+
+    base = C.limpiar_doc({"version": 2, "formato": "v45", "laminas": [{"capas": []}]})
+    doc, _a = K.carrusel_desde_texto(pincel, base, 6, texto, "sustituir", None, None, None, "Alba")
+    ok(len(doc["laminas"]) == 7 and doc["laminas"][0]["tipo"] == "portada" and doc["laminas"][0]["familia"] == 6,
+       "«Partir» hace el carrusel con la portada de la plantilla de la familia")
+    grupos = {c["enlace"] for lam in doc["laminas"] for c in lam["capas"] if c.get("enlace")}
+    ok(len(grupos) == 3 and all(sum(1 for c in lam["capas"] if c.get("enlace")) == 3 for lam in doc["laminas"]),
+       "con la marca, el número y «Desliza →» en todas (3 grupos)")
+    num = next(c for c in doc["laminas"][1]["capas"] if c.get("rol") == "en_numero")
+    ok(num["txt"] == "{n}/{total}" and num["salvo"] == ["primera"] and num.get("solo_horizontal"), "el número: no en la portada ni en historias")
+    des = next(c for c in doc["laminas"][1]["capas"] if c.get("rol") == "en_desliza")
+    ok(des["salvo"] == ["primera", "ultima", "pdf"], "«Desliza →»: ni en la portada, ni en la última, ni en el PDF")
+    titulo = next(c for c in doc["laminas"][1]["capas"] if c.get("rol") == "titulo")
+    ok(titulo["txt"] == "No probar los mandos", "el titular de cada punto, su primera línea")
+    ids = [c["id"] for lam in doc["laminas"] for c in lam["capas"]]
+    ok(len(ids) == len(set(ids)), "sin ids repetidos en todo el carrusel")
+
+    # añadir
+    doc2, _a = K.carrusel_desde_texto(pincel, doc, 6, "Nueva\nCon texto", "anadir", None, None, None, "Alba")
+    ok(len(doc2["laminas"]) == 8 and doc2["laminas"][-2]["capas"][-1].get("enlace") and doc2["laminas"][-1]["tipo"] == "cierre",
+       "«Añadir» las pone antes del cierre, con lo «en todas» de antes")
+    # volver a montar con otra familia: textos y lo añadido se conservan
+    lam = doc["laminas"][1]
+    lam["capas"].append({"tipo": "forma", "id": "mia9", "rol": "", "nombre": "Mía", "x": 1, "y": 1, "w": 5, "h": 5})
+    lam["capas"][-1]["relleno"] = {"color": "kit:acento"}
+    lam["alt"] = "Mi texto alternativo"
+    r = K.montar_lamina(pincel, doc, 1, 10, "punto", None, None, None, None, "Alba")
+    nueva = r["laminas"][1]
+    ok(nueva["familia"] == 10 and nueva["tipo"] == "punto", "«Volver a montar» con otra familia")
+    ok(next(c for c in nueva["capas"] if c.get("rol") == "titulo")["txt"] == "No probar los mandos", "conserva los textos")
+    ok(any(c["id"] == "mia9" for c in nueva["capas"]) and nueva.get("alt") == "Mi texto alternativo" and nueva.get("id") == lam.get("id"),
+       "y lo añadido, el texto alternativo y el id de la lámina")
+    en = [c for c in nueva["capas"] if c.get("rol") in K.ROLES_EN_TODAS]
+    ok(len(en) == 3 and all(c.get("enlace") for c in en) and all(c["fuente"]["id"] == "poppins" for c in en),
+       "lo «en todas» se queda en su grupo, con la letra de la familia nueva")
+    cita = K.nueva_lamina(pincel, doc, 1, 6, "cita", None, None, None, "Alba")
+    otra = K.montar_lamina(pincel, cita, 1, 10, "cita", None, None, None, None, "Alba")
+    ok(sum(1 for c in otra["laminas"][1]["capas"] if c.get("nombre") == "Comillas") == 1,
+       "volver a montar una cita no deja dos comillas (los adornos de la familia se rehacen)")
+    lista = K.montar_lamina(pincel, K.nueva_lamina(pincel, doc, 1, 6, "lista", None, None, None, "Alba"), 1, 6, "lista",
+                            None, None, None, None, "Alba")
+    ok(sum(1 for c in lista["laminas"][1]["capas"] if c.get("nombre") == "Número 1") == 1, "ni dos números en una lista")
+    r = K.montar_lamina(pincel, doc, 1, 6, "lista", None, None, None, None, "Alba")
+    ok(next(c for c in r["laminas"][1]["capas"] if c.get("rol") == "titulo")["txt"] == "No probar los mandos",
+       "cambiar de tipo lleva el titular a su sitio")
+    todas = K.montar_todas(pincel, dict(doc, laminas=doc["laminas"] + [{"id": "blanca", "tipo": "blanco", "capas": [
+        {"tipo": "forma", "id": "zz1", "x": 0, "y": 0, "w": 100, "h": 100}]}]), 14, None, None, None, "Alba")
+    ok(all(lam.get("familia") == 14 for lam in todas["laminas"][:-1]), "«… y todas» monta todas con la familia nueva")
+    ok(todas["laminas"][-1]["capas"][0]["id"] == "zz1", "menos las «En blanco»")
+    portada = K.montar_lamina(pincel, doc, 0, 3, "portada", None, None, None, None, "Alba")["laminas"][0]
+    ok(portada["tipo"] == "portada" and portada["familia"] == 3 and len([c for c in portada["capas"] if c.get("enlace")]) == 3,
+       "la portada se vuelve a montar con su plantilla, sin perder lo «en todas»")
+    nuevo = K.nueva_lamina(pincel, doc, 2, 6, "cita", None, None, None, "Alba")
+    ok(len(nuevo["laminas"]) == 8 and nuevo["laminas"][2]["tipo"] == "cita" and
+       len([c for c in nuevo["laminas"][2]["capas"] if c.get("enlace")]) == 3, "añadir una lámina de un tipo, con lo «en todas»")
+    try:
+        K.lamina(6, "nada", "v45", G.COLORES_DEFECTO)
+        ok(False, "un tipo que no existe se rechaza")
+    except C.ErrorGraficas:
+        ok(True, "un tipo que no existe se rechaza")
+
+    nota = K.avisos_del_carrusel(doc)
+    textos = " ".join(n["texto"] for n in nota)
+    ok(any(n["nivel"] == "bien" and "Portada corta" in n["texto"] for n in nota), "la nota: la portada corta, bien")
+    ok("Siguen textos de muestra" in textos, "avisa de los textos de muestra que siguen (el cierre)")
+    ok("Sin texto alternativo" in textos, "y de las láminas sin texto alternativo")
+    ok(not any(n["nivel"] == "mal" and "láminas." in n["texto"] for n in nota), "el número de láminas nunca es rojo")
+    doc["laminas"][1]["capas"] = [c for c in doc["laminas"][1]["capas"] if c.get("rol") != "titulo"]
+    ok("lámina 2 no tiene titular" in " ".join(n["texto"] for n in K.avisos_del_carrusel(doc)), "la segunda portada: sin titular, avisa")
+
+
 # ================================================================ por la API
 
 def _arrancar(carpeta):
@@ -459,6 +693,8 @@ def main():
     pincel = G.Pincel()
     try:
         pieza_de_siempre_igual(pincel)
+        partir_y_montar(pincel)
+        familias(pincel)
     finally:
         pincel.cerrar()
     carpeta = tempfile.mkdtemp(prefix="graficas_carrusel_")

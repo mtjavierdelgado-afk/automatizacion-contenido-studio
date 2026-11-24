@@ -1308,7 +1308,10 @@ def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=Non
         # nunca se corta nada en silencio: lo añadido iría al final y sería lo perdido
         raise ErrorGraficas(f"con esta plantilla serían {total} capas y caben {MAX_CAPAS}: "
                             f"quita {total - MAX_CAPAS} o elige otra plantilla")
-    doc["laminas"][lamina] = {"capas": abajo + nuevas + sueltas}
+    # la lámina conserva lo suyo (id, tipo, familia, texto alternativo): en un
+    # carrusel, «Volver a montar» no la convierte en otra
+    doc["laminas"][lamina] = dict({k: v for k, v in doc["laminas"][lamina].items() if k != "capas"},
+                                  capas=abajo + nuevas + sueltas)
     doc["formato"] = formato
     doc["origen"]["plantilla"] = plantilla
     return limpiar_doc(doc)

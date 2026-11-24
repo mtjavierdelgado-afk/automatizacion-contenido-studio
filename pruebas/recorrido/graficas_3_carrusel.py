@@ -191,7 +191,53 @@ def graficas_3_carrusel(navegador, datos):
     pg.sin_errores("la tarjeta del carrusel")
     pg.cerrar()
 
-    # 10. EN EL MÓVIL: la tira justo debajo del lienzo, sin salirse
+    # 10. LAS FAMILIAS: partir un texto, añadir por tipo, montar todas y la nota
+    pg = Pagina(navegador, datos, ancho=1600, alto=1100, nombre="carrusel_familias")
+    pg.js(f"elegirCliente({json.dumps(cid)});")
+    ok(pg.esperar(".seccion-graficas .nueva-en-capas", segundos=20), "otra pieza para las familias")
+    pg.pulsar(".seccion-graficas .nueva-en-capas", "Diseño en capas")
+    ok(pg.esperar("#editor-capas .ce-lienzo [data-c]", segundos=40), "se abre el editor")
+    ok(pg.esperar(".ce-der h3", "Familia de carrusel", 10), "el panel de la pieza ofrece la familia de carrusel")
+    pg.pulsar(".ce-der button", "Partir un texto en láminas")
+    ok(pg.esperar(".ce-modal .ce-partir-texto", segundos=3), "«Partir un texto en láminas» abre dónde pegarlo")
+    pg.p.locator(".ce-partir-texto").fill("5 errores al alquilar una consola\nY cómo evitarlos\n\n"
+                                         "No probar los mandos\nPruébalos antes de que lleguen.\n\n"
+                                         "Lo que no falta\n- Pantalla grande\n- 4 mandos\n- Juegos para varios\n\n"
+                                         "8 de 10\nfiestas con consola terminan tarde")
+    pg.pulsar(".ce-modal button", "Hacer el carrusel")
+    ok(_esperar_js(pg, "() => EditorCapas._estado().doc.laminas.length === 5", 30), "hace las láminas: portada, punto, lista, dato y cierre")
+    tipos = [lam.get("tipo") for lam in _laminas(pg)]
+    ok(tipos == ["portada", "punto", "lista", "dato", "cierre"], f"cada una de su tipo ({tipos})")
+    ok(_tira(pg) == 5, "la tira las enseña")
+    lams = _laminas(pg)
+    ok(len({c["enlace"] for lam in lams for c in lam["capas"] if c.get("enlace")}) == 3, "con la marca, el número y «Desliza» en todas")
+    pg.p.locator(".ce-tira-lamina").nth(1).click()
+    _esperar_js(pg, "() => EditorCapas._estado().lamina === 1", 3)
+    ok(_esperar_js(pg, "() => [...document.querySelectorAll('.ce-lienzo [data-c]')].some(n => n.textContent === '2/5')", 5),
+       "la lámina 2 lleva «2/5»")
+    pg.pulsar(".ce-tira-acciones button", "Lámina")
+    ok(pg.esperar(".ce-tira-menu button", "Antes / después", 3), "«＋ Lámina» ofrece los tipos de la familia")
+    pg.pulsar(".ce-tira-menu button", "Cita")
+    ok(_esperar_js(pg, "() => EditorCapas._estado().doc.laminas.length === 6 && EditorCapas._estado().doc.laminas[2].tipo === 'cita'", 30),
+       "«Cita» añade una lámina de cita detrás, con el estilo de la familia")
+    ok(len([c for c in _laminas(pg)[2]["capas"] if c.get("enlace")]) == 3, "y con lo de «en todas»")
+    pg.p.keyboard.press("Escape")
+    pg.p.select_option(".ce-der select[aria-label='Familia del carrusel']", "10")
+    pg.pulsar(".ce-der button", "y todas con esta familia")
+    ok(_esperar_js(pg, "() => EditorCapas._estado().doc.laminas.every(l => l.familia === 10)", 40),
+       "«… y todas con esta familia» las vuelve a montar con Neón nocturno")
+    ok(next(c for c in _laminas(pg)[1]["capas"] if c.get("rol") == "titulo")["txt"] == "No probar los mandos", "con sus textos")
+    pg.p.keyboard.press("Control+z")
+    ok(_esperar_js(pg, "() => EditorCapas._estado().doc.laminas[1].familia !== 10", 5), "Ctrl+Z vuelve a la familia de antes")
+    pg.p.keyboard.press("Control+y")
+    pg.pulsar(".ce-der button", "Revisar el carrusel")
+    ok(pg.esperar(".ce-nota-carrusel li", "Portada corta", 20), "«Revisar el carrusel» da la nota: la portada")
+    ok(pg.esperar(".ce-nota-carrusel li.mal", "textos de muestra", 3), "y avisa de los textos de muestra que siguen")
+    pg.captura("carrusel_familias")
+    pg.sin_errores("las familias de carrusel")
+    pg.cerrar()
+
+    # 11. EN EL MÓVIL: la tira justo debajo del lienzo, sin salirse
     pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="carrusel_movil")
     pg.js(f"elegirCliente({json.dumps(cid)});")
     ok(pg.esperar(".tarjeta-pieza .abrir-pieza", segundos=20), "en el móvil")

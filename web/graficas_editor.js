@@ -189,6 +189,7 @@
     }
     if (ED !== yo || yo.cerrado) return;
     montarPantalla();
+    catalogoCarrusel().then(() => { if (ED === yo) { pintarTira(); if (!ED.sel.length) pintarDerecha(); } }).catch(() => {});
     cargarLogos();
     cargarFotosDelDoc();
     cargarLetrasDelDoc();
@@ -1017,6 +1018,7 @@
       el('small', { clase: 'ce-pista' }, 'Recoloca todo con una plantilla y en el tamaño de ahora. Tus textos, la foto, los colores que elegiste a mano y lo que has añadido se conservan.'),
       el('label', { clase: 'ce-campo' }, el('span', {}, 'Plantilla'), elegir),
       boton('Volver a montar', { clase: 'ce-btn ce-ancho' }, () => volverAMontar(parseInt(elegir.value, 10)))));
+    panelFamilias(P);
 
     const col = colores();
     const propios = d.colores || {};
@@ -1685,6 +1687,7 @@
       const n = ED.doc.laminas.length;
       avisoPantalla(comoNueva ? 'Guardada como pieza nueva.'
         : (n > 1 ? `Guardado: las ${n} láminas ya están al día.` : 'Guardado: el PNG y el JPG ya están al día.'));
+      if (n > 1) avisarMuestras(yo);
       const quitar = ED.raiz.querySelector('.ce-conflicto');
       if (quitar) quitar.remove();
     } catch (e) {
@@ -2079,7 +2082,14 @@
       lista.appendChild(el('li', {}, b));
     });
     const lleno = L.length >= MAX_LAMINAS;
+    const f = formato();
+    const horiz = f.W / f.H > 1.3;
+    const tipos = ((ED.carCat || {}).tipos || []).filter(t => t.id !== 'portada');
     const menu = el('div', { clase: 'ce-tira-menu', hidden: true, role: 'menu' },
+      ...tipos.map(t => boton(t.nombre, { role: 'menuitem', disabled: horiz && !t.horizontal,
+        title: horiz && !t.horizontal ? 'No cabe bien en horizontal' : 'Con el estilo de la familia' },
+      () => { menu.hidden = true; anadirLaminaDeTipo(t.id); })),
+      tipos.length ? el('hr', {}) : null,
       boton('En blanco', { role: 'menuitem' }, () => { menu.hidden = true; anadirLamina(laminaEnBlanco()); }),
       boton('Copia de esta', { role: 'menuitem' }, () => { menu.hidden = true; duplicarLamina(); }));
     const mas = boton('＋ Lámina', { disabled: lleno, 'aria-haspopup': 'menu', title: lleno ? `Como mucho ${MAX_LAMINAS} láminas` : 'Añadir una lámina después de esta' },
@@ -2180,6 +2190,177 @@
       L.length > 1 ? el('div', { clase: 'ce-campo' }, el('span', {}, `¿Dónde caben ${L.length} láminas?`),
         el('ul', { clase: 'ce-donde-cabe' }, ...filas.map(([red, cuantas, cabe]) =>
           el('li', { clase: cabe ? 'si' : 'no' }, el('b', {}, `${cabe ? '✓' : '✗'} ${red}`), ` · ${cuantas}`)))) : null));
+  }
+
+
+  /* ---------------------------------------------------------------- familias (graficas-3-carrusel)
+   * Cada plantilla es una familia de carrusel: el servidor compone las láminas
+   * de cada tipo con su estilo (pasos/graficas_carrusel.py). Lo que devuelve
+   * sustituye al documento solo si no se ha cambiado nada mientras tanto. */
+
+  function familiaActual() {
+    const lam = ED.doc.laminas[ED.lamina];
+    return lam.familia || (ED.doc.laminas.find(l => l.familia) || {}).familia || ED.origen.plantilla || 1;
+  }
+
+  async function catalogoCarrusel() {
+    if (ED.carCat) return ED.carCat;
+    const yo = ED;
+    const r = await yo.opc.pedir(`${yo.opc.base}/api/graficas/carrusel/catalogo`);
+    yo.carCat = r;
+    return r;
+  }
+
+  /** Pide al servidor un documento nuevo (montar, añadir, partir) y lo pone si
+   * no se ha tocado nada mientras tanto. -> la respuesta, o null. */
+  async function docDelServidor(ruta, cuerpo, aviso) {
+    if (ED.montando) return null;
+    terminarEdicionTexto(true);
+    const yo = ED;
+    const antes = firmaDoc();
+    yo.montando = true;
+    avisoPantalla(aviso);
+    try {
+      const r = await yo.opc.pedir(yo.opc.api(yo.cid, ruta), { method: 'POST', cuerpo: Object.assign({ doc: docParaEnviar() }, cuerpo) });
+      if (ED !== yo) return null;
+      if (firmaDoc() !== antes) {
+        avisoPantalla('Has cambiado algo mientras se componía: no se ha aplicado. Vuelve a pulsarlo.', true);
+        return null;
+      }
+      ED.doc = r.doc;
+      delete ED.doc.origen;
+      asegurarIdsLaminas(ED.doc);
+      ED.lamina = Math.min(ED.lamina, ED.doc.laminas.length - 1);
+      ED.sel = [];
+      cargarFotosDelDoc();
+      cargarLetrasDelDoc();
+      return r;
+    } catch (e) {
+      if (ED === yo) avisoPantalla(`No se ha podido: ${e.message}`, true);
+      return null;
+    } finally {
+      yo.montando = false;
+    }
+  }
+
+  function repintarTodoElCarrusel() {
+    medirLienzo();
+    pintarTodo(); commit(); pintarPaneles(); pintarTira();
+    revisarZonas();
+  }
+
+  async function anadirLaminaDeTipo(tipo) {
+    if (ED.doc.laminas.length >= MAX_LAMINAS) { avisoPantalla(`Un carrusel tiene como mucho ${MAX_LAMINAS} láminas.`, true); return; }
+    const donde = ED.lamina + 1;
+    const r = await docDelServidor('/capas/lamina', { donde, familia: familiaActual(), tipo }, 'Componiendo la lámina…');
+    if (!r) return;
+    ED.lamina = donde;
+    repintarTodoElCarrusel();
+    avisoPantalla(`Lámina «${NOMBRE_TIPO[tipo]}» añadida con el estilo de la familia. Cambia sus textos con doble clic.`);
+  }
+
+  async function montarEstaLamina(n, tipo) {
+    const r = await docDelServidor('/capas/lamina', { lamina: ED.lamina, familia: n, tipo }, 'Volviendo a montar la lámina…');
+    if (!r) return;
+    repintarTodoElCarrusel();
+    avisoPantalla('Lámina recolocada: sus textos y lo que añadiste se conservan. Ctrl+Z vuelve a lo de antes.');
+  }
+
+  async function montarTodas(n) {
+    const r = await docDelServidor('/capas/montar-todas', { familia: n }, 'Volviendo a montar todas las láminas…');
+    if (!r) return;
+    repintarTodoElCarrusel();
+    avisoPantalla('Todas las láminas con la familia nueva (las «En blanco» se quedan como estaban). Ctrl+Z lo deshace.');
+  }
+
+  function abrirPartirTexto() {
+    const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Partir un texto en láminas' });
+    const cerrarModal = () => capaVista.remove();
+    const area = el('textarea', { clase: 'ce-partir-texto', rows: '12', maxlength: '12000', 'aria-label': 'El texto del carrusel',
+      placeholder: 'Pega aquí tu texto. Cada párrafo (separado por una línea en blanco) es una lámina:\n\nEl primero es la portada.\n\nUn párrafo con viñetas (- uno, - dos) es una lista.\n\n8 de 10\nUn párrafo que empieza por una cifra corta es un dato.\n\nLos demás, puntos numerados.' });
+    const hay = ED.doc.laminas.length;
+    const partir = async modo => {
+      const texto = area.value;
+      if (!texto.trim()) { area.focus(); return; }
+      cerrarModal();
+      const r = await docDelServidor('/capas/partir', { familia: familiaActual(), texto, modo }, 'Partiendo el texto en láminas…');
+      if (!r) return;
+      ED.lamina = 0;
+      repintarTodoElCarrusel();
+      const extra = (r.avisos || []).join(' ');
+      avisoPantalla(`${ED.doc.laminas.length} láminas. ${extra} Ctrl+Z vuelve a lo de antes.`.trim(), !!extra);
+    };
+    capaVista.appendChild(el('div', { clase: 'ce-modal-cuerpo ce-modal-partir' },
+      el('h2', {}, 'Partir un texto en láminas'),
+      el('p', { clase: 'ce-pista' }, 'Sin IA: cada párrafo es una lámina, con la primera línea de titular, y al final va el cierre. Caben 20 láminas.'),
+      area,
+      el('div', { clase: 'ce-botonera' },
+        boton(hay > 1 ? 'Sustituir las láminas' : 'Hacer el carrusel', { clase: 'ce-btn ce-primario' }, () => partir('sustituir')),
+        hay > 1 ? boton('Añadirlas (antes del cierre)', {}, () => partir('anadir')) : null,
+        boton('Cancelar', {}, cerrarModal))));
+    capaVista.addEventListener('pointerdown', ev => { if (ev.target === capaVista) cerrarModal(); });
+    ED.raiz.appendChild(capaVista);
+    area.focus();
+  }
+
+  async function revisarCarrusel(caja) {
+    caja.textContent = 'Revisando…';
+    const yo = ED;
+    try {
+      const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/capas/nota'), { method: 'POST', cuerpo: { doc: docParaEnviar() } });
+      if (ED !== yo) return;
+      const notas = r.nota.slice();
+      const f = formato();
+      if ((f.zL || f.zR) && !(f.H / f.W > 1.7)) {
+        notas.push({ nivel: 'aviso', texto: `En la cuadrícula del perfil (3:4) la portada se recorta por los lados: «Ver lo que tapa la red» enseña qué se pierde.` });
+      }
+      if (ED.avisos.length) notas.push({ nivel: 'mal', texto: `En esta lámina, ${ED.avisos.length} capa(s) quedan en lo que tapa la red o se salen.` });
+      caja.textContent = '';
+      caja.appendChild(el('ul', { clase: 'ce-nota-carrusel' }, ...notas.map(n =>
+        el('li', { clase: n.nivel }, el('b', {}, n.nivel === 'bien' ? '✓' : n.nivel === 'mal' ? '✗' : '!'), ' ', n.texto))));
+    } catch (e) {
+      caja.textContent = `No se ha podido revisar: ${e.message}`;
+    }
+  }
+
+  /** Tras guardar un carrusel: si siguen textos de muestra, se dice antes de
+   * que salga a ninguna parte (descargar o publicar). */
+  async function avisarMuestras(E) {
+    try {
+      const r = await E.opc.pedir(E.opc.api(E.cid, '/capas/nota'), { method: 'POST', cuerpo: { doc: Object.assign(copia(E.doc), { version: 2, origen: copia(E.origen) }) } });
+      const muestra = (r.nota || []).find(x => x.nivel === 'mal' && /muestra/.test(x.texto));
+      if (muestra && ED === E) avisoPantalla(`Guardado. Ojo: ${muestra.texto}`, true);
+    } catch (_) { /* la nota es una ayuda: si falla, no se dice nada */ }
+  }
+
+  /** La familia, el tipo, montar y partir, en el panel de la pieza. */
+  function panelFamilias(P) {
+    const cat = ED.carCat;
+    if (!cat) {
+      catalogoCarrusel().then(() => { if (ED && ED.der && !ED.sel.length) pintarDerecha(); }).catch(() => {});
+      return;
+    }
+    const lam = ED.doc.laminas[ED.lamina];
+    const f = formato();
+    const horiz = f.W / f.H > 1.3;
+    const fam = el('select', { 'aria-label': 'Familia del carrusel' }, ...cat.familias.map(x => el('option', { value: String(x.n) }, `${x.n} · ${x.nombre}`)));
+    fam.value = String(familiaActual());
+    const tipos = cat.tipos.filter(t => !horiz || t.horizontal);
+    const tipo = el('select', { 'aria-label': 'Tipo de esta lámina' }, ...tipos.map(t => el('option', { value: t.id }, t.nombre)));
+    tipo.value = tipos.some(t => t.id === lam.tipo) ? lam.tipo : (ED.lamina === 0 ? 'portada' : 'punto');
+    const nota = el('div', { clase: 'ce-pista' });
+    P.appendChild(grupo('Familia de carrusel',
+      el('small', { clase: 'ce-pista' }, 'Cada plantilla es una familia: sus láminas de dentro llevan su letra, su adorno y los colores del Kit.'),
+      el('label', { clase: 'ce-campo' }, el('span', {}, 'Familia'), fam),
+      el('label', { clase: 'ce-campo' }, el('span', {}, 'Tipo de esta lámina'), tipo),
+      horiz ? el('small', { clase: 'ce-pista' }, 'En horizontal no hay Lista, Antes / después ni Pasos: no caben bien.') : null,
+      el('div', { clase: 'ce-botonera' },
+        boton('Montar esta lámina', { title: 'Con esta familia y este tipo: sus textos van a su sitio' }, () => montarEstaLamina(parseInt(fam.value, 10), tipo.value)),
+        ED.doc.laminas.length > 1 ? boton('… y todas con esta familia', { title: 'Las «En blanco» se quedan como están' }, () => montarTodas(parseInt(fam.value, 10))) : null),
+      boton('Partir un texto en láminas…', { clase: 'ce-btn ce-ancho' }, abrirPartirTexto),
+      ED.doc.laminas.length > 1 ? boton('Revisar el carrusel', { clase: 'ce-btn ce-ancho', title: 'La nota del carrusel: portada, segunda portada, una idea por lámina, cierre, textos alternativos…' },
+        () => revisarCarrusel(nota)) : null,
+      nota));
   }
 
   /* ================================================================ ratón y dedo */

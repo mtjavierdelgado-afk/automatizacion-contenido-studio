@@ -25175,6 +25175,84 @@ def graficas_montar_capas(cid: str, peticion: Request, cuerpo: dict = Body(defau
     return {"doc": doc}
 
 
+# --- Las familias de carrusel (rama graficas-3-carrusel; pasos/graficas_carrusel.py).
+# Componen láminas con el estilo de cada plantilla. No guardan nada ni llaman a una IA.
+
+try:
+    import graficas_carrusel as GRAFICAS_CARRUSEL  # noqa: E402
+    ERROR_GRAFICAS_CARRUSEL = ""
+except Exception as _fallo_carrusel:  # noqa: BLE001
+    GRAFICAS_CARRUSEL = None
+    ERROR_GRAFICAS_CARRUSEL = f"{type(_fallo_carrusel).__name__}: {_fallo_carrusel}"
+
+
+def _contexto_carrusel(cid, peticion):
+    if GRAFICAS_CARRUSEL is None:
+        raise ErrorApi(503, f"Los carruseles de Gráficas no se han podido cargar: {ERROR_GRAFICAS_CARRUSEL}")
+    G, C, raiz, kit, logo, oscuro = _contexto_capas(cid, peticion)
+    marca = (_ficha_de_graficas(cid, peticion) or {}).get("nombre") or ""
+    return G, GRAFICAS_CARRUSEL, kit, logo, oscuro, marca
+
+
+def _entero(valor, que):
+    if type(valor) is not int:
+        raise ErrorApi(400, f"{que} no vale")
+    return valor
+
+
+@app.get("/api/graficas/carrusel/catalogo")
+def graficas_catalogo_carrusel():
+    """Las familias (una por plantilla) y los tipos de lámina."""
+    if GRAFICAS_CARRUSEL is None:
+        raise ErrorApi(503, f"Los carruseles de Gráficas no se han podido cargar: {ERROR_GRAFICAS_CARRUSEL}")
+    return GRAFICAS_CARRUSEL.catalogo()
+
+
+@app.post("/api/graficas/{cid}/capas/lamina")
+def graficas_lamina_carrusel(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Una lámina de un carrusel: `donde` (posición) añade una nueva del `tipo`
+    y la `familia` pedidos; `lamina` (índice) vuelve a montar esa. -> {doc}"""
+    G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
+    cuerpo = cuerpo or {}
+    n, tipo = _entero(cuerpo.get("familia"), "esa familia"), str(cuerpo.get("tipo") or "")
+    if "donde" in cuerpo:
+        donde = _entero(cuerpo.get("donde"), "ese sitio")
+        doc = _por_capas(G._con_turno, lambda p: K.nueva_lamina(p, cuerpo.get("doc"), donde, n, tipo, kit, logo, oscuro, marca))
+    else:
+        i = _entero(cuerpo.get("lamina", 0), "esa lámina")
+        doc = _por_capas(G._con_turno, lambda p: K.montar_lamina(p, cuerpo.get("doc"), i, n, tipo, kit, logo, oscuro,
+                                                                 cuerpo.get("textos"), marca))
+    return {"doc": doc}
+
+
+@app.post("/api/graficas/{cid}/capas/montar-todas")
+def graficas_montar_todas(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Volver a montar a todas» con una familia (las «En blanco» no se tocan)."""
+    G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
+    cuerpo = cuerpo or {}
+    n = _entero(cuerpo.get("familia"), "esa familia")
+    return {"doc": _por_capas(G._con_turno, lambda p: K.montar_todas(p, cuerpo.get("doc"), n, kit, logo, oscuro, marca))}
+
+
+@app.post("/api/graficas/{cid}/capas/partir")
+def graficas_partir_texto(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Partir un texto en láminas», sin IA: cada párrafo, una lámina."""
+    G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
+    cuerpo = cuerpo or {}
+    n = _entero(cuerpo.get("familia"), "esa familia")
+    doc, avisos = _por_capas(G._con_turno, lambda p: K.carrusel_desde_texto(
+        p, cuerpo.get("doc"), n, cuerpo.get("texto"), str(cuerpo.get("modo") or "sustituir"), kit, logo, oscuro, marca))
+    return {"doc": doc, "avisos": avisos}
+
+
+@app.post("/api/graficas/{cid}/capas/nota")
+def graficas_nota_carrusel(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """La nota del carrusel (sin IA): portada, segunda portada, una idea por
+    lámina, número, cierre, textos alternativos y textos de muestra."""
+    _G, K, _kit, _logo, _oscuro, _marca = _contexto_carrusel(cid, peticion)
+    return {"nota": _por_capas(K.avisos_del_carrusel, (cuerpo or {}).get("doc"))}
+
+
 @app.get("/api/graficas/{cid}/logo/{variante}")
 def graficas_logo(cid: str, variante: str, peticion: Request):
     """El logo del proyecto («normal») o el de fondo oscuro del Kit («oscuro»),

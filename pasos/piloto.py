@@ -187,6 +187,12 @@ def _guardar(raiz, datos):
         sobran = len(videos) - MAX_VIDEOS
         quedan = []
         for v in videos:
+            # un vídeo del piloto AUTOMÁTICO que aún tiene algo pendiente
+            # (esperando tu OK, programado…) no se olvida (rama piloto-2)
+            auto = v.get("auto") if isinstance(v.get("auto"), dict) else None
+            if auto and auto.get("paso") not in ("publicado", "no_publicar"):
+                quedan.append(v)
+                continue
             if sobran > 0 and v.get("estado") in TERMINADOS:
                 sobran -= 1
                 continue
@@ -346,6 +352,9 @@ def _nueva(pedido):
         # parada que la persona ha mirado (`tipo_parada`): tope, interruptor,
         # vistos u ocupado. Nunca todas a la vez.
         "tipo_parada": "", "saltar": "", "cancelar": False,
+        # rama piloto-2: el bloque del piloto AUTOMÁTICO (su hueco, sus redes,
+        # su paso). Los del nivel 1 no lo llevan y se pintan como siempre.
+        **({"auto": dict(p["auto"])} if isinstance(p.get("auto"), dict) else {}),
     }
 
 
@@ -387,7 +396,7 @@ def leer(raiz, vid):
 CAMPOS = ("estado", "etapa", "pid", "nombre", "trabajo", "mensaje", "porque", "donde",
           "revisar", "avisos", "portadas", "portada_puesta", "redes", "coste_usd",
           "previsto_usd", "empezado", "terminado", "intentos", "tipo_parada", "saltar",
-          "cancelar")
+          "cancelar", "auto")
 
 
 def cambiar(raiz, vid, **campos):
@@ -410,9 +419,48 @@ def cambiar(raiz, vid, **campos):
     raise ErrorPiloto("ese vídeo ya no está en el piloto", 404)
 
 
-def apuntar_revision(raiz, vid, que, donde=""):
-    """Añade una cosa a «Para revisar» de un vídeo (sin repetirla)."""
+class RevVieja(ErrorPiloto):
+    """La aprobación cambió en otro sitio: lleva la ficha de ahora."""
+
+    def __init__(self, ficha):
+        super().__init__("Esto se cambió en otro sitio hace un momento", 409)
+        self.ficha = ficha
+
+
+def cambiar_auto(raiz, vid, cambios, rev=None, si_paso=None):
+    """Cambia el bloque `auto` de un vídeo (rama piloto-2), de una vez y bajo
+    el cerrojo del piloto. Con `rev` (el que vio la pantalla), si alguien lo
+    cambió entre medias -> RevVieja. Con `si_paso` (tupla), solo si el paso
+    sigue siendo uno de esos; si no, no toca nada y devuelve None. Sube `rev`.
+    -> la ficha"""
+    _vid(vid)
+    with _LOCK:
+        datos = _leer(raiz)
+        for v in datos["videos"]:
+            if v.get("id") != vid:
+                continue
+            auto = v.get("auto")
+            if not isinstance(auto, dict):
+                raise ErrorPiloto("ese vídeo no es del piloto automático", 409)
+            if rev is not None and int(rev) != int(auto.get("rev") or 0):
+                raise RevVieja(dict(v))
+            if si_paso is not None and auto.get("paso") not in si_paso:
+                return None
+            auto = dict(auto, **cambios)
+            auto["rev"] = int(auto.get("rev") or 0) + 1
+            v["auto"] = auto
+            _guardar(raiz, datos)
+            return dict(v)
+    raise ErrorPiloto("ese vídeo ya no está en el piloto", 404)
+
+
+def apuntar_revision(raiz, vid, que, donde="", tipo=""):
+    """Añade una cosa a «Para revisar» de un vídeo (sin repetirla). `tipo`
+    (rama piloto-2) dice si frena la publicación sola del nivel 3: ver
+    `piloto_auto.TIPOS_QUE_BLOQUEAN`; sin tipo, frena."""
     linea = {"que": str(que)[:300], "donde": str(donde or "")[:80]}
+    if tipo:
+        linea["tipo"] = str(tipo)[:40]
     with _LOCK:
         datos = _leer(raiz)
         for v in datos["videos"]:

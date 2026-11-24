@@ -465,18 +465,27 @@ def quitar_unidad(raiz, cid, gid, indice, vid=None, anterior=None):
             _guardar(raiz, datos)
 
 
-def limpiar_pendientes(raiz, vids_vivos):
-    """Las entradas «pendiente» (apuntadas antes de encolar) sin ningún vídeo
-    del piloto: el servicio se reinició entre medias. Se marcan devueltas para
-    que el encargo vuelva a la lista. -> cuántas"""
+def limpiar_pendientes(raiz, fichas_piloto):
+    """Las entradas «pendiente» (apuntadas justo antes de encolar) que quedaron
+    así por un reinicio entre medias. Si el encargo SÍ tiene un vídeo en el
+    piloto, se le pone el id de ese vídeo (no se devuelve: se haría dos veces);
+    si no tiene ninguno, se marca devuelto para que vuelva a la lista. -> cuántas"""
+    por_unidad = {}
+    for f in fichas_piloto or []:
+        por_unidad[clave_unidad(f.get("cid"), f.get("gid"), f.get("indice"))] = f.get("id")
     cuantas = 0
     with _LOCK:
         datos = _leer(raiz)
-        for entrada in datos["historial"].values():
-            if isinstance(entrada, dict) and entrada.get("vid") == "pendiente" \
-                    and not entrada.get("devuelto"):
+        for clave, entrada in datos["historial"].items():
+            if not isinstance(entrada, dict) or entrada.get("vid") != "pendiente":
+                continue
+            if por_unidad.get(clave):
+                entrada["vid"] = por_unidad[clave]
+            elif not entrada.get("devuelto"):
                 entrada["devuelto"] = True
-                cuantas += 1
+            else:
+                continue
+            cuantas += 1
         if cuantas:
             _guardar(raiz, datos)
     return cuantas

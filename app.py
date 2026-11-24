@@ -25169,7 +25169,7 @@ def _auto_vuelta():
         # un reinicio entre apuntar el encargo y encolarlo lo dejaría fuera
         # para siempre: el que sigue «pendiente» sin ficha vuelve a la lista
         try:
-            AUTO.limpiar_pendientes(raiz, {f["id"] for f in PILOTO.listar(raiz)})
+            AUTO.limpiar_pendientes(raiz, PILOTO.listar(raiz))
         except Exception:                                   # noqa: BLE001
             pass
         preguntar = False

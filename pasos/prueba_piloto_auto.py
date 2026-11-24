@@ -759,9 +759,23 @@ def _escenarios(servidor, base, pet, reloj, llamadas, hechos_falsos, guiones, pi
           "y el encargo devuelto SE VUELVE A HACER (aunque el vídeo viejo esté terminado)")
     # ronda 2, m1: un «pendiente» sin ficha (reinicio a mitad) vuelve a la lista
     A.apuntar_unidad(base, "c1", "gq", 0, "pendiente")
-    A.limpiar_pendientes(base, set())
+    A.limpiar_pendientes(base, P.listar(base))
     ok(A.historial(base)[A.clave_unidad("c1", "gq", 0)]["devuelto"],
        "un encargo apuntado sin vídeo (reinicio entre apuntar y encolar) vuelve a la lista")
+    # ronda 3: CON vídeo (reinicio entre encolar y apuntar su id): no se devuelve
+    guiones["gp"] = {"estado": "pendiente"}
+    vp = P.encolar(base, {"cid": "c1", "gid": "gp", "estilo": "e1",
+                          "auto": {"cid": "c1", "gid": "gp", "indice": 0, "hueco": "2026-12-20T19:00",
+                                   "redes": ["tiktok"], "modo": 2, "paso": "preparando", "rev": 0}})
+    A.apuntar_unidad(base, "c1", "gp", 0, "pendiente")
+    vuelta()
+    entrada = A.historial(base)[A.clave_unidad("c1", "gp", 0)]
+    ok(entrada["vid"] == vp["id"] and not entrada["devuelto"],
+       "un «pendiente» CON vídeo se queda con su vídeo, sin devolverlo")
+    servidor.aprobar_no_publicar(vp["id"], pet, {"rev": P.leer(base, vp["id"])["auto"]["rev"], "devolver": False})
+    vuelta()
+    igual(len([f for f in autos() if f["gid"] == "gp"]), 1,
+          "y «No publicar» sin devolver NO lo vuelve a hacer")
     # m7: un aviso de Telegram no sube el rev (no da un «otro sitio» falso)
     rev = P.leer(base, v6["id"])["auto"]["rev"]
     servidor._auto_avisar(base, P.leer(base, v6["id"]), "razon", "prueba", clave="prueba_rev")

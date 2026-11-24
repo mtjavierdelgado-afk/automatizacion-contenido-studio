@@ -684,6 +684,63 @@ def _escenarios(servidor, base, pet, reloj, llamadas, hechos_falsos, guiones, pi
     igual(len(autos()), n + 1, "con «Hacer igualmente» sí se hace")
     igual(servidor._AUTO_BLOQUEOS.get("c1"), None, "y el freno desaparece (sin aviso viejo)")
 
+    print("\n  LO QUE ENCONTRÓ EL ÁRBITRO DEL CÓDIGO (ronda 1)")
+    PUB = servidor._publicar()
+    # G2: YouTube publicado a mano desde Publicar mientras esperaba el OK
+    pid5 = __import__("nucleo").Proyecto.crear(base, "auto cinco").id
+    v5 = P.encolar(base, {"cid": "c1", "gid": "gz", "estilo": "e1",
+                          "auto": {"cid": "c1", "gid": "gz", "indice": 0, "hueco": "2026-12-09T19:00",
+                                   "redes": ["tiktok", "youtube"], "modo": 2, "paso": "espera_ok", "rev": 0,
+                                   "envios_antes": []}})
+    P.cambiar(base, v5["id"], estado="listo", pid=pid5)
+    datos5 = PUB._leer_video(base, pid5)
+    datos5["envios"].append({"id": "manual", "red": "youtube", "estado": "programado", "lote": "lm",
+                             "creado": "2026-12-01T10:00:00", "cuando": "2026-12-09T19:00:00"})
+    PUB._escribir(PUB._ruta_video(base, pid5), datos5)
+    vuelta()
+    igual(P.leer(base, v5["id"])["auto"]["paso"], "espera_ok",
+          "con solo YouTube publicado a mano, sigue esperando tu OK (falta TikTok)")
+    antes = len(llamadas["enviar"])
+    servidor.aprobar_publicar(v5["id"], pet, {"rev": P.leer(base, v5["id"])["auto"]["rev"]})
+    igual(llamadas["enviar"][antes:], [(pid5, ("tiktok",), "2026-12-09T19:00")],
+          "«Publicar así» manda SOLO la red que faltaba (TikTok), no YouTube otra vez")
+    # G3: el vídeo pasa a otro proyecto y se le cambia la fecha: no se programa allí
+    hechos_falsos["publicar"] = {"cliente_ok": False}
+    P.cambiar_auto(base, v5["id"], {"paso": "reprogramando"})
+    for e in PUB._leer_video(base, pid5)["envios"]:
+        pass
+    datos5 = PUB._leer_video(base, pid5)
+    for e in datos5["envios"]:
+        e["estado"] = "cancelado"
+    PUB._escribir(PUB._ruta_video(base, pid5), datos5)
+    antes = len(llamadas["enviar"])
+    vuelta()
+    igual(len(llamadas["enviar"]), antes,
+          "reprogramar un vídeo que ya no es de este proyecto NO llama a `enviar` (todas las vías)")
+    igual(P.leer(base, v5["id"])["auto"]["paso"], "espera_ok", "y espera tu OK con el aviso")
+    hechos_falsos["publicar"] = {}
+    # G4: «No publicar» y después «Reintentar» del nivel 1: no se rehace
+    v6 = P.encolar(base, {"cid": "c1", "gid": "gw", "estilo": "e1",
+                          "auto": {"cid": "c1", "gid": "gw", "indice": 0, "hueco": "2026-12-11T19:00",
+                                   "redes": ["tiktok"], "modo": 2, "paso": "preparando", "rev": 0}})
+    servidor.aprobar_no_publicar(v6["id"], pet, {"rev": 0})
+    try:
+        servidor.piloto_seguir(v6["id"], pet, {})
+        ok(False, "«Reintentar» de un «No publicar» tenía que negarse")
+    except servidor.ErrorApi as fallo:
+        ok(fallo.codigo == 409 and "Devolver" in fallo.mensaje,
+           "«Reintentar» tras «No publicar» se niega y dice «Devolver a la lista»")
+    # G1: Publicar en un vídeo sin textos: el `antes` no da 409 falso
+    with open(servidor.__file__, encoding="utf-8") as fh:
+        fuente = fh.read()
+    ok('for r in _publicar().REDES}' in fuente.split("def publicar_ficha", 1)[1].split("\ndef ", 1)[0],
+       "las huellas de Publicar traen TODAS las redes (también las que aún no tienen texto)")
+    ok(A.huella({}) == A.huella({}) and A.huella({}) != "", "la huella de una red vacía es estable")
+    # m7: un aviso de Telegram no sube el rev (no da un «otro sitio» falso)
+    rev = P.leer(base, v6["id"])["auto"]["rev"]
+    servidor._auto_avisar(base, P.leer(base, v6["id"]), "razon", "prueba", clave="prueba_rev")
+    igual(P.leer(base, v6["id"])["auto"]["rev"], rev, "mandar un aviso no cambia el rev de la página")
+
 
 def main():
     raiz = tempfile.mkdtemp(prefix="prueba_piloto_auto_")

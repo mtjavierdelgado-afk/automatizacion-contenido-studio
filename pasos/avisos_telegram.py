@@ -226,5 +226,9 @@ def editar(mensaje, texto):
             "disable_web_page_preview": True})
         return True
     except (ErrorTelegram, ValueError) as fallo:
-        # «message is not modified» no es un fallo
-        return "not modified" in str(fallo)
+        # «message is not modified» no es un fallo; la red caída sí (pausa)
+        if "not modified" in str(fallo):
+            return True
+        if "no se pudo hablar" in str(fallo):
+            _fallo()
+        return False

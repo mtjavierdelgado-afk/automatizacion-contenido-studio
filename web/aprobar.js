@@ -93,10 +93,27 @@ function esperar(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ------------------------------------------------------------------ cargar
 
+/* ¿Está la persona usando la página? (viendo el vídeo, escribiendo, con la
+   portada o la fecha abiertas). Entonces la vuelta de cada 15 s NO repinta:
+   se cortaría el vídeo y se cerraría el teclado. */
+function ocupadaConLaPagina() {
+  const v = AP.nodoVideo;
+  if (v && !v.paused && !v.ended) return true;
+  const foco = document.activeElement;
+  if (foco && raiz().contains(foco) && ['INPUT', 'TEXTAREA', 'SELECT'].includes(foco.tagName)) return true;
+  return !!(AP.portadaEditor || AP.fechaAbierta);
+}
+
 async function cargar(silencioso) {
   if (!VIDEO) { pintarFallo('Este enlace no dice qué vídeo abrir.'); return; }
   try {
     const nuevo = await pedir(`/api/aprobar/${encodeURIComponent(VIDEO)}`);
+    const crudo = JSON.stringify(nuevo);
+    if (silencioso && AP.datos) {
+      if (crudo === AP.crudo) return;                 // nada cambió: no se repinta
+      if (ocupadaConLaPagina()) return;               // se pinta en la próxima vuelta libre
+    }
+    AP.crudo = crudo;
     // LO QUE SE ESCRIBE NO SE PISA: si el servidor trae otros textos para una
     // red que se está editando, se avisa en vez de cambiarlos
     if (AP.datos && Object.keys(AP.editando).some(r => AP.editando[r])) {
@@ -197,8 +214,13 @@ function pintar() {
   if (clave === 'programado' || clave === 'publicado') estado = `Ya está aprobado: ${estado.replace(/^[^ ]+ /, '')}`;
   partes.push(h('div', { clase: `ap-estado ${claseDeEstado(clave)}`, role: 'status', texto: estado }));
   if (d.video) {
-    partes.push(h('div', { clase: 'ap-bloque' },
-      h('video', { clase: 'ap-video', src: `${BASE}/${d.video}`, controls: true, playsinline: true, preload: 'metadata' })));
+    // EL MISMO <video> en cada repintado: uno nuevo volvería al principio
+    if (!AP.nodoVideo || AP.nodoVideo.dataset.fuente !== d.video) {
+      AP.nodoVideo = h('video', { clase: 'ap-video', src: `${BASE}/${d.video}`, controls: true, playsinline: true,
+        preload: 'metadata' });
+      AP.nodoVideo.dataset.fuente = d.video;
+    }
+    partes.push(h('div', { clase: 'ap-bloque' }, AP.nodoVideo));
   } else if (!d.terminado) {
     partes.push(h('p', { clase: 'ap-sub', texto: d.mensaje || 'El vídeo todavía se está haciendo.' }));
   }
@@ -560,6 +582,7 @@ async function publicar() {
   await accion(async () => {
     AP.datos = await pedir(`/api/aprobar/${encodeURIComponent(VIDEO)}/publicar`,
       { method: 'POST', cuerpo: { rev: AP.datos.rev, desde: 'movil' } });
+    AP.crudo = JSON.stringify(AP.datos);
     return `Listo: ${AP.datos.vivo.texto}.`;
   });
 }
@@ -576,15 +599,41 @@ async function cambiarFecha(valor) {
   });
 }
 
+/* «No publicar»: UNA pregunta, con la casilla de devolver DESMARCADA (volver
+   a pagar nunca es lo que pasa por pulsar «Aceptar» dos veces). */
+function preguntarNoPublicar() {
+  return new Promise(resolver => {
+    const casilla = h('input', { type: 'checkbox', id: 'ap-devolver' });
+    const cerrar = (resultado) => { capa.remove(); resolver(resultado); };
+    const capa = h('div', { clase: 'ap-capa', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'ap-np-titulo' },
+      h('div', { clase: 'ap-dialogo' },
+        h('h2', { id: 'ap-np-titulo', texto: '¿No publicar este vídeo?' }),
+        h('p', { texto: 'Si ya estaba programado, se cancela en Upload-Post.' }),
+        h('label', { clase: 'ap-casilla', for: 'ap-devolver' }, casilla,
+          h('span', { texto: 'Devolver este vídeo del guion a la lista: el piloto lo volverá a hacer más adelante (y se volverá a pagar).' })),
+        h('div', { clase: 'ap-fila' },
+          h('button', { clase: 'peligro', texto: 'No publicar', onclick: () => cerrar({ ok: true, devolver: casilla.checked }) }),
+          h('button', { texto: 'Cancelar', onclick: () => cerrar({ ok: false }) }))));
+    document.body.append(capa);
+    capa.querySelector('button').focus();
+  });
+}
+
 async function noPublicar() {
-  if (!confirm('¿No publicar este vídeo? Si ya estaba programado, se cancela.')) return;
-  const devolver = confirm('¿Devolver este vídeo del guion a la lista? El piloto lo volvería a hacer (y a pagar) más adelante.\n\nAceptar = devolverlo · Cancelar = no');
+  const r0 = await preguntarNoPublicar();
+  if (!r0.ok) return;
+  const devolver = r0.devolver;
   await accion(async () => {
     const r = await pedir(`/api/aprobar/${encodeURIComponent(VIDEO)}/no-publicar`,
       { method: 'POST', cuerpo: { rev: AP.datos.rev, devolver } });
     if (r.quitado) { pintarFallo('No se publica, y el guion vuelve a la lista del piloto.'); AP.datos = null; return ''; }
     AP.datos = r;
-    return r.paso === 'retirando' ? 'Quitándolo de Upload-Post…' : 'No se publica.';
+    AP.crudo = JSON.stringify(r);
+    if (r.paso === 'retirando') {
+      return 'Quitándolo de Upload-Post…' + (r.devolver_luego ? ' Cuando esté quitado, el guion vuelve a la lista.' : '');
+    }
+    return devolver && !r.devuelto ? 'No se publica (el guion no se pudo devolver a la lista).'
+      : devolver ? 'No se publica, y el guion vuelve a la lista.' : 'No se publica.';
   });
 }
 

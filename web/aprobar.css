@@ -134,3 +134,20 @@ details.ap-red > summary {
 .ap-pie a { color: var(--acento); }
 .ap a { color: var(--acento); }
 .oculto { display: none !important; }
+
+.ap-capa {
+  position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: flex-end; justify-content: center; padding: 16px;
+}
+.ap-dialogo {
+  width: min(520px, 100%); background: var(--tarjeta); color: var(--texto);
+  border: 1px solid var(--borde); border-radius: var(--radio); padding: 16px;
+  margin-bottom: env(safe-area-inset-bottom);
+}
+.ap-casilla { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0; cursor: pointer; }
+.ap-casilla input { width: 22px; height: 22px; margin: 2px 0 0; flex: none; }
+.ap button.peligro, .ap-dialogo button.peligro { color: var(--mal); border-color: var(--mal); background: transparent; }
+.ap-dialogo button {
+  font: inherit; font-weight: 600; min-height: 44px; padding: 10px 16px; border-radius: 12px;
+  border: 1px solid var(--borde); background: var(--campo); color: var(--texto); cursor: pointer; flex: 1 1 auto;
+}

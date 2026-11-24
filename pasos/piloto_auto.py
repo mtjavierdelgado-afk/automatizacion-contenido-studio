@@ -449,6 +449,18 @@ def apuntar_unidad(raiz, cid, gid, indice, vid):
         _guardar(raiz, datos)
 
 
+def quitar_unidad(raiz, cid, gid, indice, vid=None):
+    """Deshace `apuntar_unidad` (el encolado falló justo después). Solo si
+    sigue siendo de ese vídeo."""
+    clave = clave_unidad(cid, gid, indice)
+    with _LOCK:
+        datos = _leer(raiz)
+        entrada = datos["historial"].get(clave)
+        if isinstance(entrada, dict) and (vid is None or entrada.get("vid") == vid):
+            datos["historial"].pop(clave, None)
+            _guardar(raiz, datos)
+
+
 def devolver_unidad(raiz, cid, gid, indice):
     """«Devolver a la lista»: ese encargo (solo ese) se puede volver a hacer
     (y a pagar). -> True si estaba apuntado"""
@@ -736,8 +748,8 @@ def reconciliar(auto, envios):
             return {"paso": None, "aviso": "", "accion": "cancelar"}
         if paso == "retirando":
             if r["salidos"]:
-                return {"paso": "publicado" if r["todas_publicadas"] else "no_publicar",
-                        "aviso": "ya_salio", "accion": ""}
+                # algo ya salió: se dice, y queda como publicado (lo que salió, salió)
+                return {"paso": "publicado", "aviso": "ya_salio", "accion": ""}
             return {"paso": "no_publicar", "aviso": "", "accion": ""}
         # reprogramando: todo cancelado o salido -> programar la fecha nueva
         if r["salidos"]:

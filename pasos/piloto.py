@@ -427,11 +427,13 @@ class RevVieja(ErrorPiloto):
         self.ficha = ficha
 
 
-def cambiar_auto(raiz, vid, cambios, rev=None, si_paso=None):
+def cambiar_auto(raiz, vid, cambios, rev=None, si_paso=None, contar_rev=True):
     """Cambia el bloque `auto` de un vídeo (rama piloto-2), de una vez y bajo
     el cerrojo del piloto. Con `rev` (el que vio la pantalla), si alguien lo
     cambió entre medias -> RevVieja. Con `si_paso` (tupla), solo si el paso
-    sigue siendo uno de esos; si no, no toca nada y devuelve None. Sube `rev`.
+    sigue siendo uno de esos; si no, no toca nada y devuelve None. Sube `rev`
+    salvo con `contar_rev=False` (lo que no ve nadie: los avisos mandados),
+    para no dar un «se cambió en otro sitio» falso a la página abierta.
     -> la ficha"""
     _vid(vid)
     with _LOCK:
@@ -447,7 +449,8 @@ def cambiar_auto(raiz, vid, cambios, rev=None, si_paso=None):
             if si_paso is not None and auto.get("paso") not in si_paso:
                 return None
             auto = dict(auto, **cambios)
-            auto["rev"] = int(auto.get("rev") or 0) + 1
+            if contar_rev:
+                auto["rev"] = int(auto.get("rev") or 0) + 1
             v["auto"] = auto
             _guardar(raiz, datos)
             return dict(v)

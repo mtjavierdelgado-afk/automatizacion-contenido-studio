@@ -27949,7 +27949,10 @@ async function guardarTextosPublicar() {
        anterior, que ya trajo la suya) y el servidor dice 409 si no casa. */
     const huellas = (PUB.ficha && PUB.ficha.pid === pid && PUB.ficha.huellas_textos) || null;
     const cuerpo = { textos };
-    if (huellas) cuerpo.antes = Object.fromEntries(Object.keys(textos).map(r => [r, huellas[r] || '']));
+    if (huellas) {
+      const antesDe = Object.keys(textos).filter(r => typeof huellas[r] === 'string');
+      if (antesDe.length) cuerpo.antes = Object.fromEntries(antesDe.map(r => [r, huellas[r]]));
+    }
     try {
       return await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}`), { method: 'PUT', cuerpo });
     } catch (e) {
@@ -27957,6 +27960,7 @@ async function guardarTextosPublicar() {
       if (!confirm('Esto se cambió en otro sitio hace un momento (por ejemplo, en el móvil).\n\n'
         + 'Aceptar = guardar lo tuyo igualmente · Cancelar = ver lo nuevo')) {
         if (PUB.borradorDe === pid || PUB.pid === pid) limpiarBorradorPublicar(textos);
+        toast('Descartado lo tuyo: ves lo que se guardó en el otro sitio');
         return pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}`));
       }
       delete cuerpo.antes;
@@ -31970,7 +31974,7 @@ function bloqueAutoGuionParrilla(g) {
       target: '_blank', rel: 'noopener' }, 'Ver y aprobar ›'));
     if (r.auto.clave === 'no_publicar') {
       botones.appendChild(h('button', { clase: 'mini', title: 'El piloto lo volverá a hacer (y a pagar) más adelante',
-        onclick: () => accionAutoGuion('devolver', g.id, 0, 'Vuelve a la lista: el piloto lo hará cuando le toque.',
+        onclick: () => accionAutoGuion('devolver', g.id, r.auto.indice || 0, 'Vuelve a la lista: el piloto lo hará cuando le toque.',
           '¿Devolver este guion a la lista del piloto? Se volverá a hacer el vídeo (y a pagarlo).') }, 'Devolver a la lista'));
     }
     caja.appendChild(botones);
@@ -36200,18 +36204,25 @@ function tarjetaVideoPiloto(v) {
   /* «Seguir igualmente» NO en una parada por «tiene algo en marcha»: el
      piloto nunca se salta eso, así que hacía lo mismo que «Reintentar». Esa
      parada se retoma sola cuando acaba lo que había en marcha (piloto-lista). */
-  if (v.estado === 'parado' && v.tipo_parada && v.tipo_parada !== 'ocupado') {
+  /* un vídeo del piloto automático que dijiste «No publicar» no se rehace
+     desde aquí (pagaría un vídeo que no sale): «Devolver a la lista» en la
+     Parrilla. Y uno vivo no se quita de la lista (se perdería su «No publicar»
+     y su hueco): primero «No publicar» en «Ver y aprobar ›». (piloto-2) */
+  const autoPaso = v.auto ? v.auto.paso : '';
+  const autoSinRehacer = ['no_publicar', 'retirando'].includes(autoPaso);
+  const autoVivo = !!v.auto && !['no_publicar', 'publicado'].includes(autoPaso);
+  if (!autoSinRehacer && v.estado === 'parado' && v.tipo_parada && v.tipo_parada !== 'ocupado') {
     botones.appendChild(h('button', { clase: 'mini primario', title: 'Ya lo has mirado: sigue desde donde se paró',
       onclick: () => seguirPiloto(v, true) }, 'Seguir igualmente'));
   }
-  if (['error', 'interrumpido', 'cancelado', 'parado'].includes(v.estado)) {
+  if (!autoSinRehacer && ['error', 'interrumpido', 'cancelado', 'parado'].includes(v.estado)) {
     botones.appendChild(h('button', { clase: 'mini', title: 'Vuelve a la cola y sigue donde iba (lo hecho no se paga otra vez)',
       onclick: () => seguirPiloto(v, false) }, 'Reintentar'));
   }
   if (['trabajando', 'en_cola'].includes(v.estado)) {
     botones.appendChild(h('button', { clase: 'mini fantasma peligro', disabled: v.vivo && v.vivo.cancelando ? true : null,
       onclick: () => pararPiloto(v) }, 'Parar'));
-  } else {
+  } else if (!autoVivo) {
     botones.appendChild(h('button', { clase: 'mini fantasma', title: 'Quitar de esta lista (el vídeo se queda en Tus proyectos)',
       onclick: () => quitarPiloto(v) }, 'Quitar de la lista'));
   }

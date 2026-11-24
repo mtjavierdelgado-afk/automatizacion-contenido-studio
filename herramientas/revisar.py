@@ -35,6 +35,7 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: Lo que prueba cada suite, para que el informe se entienda sin abrir el código.
 QUE_PRUEBA = {
     "prueba_api.py": "el servidor: todas las rutas de la API",
+    "prueba_piloto_auto.py": "el piloto automático (niveles 2 y 3)", "prueba_telegram.py": "los avisos por Telegram",
     "prueba_coste_capturas.py": "el coste y las capturas",
     "prueba_clases_css.py": "que cada clase de la pantalla tenga su estilo",
     "prueba_textos.py": "los textos de la pantalla",

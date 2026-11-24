@@ -21662,7 +21662,14 @@ def publicar_ficha(pid: str, peticion: Request):
     ctx = _ctx_publicable(pid, peticion)
     info = _info_para_publicar(ctx)
     ajustes = _publicar().ajustes_de(raiz_proyectos(), info["cliente"])
-    return _publicar().ficha(raiz_proyectos(), info, ajustes)
+    ficha = _publicar().ficha(raiz_proyectos(), info, ajustes)
+    # la huella de los textos de cada red tal como se ven ahora: la pantalla la
+    # devuelve como `antes` al guardar, para saber si otro sitio los cambió
+    # entre medias (piloto-2: el mismo vídeo se edita en el móvil y aquí)
+    if AUTO is not None:
+        ficha["huellas_textos"] = {r: AUTO.huella((ficha.get("textos") or {}).get(r) or {})
+                                   for r in (ficha.get("textos") or {})}
+    return ficha
 
 
 @app.put("/api/publicar/videos/{pid}")
@@ -25537,6 +25544,20 @@ def piloto_auto_guardar(cid: str, peticion: Request, cuerpo: dict = Body(default
                                          "modo": ficha.get("modo")})
     _piloto_despertar()
     return piloto_auto_ver(cid or PAR.SIN_PROYECTO, peticion)
+
+
+@app.post("/api/piloto/auto/{cid}/vista")
+def piloto_auto_vista(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Los próximos 7 días con la ficha que se está editando, SIN guardarla
+    (para verlo antes de pulsar «Guardar»)."""
+    _auto()
+    PAR = _parrilla()
+    cid_par = _proyecto_parrilla(cid, peticion)
+    cid = AUTO.clave_proyecto("" if cid_par == PAR.SIN_PROYECTO else cid_par)
+    borrador = _por_auto(AUTO.limpiar_ficha, _cuerpo(cuerpo), tuple(_publicar().REDES))
+    ficha = dict(AUTO.FICHA_DEFECTO, **borrador)
+    return {"proximos": _auto_proximos(raiz_proyectos(), cid, ficha),
+            "repetidas": AUTO.horas_repetidas(ficha)}
 
 
 @app.post("/api/piloto/auto/{cid}/cancelar-programados")

@@ -472,6 +472,11 @@ def limpiar_pendientes(raiz, fichas_piloto):
     si no tiene ninguno, se marca devuelto para que vuelva a la lista. -> cuántas"""
     por_unidad = {}
     for f in fichas_piloto or []:
+        # una vieja que no se publica o que paraste no cuenta: si lo devolviste,
+        # sigue devuelto
+        if f.get("estado") == "cancelado" or (
+                es_automatico(f) and f["auto"].get("paso") == "no_publicar"):
+            continue
         por_unidad[clave_unidad(f.get("cid"), f.get("gid"), f.get("indice"))] = f.get("id")
     cuantas = 0
     with _LOCK:

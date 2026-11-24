@@ -479,6 +479,12 @@ def prueba_fuentes(bases):
                         "result": {"eventPriceUsd": 0.0037}}}}}
     igual(F._cobrado_apify(extra_barato, "tiktok", pedidos=30, traidos=30), F.coste_apify("tiktok", 30),
           "sin marca y con un extra barato: nunca menos que la tabla para los vídeos traídos (no 0,016)")
+    sin_contar = dict(run_ppe, usageTotalUsd=0, chargedEventCounts={"result": 0, "actor-start": 0})
+    igual(F._cobrado_apify(sin_contar, "tiktok", pedidos=1, traidos=1), 0.0047,
+          "si Apify aún no contó nada, con un resultado traído cuentan el resultado y el arranque "
+          "(tren del 19-11: se apuntaba 0,0037)")
+    igual(F._cobrado_apify(dict(sin_contar, status="FAILED"), "tiktok", pedidos=10), None,
+          "sin nada traído, el arranque no se supone: se queda la reserva")
     solo_arranque = {"status": "SUCCEEDED", "usageTotalUsd": 0.001, "chargedEventCounts": {"actor-start": 1},
                      "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {
                          "actor-start": {"eventPriceUsd": 0.001, "isOneTimeEvent": True}}}}}
@@ -486,7 +492,7 @@ def prueba_fuentes(bases):
           "sin ningún evento por resultado, el suelo sigue protegiendo")
     igual(F._cobrado_apify(dict(run_ppe, chargedEventCounts={"result": 10 ** 9}), "tiktok", 1, 1, techo=4.5), 4.5,
           "un contador absurdo no pasa de lo que se le dejó cobrar a Apify (maxTotalChargeUsd)")
-    igual(F._cobrado_apify(dict(run_ppe, chargedEventCounts={"result": 10 ** 9}), "tiktok", 1, 1), 37.0,
+    igual(F._cobrado_apify(dict(run_ppe, chargedEventCounts={"result": 10 ** 9}), "tiktok", 1, 1), 37.001,
           "y sin techo, cada contador se queda en 10.000 como mucho")
     negativo = {"status": "SUCCEEDED", "usageTotalUsd": 0.001, "chargedEventCounts": {"result": 0},
                 "pricingInfo": {"pricingPerEvent": {"actorChargeEvents": {

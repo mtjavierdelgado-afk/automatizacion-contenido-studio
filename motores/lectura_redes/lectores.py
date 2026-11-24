@@ -570,6 +570,11 @@ def _cobrado_por_eventos(run, traidos=0):
     principal = "marcado" if marcados else ("respaldo" if principal_de else None)
     for nombre, precio in precios.items():
         cuantos = min(max(_numero(contados.get(nombre)) or 0, 0), MAXIMO_EVENTOS_APIFY)
+        if str(nombre).lower() in ARRANQUES_APIFY and traidos:
+            # si trajo resultados, el actor arrancó: Apify cobra su arranque
+            # aunque al leer aún no lo haya contado (prueba del tren del 19-11:
+            # cuenta vacía, se apuntaba 0,0037 $ y Apify cobró 0,0047 $)
+            cuantos = max(cuantos, 1)
         if nombre == principal_de:
             cuantos = max(cuantos, min(int(traidos or 0), MAXIMO_EVENTOS_APIFY))
         total += cuantos * precio

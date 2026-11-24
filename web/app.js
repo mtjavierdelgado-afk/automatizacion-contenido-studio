@@ -36427,6 +36427,40 @@ async function descargarGrafica(cid, id, extension) {
   } catch (e) { toast(`No se ha podido descargar: ${e.message}`, true); }
 }
 
+/* LAS DESCARGAS DE UN CARRUSEL (rama graficas-3-carrusel): ZIP en JPG o PNG y
+   el PDF de LinkedIn. Si faltan las láminas pintadas (se guardó desde una
+   versión de antes), el servidor contesta 409 y se ofrece «Preparar las
+   láminas», que es el mismo trabajo con barra que guardar. */
+async function descargarLaminas(cid, pieza, que) {
+  const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
+  const ruta = que === 'pdf' ? `/piezas/${pieza.id}/laminas.pdf` : `/piezas/${pieza.id}/laminas.zip?formato=${que === 'zip-png' ? 'png' : 'jpg'}`;
+  const bajar = () => fetch(apiGraficas(cid, ruta), { headers: pases ? { 'X-Estudio-Abiertos': pases } : {} });
+  try {
+    let r = await bajar();
+    if (r.status === 409) {
+      if (!window.confirm('Las láminas de este carrusel no están preparadas (se guardó con una versión anterior). ¿Prepararlas ahora? No cambia el diseño y tarda unos segundos.')) return;
+      toast('Preparando las láminas…');
+      const t = await pedir(apiGraficas(cid, `/piezas/${pieza.id}/laminas/preparar`), { method: 'POST' });
+      for (let i = 0; t && t.trabajo && i < 400; i++) {
+        await new Promise(ok => setTimeout(ok, 700));
+        const e = await pedir(apiGraficas(cid, `/capas/trabajo/${t.trabajo}`));
+        if (e.estado === 'error') throw new Error(e.error);
+        if (e.estado === 'listo') break;
+      }
+      r = await bajar();
+    }
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const nombre = ((r.headers.get('content-disposition') || '').match(/filename="([^"]+)"/) || [])[1]
+      || `carrusel-${pieza.id}.${que === 'pdf' ? 'pdf' : 'zip'}`;
+    const url = URL.createObjectURL(await r.blob());
+    const enlace = h('a', { href: url, download: nombre });
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch (e) { toast(`No se ha podido descargar: ${e.message}`, true); }
+}
+
 function botonNuevaGrafica(cid) {
   return h('button', { clase: 'nueva-grafica', title: 'Una pieza para redes con el kit de este proyecto',
     onclick: () => abrirEditorGrafica(cid, null) }, '+ Nueva gráfica');
@@ -36528,10 +36562,15 @@ function seccionGraficasDelProyecto(cid) {
     return h('div', { clase: 'tarjeta-pieza' },
       h('button', { clase: 'abrir-pieza', title: 'Abrir para cambiarla', onclick: abrir }, img),
       h('b', {}, p.nombre),
-      h('span', { clase: 'meta' }, enCapas ? `${p.medida} · en capas` : p.medida),
+      h('span', { clase: 'meta' }, enCapas ? `${p.medida} · en capas${p.laminas > 1 ? ` · ${p.laminas} láminas` : ''}` : p.medida),
       h('div', { clase: 'fila' },
-        h('button', { clase: 'mini', onclick: () => descargarGrafica(cid, p.id, 'png') }, 'PNG'),
-        h('button', { clase: 'mini', onclick: () => descargarGrafica(cid, p.id, 'jpg') }, 'JPG'),
+        p.laminas > 1 ? h('button', { clase: 'mini descargar-zip', title: 'Todas las láminas en JPG, numeradas, con sus textos alternativos',
+          onclick: () => descargarLaminas(cid, p, 'zip') }, 'ZIP') : null,
+        p.laminas > 1 ? h('button', { clase: 'mini descargar-zip-png', title: 'Todas las láminas en PNG', onclick: () => descargarLaminas(cid, p, 'zip-png') }, 'ZIP PNG') : null,
+        p.laminas > 1 ? h('button', { clase: 'mini descargar-pdf', title: 'El carrusel en PDF para LinkedIn (sin «Desliza →»)',
+          onclick: () => descargarLaminas(cid, p, 'pdf') }, 'PDF LinkedIn') : null,
+        h('button', { clase: 'mini', title: p.laminas > 1 ? 'La lámina 1' : '', onclick: () => descargarGrafica(cid, p.id, 'png') }, p.laminas > 1 ? 'PNG (1.ª)' : 'PNG'),
+        h('button', { clase: 'mini', title: p.laminas > 1 ? 'La lámina 1' : '', onclick: () => descargarGrafica(cid, p.id, 'jpg') }, p.laminas > 1 ? 'JPG (1.ª)' : 'JPG'),
         enCapas ? null : h('button', { clase: 'mini abrir-en-capas', title: 'Moverla, añadir textos, fotos y formas donde quieras. La versión de antes se queda guardada.',
           onclick: () => abrirEditorCapas(cid, p) }, 'Abrir en capas'),
         h('button', { clase: 'mini', onclick: () => (enCapas ? abrirEditorCapas(cid, p, { duplicar: true })

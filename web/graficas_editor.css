@@ -225,3 +225,71 @@ body.ce-abierto { overflow: hidden; }
   .ce-girar { width: 32px; height: 32px; margin-left: -16px; top: -46px; font-size: 16px; }
   .ce-btn, .ce-mini { min-height: 40px; }
 }
+
+/* ---------------------------------------------------------------- la tira de láminas (graficas-3-carrusel) */
+.ce-tira {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px max(12px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  background: var(--panel); border-top: 1px solid var(--linea);
+}
+.ce-tira-lista { list-style: none; margin: 0; padding: 2px; display: flex; gap: 8px; overflow-x: auto; }
+.ce-tira-lamina {
+  position: relative; display: block; width: 64px; padding: 0; border: 2px solid var(--linea); border-radius: 8px;
+  background: var(--hueco); cursor: pointer; overflow: hidden; flex: none;
+}
+.ce-tira-lamina.actual { border-color: var(--acento); box-shadow: 0 0 0 2px var(--anillo); }
+.ce-tira-lamina.arrastrando { opacity: .4; }
+.ce-tira-lamina.destino { border-style: dashed; border-color: var(--acento); }
+.ce-tira-lamina:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+.ce-tira-num {
+  position: absolute; left: 3px; bottom: 3px; min-width: 18px; padding: 0 4px; border-radius: 6px;
+  font: 700 11px/16px sans-serif; text-align: center; background: var(--panel); color: var(--texto);
+}
+.ce-mini-lienzo, .ce-movil-lienzo {
+  position: relative; width: 100%; overflow: hidden; container-type: size; pointer-events: none;
+  font-family: 'ce-Poppins', 'Poppins', sans-serif;
+}
+.ce-mini-lienzo *, .ce-movil-lienzo * { box-sizing: border-box; }
+.ce-mini-lienzo .ce-texto-vacio, .ce-mini-lienzo .ce-sin-logo,
+.ce-movil-lienzo .ce-texto-vacio, .ce-movil-lienzo .ce-sin-logo { visibility: hidden; }
+.ce-tira-acciones { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ce-tira-cuenta { color: var(--tenue); font-size: 12px; margin-right: 4px; }
+.ce-tira-mas { position: relative; }
+.ce-tira-menu {
+  position: absolute; left: 0; bottom: calc(100% + 4px); z-index: 5; display: flex; flex-direction: column; gap: 4px;
+  padding: 6px; border-radius: 10px; background: var(--panel); border: 1px solid var(--linea); box-shadow: var(--sombra); min-width: 160px;
+}
+.ce-tira-menu[hidden] { display: none; }
+.ce-tira-menu .ce-btn { justify-content: flex-start; }
+.ce-donde-cabe { list-style: none; margin: 0; padding: 0; font-size: 12px; line-height: 1.7; color: var(--tenue); }
+.ce-donde-cabe .si b { color: var(--ok); }
+.ce-donde-cabe .no b { color: var(--malo); }
+
+/* ---------------------------------------------------------------- ver como en el móvil */
+.ce-modal-movil { align-items: center; }
+.ce-movil {
+  position: relative; width: min(320px, 80vw); border-radius: 22px; padding: 10px; background: var(--hueco);
+  border: 1px solid var(--linea-fuerte);
+}
+.ce-movil-pasar { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; border-radius: 12px; scrollbar-width: none; }
+.ce-movil-pasar::-webkit-scrollbar { display: none; }
+.ce-movil-lamina { flex: 0 0 100%; scroll-snap-align: start; }
+.ce-movil.historia .ce-movil-pasar { overflow-x: hidden; cursor: pointer; }
+.ce-movil-puntos { display: flex; justify-content: center; gap: 5px; padding-top: 8px; }
+.ce-movil-puntos span { width: 6px; height: 6px; border-radius: 50%; background: var(--linea-fuerte); }
+.ce-movil-puntos span.si { background: var(--acento); }
+.ce-movil-barras { position: absolute; left: 16px; right: 16px; top: 16px; z-index: 2; display: flex; gap: 3px; }
+.ce-movil-barras span { flex: 1; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--blanco) 40%, transparent); }
+.ce-movil-barras span.si { background: var(--blanco); }
+
+@media (max-width: 820px) {
+  /* en el móvil la tira va justo debajo del lienzo, antes de los paneles */
+  .ce-zona { display: contents; }
+  .ce-barra { order: 0; }
+  .ce-migra, .ce-conflicto { order: 0; }
+  .ce-escenario { order: 1; }
+  .ce-tira { order: 2; border-bottom: 1px solid var(--linea); }
+  .ce-der { order: 3; }
+  .ce-izq { order: 4; }
+  .ce-tira-lamina { width: 52px; }
+}

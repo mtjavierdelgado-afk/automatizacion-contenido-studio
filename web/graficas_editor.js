@@ -227,7 +227,8 @@
       E.doc.nombre = `${E.doc.nombre || 'Pieza'} (copia)`.slice(0, 80);
     }
     delete E.doc.origen;
-    for (const k of ['avisos', 'cambiada', 'medida']) delete E.doc[k];
+    for (const k of ['avisos', 'cambiada', 'medida', 'avisos_laminas']) delete E.doc[k];
+    asegurarIdsLaminas(E.doc);
   }
 
   /* ---------------------------------------------------------------- historial
@@ -238,13 +239,16 @@
   const firmaDoc = () => JSON.stringify(ED.doc);
 
   function commit(primero) {
+    if (!primero) sincronizarEnlaces();
     const s = firmaDoc();
     if (!primero && s === ED.hist[ED.pos]) return false;   // entrar en un campo no es un cambio
     ED.hist = ED.hist.slice(0, ED.pos + 1);
     ED.hist.push(s);
-    if (ED.hist.length > MAX_HIST) ED.hist.shift();
+    // un carrusel grande ocupa mucho en el historial: con él, menos pasos
+    const tope = s.length > 300000 ? 40 : MAX_HIST;
+    while (ED.hist.length > tope) ED.hist.shift();
     ED.pos = ED.hist.length - 1;
-    if (!primero) { pintarEstado(); programarVista(); }
+    if (!primero) { pintarEstado(); programarVista(); pintarMiniatura(ED.lamina); }
     return true;
   }
 
@@ -254,6 +258,7 @@
     terminarEdicionTexto(false);
     ED.pos = destino;
     ED.doc = JSON.parse(ED.hist[ED.pos]);
+    ED.lamina = Math.min(ED.lamina, ED.doc.laminas.length - 1);
     const vivos = new Set(capas().map(c => c.id));
     ED.sel = ED.sel.filter(id => vivos.has(id));
     cargarFotosDelDoc();
@@ -261,6 +266,7 @@
     pintarTodo();
     pintarPaneles();
     pintarEstado();
+    pintarTira();
     programarVista();
   }
 
@@ -691,6 +697,10 @@
     ED.der = el('aside', { clase: 'ce-panel ce-der', 'aria-label': 'Propiedades' });
     zona.append(ED.izq, ED.escenario, ED.der);
     R.appendChild(zona);
+    ED.tira = el('nav', { clase: 'ce-tira', 'aria-label': 'Láminas del carrusel' });
+    R.appendChild(ED.tira);
+    ED.anuncio = el('div', { clase: 'ce-oculto', role: 'status', 'aria-live': 'polite' });
+    R.appendChild(ED.anuncio);
     ED.marco = el('div', { clase: 'ce-marco' });
     ED.lienzo = el('div', { clase: 'ce-lienzo' });
     ED.marcas = el('div', { clase: 'ce-marcas' });
@@ -708,6 +718,7 @@
     medirLienzo();
     pintarBarra();
     pintarPaneles();
+    pintarTira();
   }
 
   /** El lienzo, del tamaño que cabe en el escenario (o con el zoom pedido). */
@@ -779,7 +790,7 @@
   function pintarEstado() {
     if (!ED || !ED.estado) return;
     ED.titulo.textContent = ED.doc.nombre || (ED.piezaId ? 'Pieza sin nombre' : 'Pieza nueva');
-    ED.estado.textContent = ED.guardando ? 'Guardando…' : (sinGuardar() ? 'Sin guardar' : (ED.piezaId ? 'Guardado ✓' : ''));
+    ED.estado.textContent = ED.guardando ? (ED.progreso || 'Guardando…') : (sinGuardar() ? 'Sin guardar' : (ED.piezaId ? 'Guardado ✓' : ''));
     ED.estado.classList.toggle('pendiente', sinGuardar());
     ED.bDeshacer.disabled = ED.pos <= 0;
     ED.bRehacer.disabled = ED.pos >= ED.hist.length - 1;
@@ -997,6 +1008,7 @@
     P.appendChild(el('label', { clase: 'ce-campo' }, el('span', {}, 'Tamaño'), tam));
     const f = formato();
     P.appendChild(el('small', { clase: 'ce-pista' }, `${f.redes}. ${f.nota}`));
+    panelCarruselPieza(P);
 
     const plantillas = ED.cat.plantillas;
     const elegir = el('select', { 'aria-label': 'Plantilla' }, ...plantillas.map(p => el('option', { value: String(p.n) }, `${p.n} · ${p.nombre}`)));
@@ -1083,6 +1095,7 @@
       P.appendChild(el('div', { clase: 'ce-nota' }, 'Bloqueada: no se mueve con el ratón. ',
         boton('Desbloquear', {}, () => { c.bloqueado = false; pintarTodo(); commit(); pintarPaneles(); })));
     }
+    panelCarruselCapa(P, c);
     if (c.tipo === 'texto') panelTexto(P, c);
     if (c.tipo === 'forma') panelForma(P, c);
     if (c.tipo === 'imagen') panelFoto(P, c);
@@ -1466,6 +1479,9 @@
       if (d.recorte) { d.recorte.x += 2; d.recorte.y += 2 * f.W / f.H; }
       d.bloqueado = false;
       if (d.rol) d.rol = '';         // la copia es tuya: «Volver a montar» no la recoloca
+      // una copia de una capa «en todas» es una capa normal: nunca dos copias
+      // del mismo grupo en una lámina
+      delete d.enlace; delete d.salvo; delete d.solo_horizontal;
       return d;
     });
   }
@@ -1490,6 +1506,8 @@
     if (bloqueadas.length) avisoPantalla(`${bloqueadas.length === 1 ? 'Una capa bloqueada no se borra' : 'Las capas bloqueadas no se borran'}: desbloquéala primero.`);
     const ids = new Set(seleccion().filter(c => !c.bloqueado).map(c => c.id));
     if (!ids.size) return;
+    const enlazadas = seleccion().filter(c => ids.has(c.id) && c.enlace);
+    if (enlazadas.length && !ED.borrandoEnlazadas) { preguntarBorrarEnlazadas(enlazadas); return; }
     ED.doc.laminas[ED.lamina].capas = capas().filter(c => !ids.has(c.id));
     ED.sel = [];
     pintarTodo();
@@ -1524,7 +1542,7 @@
     const viejo = formato();
     const f = ED.cat.formatos.find(x => x.id === nuevo);
     if (!f || f.id === viejo.id) return;
-    for (const c of capas()) {
+    for (const c of ED.doc.laminas.flatMap(l => l.capas)) {
       const redonda = (c.tipo === 'forma' && c.figura === 'elipse') || (c.tipo === 'imagen' && c.radio === 'elipse') || c.tipo === 'logo';
       if (!redonda) continue;
       const wpx = c.w / 100 * viejo.W, hpx = c.h / 100 * viejo.H;
@@ -1540,6 +1558,7 @@
     commit();
     revisarZonas();
     pintarPaneles();
+    pintarTira();
     const problemas = ED.avisos.length;
     avisoPantalla(problemas ? `${problemas} capa(s) se salen o quedan en lo que tapa la red: usa «Volver a montar» o muévelas.` : 'Mismas capas en el tamaño nuevo.');
   }
@@ -1637,9 +1656,14 @@
       enviada = JSON.stringify(Object.assign(JSON.parse(enviada), { nombre: doc.nombre }));
     }
     const yo = ED;
+    // la marca de ESTE guardado: si se corta la conexión, se relee el sello y
+    // se sabe si lo que hay guardado es lo nuestro o de otra pestaña
+    const envio = Math.random().toString(16).slice(2, 10) + Math.random().toString(16).slice(2, 10);
+    doc.origen.envio = envio;
     try {
-      const r = await yo.opc.pedir(nueva ? yo.opc.api(yo.cid, '/capas') : yo.opc.api(yo.cid, `/piezas/${yo.piezaId}/capas`),
+      let r = await yo.opc.pedir(nueva ? yo.opc.api(yo.cid, '/capas') : yo.opc.api(yo.cid, `/piezas/${yo.piezaId}/capas`),
         { method: nueva ? 'POST' : 'PUT', cuerpo: { doc } });
+      if (r && r.trabajo) r = await seguirGuardado(yo, r, nueva ? '' : yo.piezaId, envio);
       if (ED !== yo) return;
       ED.piezaId = r.id;
       ED.origen = Object.assign({}, r.doc.origen);
@@ -1658,7 +1682,9 @@
       const migra = ED.raiz.querySelector('.ce-migra');
       if (migra) migra.remove();
       pintarBarra();
-      avisoPantalla(comoNueva ? 'Guardada como pieza nueva.' : 'Guardado: el PNG y el JPG ya están al día.');
+      const n = ED.doc.laminas.length;
+      avisoPantalla(comoNueva ? 'Guardada como pieza nueva.'
+        : (n > 1 ? `Guardado: las ${n} láminas ya están al día.` : 'Guardado: el PNG y el JPG ya están al día.'));
       const quitar = ED.raiz.querySelector('.ce-conflicto');
       if (quitar) quitar.remove();
     } catch (e) {
@@ -1667,7 +1693,47 @@
       else avisoPantalla(`No se ha guardado: ${e.message}`, true);
     } finally {
       yo.guardando = false;
+      yo.progreso = '';
       if (ED === yo) { pintarEstado(); pedirVista(); }
+    }
+  }
+
+  /** Un carrusel se guarda como trabajo: se pregunta cómo va hasta que acaba
+   * (nunca una petición larga, que el proxy corta a los 60 s). -> lo que
+   * devuelve un guardado, o lanza el error con su código (409, etc.). */
+  async function seguirGuardado(E, inicio, piezaId, envio) {
+    const espera = ms => new Promise(ok => setTimeout(ok, ms));
+    let fallos = 0;
+    E.progreso = `Pintando las láminas (0 de ${inicio.total})…`;
+    if (ED === E) pintarEstado();
+    for (;;) {
+      await espera(700);
+      let t;
+      try {
+        t = await E.opc.pedir(E.opc.api(E.cid, `/capas/trabajo/${inicio.trabajo}`));
+        fallos = 0;
+      } catch (e) {
+        if (e.status === 404 || e.status === 403) throw e;          // el servicio se reinició: no se guardó
+        if (++fallos < 8) continue;                                   // un corte de red: se reintenta
+        // sin conexión durante un rato: ¿se guardó lo nuestro? (el sello lo dice)
+        if (piezaId) {
+          try {
+            const leida = await E.opc.pedir(E.opc.api(E.cid, `/piezas/${piezaId}/capas`));
+            if (leida.doc && leida.doc.origen && leida.doc.origen.envio === envio) {
+              return { id: piezaId, doc: leida.doc, avisos: [] };
+            }
+          } catch (_) { /* se informa abajo */ }
+        }
+        throw e;
+      }
+      if (t.estado === 'listo') return t.resultado;
+      if (t.estado === 'error') {
+        const fallo = new Error(t.error || 'no se ha podido guardar');
+        fallo.status = t.codigo;
+        throw fallo;
+      }
+      E.progreso = `Pintando la lámina ${Math.min(t.hechas + 1, t.total)} de ${t.total}…`;
+      if (ED === E) pintarEstado();
     }
   }
 
@@ -1704,6 +1770,416 @@
     document.body.classList.remove('ce-abierto');
     ED = null;
     if (avisar && e.opc.alCerrar) e.opc.alCerrar(!!e.cambio);
+  }
+
+  /* ================================================================ el carrusel (graficas-3-carrusel)
+   * Una pieza con varias láminas: la tira de debajo del lienzo, «En todas» (copias
+   * enlazadas: cada lámina lleva su copia con `enlace`, y un cambio en una se
+   * pasa a las demás al confirmarlo), «Ocultar aquí» (el `oculto` de esa copia) y
+   * «Este fondo a todas». Lo que el servidor quita por la posición (`salvo`,
+   * `solo_horizontal`) y el número {n}/{total} los pinta igual la pantalla. */
+
+  const MAX_LAMINAS = 20;
+  const NOMBRE_TIPO = { portada: 'Portada', punto: 'Punto', lista: 'Lista', dato: 'Dato', antes_despues: 'Antes / después',
+    pasos: 'Pasos', cita: 'Cita', cierre: 'Cierre', blanco: 'En blanco' };
+  const nuevoIdCorto = pre => pre + Math.random().toString(16).slice(2, 10).padEnd(8, '0');
+
+  function asegurarIdsLaminas(doc) {
+    const vistos = new Set();
+    for (const lam of doc.laminas) {
+      if (!lam.id || vistos.has(lam.id) || !/^[a-z0-9]{1,12}$/.test(lam.id)) lam.id = nuevoIdCorto('l');
+      vistos.add(lam.id);
+    }
+  }
+
+  /** Pasa a las demás copias de cada grupo «en todas» lo que cambió en ESTA
+   * lámina desde el último paso del historial (solo esa propiedad; nunca el
+   * id ni el `oculto`, que es «ocultar aquí»). */
+  function sincronizarEnlaces() {
+    const laminas = ED.doc.laminas;
+    if (laminas.length < 2 || !ED.hist[ED.pos]) return;
+    const aqui = laminas[ED.lamina];
+    const enlazadas = aqui.capas.filter(c => c.enlace);
+    if (!enlazadas.length) return;
+    let antes;
+    try { antes = JSON.parse(ED.hist[ED.pos]); } catch (_) { return; }
+    const lamAntes = antes.laminas.find(l => l.id === aqui.id);
+    if (!lamAntes) return;
+    const viejas = new Map(lamAntes.capas.map(c => [c.id, c]));
+    for (const c of enlazadas) {
+      const v = viejas.get(c.id);
+      if (!v || v.enlace !== c.enlace) continue;          // recién enlazada: ya se copió entera
+      const claves = new Set([...Object.keys(c), ...Object.keys(v)]);
+      for (const k of claves) {
+        if (k === 'id' || k === 'oculto' || k === 'enlace') continue;
+        if (JSON.stringify(c[k]) === JSON.stringify(v[k])) continue;
+        for (const lam of laminas) {
+          if (lam === aqui) continue;
+          for (const otra of lam.capas) {
+            if (otra.enlace !== c.enlace) continue;
+            if (k in c) otra[k] = copia(c[k]); else delete otra[k];
+          }
+        }
+      }
+    }
+  }
+
+  /** Lleva una capa a todas las láminas (copias enlazadas, encima de todo). */
+  function marcarEnTodas(c) {
+    if (c.enlace) return;
+    c.enlace = nuevoIdCorto('e');
+    let sinSitio = 0;
+    ED.doc.laminas.forEach((lam, i) => {
+      if (i === ED.lamina) return;
+      if (lam.capas.length >= LIMITES.capas) { sinSitio++; return; }
+      lam.capas.push(Object.assign(copia(c), { id: nuevoId(), oculto: false }));
+    });
+    pintarTodo(); commit(); pintarPaneles(); pintarTira();
+    avisoPantalla(sinSitio ? `En todas menos ${sinSitio} lámina(s) que ya tienen ${LIMITES.capas} capas.`
+      : 'Ahora sale en todas las láminas: lo que cambies aquí cambia en todas.');
+  }
+
+  /** «Quitar de todas»: se queda solo la de esta lámina, como capa normal. */
+  function quitarDeTodas(c) {
+    const grupo = c.enlace;
+    if (!grupo) return;
+    ED.doc.laminas.forEach((lam, i) => { if (i !== ED.lamina) lam.capas = lam.capas.filter(x => x.enlace !== grupo); });
+    delete c.enlace; delete c.salvo; delete c.solo_horizontal;
+    pintarTodo(); commit(); pintarPaneles(); pintarTira();
+  }
+
+  function preguntarBorrarEnlazadas(enlazadas) {
+    const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Borrar una capa de todas las láminas' });
+    const cerrarModal = () => capaVista.remove();
+    const nombres = enlazadas.map(c => `«${nombreDe(c)}»`).join(', ');
+    capaVista.appendChild(el('div', { clase: 'ce-modal-cuerpo' },
+      el('h2', {}, 'Está en todas las láminas'),
+      el('p', {}, `${nombres} ${enlazadas.length === 1 ? 'sale' : 'salen'} en todas las láminas. ¿La quitas de todas o solo la ocultas en esta?`),
+      el('div', { clase: 'ce-botonera' },
+        boton('Quitar de todas', { clase: 'ce-btn ce-peligro' }, () => {
+          cerrarModal();
+          const grupos = new Set(enlazadas.map(c => c.enlace));
+          ED.doc.laminas.forEach((lam, i) => { if (i !== ED.lamina) lam.capas = lam.capas.filter(x => !grupos.has(x.enlace)); });
+          ED.borrandoEnlazadas = true;
+          try { borrar(); } finally { ED.borrandoEnlazadas = false; }
+          pintarTira();
+        }),
+        boton('Ocultarla solo aquí', { clase: 'ce-btn ce-primario' }, () => {
+          cerrarModal();
+          for (const c of enlazadas) c.oculto = true;
+          ED.sel = [];
+          pintarTodo(); commit(); pintarPaneles();
+        }),
+        boton('Cancelar', {}, cerrarModal))));
+    capaVista.addEventListener('pointerdown', ev => { if (ev.target === capaVista) cerrarModal(); });
+    ED.raiz.appendChild(capaVista);
+    capaVista.querySelector('.ce-primario').focus();
+  }
+
+  /** ¿Es la capa de fondo de su lámina (la de abajo, tapándola entera)? */
+  function esFondo(c, lam) {
+    return lam.capas[0] === c && !c.giro && c.x <= 0.5 && c.y <= 0.5 && c.x + c.w >= 99.5 && c.y + c.h >= 99.5
+      && (c.tipo === 'forma' || c.tipo === 'imagen');
+  }
+
+  function fondoATodas(c) {
+    ED.doc.laminas.forEach((lam, i) => {
+      if (i === ED.lamina) return;
+      const nuevo = Object.assign(copia(c), { id: nuevoId(), oculto: false });
+      delete nuevo.enlace;
+      if (lam.capas[0] && esFondo(lam.capas[0], lam)) lam.capas[0] = nuevo; else lam.capas.unshift(nuevo);
+    });
+    pintarTodo(); commit(); pintarTira();
+    avisoPantalla('Este fondo está ahora en todas las láminas (también en la portada y el cierre). Ctrl+Z lo deshace.');
+  }
+
+  /** Lo del carrusel en el panel de una capa. */
+  function panelCarruselCapa(P, c) {
+    if (ED.doc.laminas.length < 2) return;
+    const lam = ED.doc.laminas[ED.lamina];
+    const hijos = [];
+    if (!c.enlace) {
+      hijos.push(campoCasillaSuelta('En todas las láminas', false, v => { if (v) marcarEnTodas(c); }));
+      hijos.push(el('small', { clase: 'ce-pista' }, 'Para el logo, el número (escribe {n}/{total}) o «Desliza →»: sale en todas, en el mismo sitio, y cambiarla en una la cambia en todas.'));
+    } else {
+      const salvo = new Set(c.salvo || []);
+      const fijarSalvo = (que, v) => {
+        if (v) salvo.add(que); else salvo.delete(que);
+        const lista = ['primera', 'ultima', 'pdf'].filter(x => salvo.has(x));
+        if (lista.length) c.salvo = lista; else delete c.salvo;
+      };
+      hijos.push(el('div', { clase: 'ce-nota' }, 'Sale en todas las láminas. Lo que cambies aquí cambia en todas. Para no verla solo en esta, ocúltala con el ojo de la lista.'));
+      hijos.push(campoCasilla('Menos en la primera (la portada)', salvo.has('primera'), v => fijarSalvo('primera', v)));
+      hijos.push(campoCasilla('Menos en la última', salvo.has('ultima'), v => fijarSalvo('ultima', v)));
+      hijos.push(campoCasilla('Solo en el carrusel (no en historias ni TikTok)', !!c.solo_horizontal, v => { if (v) c.solo_horizontal = true; else delete c.solo_horizontal; }));
+      hijos.push(campoCasilla('No en el PDF de LinkedIn', salvo.has('pdf'), v => fijarSalvo('pdf', v)));
+      hijos.push(boton('Quitar de todas', { clase: 'ce-btn ce-ancho', title: 'Se queda solo la de esta lámina' }, () => quitarDeTodas(c)));
+    }
+    if (esFondo(c, lam)) {
+      hijos.push(boton('Este fondo a todas las láminas', { clase: 'ce-btn ce-ancho' }, () => fondoATodas(c)));
+    }
+    P.appendChild(grupo('Carrusel', ...hijos));
+  }
+
+  /** Una casilla que llama a `fijar` y nada más (quien la usa repinta). */
+  function campoCasillaSuelta(etiqueta, valor, fijar) {
+    const entrada = el('input', { type: 'checkbox' });
+    entrada.checked = !!valor;
+    entrada.addEventListener('change', () => fijar(entrada.checked));
+    return el('label', { clase: 'ce-casilla' }, entrada, el('span', {}, etiqueta));
+  }
+
+  /* ---------------------------------------------------------------- láminas */
+
+  function irALamina(i) {
+    if (!ED || i < 0 || i >= ED.doc.laminas.length) return;
+    terminarEdicionTexto(true);
+    ED.lamina = i;
+    ED.sel = [];
+    ED.vista.avisos = [];
+    pintarTodo();
+    pintarPaneles();
+    pintarTira();
+    revisarZonas();
+    programarVista();
+    anunciar(`Lámina ${i + 1} de ${ED.doc.laminas.length}, ${NOMBRE_TIPO[ED.doc.laminas[i].tipo] || 'sin tipo'}`);
+  }
+
+  function anunciar(texto) {
+    if (ED && ED.anuncio) ED.anuncio.textContent = texto;
+  }
+
+  /** Copias, en una lámina nueva, de cada grupo «en todas» (de la primera lámina que lo tenga). */
+  function enlazadasPara() {
+    const vistos = new Set();
+    const salida = [];
+    for (const lam of ED.doc.laminas) {
+      for (const c of lam.capas) {
+        if (!c.enlace || vistos.has(c.enlace)) continue;
+        vistos.add(c.enlace);
+        salida.push(Object.assign(copia(c), { id: nuevoId(), oculto: false }));
+      }
+    }
+    return salida;
+  }
+
+  /** Una lámina «En blanco»: el fondo de esta y lo que va en todas. */
+  function laminaEnBlanco() {
+    const aqui = ED.doc.laminas[ED.lamina];
+    const capasNuevas = [];
+    if (aqui.capas[0] && esFondo(aqui.capas[0], aqui) && !aqui.capas[0].enlace) {
+      const fondo = Object.assign(copia(aqui.capas[0]), { id: nuevoId(), oculto: false });
+      capasNuevas.push(fondo);
+    } else {
+      capasNuevas.push(capaNueva('forma', { nombre: 'Fondo', figura: 'rect', puntos: [], x: 0, y: 0, w: 100, h: 100,
+        relleno: { color: 'kit:oscuro', alfa: 1 }, borde: null, radio: 0, sombra: [] }));
+    }
+    capasNuevas.push(...enlazadasPara());
+    return { id: nuevoIdCorto('l'), tipo: 'blanco', capas: capasNuevas };
+  }
+
+  function anadirLamina(lam, donde) {
+    if (ED.doc.laminas.length >= MAX_LAMINAS) { avisoPantalla(`Un carrusel tiene como mucho ${MAX_LAMINAS} láminas.`, true); return false; }
+    const i = donde === undefined ? ED.lamina + 1 : donde;
+    ED.doc.laminas.splice(i, 0, lam);
+    cargarFotosDelDoc();
+    cargarLetrasDelDoc();
+    ED.lamina = i;
+    ED.sel = [];
+    pintarTodo(); commit(); pintarPaneles(); pintarTira();
+    anunciar(`Lámina ${i + 1} de ${ED.doc.laminas.length} añadida`);
+    return true;
+  }
+
+  function duplicarLamina() {
+    const lam = copia(ED.doc.laminas[ED.lamina]);
+    lam.id = nuevoIdCorto('l');
+    for (const c of lam.capas) c.id = nuevoId();      // las enlazadas siguen en su grupo
+    anadirLamina(lam);
+  }
+
+  function borrarLamina() {
+    if (ED.doc.laminas.length < 2) return;
+    const i = ED.lamina;
+    ED.doc.laminas.splice(i, 1);
+    if (ED.doc.laminas.length === 1) {
+      // una sola lámina: ya no es un carrusel, lo de «en todas» queda como capas normales
+      for (const c of ED.doc.laminas[0].capas) { delete c.enlace; delete c.salvo; delete c.solo_horizontal; }
+    }
+    ED.lamina = Math.min(i, ED.doc.laminas.length - 1);
+    ED.sel = [];
+    pintarTodo(); commit(); pintarPaneles(); pintarTira();
+    avisoPantalla('Lámina borrada. Ctrl+Z la recupera.');
+  }
+
+  function moverLamina(de, a) {
+    const L = ED.doc.laminas;
+    if (de === a || a < 0 || a >= L.length) return;
+    const [lam] = L.splice(de, 1);
+    L.splice(a, 0, lam);
+    ED.lamina = a;
+    ED.sel = [];
+    pintarTodo(); commit(); pintarPaneles(); pintarTira();
+    anunciar(`Lámina movida a la posición ${a + 1} de ${L.length}`);
+  }
+
+  /** Los nodos de una lámina cualquiera (para la tira y la vista en el móvil). */
+  function nodosDeLamina(i) {
+    const antes = ED.lamina;
+    ED.lamina = i;
+    try {
+      const col = colores();
+      return ED.doc.laminas[i].capas.map(c => nodoCapa(c, col)).filter(Boolean);
+    } finally {
+      ED.lamina = antes;
+    }
+  }
+
+  function miniLienzo(i, clase) {
+    const f = formato();
+    const mini = el('div', { clase: clase || 'ce-mini-lienzo', 'aria-hidden': 'true' });
+    mini.style.aspectRatio = `${f.W} / ${f.H}`;
+    mini.style.background = colores().oscuro;
+    mini.append(...nodosDeLamina(i));
+    return mini;
+  }
+
+  function pintarMiniatura(i) {
+    if (!ED || !ED.tira) return;
+    const hueco = ED.tira.querySelector(`.ce-tira-lamina[data-i="${i}"] .ce-mini-lienzo`);
+    if (!hueco || ED.doc.laminas.length !== ED.tira.querySelectorAll('.ce-tira-lamina').length) { pintarTira(); return; }
+    hueco.replaceWith(miniLienzo(i));
+  }
+
+  function pintarTira() {
+    if (!ED || !ED.tira) return;
+    const T = ED.tira;
+    const scroll = T.querySelector('.ce-tira-lista') ? T.querySelector('.ce-tira-lista').scrollLeft : 0;
+    T.textContent = '';
+    const L = ED.doc.laminas;
+    const lista = el('ol', { clase: 'ce-tira-lista', 'aria-label': `Láminas (${L.length})` });
+    L.forEach((lam, i) => {
+      const tipo = NOMBRE_TIPO[lam.tipo] || '';
+      const b = el('button', { type: 'button', clase: 'ce-tira-lamina' + (i === ED.lamina ? ' actual' : ''), 'data-i': String(i),
+        'aria-current': i === ED.lamina ? 'true' : 'false', draggable: 'true',
+        'aria-label': `Lámina ${i + 1} de ${L.length}${tipo ? `, ${tipo}` : ''}`,
+        title: `Lámina ${i + 1}${tipo ? ` · ${tipo}` : ''} (arrástrala para cambiar el orden)`,
+        onclick: () => irALamina(i) },
+      miniLienzo(i), el('span', { clase: 'ce-tira-num' }, String(i + 1)));
+      b.addEventListener('dragstart', ev => { ev.dataTransfer.setData('text/plain', String(i)); ev.dataTransfer.effectAllowed = 'move'; b.classList.add('arrastrando'); });
+      b.addEventListener('dragend', () => b.classList.remove('arrastrando'));
+      b.addEventListener('dragover', ev => { ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; b.classList.add('destino'); });
+      b.addEventListener('dragleave', () => b.classList.remove('destino'));
+      b.addEventListener('drop', ev => {
+        ev.preventDefault();
+        b.classList.remove('destino');
+        const de = parseInt(ev.dataTransfer.getData('text/plain'), 10);
+        if (Number.isInteger(de)) moverLamina(de, i);
+      });
+      lista.appendChild(el('li', {}, b));
+    });
+    const lleno = L.length >= MAX_LAMINAS;
+    const menu = el('div', { clase: 'ce-tira-menu', hidden: true, role: 'menu' },
+      boton('En blanco', { role: 'menuitem' }, () => { menu.hidden = true; anadirLamina(laminaEnBlanco()); }),
+      boton('Copia de esta', { role: 'menuitem' }, () => { menu.hidden = true; duplicarLamina(); }));
+    const mas = boton('＋ Lámina', { disabled: lleno, 'aria-haspopup': 'menu', title: lleno ? `Como mucho ${MAX_LAMINAS} láminas` : 'Añadir una lámina después de esta' },
+      () => { menu.hidden = !menu.hidden; });
+    const acciones = el('div', { clase: 'ce-tira-acciones' },
+      el('span', { clase: 'ce-tira-cuenta' }, L.length > 1 ? `Lámina ${ED.lamina + 1} de ${L.length}` : 'Una lámina'),
+      el('span', { clase: 'ce-tira-mas' }, mas, menu),
+      boton('← Mover', { disabled: ED.lamina === 0, title: 'Antes (Alt+←)' }, () => moverLamina(ED.lamina, ED.lamina - 1)),
+      boton('Mover →', { disabled: ED.lamina >= L.length - 1, title: 'Después (Alt+→)' }, () => moverLamina(ED.lamina, ED.lamina + 1)),
+      boton('Borrar lámina', { disabled: L.length < 2, clase: 'ce-btn ce-peligro' }, borrarLamina),
+      boton('Ver como en el móvil', { disabled: L.length < 1 }, verEnElMovil));
+    T.append(lista, acciones);
+    const nueva = T.querySelector('.ce-tira-lista');
+    nueva.scrollLeft = scroll;
+    const actual = T.querySelector('.ce-tira-lamina.actual');
+    if (actual && actual.scrollIntoView) actual.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  /** «Ver como en el móvil»: el carrusel se desliza con sus puntos; las historias
+   * llevan las barras de arriba y se avanza tocando. */
+  function verEnElMovil() {
+    const f = formato();
+    const historia = f.H / f.W > 1.7;
+    const L = ED.doc.laminas;
+    let actual = ED.lamina;
+    const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Así se ve en el móvil' });
+    const cerrarModal = () => capaVista.remove();
+    const telefono = el('div', { clase: 'ce-movil' + (historia ? ' historia' : '') });
+    const pasar = el('div', { clase: 'ce-movil-pasar' }, ...L.map((_l, i) => el('div', { clase: 'ce-movil-lamina' }, miniLienzo(i, 'ce-movil-lienzo'))));
+    const puntos = el('div', { clase: 'ce-movil-puntos', 'aria-hidden': 'true' }, ...L.map(() => el('span', {})));
+    const barras = el('div', { clase: 'ce-movil-barras', 'aria-hidden': 'true' }, ...L.map(() => el('span', {})));
+    const contador = el('div', { clase: 'ce-pista', role: 'status' });
+    const marcar = () => {
+      [...puntos.children].forEach((p, i) => p.classList.toggle('si', i === actual));
+      [...barras.children].forEach((p, i) => p.classList.toggle('si', i <= actual));
+      contador.textContent = `${actual + 1} de ${L.length}`;
+    };
+    const ir = i => {
+      actual = Math.max(0, Math.min(L.length - 1, i));
+      pasar.scrollTo({ left: actual * pasar.clientWidth, behavior: 'smooth' });
+      marcar();
+    };
+    pasar.addEventListener('scroll', () => {
+      const i = Math.round(pasar.scrollLeft / Math.max(1, pasar.clientWidth));
+      if (i !== actual) { actual = i; marcar(); }
+    });
+    if (historia) {
+      pasar.addEventListener('click', ev => {
+        const r = pasar.getBoundingClientRect();
+        ir(actual + (ev.clientX - r.left < r.width / 3 ? -1 : 1));
+      });
+      telefono.append(barras, pasar);
+    } else {
+      telefono.append(pasar, puntos);
+    }
+    capaVista.appendChild(el('div', { clase: 'ce-modal-cuerpo ce-modal-movil' },
+      el('h2', {}, historia ? 'Así se ven las historias' : 'Así se ve el carrusel'),
+      el('p', { clase: 'ce-pista' }, historia ? 'Toca a la derecha para pasar y a la izquierda para volver.' : 'Desliza con el dedo (o con las flechas).'),
+      telefono, contador,
+      el('div', { clase: 'ce-botonera' },
+        boton('←', { 'aria-label': 'Anterior' }, () => ir(actual - 1)),
+        boton('→', { 'aria-label': 'Siguiente' }, () => ir(actual + 1)),
+        boton('Cerrar', { clase: 'ce-btn ce-primario' }, cerrarModal))));
+    capaVista.addEventListener('pointerdown', ev => { if (ev.target === capaVista) cerrarModal(); });
+    capaVista.addEventListener('keydown', ev => {
+      if (ev.key === 'ArrowRight') { ev.preventDefault(); ir(actual + 1); }
+      if (ev.key === 'ArrowLeft') { ev.preventDefault(); ir(actual - 1); }
+    });
+    ED.raiz.appendChild(capaVista);
+    requestAnimationFrame(() => { pasar.scrollLeft = actual * pasar.clientWidth; marcar(); });
+    capaVista.querySelector('.ce-primario').focus();
+  }
+
+  /** Lo del carrusel en el panel de la pieza: la lámina que ves (su texto
+   * alternativo) y dónde cabe. */
+  function panelCarruselPieza(P) {
+    const L = ED.doc.laminas;
+    const lam = L[ED.lamina];
+    const alt = el('textarea', { maxlength: '400', rows: '2', 'aria-label': 'Texto alternativo de esta lámina',
+      placeholder: 'Qué se ve, para quien no puede verla (si lo dejas vacío, sale de sus textos)' });
+    alt.value = lam.alt || '';
+    alt.addEventListener('input', () => { if (alt.value.trim()) lam.alt = alt.value.slice(0, 400); else delete lam.alt; });
+    alt.addEventListener('change', () => commit());
+    const f = formato();
+    const vertical = f.H / f.W > 1.7;
+    const filas = [
+      ['Instagram', vertical ? 'Historias: una por lámina' : '20 subiendo a mano (publicando automático, puede que 10)', L.length <= 20],
+      ['Facebook', vertical ? 'Historias: una por lámina' : '20 subiendo a mano', L.length <= 20],
+      ['Threads', '20', L.length <= 20],
+      ['TikTok en fotos', '35, solo JPG', L.length <= 35],
+      ['LinkedIn (PDF)', '300 páginas', true],
+      ['Pinterest', 'de 2 a 5', L.length >= 2 && L.length <= 5],
+      ['X', '4', L.length <= 4],
+    ];
+    P.appendChild(grupo(L.length > 1 ? `Lámina ${ED.lamina + 1} de ${L.length}` : 'Carrusel',
+      L.length > 1 ? el('label', { clase: 'ce-campo' }, el('span', {}, 'Texto alternativo de esta lámina'), alt) : null,
+      L.length > 1 ? null : el('small', { clase: 'ce-pista' }, 'Para hacer un carrusel, añade láminas con «＋ Lámina», debajo del lienzo.'),
+      L.length > 1 ? el('div', { clase: 'ce-campo' }, el('span', {}, `¿Dónde caben ${L.length} láminas?`),
+        el('ul', { clase: 'ce-donde-cabe' }, ...filas.map(([red, cuantas, cabe]) =>
+          el('li', { clase: cabe ? 'si' : 'no' }, el('b', {}, `${cabe ? '✓' : '✗'} ${red}`), ` · ${cuantas}`)))) : null));
   }
 
   /* ================================================================ ratón y dedo */
@@ -2108,6 +2584,13 @@
     }
     if ((tecla === 'Delete' || tecla === 'Backspace') && ED.sel.length) { ev.preventDefault(); borrar(); return; }
     if (tecla === 'Enter' && ED.sel.length === 1 && seleccion()[0].tipo === 'texto') { ev.preventDefault(); empezarEdicionTexto(ED.sel[0], true); return; }
+    if (ev.altKey && (tecla === 'ArrowLeft' || tecla === 'ArrowRight')) {
+      // Alt+flechas: la lámina, antes o después
+      ev.preventDefault();
+      moverLamina(ED.lamina, ED.lamina + (tecla === 'ArrowLeft' ? -1 : 1));
+      return;
+    }
+    if (tecla === 'PageUp' || tecla === 'PageDown') { ev.preventDefault(); irALamina(ED.lamina + (tecla === 'PageUp' ? -1 : 1)); return; }
     const flechas = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
     if (flechas[tecla] && ED.sel.length) {
       ev.preventDefault();

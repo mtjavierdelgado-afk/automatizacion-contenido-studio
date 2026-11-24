@@ -515,6 +515,24 @@ def partir_y_montar(pincel):
              "Lo que no falta\n- Uno\n- Dos\n- Tres\n- Cuatro\n- Cinco\n- Seis\n- Siete\n\n"
              "8 de 10\nfiestas terminan tarde\n\n"
              "Otro punto\nCon su texto.")
+    # prueba en el servidor del 24-11: con la familia 10 (sin texto de apoyo) el
+    # apoyo de la portada se quedaba encima del botón «Desliza →»
+    base = {"version": 2, "formato": "v45", "nombre": "x", "laminas": [{"capas": []}]}
+    d1, _av = K.carrusel_desde_texto(pincel, base, 1, texto, "sustituir", None, None, None, "Alba")
+    d10 = K.montar_todas(pincel, d1, 10, None, None, None, "Alba")
+    apoyo = [c for c in d10["laminas"][0]["capas"] if c.get("rol") == "apoyo"]
+    ok(len(apoyo) == 1 and apoyo[0].get("oculto") and apoyo[0]["txt"] == "Y cómo evitarlos",
+       "una portada cuya familia no tiene sitio para el apoyo lo conserva, pero oculto (no pisa el botón)")
+    d1b = K.montar_todas(pincel, d10, 1, None, None, None, "Alba")
+    apoyo = [c for c in d1b["laminas"][0]["capas"] if c.get("rol") == "apoyo"]
+    ok(len(apoyo) == 1 and not apoyo[0].get("oculto") and apoyo[0]["txt"] == "Y cómo evitarlos",
+       "y al volver a una familia con sitio, sale otra vez (sin duplicarse)")
+    _d, av = K.carrusel_desde_texto(pincel, base, 10, texto, "sustituir", None, None, None, "Alba")
+    ok(any("no lleva texto de apoyo" in a for a in av), "partir con esa familia avisa de que el apoyo no sale")
+    nota = " ".join(str(a) for a in K.avisos_del_carrusel(d1))
+    ok("lámina 2" not in nota.split("muestra")[-1].split(":")[0] if "muestra" in nota else True,
+       f"el «01» de un punto escrito no cuenta como texto de muestra ({nota[:200]})")
+
     piezas, avisos = K.partir(texto)
     ok([p[0] for p in piezas] == ["portada", "punto", "lista", "lista", "dato", "punto", "cierre"],
        f"cada párrafo a su tipo, y al final el cierre ({[p[0] for p in piezas]})")

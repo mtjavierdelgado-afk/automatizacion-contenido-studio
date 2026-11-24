@@ -582,7 +582,8 @@ def montar_lamina(pincel, doc, indice, n, tipo, kit=None, logo=None, logo_oscuro
     familia(n)
     previa = doc["laminas"][indice]
     if tipo == "portada":
-        nuevo = C.montar(pincel, n, doc["formato"], doc, textos or {}, kit, logo, logo_oscuro, indice)
+        nuevo = C.montar(pincel, n, doc["formato"], doc, textos or {}, kit, logo, logo_oscuro, indice,
+                         ocultar_sin_sitio=True)
         lam = nuevo["laminas"][indice]
         lam["tipo"], lam["familia"] = "portada", n
         if len(nuevo["laminas"]) > 1:
@@ -752,6 +753,10 @@ def carrusel_desde_texto(pincel, doc, n, texto, modo="sustituir", kit=None, logo
             textos = textos_de_portada(n, t, piezas, marca)
             m = C.montar(pincel, n, doc["formato"], base, textos, kit, logo, logo_oscuro, 0)
             lam = dict(m["laminas"][0], tipo="portada", familia=n)
+            apoyo = (t.get("apoyo") or "").strip()
+            if apoyo and n != 9 and not any(c.get("rol") == "apoyo" for c in lam["capas"]):
+                avisos.append(f"La portada de la familia {n} no lleva texto de apoyo: «{apoyo[:60]}» no sale. "
+                              "Elige otra familia o ponlo en la lámina 2.")
         else:
             lam = lamina(n, tipo, doc["formato"], colores, t, marca)
         nuevas.append(lam)
@@ -868,9 +873,12 @@ def avisos_del_carrusel(doc):
                       "Si no lo escribes, sale de sus textos.")
     else:
         nota("bien", "Todas las láminas tienen texto alternativo.")
-    muestras = {v for t in MUESTRA.values() for v in t.values()} | {"Tu gancho aquí", "Tu titular aquí"}
+    # el número, las etiquetas «Antes»/«Después» y «Guárdalo y compártelo» sirven tal cual:
+    # «01» de un punto que escribiste no es un texto de muestra (prueba del 24-11)
+    sirven = {"numero", "etiqueta1", "etiqueta2", "guardalo"}
+    muestras = {v for t in MUESTRA.values() for k, v in t.items() if k not in sirven} | {"Tu gancho aquí", "Tu titular aquí"}
     con_muestra = sorted({i + 1 for i, lam in enumerate(L) for c in lam["capas"]
-                          if c["tipo"] == "texto" and c["txt"].strip() in muestras})
+                          if c["tipo"] == "texto" and not c.get("oculto") and c["txt"].strip() in muestras})
     if con_muestra:
         nota("mal", f"Siguen textos de muestra en la lámina {', '.join(map(str, con_muestra))}: cámbialos antes de publicar.")
     if not 7 <= len(L) <= 10:

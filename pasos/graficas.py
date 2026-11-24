@@ -954,6 +954,8 @@ def listar_piezas(raiz, cid):
                 # lo último que se guardó es la versión en capas: su nombre y su fecha
                 ficha = dict(ficha, nombre=vale.get("nombre") or ficha.get("nombre"),
                              cambiada=vale.get("cambiada") or ficha.get("cambiada"))
+                if isinstance(vale.get("laminas"), int) and vale["laminas"] > 1:
+                    ficha["laminas"] = vale["laminas"]      # un carrusel (graficas-3-carrusel)
             salida.append(dict(ficha, en_capas=en_capas))
     salida.sort(key=lambda p: p.get("cambiada") or "", reverse=True)
     return salida

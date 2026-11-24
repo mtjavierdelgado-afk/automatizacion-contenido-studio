@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 RAIZ = os.path.dirname(AQUI)
@@ -196,6 +197,168 @@ def pantalla_igual():
        f"{len(casos)} casos iguales en la pantalla y en el PNG" + (f" (caso {malos[0]}: {salida[malos[0]]} != {esperado[malos[0]]})" if malos else ""))
 
 
+# ================================================================ guardar
+
+def guardar(carpeta):
+    print("guardar un carrusel: solo lo que cambió, una carpeta por guardado")
+    raiz = os.path.join(carpeta, "proyectos")
+    os.makedirs(raiz, exist_ok=True)
+    cid = "cafe"
+    pasos = []
+    doc = carrusel()
+    r = C.guardar(raiz, cid, doc, None, avisar=lambda h, t: pasos.append((h, t)))
+    pid, guardado = r["id"], r["doc"]["origen"]["guardado"]
+    destino = G._carpeta_pieza(raiz, cid, pid)
+    carpeta1 = C.carpeta_laminas(raiz, cid, pid, guardado)
+    ok(sorted(os.listdir(carpeta1)) == ["01.jpg", "01.png", "02.jpg", "02.png", "03.jpg", "03.png", "huellas.json"],
+       "cada lámina en PNG y JPG, numeradas, en la carpeta de este guardado")
+    ok(open(os.path.join(destino, "capas.png"), "rb").read() == open(os.path.join(carpeta1, "01.png"), "rb").read(),
+       "capas.png es la lámina 1 (la lista, la miniatura y `main` la ven)")
+    ok(pasos[0] == (0, 3) and pasos[-1] == (3, 3), f"avisa de cómo va ({pasos})")
+    meta = G.meta_capas(raiz, cid, pid)
+    ok(meta.get("laminas") == 3, "la ficha pequeña dice cuántas láminas hay")
+    pieza = next(p for p in G.listar_piezas(raiz, cid) if p["id"] == pid)
+    ok(pieza.get("laminas") == 3 and pieza.get("en_capas"), "y la lista también")
+    ok(len(r["avisos_laminas"]) == 3, "con los avisos de cada lámina")
+    pngs = [open(os.path.join(carpeta1, f"0{n}.png"), "rb").read() for n in (1, 2, 3)]
+    ok(len(set(pngs)) == 3, "cada lámina es distinta (su número, su «Desliza»)")
+
+    # otra vez, cambiando solo la lámina 2: se reutilizan las otras dos
+    _ficha, leido = C.leer(raiz, cid, pid)
+    leido["laminas"][1]["capas"][1]["txt"] = "Idea cambiada"
+    leido["origen"]["envio"] = "abc123"
+    pasos.clear()
+    r2 = C.guardar(raiz, cid, leido, pid, avisar=lambda h, t: pasos.append((h, t)))
+    ok(pasos[0] == (2, 3), f"solo vuelve a pintar la lámina que cambió ({pasos})")
+    carpeta2 = C.carpeta_laminas(raiz, cid, pid, r2["doc"]["origen"]["guardado"])
+    ok(not os.path.exists(carpeta1) and os.path.isdir(carpeta2), "la carpeta del guardado anterior se borra")
+    ok(open(os.path.join(carpeta2, "01.png"), "rb").read() == pngs[0], "la lámina 1, igual que antes")
+    ok(open(os.path.join(carpeta2, "02.png"), "rb").read() != pngs[1], "la 2, con el cambio")
+    ok(G.meta_capas(raiz, cid, pid).get("envio") == "abc123", "el sello dice quién guardó (para no confundirlo con otra pestaña)")
+    ok(C.leer(raiz, cid, pid)[1]["origen"].get("envio") == "abc123", "y el documento también")
+
+    # una huella con otro pintor no se reutiliza
+    viejo = C.PINTOR
+    try:
+        C.PINTOR = "otro"
+        _f, leido = C.leer(raiz, cid, pid)
+        pasos.clear()
+        C.guardar(raiz, cid, leido, pid, avisar=lambda h, t: pasos.append((h, t)))
+        ok(pasos[0] == (0, 3), "si cambia el pintor, se vuelve a pintar todo")
+    finally:
+        C.PINTOR = viejo
+
+    # otra pestaña ya guardó: 409, sin escribir nada
+    _f, viejo_doc = C.leer(raiz, cid, pid)
+    C.guardar(raiz, cid, viejo_doc, pid)
+    antes = sorted(os.listdir(destino))
+    try:
+        C.guardar(raiz, cid, viejo_doc, pid)
+        ok(False, "guardar sobre lo de otra pestaña da conflicto")
+    except C.ErrorConflicto:
+        ok(sorted(os.listdir(destino)) == antes, "guardar sobre lo de otra pestaña da conflicto y no escribe nada")
+
+    # volver a una lámina: las carpetas de láminas sobran
+    _f, leido = C.leer(raiz, cid, pid)
+    leido["laminas"] = leido["laminas"][:1]
+    C.guardar(raiz, cid, leido, pid)
+    ok(not [n for n in os.listdir(destino) if n.startswith("capas_")], "con una sola lámina no queda ninguna carpeta de láminas")
+    ok("laminas" not in G.meta_capas(raiz, cid, pid), "ni el número de láminas en el sello")
+
+
+# ================================================================ por la API
+
+def _arrancar(carpeta):
+    import socket                                           # noqa: PLC0415
+    import time                                             # noqa: PLC0415
+    import requests                                         # noqa: PLC0415
+    with socket.socket() as sonda:
+        sonda.bind(("127.0.0.1", 0))
+        puerto = sonda.getsockname()[1]
+    entorno = dict(os.environ, ESTUDIO_SIMULAR="1", PYTHONIOENCODING="utf-8")
+    for var, nombre in (("ESTUDIO_PRESETS", "presets.json"), ("ESTUDIO_BANCO_PRESETS", "banco_presets"),
+                        ("ESTUDIO_SECRETOS", "secretos"), ("ESTUDIO_RECETAS", "recetas.json"),
+                        ("ESTUDIO_AJUSTES", "ajustes.json"), ("ESTUDIO_ESTADISTICAS", "estadisticas.json")):
+        entorno[var] = os.path.join(carpeta, nombre)
+    os.makedirs(entorno["ESTUDIO_SECRETOS"], exist_ok=True)
+    proceso = subprocess.Popen([sys.executable, os.path.join(RAIZ, "app.py"), "--puerto", str(puerto), "--proyectos",
+                                os.path.join(carpeta, "proyectos")], cwd=RAIZ, env=entorno,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    base = f"http://127.0.0.1:{puerto}"
+    limite = time.time() + 90
+    while time.time() < limite:
+        if proceso.poll() is not None:
+            raise RuntimeError("el Studio no arranca")
+        try:
+            if requests.get(base + "/api/salud", timeout=2).status_code == 200:
+                return proceso, base
+        except requests.RequestException:
+            time.sleep(0.3)
+    proceso.kill()
+    raise RuntimeError("el Studio no contesta")
+
+
+def por_la_api(carpeta):
+    print("guardar un carrusel por la API: un trabajo con barra")
+    import time                                             # noqa: PLC0415
+    import requests                                         # noqa: PLC0415
+    os.makedirs(os.path.join(carpeta, "proyectos"), exist_ok=True)
+    proceso, base = _arrancar(carpeta)
+    try:
+        r = requests.post(base + "/api/clientes", json={"nombre": "Carrusel"}, timeout=30)
+        d = r.json()
+        cid = d.get("id") or (d.get("cliente") or {}).get("id")
+        ok(r.status_code in (200, 201) and cid, "un proyecto para probar")
+        # una lámina: como siempre, en la misma petición
+        una = dict(carrusel(), laminas=carrusel()["laminas"][:1])
+        r = requests.post(base + f"/api/graficas/{cid}/capas", json={"doc": una}, timeout=60)
+        ok(r.status_code == 201 and r.json().get("id"), "una pieza de una lámina se guarda como siempre (201)")
+        # tres láminas: un trabajo
+        r = requests.post(base + f"/api/graficas/{cid}/capas", json={"doc": carrusel()}, timeout=60)
+        ok(r.status_code == 202 and r.json().get("trabajo") and r.json().get("total") == 3,
+           f"un carrusel devuelve un trabajo al momento (202): {r.status_code}")
+        tid = r.json().get("trabajo")
+        vistas, estado = set(), {}
+        limite = time.time() + 120
+        while time.time() < limite:
+            estado = requests.get(base + f"/api/graficas/{cid}/capas/trabajo/{tid}", timeout=30).json()
+            vistas.add((estado.get("hechas"), estado.get("total")))
+            if estado.get("estado") != "pintando":
+                break
+            time.sleep(0.2)
+        ok(estado.get("estado") == "listo" and (estado.get("resultado") or {}).get("id"),
+           f"el trabajo acaba con lo que devuelve un guardado ({estado.get('estado')}, {estado.get('error')})")
+        ok((3, 3) in vistas, f"y dice cuántas láminas lleva ({sorted(vistas, key=str)})")
+        pid = (estado.get("resultado") or {}).get("id")
+        piezas = requests.get(base + f"/api/graficas/{cid}/piezas", timeout=30).json()["piezas"]
+        ok(any(p["id"] == pid and p.get("laminas") == 3 for p in piezas), "la lista dice que tiene 3 láminas")
+        # guardar otra vez con el documento de antes: el trabajo acaba en 409
+        def esperar(t):
+            fin = time.time() + 120
+            while time.time() < fin:
+                e = requests.get(base + f"/api/graficas/{cid}/capas/trabajo/{t}", timeout=30).json()
+                if e.get("estado") != "pintando":
+                    return e
+                time.sleep(0.2)
+            return {}
+        doc = (estado.get("resultado") or {}).get("doc")
+        r = requests.put(base + f"/api/graficas/{cid}/piezas/{pid}/capas", json={"doc": doc}, timeout=60)
+        ok(esperar(r.json().get("trabajo")).get("estado") == "listo", "volver a guardar con lo último guardado vale")
+        r = requests.put(base + f"/api/graficas/{cid}/piezas/{pid}/capas", json={"doc": doc}, timeout=60)
+        e2 = esperar(r.json().get("trabajo"))
+        ok(e2.get("estado") == "error" and e2.get("codigo") == 409, f"un guardado que pisaría a otro acaba en 409 ({e2})")
+        r = requests.get(base + f"/api/graficas/{cid}/capas/trabajo/nohayeso", timeout=30)
+        ok(r.status_code == 404 and "Vuelve a pulsar" in r.text, "un trabajo que no existe dice que se vuelva a guardar")
+        r = requests.get(base + f"/api/graficas/otro/capas/trabajo/{tid}", timeout=30)
+        ok(r.status_code in (403, 404), "un trabajo solo se ve desde su proyecto")
+    finally:
+        proceso.terminate()
+        try:
+            proceso.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proceso.kill()
+
+
 def main():
     formato_del_documento()
     capas_por_lamina()
@@ -205,6 +368,12 @@ def main():
         pieza_de_siempre_igual(pincel)
     finally:
         pincel.cerrar()
+    carpeta = tempfile.mkdtemp(prefix="graficas_carrusel_")
+    try:
+        guardar(carpeta)
+        por_la_api(os.path.join(carpeta, "api"))
+    finally:
+        shutil.rmtree(carpeta, ignore_errors=True)
     print(f"\n{CUENTA['ok']} comprobaciones bien, {CUENTA['mal']} mal")
     return 1 if CUENTA["mal"] else 0
 

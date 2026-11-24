@@ -45,6 +45,7 @@ import unicodedata
 import shutil
 import tempfile
 import sys
+import secrets
 import threading
 import time
 import uuid
@@ -25027,18 +25028,75 @@ def graficas_vista_capas(cid: str, peticion: Request, cuerpo: dict = Body(defaul
     return {"img": G._uri_jpg(G.a_jpg(png, 1080, 88)), "avisos": avisos, "lineas": lineas}
 
 
+# Un carrusel (más de una lámina) se guarda como TRABAJO (graficas-3-carrusel):
+# pintar 20 láminas pasa del corte de 60 s del proxy. Guardar devuelve al
+# momento el id del trabajo y la pantalla pregunta cómo va. Vive en memoria: si
+# el servicio se reinicia a mitad, no queda nada escrito (todo se escribe al
+# final, de una vez) y la pantalla pide volver a guardar.
+_TRABAJOS_CAPAS = {}
+_CERROJO_TRABAJOS_CAPAS = threading.Lock()
+_VIDA_TRABAJO_CAPAS = 3600
+
+
+def _guardar_capas(cid, pieza_id, peticion, cuerpo):
+    _G, C, raiz, _kit, logo, oscuro = _contexto_capas(cid, peticion)
+    doc = (cuerpo or {}).get("doc")
+    laminas = doc.get("laminas") if isinstance(doc, dict) else None
+    if not isinstance(laminas, list) or len(laminas) <= 1:
+        # una lámina: como siempre, en la misma petición
+        return _por_capas(C.guardar, raiz, cid, doc, pieza_id, logo, oscuro)
+    ahora = time.time()
+    with _CERROJO_TRABAJOS_CAPAS:
+        for tid in [t for t, v in _TRABAJOS_CAPAS.items() if v["fin"] and ahora - v["fin"] > _VIDA_TRABAJO_CAPAS]:
+            del _TRABAJOS_CAPAS[tid]
+        if pieza_id and any(v["cid"] == cid and v["pieza"] == pieza_id and not v["fin"] for v in _TRABAJOS_CAPAS.values()):
+            raise ErrorApi(409, "esta pieza ya se está guardando: espera a que termine")
+        tid = secrets.token_hex(8)
+        trabajo = {"id": tid, "cid": cid, "pieza": pieza_id or "", "estado": "pintando", "hechas": 0,
+                   "total": len(laminas), "resultado": None, "error": "", "codigo": 0, "fin": 0}
+        _TRABAJOS_CAPAS[tid] = trabajo
+
+    def avisar(hechas, total):
+        trabajo.update(hechas=hechas, total=total)
+
+    def correr():
+        try:
+            trabajo["resultado"] = C.guardar(raiz, cid, doc, pieza_id, logo, oscuro, avisar)
+            trabajo["estado"] = "listo"
+        except C.ErrorConflicto as fallo:
+            trabajo.update(estado="error", error=str(fallo), codigo=409)
+        except _G.ErrorGraficas as fallo:
+            trabajo.update(estado="error", error=str(fallo), codigo=404 if isinstance(fallo, _G.ErrorNoEsta) else 400)
+        except Exception as fallo:                          # noqa: BLE001
+            trabajo.update(estado="error", error=f"no se ha podido guardar: {fallo}", codigo=500)
+        finally:
+            trabajo["fin"] = time.time()
+    threading.Thread(target=correr, name=f"capas-{tid}", daemon=True).start()
+    return JSONResponse({"trabajo": tid, "total": len(laminas)}, status_code=202)
+
+
 @app.put("/api/graficas/{cid}/piezas/{pieza_id}/capas")
 def graficas_guardar_capas(cid: str, pieza_id: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """Guarda la versión en capas de una pieza, al lado de la de siempre."""
-    _G, C, raiz, _kit, logo, oscuro = _contexto_capas(cid, peticion)
-    return _por_capas(C.guardar, raiz, cid, (cuerpo or {}).get("doc"), pieza_id, logo, oscuro)
+    """Guarda la versión en capas de una pieza, al lado de la de siempre. Un
+    carrusel devuelve un trabajo (202) que se sigue en `.../capas/trabajo/{id}`."""
+    return _guardar_capas(cid, pieza_id, peticion, cuerpo)
 
 
 @app.post("/api/graficas/{cid}/capas", status_code=201)
 def graficas_crear_en_capas(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """Una pieza nueva que nace en capas."""
-    _G, C, raiz, _kit, logo, oscuro = _contexto_capas(cid, peticion)
-    return _por_capas(C.guardar, raiz, cid, (cuerpo or {}).get("doc"), None, logo, oscuro)
+    """Una pieza nueva que nace en capas (un carrusel, como trabajo: 202)."""
+    return _guardar_capas(cid, None, peticion, cuerpo)
+
+
+@app.get("/api/graficas/{cid}/capas/trabajo/{tid}")
+def graficas_trabajo_capas(cid: str, tid: str, peticion: Request):
+    """Cómo va el guardado de un carrusel: láminas hechas, y al acabar lo que
+    devuelve un guardado (o el error, con su código: 409 si otra pestaña guardó antes)."""
+    _ficha_de_graficas(cid, peticion)
+    trabajo = _TRABAJOS_CAPAS.get(str(tid))
+    if not trabajo or trabajo["cid"] != cid:
+        raise ErrorApi(404, "No se guardó: el servicio se reinició a mitad. Vuelve a pulsar «Guardar».")
+    return {k: trabajo[k] for k in ("estado", "hechas", "total", "resultado", "error", "codigo")}
 
 
 # --- El editor con capas libres (rama graficas-2-editor, 12-11-2026;

@@ -30,6 +30,7 @@ Por qué así
 - **Nada de esto toca vídeos, params ni firmas** (regla 1): todo vive en
   `<proyectos>/_sistema/graficas/`. Abrir, convertir y comparar no escriben.
 """
+import hashlib
 import html as html_mod
 import io
 import json
@@ -37,6 +38,7 @@ import math
 import os
 import re
 import secrets
+import shutil
 import threading
 import time
 
@@ -609,8 +611,9 @@ def capas_de_lamina(doc, lamina, f):
     return salida
 
 
-def html_capas(doc, kit=None, imagen_de=None, logo=None, logo_oscuro=None, lamina=0):
-    """El documento de una lámina. `imagen_de(nombre) -> ruta o None`."""
+def html_capas(doc, kit=None, imagen_de=None, logo=None, logo_oscuro=None, lamina=0, memo=None):
+    """El documento de una lámina. `imagen_de(nombre) -> ruta o None`. `memo`
+    guarda cada fichero ya leído: con varias láminas, cada foto se lee una vez."""
     doc = limpiar_doc(doc)
     f = G.formato(doc["formato"])
     colores = G.colores_finales(kit, doc)
@@ -619,7 +622,7 @@ def html_capas(doc, kit=None, imagen_de=None, logo=None, logo_oscuro=None, lamin
         raise ErrorGraficas("esa lámina no está")
     usadas = set()
     imagen_de = imagen_de or (lambda _n: None)
-    memo = {}
+    memo = {} if memo is None else memo
     cuerpo = "".join(_html_capa(c, doc, kit, colores, f, imagen_de, (logo, logo_oscuro), usadas, memo)
                      for c in capas_de_lamina(doc, lamina, f))
     faltan = [G.FUENTES[u][0] for u in usadas if not G.fuente_lista(u)]
@@ -652,7 +655,10 @@ _AJUSTAR = """(() => {
 def pintar(pincel, doc, kit=None, imagen_de=None, logo=None, logo_oscuro=None, lamina=0):
     """-> (png, avisos, medida). Cada texto que «ajusta» baja su letra hasta
     caber en su caja (como el motor de siempre, con el mismo mínimo)."""
-    documento, f, margenes, faltan = html_capas(doc, kit, imagen_de, logo, logo_oscuro, lamina)
+    return _pintar_documento(pincel, *html_capas(doc, kit, imagen_de, logo, logo_oscuro, lamina))
+
+
+def _pintar_documento(pincel, documento, f, margenes, faltan):
     pincel.abrir(documento, f["W"], f["H"])
     reducidos = pincel.evaluar(_AJUSTAR) or 0
     medida = pincel.evaluar(G._MEDIR % (json.dumps(list(margenes)), "[]")) or {"fuera": [], "choca": []}
@@ -1366,7 +1372,82 @@ def _escribir_bytes(ruta, contenido):
     os.replace(temporal, ruta)
 
 
-def guardar(raiz, cid, doc, pieza_id=None, logo=None, logo_oscuro=None):
+#: Sube si cambia CÓMO se pinta: una lámina ya pintada solo se reutiliza si su
+#: huella (HTML + versión del pintor + letras que faltaban) es la misma.
+PINTOR = "1"
+#: Cada cuántas láminas se cede el turno del navegador a las demás peticiones.
+LAMINAS_POR_TURNO = 5
+
+
+def carpeta_laminas(raiz, cid, pieza_id, guardado):
+    """Donde van las láminas de un carrusel: una carpeta por guardado, así una
+    descarga nunca mezcla láminas de dos guardados."""
+    return os.path.join(G._carpeta_pieza(raiz, cid, pieza_id), f"capas_{guardado}")
+
+
+def _previas(raiz, cid, pieza_id):
+    """huella -> (png, jpg, avisos) del último guardado, para no volver a pintar
+    lo que no cambió. Solo lee, y nunca falla (sin nada, se pinta todo)."""
+    meta = G.meta_capas(raiz, cid, pieza_id) or {} if pieza_id else {}
+    guardado = re.sub(r"[^0-9a-f]", "", str(meta.get("guardado") or ""))[:16]
+    if not guardado:
+        return {}
+    carpeta = carpeta_laminas(raiz, cid, pieza_id, guardado)
+    try:
+        indice = G._leer_json(os.path.join(carpeta, "huellas.json"))
+        salida = {}
+        for n, (huella, avisos) in enumerate(zip(indice["huellas"], indice["avisos"]), 1):
+            png, jpg = (os.path.join(carpeta, f"{n:02d}.{e}") for e in ("png", "jpg"))
+            if os.path.isfile(png) and os.path.isfile(jpg):
+                salida[huella] = (png, jpg, avisos)
+        return salida
+    except Exception:                                       # noqa: BLE001
+        return {}
+
+
+def pintar_laminas(doc, kit, imagen_de, logo=None, logo_oscuro=None, previas=None, avisar=None):
+    """-> [(png, jpg, avisos, huella)], una por lámina. Cada foto se lee una vez;
+    solo se pintan las láminas que cambiaron (huella), y el turno del
+    navegador se cede cada `LAMINAS_POR_TURNO`. `avisar(hechas, total)`."""
+    previas = previas or {}
+    memo = {}
+    total = len(doc["laminas"])
+    preparadas = []
+    for i in range(total):
+        documento, f, margenes, faltan = html_capas(doc, kit, imagen_de, logo, logo_oscuro, i, memo)
+        huella = hashlib.sha256(f"{PINTOR}\0{sorted(faltan)}\0{documento}".encode()).hexdigest()[:32]
+        preparadas.append((documento, f, margenes, faltan, huella))
+    salida = [None] * total
+    por_pintar = []
+    for i, (_d, _f, _m, _fa, huella) in enumerate(preparadas):
+        vieja = previas.get(huella)
+        if vieja:
+            try:
+                with open(vieja[0], "rb") as a, open(vieja[1], "rb") as b:
+                    salida[i] = (a.read(), b.read(), list(vieja[2]), huella)
+                continue
+            except OSError:
+                pass
+        por_pintar.append(i)
+    hechas = total - len(por_pintar)
+    if avisar:
+        avisar(hechas, total)
+    for desde in range(0, len(por_pintar), LAMINAS_POR_TURNO):
+        tanda = por_pintar[desde:desde + LAMINAS_POR_TURNO]
+
+        def trabajar(pincel, tanda=tanda):
+            for i in tanda:
+                documento, f, margenes, faltan, huella = preparadas[i]
+                png, avisos, _ = _pintar_documento(pincel, documento, f, margenes, faltan)
+                salida[i] = (png, G.a_jpg(png), avisos, huella)
+        G._con_turno(trabajar)
+        hechas += len(tanda)
+        if avisar:
+            avisar(hechas, total)
+    return salida
+
+
+def guardar(raiz, cid, doc, pieza_id=None, logo=None, logo_oscuro=None, avisar=None):
     """Guarda una pieza en capas. Con `pieza_id`, al lado de su pieza de siempre
     (que no se toca). Sin él, nace una pieza nueva solo en capas, con una ficha
     mínima y una copia en pieza.png/jpg para que la lista y la descarga de
@@ -1400,8 +1481,15 @@ def guardar(raiz, cid, doc, pieza_id=None, logo=None, logo_oscuro=None):
     def imagen_de(nombre):
         return G.ruta_imagen(raiz, cid, nombre)
 
-    png, avisos, _ = G._con_turno(lambda p: pintar(p, doc, kit, imagen_de, logo, logo_oscuro))
-    jpg = G.a_jpg(png)
+    varias = len(doc["laminas"]) > 1
+    if varias:
+        laminas = pintar_laminas(doc, kit, imagen_de, logo, logo_oscuro, _previas(raiz, cid, None if nueva else pieza_id), avisar)
+        png, jpg, avisos = laminas[0][:3]
+    else:
+        # una sola lámina: exactamente como antes de los carruseles
+        laminas = []
+        png, avisos, _ = G._con_turno(lambda p: pintar(p, doc, kit, imagen_de, logo, logo_oscuro))
+        jpg = G.a_jpg(png)
     f = G.formato(doc["formato"])
     ahora = time.strftime("%Y-%m-%dT%H:%M:%S")
     rutas = _rutas(raiz, cid, pieza_id)
@@ -1428,12 +1516,37 @@ def guardar(raiz, cid, doc, pieza_id=None, logo=None, logo_oscuro=None):
         _escribir_bytes(rutas["png"], png)
         _escribir_bytes(rutas["jpg"], jpg)
         doc["origen"].update(sello=ficha["sello"], nacida=nacida, guardado=secrets.token_hex(8))
-        G._escribir_json(rutas["json"], dict(doc, avisos=avisos, cambiada=ahora, medida=f"{f['W']}×{f['H']}"))
+        if varias:
+            # las láminas en su carpeta, con el número de este guardado (la
+            # 1 también es capas.png: la lista, la miniatura y `main` la ven)
+            carpeta = carpeta_laminas(raiz, cid, pieza_id, doc["origen"]["guardado"])
+            os.makedirs(carpeta, exist_ok=True)
+            for n, (png_n, jpg_n, _av, _h) in enumerate(laminas, 1):
+                _escribir_bytes(os.path.join(carpeta, f"{n:02d}.png"), png_n)
+                _escribir_bytes(os.path.join(carpeta, f"{n:02d}.jpg"), jpg_n)
+            G._escribir_json(os.path.join(carpeta, "huellas.json"),
+                             {"huellas": [x[3] for x in laminas], "avisos": [x[2] for x in laminas]})
+        extra = {"avisos_laminas": [x[2] for x in laminas]} if varias else {}
+        G._escribir_json(rutas["json"], dict(doc, avisos=avisos, cambiada=ahora, medida=f"{f['W']}×{f['H']}", **extra))
         meta = {"sello": ficha["sello"], "guardado": doc["origen"]["guardado"], "cambiada": ahora,
                 "nombre": doc["nombre"] or ficha.get("nombre") or ""}
+        if varias:
+            meta["laminas"] = len(laminas)
+        if doc["origen"].get("envio"):
+            # quien guardó: si se corta la conexión, el editor relee el sello
+            # y sabe si el guardado fue suyo (y no de otra pestaña)
+            meta["envio"] = doc["origen"]["envio"]
         if nacida:
             # en una nacida el sello cambia: primero la ficha (con el sello nuevo) y
             # luego la ficha pequeña; una nueva no sale en la lista hasta su ficha
             G._escribir_json(os.path.join(destino, "pieza.json"), ficha)
         G._escribir_json(rutas["meta"], meta)
-    return {"id": pieza_id, "doc": doc, "avisos": avisos, "cambiada": ahora}
+        # las carpetas de láminas de guardados anteriores ya no valen
+        quedarse = f"capas_{doc['origen']['guardado']}" if varias else None
+        for nombre in os.listdir(destino):
+            if nombre.startswith("capas_") and nombre != quedarse and os.path.isdir(os.path.join(destino, nombre)):
+                shutil.rmtree(os.path.join(destino, nombre), ignore_errors=True)
+    salida = {"id": pieza_id, "doc": doc, "avisos": avisos, "cambiada": ahora}
+    if varias:
+        salida["avisos_laminas"] = [x[2] for x in laminas]
+    return salida

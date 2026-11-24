@@ -663,8 +663,9 @@ código:
 - **Guardar más de una lámina es un trabajo** (202 con `{trabajo, total}` y
   `GET /capas/trabajo/{tid}`): se pinta por láminas, cede el turno cada 5 y
   reutiliza las que no cambiaron por su huella (sha de `PINTOR` + lo que falta
-  + el HTML). Medido: 20 láminas nuevas, 17,8 s; volver a guardar con una
-  cambiada, 1,6 s. **Si cambias cómo se pinta, sube `PINTOR`** o se servirán
+  + el HTML). Medido en 2 núcleos (19-11): 20
+  láminas nuevas con 4 fotos cada una, unos 17-18 s; volver a guardar con una
+  cambiada, menos de 2 s. **Si cambias cómo se pinta, sube `PINTOR`** o se servirán
   láminas viejas. Ficheros: `capas_<guardado>/NN.png|jpg|pdf.jpg` y
   `huellas.json`; `capas.png` es la lámina 1. Si el editor se cierra, el
   trabajo sigue y al volver se reencuentra por `envio`.

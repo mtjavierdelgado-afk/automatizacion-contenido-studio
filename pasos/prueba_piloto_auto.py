@@ -736,6 +736,32 @@ def _escenarios(servidor, base, pet, reloj, llamadas, hechos_falsos, guiones, pi
     ok('for r in _publicar().REDES}' in fuente.split("def publicar_ficha", 1)[1].split("\ndef ", 1)[0],
        "las huellas de Publicar traen TODAS las redes (también las que aún no tienen texto)")
     ok(A.huella({}) == A.huella({}) and A.huella({}) != "", "la huella de una red vacía es estable")
+    # ronda 2, G1: «No publicar» + devolver un vídeo TERMINADO: se vuelve a hacer
+    guiones["gv"] = {"estado": "pendiente"}
+    for f in autos():
+        if f["auto"].get("paso") in A.SIN_PROGRAMAR:
+            P.cambiar_auto(base, f["id"], {"paso": "no_publicar"})
+    for g in list(guiones):
+        if g != "gv":
+            guiones[g]["estado"] = "usado"
+    A.guardar_ficha(base, "c1", {"max_pendientes": 5}, REDES)
+    vuelta()
+    hechos_v = [f for f in autos() if f["gid"] == "gv"]
+    igual(len(hechos_v), 1, "el guion gv se encola")
+    P.cambiar(base, hechos_v[0]["id"], estado="listo", pid=pid5)
+    P.cambiar_auto(base, hechos_v[0]["id"], {"paso": "espera_ok", "envios_antes": [
+        e["id"] for e in PUB._leer_video(base, pid5)["envios"]]})
+    r = servidor.aprobar_no_publicar(hechos_v[0]["id"], pet,
+                                     {"rev": P.leer(base, hechos_v[0]["id"])["auto"]["rev"], "devolver": True})
+    ok(r.get("devuelto"), "«No publicar» con la casilla: devuelto")
+    vuelta()
+    igual(len([f for f in autos() if f["gid"] == "gv"]), 2,
+          "y el encargo devuelto SE VUELVE A HACER (aunque el vídeo viejo esté terminado)")
+    # ronda 2, m1: un «pendiente» sin ficha (reinicio a mitad) vuelve a la lista
+    A.apuntar_unidad(base, "c1", "gq", 0, "pendiente")
+    A.limpiar_pendientes(base, set())
+    ok(A.historial(base)[A.clave_unidad("c1", "gq", 0)]["devuelto"],
+       "un encargo apuntado sin vídeo (reinicio entre apuntar y encolar) vuelve a la lista")
     # m7: un aviso de Telegram no sube el rev (no da un «otro sitio» falso)
     rev = P.leer(base, v6["id"])["auto"]["rev"]
     servidor._auto_avisar(base, P.leer(base, v6["id"]), "razon", "prueba", clave="prueba_rev")

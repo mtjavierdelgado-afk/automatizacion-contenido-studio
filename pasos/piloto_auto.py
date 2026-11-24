@@ -449,16 +449,37 @@ def apuntar_unidad(raiz, cid, gid, indice, vid):
         _guardar(raiz, datos)
 
 
-def quitar_unidad(raiz, cid, gid, indice, vid=None):
-    """Deshace `apuntar_unidad` (el encolado falló justo después). Solo si
-    sigue siendo de ese vídeo."""
+def quitar_unidad(raiz, cid, gid, indice, vid=None, anterior=None):
+    """Deshace `apuntar_unidad` (el encolado falló justo después): vuelve la
+    entrada de antes (un encargo devuelto sigue con su rastro) o se borra.
+    Solo si sigue siendo de ese vídeo."""
     clave = clave_unidad(cid, gid, indice)
     with _LOCK:
         datos = _leer(raiz)
         entrada = datos["historial"].get(clave)
         if isinstance(entrada, dict) and (vid is None or entrada.get("vid") == vid):
-            datos["historial"].pop(clave, None)
+            if isinstance(anterior, dict):
+                datos["historial"][clave] = anterior
+            else:
+                datos["historial"].pop(clave, None)
             _guardar(raiz, datos)
+
+
+def limpiar_pendientes(raiz, vids_vivos):
+    """Las entradas «pendiente» (apuntadas antes de encolar) sin ningún vídeo
+    del piloto: el servicio se reinició entre medias. Se marcan devueltas para
+    que el encargo vuelva a la lista. -> cuántas"""
+    cuantas = 0
+    with _LOCK:
+        datos = _leer(raiz)
+        for entrada in datos["historial"].values():
+            if isinstance(entrada, dict) and entrada.get("vid") == "pendiente" \
+                    and not entrada.get("devuelto"):
+                entrada["devuelto"] = True
+                cuantas += 1
+        if cuantas:
+            _guardar(raiz, datos)
+    return cuantas
 
 
 def devolver_unidad(raiz, cid, gid, indice):

@@ -98,7 +98,9 @@ def _llamar(token, metodo, campos=None, plazo=PLAZO_S):
         if fallo.code == 401:
             raise ErrorTelegram("Telegram no reconoce ese token: cópialo otra vez de @BotFather",
                                 400) from None
-        raise ErrorTelegram(f"Telegram dijo: {texto or fallo.code}", 502) from None
+        error = ErrorTelegram(f"Telegram dijo: {texto or fallo.code}", 502)
+        error.http = int(fallo.code or 0)
+        raise error from None
     except (urllib.error.URLError, OSError, ValueError) as fallo:
         raise ErrorTelegram(f"no se pudo hablar con Telegram ({fallo})", 502) from None
     if not datos.get("ok"):
@@ -229,6 +231,7 @@ def editar(mensaje, texto):
         # «message is not modified» no es un fallo; la red caída sí (pausa)
         if "not modified" in str(fallo):
             return True
-        if "no se pudo hablar" in str(fallo):
-            _fallo()
+        http = getattr(fallo, "http", 0)
+        if "no se pudo hablar" in str(fallo) or http == 429 or http >= 500:
+            _fallo()                    # Telegram caído o saturado: se espera
         return False

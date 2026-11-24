@@ -24616,12 +24616,12 @@ def _auto_avisar(raiz, ficha, tipo, extra="", silencioso=False, clave=""):
     mensajes = list(a.get("telegram") or [])
     reciente = avisado.get(clave)
     try:
-        if reciente and time.time() - float(reciente) < 24 * 3600 and mensajes:
-            # el mismo aviso: se edita el último mensaje, y solo si dice otra cosa
-            # (editar en cada vuelta con Telegram caído frenaría al vigía)
-            if mensajes[-1].get("texto") != texto and \
-                    TELEGRAM.editar(mensajes[-1].get("mensaje"), texto):
-                mensajes[-1]["texto"] = texto
+        suyo = next((m for m in reversed(mensajes) if m.get("clave") == clave), None)
+        if reciente and time.time() - float(reciente) < 24 * 3600 and suyo:
+            # el mismo aviso: se edita SU último mensaje, y solo si dice otra
+            # cosa (editar en cada vuelta con Telegram caído frenaría al vigía)
+            if suyo.get("texto") != texto and TELEGRAM.editar(suyo.get("mensaje"), texto):
+                suyo["texto"] = texto
                 PILOTO.cambiar_auto(raiz, ficha["id"], {"telegram": mensajes[-10:]},
                                     contar_rev=False)
             return
@@ -24637,7 +24637,7 @@ def _auto_avisar(raiz, ficha, tipo, extra="", silencioso=False, clave=""):
         anotar_global("piloto_auto_telegram", {"piloto": ficha["id"], "fallo": str(fallo)[:200]})
         return
     avisado[clave] = time.time()
-    mensajes.append({"mensaje": mid, "tipo": tipo, "cuando": ahora(), "texto": texto})
+    mensajes.append({"mensaje": mid, "tipo": tipo, "cuando": ahora(), "texto": texto, "clave": clave})
     try:
         # lo que se mandó no cuenta como cambio del vídeo: sin esto, la página
         # abierta recibiría un «se cambió en otro sitio» falso
@@ -24823,8 +24823,8 @@ def _auto_enviar(raiz, ficha, quien, redes=None, cuando=None):
     cuando = cuando or a.get("hueco")
     cambios = {"paso": "publicando", "intento_el": ahora()}
     if "envios_antes" not in a:
-        # vídeo de antes de apuntarlo al nacer: lo que ya había no es suyo
-        cambios["envios_antes"] = [e.get("id") for e in _auto_envios(pid) if e.get("id")]
+        # sin apuntar al nacer: TODOS sus envíos son suyos (también uno a mano)
+        cambios["envios_antes"] = []
     if quien != "piloto":
         cambios.update(aprobado_por=quien, aprobado_el=ahora())
     ficha = PILOTO.cambiar_auto(raiz, ficha["id"], cambios)
@@ -25071,8 +25071,11 @@ def _auto_programar(raiz, cid, cfg, ahora_):
         return
     # un encargo que ya tiene un vídeo del piloto (de CUALQUIER nivel) que no
     # se paró a mano no se vuelve a hacer
+    # (uno automático que dijiste «No publicar» no cuenta: si lo devolviste a
+    # la lista, se tiene que poder volver a hacer)
     en_piloto = {(AUTO.clave_proyecto(f.get("cid")), f.get("gid"), int(f.get("indice") or 0))
-                 for f in fichas if f.get("estado") != "cancelado"}
+                 for f in fichas if f.get("estado") != "cancelado"
+                 and not (AUTO.es_automatico(f) and f["auto"].get("paso") == "no_publicar")}
     candidatas = [c for c in candidatas if (cid, c["gid"], c["indice"]) not in _AUTO_SALTADAS
                   and (cid, c["gid"], c["indice"]) not in en_piloto]
     if not candidatas:
@@ -25138,11 +25141,12 @@ def _auto_programar(raiz, cid, cfg, ahora_):
                        "huella_guion": PAR.huella_material((enc or {}).get("material"))}}
     # EL HISTORIAL PRIMERO: un reinicio entre encolar y apuntar rehacería
     # (y pagaría) el encargo. Si encolar falla, se deshace.
+    anterior = AUTO.historial(raiz).get(AUTO.clave_unidad(cid, u["gid"], u["indice"]))
     AUTO.apuntar_unidad(raiz, cid, u["gid"], u["indice"], "pendiente")
     try:
         ficha = PILOTO.encolar(raiz, pedido)
     except PILOTO.ErrorPiloto as fallo:
-        AUTO.quitar_unidad(raiz, cid, u["gid"], u["indice"], "pendiente")
+        AUTO.quitar_unidad(raiz, cid, u["gid"], u["indice"], "pendiente", anterior=anterior)
         _AUTO_SALTADAS[clave_u] = str(fallo)
         _auto_aviso_proyecto(raiz, cid, f"saltada|{cid}|{u['gid']}|{u['indice']}", "antes",
                              f"{u['codigo'] or u['titulo']}: {fallo}. Paso al siguiente guion.",
@@ -25162,6 +25166,12 @@ def _auto_vuelta():
     raiz = raiz_proyectos()
     with _AUTO_LOCK:
         ahora_ = _auto_ahora()
+        # un reinicio entre apuntar el encargo y encolarlo lo dejaría fuera
+        # para siempre: el que sigue «pendiente» sin ficha vuelve a la lista
+        try:
+            AUTO.limpiar_pendientes(raiz, {f["id"] for f in PILOTO.listar(raiz)})
+        except Exception:                                   # noqa: BLE001
+            pass
         preguntar = False
         for ficha in PILOTO.listar(raiz):
             if not AUTO.es_automatico(ficha):

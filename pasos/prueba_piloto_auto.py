@@ -350,6 +350,341 @@ def probar_piloto_con_auto(raiz):
        "al podar los 300, el automático que espera tu OK se queda")
 
 
+# ====================================================== CON EL SERVIDOR (app.py)
+
+class _Pet:
+    headers = {}
+
+
+def probar_con_el_servidor(raiz_padre):
+    """El vigía y las rutas de app.py con Upload-Post, Telegram y la Parrilla
+    de mentira: lo que el árbitro pidió comprobar (publicar una sola vez, nunca
+    sin OK en nivel 2, «No publicar» de verdad, avisos que no se quedan…)."""
+    print("\n  CON EL SERVIDOR: EL VIGÍA Y LAS RUTAS")
+    try:
+        import app as servidor                                    # noqa: PLC0415
+    except ImportError as fallo:
+        print(f"      (omitida: falta {fallo.name} en este entorno; en el servidor sí corre)")
+        return
+    from nucleo import Estado, Proyecto                           # noqa: PLC0415
+    base = os.path.join(raiz_padre, "servidor")
+    os.makedirs(base)
+    servidor.fijar_raiz_proyectos(base)
+    PUB = servidor._publicar()
+    PAR = servidor._parrilla()
+    pet = _Pet()
+    reloj = {"ahora": dt.datetime(2026, 11, 23, 8, 0, tzinfo=dt.timezone(dt.timedelta(hours=-5)))}
+    llamadas = {"enviar": [], "cancelar": [], "telegram": [], "editar": []}
+    hechos_falsos = {}
+    guiones = {"g1": {"estado": "pendiente"}, "g2": {"estado": "pendiente"},
+               "g3": {"estado": "pendiente"}}
+
+    pid1 = Proyecto.crear(base, "auto uno").id
+    pid2 = Proyecto.crear(base, "auto dos").id
+    for p_ in (pid1, pid2):
+        Estado(servidor.contexto(p_).proyecto)
+
+    def leer_envios(pid):
+        return PUB._leer_video(base, pid)
+
+    def enviar_falso(raiz, info, ajustes, cuerpo, en_hilo=True):
+        llamadas["enviar"].append((info["pid"], tuple(cuerpo["redes"]), cuerpo.get("cuando")))
+        datos = leer_envios(info["pid"])
+        if hechos_falsos.get("enviar_falla"):
+            raise PUB.ErrorPublicar(hechos_falsos["enviar_falla"], 409)
+        for red in cuerpo["redes"]:
+            if any(e["red"] == red and e["estado"] in PUB.VIVOS for e in datos["envios"]):
+                raise PUB.ErrorPublicar("este vídeo ya está publicado o programado en X. Si de "
+                                        "verdad quieres publicarlo otra vez, confírmalo.", 409)
+        nuevos = []
+        for red in cuerpo["redes"]:
+            nuevos.append({"id": f"e{len(llamadas['enviar'])}{red[:2]}", "red": red,
+                           "estado": "programado", "lote": f"l{len(llamadas['enviar'])}",
+                           "job_id": "j1", "cuando": cuerpo.get("cuando") + ":00",
+                           "creado": "2026-11-23T08:00:00"})
+        datos["envios"].extend(nuevos)
+        PUB._escribir(PUB._ruta_video(base, info["pid"]), datos)
+        return nuevos
+
+    def cancelar_falso(raiz, pid, eid):
+        llamadas["cancelar"].append(eid)
+        datos = leer_envios(pid)
+        e = next(x for x in datos["envios"] if x["id"] == eid)
+        if e["estado"] == "programado" and hechos_falsos.get("cancelar_espera"):
+            raise PUB.ErrorPublicar("Upload-Post todavía no le ha dado número de trabajo", 409)
+        lote = e.get("lote")
+        for x in datos["envios"]:
+            if x.get("lote") == lote and x["estado"] in ("programado", "espera_ok", "comprobar"):
+                x["estado"] = "cancelado"
+        PUB._escribir(PUB._ruta_video(base, pid), datos)
+        return {}
+
+    def poner_envios(pid, *estados):
+        datos = leer_envios(pid)
+        for e in datos["envios"]:
+            for red, estado in estados:
+                if e["red"] == red:
+                    e["estado"] = estado
+        PUB._escribir(PUB._ruta_video(base, pid), datos)
+
+    def hechos_publicar(raiz, ficha):
+        hechos = {"portada": True, "textos_faltan": [], "encaje_malo": [], "desactualizada": False,
+                  "mp4_cambiado": False, "guion_cambiado": False, "salio": "",
+                  "cliente_ok": True, "clave_upload": True, "perfil": True, "redes_sin_cuenta": []}
+        hechos.update(hechos_falsos.get("publicar") or {})
+        return hechos, {"pid": ficha["pid"], "cliente": "c1"}, {}
+
+    def parrilla_listar(raiz, cid):
+        return {"matrices": [{"id": "m1", "guiones": [
+            {"id": g, "estado": d["estado"], "encargos": 1, "codigo": g.upper(), "titulo": "",
+             "duracion_s": 60} for g, d in guiones.items()]}]}
+
+    def parrilla_leer(raiz, cid, gid):
+        if gid not in guiones:
+            raise PAR.ErrorParrilla("ese guion ya no existe", 404)
+        return {"id": gid, "estilo": "", "leido": {"codigo": gid.upper(), "titulo": ""},
+                "encargo": [{"material": f"material {gid}", "avisos": guiones[gid].get("avisos", []),
+                             "duracion_objetivo_s": 60, "formato": "vertical"}]}
+
+    class TelegramFalso:
+        ErrorTelegram = RuntimeError
+
+        @staticmethod
+        def conectado():
+            return True
+
+        @staticmethod
+        def base_url():
+            return "https://studio.test"
+
+        @staticmethod
+        def enviar(texto, silencioso=False, respetar_pausa=True):
+            llamadas["telegram"].append(texto)
+            return str(len(llamadas["telegram"]))
+
+        @staticmethod
+        def editar(mensaje, texto):
+            llamadas["editar"].append((mensaje, texto))
+            return True
+
+        @staticmethod
+        def estado():
+            return {"conectado": True}
+
+    cambios = {
+        (servidor, "_auto_ahora"): lambda: reloj["ahora"],
+        (servidor, "_auto_hechos_publicar"): hechos_publicar,
+        (servidor, "_auto_existe_video"): lambda pid: pid not in hechos_falsos.get("borrados", ()),
+        (servidor, "_auto_proyectos"): lambda: {"c1": "Cliente uno", "": "Sin proyecto"},
+        (servidor, "_auto_estilos"): lambda: {"e1": "c1", "e2": "otro"},
+        (servidor, "_auto_refrescar"): lambda lotes=(): None,
+        (servidor, "publicar_ficha"): lambda pid, peticion: {},
+        (servidor, "_proyecto_parrilla"): lambda cid, peticion: cid,
+        # el vigía de verdad NO corre aquí: cada vuelta la da la prueba
+        (servidor, "_piloto_despertar"): lambda: None,
+        (servidor, "TELEGRAM"): TelegramFalso,
+        (PUB, "enviar"): enviar_falso,
+        (PUB, "cancelar"): cancelar_falso,
+        (PUB, "estado_clave"): lambda: {"puesta": True},
+        (PUB, "ajustes_de"): lambda raiz, cid: {"perfil": "p", "redes": ["tiktok"]},
+        (PAR, "listar"): parrilla_listar,
+        (PAR, "leer"): parrilla_leer,
+    }
+    viejos = {k: getattr(k[0], k[1]) for k in cambios}
+    for (obj, nombre), valor in cambios.items():
+        setattr(obj, nombre, valor)
+    try:
+        _escenarios(servidor, base, pet, reloj, llamadas, hechos_falsos, guiones, pid1, pid2,
+                    poner_envios)
+    finally:
+        for (obj, nombre), valor in viejos.items():
+            setattr(obj, nombre, valor)
+
+
+def _escenarios(servidor, base, pet, reloj, llamadas, hechos_falsos, guiones, pid1, pid2,
+                poner_envios):
+    vuelta = servidor._auto_vuelta
+    A.guardar_ficha(base, "c1", {"activo": True, "modo": 3, "estilo": "e1", "anticipacion_h": 24,
+                                 "huecos": [{"dias": [1, 3, 5], "hora": "19:00",
+                                             "redes": ["tiktok", "youtube"]}]}, REDES)
+
+    def autos():
+        return [f for f in P.listar(base) if A.es_automatico(f)]
+
+    vuelta()
+    igual(len(autos()), 1, "encendido en nivel 3: el vigía encola UN vídeo para el hueco de hoy")
+    f1 = autos()[0]
+    igual((f1["gid"], f1["auto"]["hueco"], f1["auto"]["redes"]),
+          ("g1", "2026-11-23T19:00", ["tiktok", "youtube"]),
+          "el primer guion pendiente, para el lunes 19:00, con las redes del hueco")
+    vuelta()
+    igual(len(autos()), 1, "el siguiente hueco (miércoles) aún no toca: fuera de las 24 h")
+    ok("g1" not in [c["gid"] for c in A.unidades_candidatas(
+        servidor._parrilla().listar(base, "c1"), "c1", A.historial(base))],
+       "y g1 queda en el historial: no se vuelve a hacer")
+
+    # el nivel 1 «termina» el vídeo
+    P.cambiar(base, f1["id"], estado="listo", pid=pid1)
+    import threading as _th                                       # noqa: PLC0415
+    hilos = [_th.Thread(target=vuelta) for _ in range(3)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+    igual(len(llamadas["enviar"]), 1, "tres vueltas a la vez: UN solo `enviar` (nunca dos veces)")
+    igual(P.leer(base, f1["id"])["auto"]["paso"], "programado", "y queda programado")
+    ok(any("Programado" in t for t in llamadas["telegram"]), "con su aviso (silencioso) por Telegram")
+    vuelta()
+    igual(len(llamadas["enviar"]), 1, "otra vuelta no lo vuelve a mandar")
+
+    print("\n  NIVEL 2 (Y LA FICHA CAMBIADA A MITAD)")
+    reloj["ahora"] = reloj["ahora"].replace(day=25)
+    vuelta()                                 # encola g2 para el miércoles
+    f2 = [f for f in autos() if f["gid"] == "g2"][0]
+    A.guardar_ficha(base, "c1", {"modo": 2}, REDES)
+    P.cambiar(base, f2["id"], estado="listo", pid=pid2)
+    antes = len(llamadas["enviar"])
+    vuelta()
+    f2 = P.leer(base, f2["id"])
+    igual(f2["auto"]["paso"], "espera_ok",
+          "encolado en nivel 3 pero la ficha pasó a nivel 2: NO se publica solo, espera tu OK")
+    igual(len(llamadas["enviar"]), antes, "y no se llamó a `enviar`")
+    ok(any("espera tu OK" in t for t in llamadas["telegram"]), "avisa por Telegram con su enlace")
+    ok(any("aprobar.html?video=" + f2["id"] in t for t in llamadas["telegram"]),
+       "el enlace lleva a la página del móvil de ESE vídeo")
+    vista = servidor.aprobar_ver(f2["id"], pet)
+    igual((vista["vivo"]["clave"], vista["editable"]), ("espera_ok", True),
+          "la página dice «espera tu OK» y deja editar")
+    try:
+        servidor.aprobar_publicar(f2["id"], pet, {"rev": vista["rev"] - 1})
+        ok(False, "un rev viejo tenía que dar 409")
+    except servidor.ErrorApi as fallo:
+        ok(fallo.codigo == 409 and "otro sitio" in fallo.mensaje,
+           "con un rev viejo: «Esto se cambió en otro sitio»")
+    servidor.aprobar_publicar(f2["id"], pet, {"rev": vista["rev"], "desde": "movil"})
+    igual(len(llamadas["enviar"]), antes + 1, "«✓ Publicar así» lo programa")
+    try:
+        servidor.aprobar_publicar(f2["id"], pet, {"rev": P.leer(base, f2["id"])["auto"]["rev"]})
+        ok(False, "un segundo OK tenía que dar 409")
+    except servidor.ErrorApi as fallo:
+        ok(fallo.codigo == 409 and "Ya está aprobado" in fallo.mensaje,
+           "un segundo OK (el otro sitio): «Ya está aprobado», sin volver a mandarlo")
+    igual(len(llamadas["enviar"]), antes + 1, "sigue siendo un solo envío")
+    igual(P.leer(base, f2["id"])["auto"]["aprobado_por"], "movil", "se apunta desde dónde se aprobó")
+
+    print("\n  NO PUBLICAR (CON UNA SUBIDA A MEDIAS)")
+    poner_envios(pid2, ("tiktok", "comprobar"))
+    rev = P.leer(base, f2["id"])["auto"]["rev"]
+    servidor.aprobar_no_publicar(f2["id"], pet, {"rev": rev})
+    vuelta()
+    f2 = P.leer(base, f2["id"])
+    igual(f2["auto"]["paso"], "retirando",
+          "con TikTok en «comprobar» NO se da por retirado (Upload-Post quizá lo tiene)")
+    ok(any("No sé si salió" in t or "Ya lo miré" in t for t in llamadas["telegram"]),
+       "y avisa de mirarlo en Upload-Post («Ya lo miré»)")
+    servidor.aprobar_ya_lo_mire(f2["id"], pet, {"rev": f2["auto"]["rev"]})
+    vuelta()
+    vuelta()
+    igual(P.leer(base, f2["id"])["auto"]["paso"], "no_publicar",
+          "tras «Ya lo miré», se cancela lo demás y queda «no se publica»")
+    vuelta()
+    igual(P.leer(base, f2["id"])["auto"]["paso"], "no_publicar",
+          "y no resucita en «espera tu OK» (todo cancelado a propósito)")
+
+    print("\n  LA RED QUE FALLA")
+    poner_envios(pid1, ("youtube", "fallido"))
+    vuelta()
+    f1 = P.leer(base, f1["id"])
+    igual(f1["auto"]["paso"], "fallo", "YouTube falló: paso «fallo»")
+    ok(any("falló" in t for t in llamadas["telegram"]), "con su aviso")
+    ok(A.ocupa_hueco(f1), "y sigue ocupando su hueco (nunca se rehace el vídeo)")
+    antes = len(llamadas["enviar"])
+    servidor.aprobar_reintentar_red(f1["id"], pet, {"rev": f1["auto"]["rev"], "red": "youtube"})
+    igual(llamadas["enviar"][-1][1], ("youtube",), "«Reintentar esta red» manda SOLO YouTube")
+    igual(len(llamadas["enviar"]), antes + 1, "una vez")
+    vuelta()
+    igual(P.leer(base, f1["id"])["auto"]["paso"], "programado", "y vuelve a programado")
+    poner_envios(pid1, ("tiktok", "publicado"), ("youtube", "publicado"))
+    vuelta()
+    igual(P.leer(base, f1["id"])["auto"]["paso"], "publicado", "todo publicado → publicado")
+    ok(any(t.startswith("✓ Publicado") for t in llamadas["telegram"]), "y lo dice")
+
+    print("\n  LA PARRILLA AL DÍA (SIN AVISOS VIEJOS)")
+    lista = parrilla = servidor._parrilla().listar(base, "c1")
+    servidor._auto_en_parrilla(lista, "c1")
+    etiquetas = {g["id"]: (g.get("auto") or {}).get("clave") for g in parrilla["matrices"][0]["guiones"]}
+    igual(etiquetas.get("g1"), "publicado", "g1: «✓ publicado»")
+    igual(etiquetas.get("g2"), "no_publicar", "g2: «✗ no se publica»")
+    g3 = [f for f in autos() if f["gid"] == "g3"]
+    ok(etiquetas.get("g3") in (None, "esperando_turno", "haciendo"),
+       f"g3: {etiquetas.get('g3')} {[(f['estado'], f['auto']['paso'], f.get('mensaje')) for f in g3]}")
+
+    print("\n  PUBLICANDO SIN ENVÍOS (REINICIO A MITAD) Y EL 409 DE «YA PROGRAMADO»")
+    v = P.encolar(base, {"cid": "c1", "gid": "gx", "estilo": "e1",
+                         "auto": {"cid": "c1", "gid": "gx", "indice": 0, "hueco": "2026-11-27T19:00",
+                                  "redes": ["tiktok"], "modo": 3, "paso": "publicando", "rev": 0,
+                                  "envios_antes": []}})
+    pid3 = __import__("nucleo").Proyecto.crear(base, "auto tres").id
+    P.cambiar(base, v["id"], estado="listo", pid=pid3)
+    antes = len(llamadas["enviar"])
+    vuelta()
+    igual(len(llamadas["enviar"]), antes + 1, "«publicando» sin ningún envío: se vuelve a mandar")
+    igual(P.leer(base, v["id"])["auto"]["paso"], "programado", "y queda programado")
+    P.cambiar_auto(base, v["id"], {"paso": "publicando"})
+    vuelta()
+    igual(len(llamadas["enviar"]), antes + 1,
+          "«publicando» CON envíos suyos: se reconcilia, no se manda otra vez")
+    igual(P.leer(base, v["id"])["auto"]["paso"], "programado", "programado")
+
+    print("\n  RAZONES PARA ESPERAR Y CLIENTE CAMBIADO")
+    guiones["g4"] = {"estado": "pendiente", "avisos": ["falta la llamada a la acción ([FALTA CTA])"]}
+    A.guardar_ficha(base, "c1", {"modo": 3}, REDES)
+    hechos_falsos["publicar"] = {"cliente_ok": False}
+    w = P.encolar(base, {"cid": "c1", "gid": "gy", "estilo": "e1",
+                         "auto": {"cid": "c1", "gid": "gy", "indice": 0, "hueco": "2026-11-30T19:00",
+                                  "redes": ["tiktok"], "modo": 3, "paso": "preparando", "rev": 0}})
+    pid4 = __import__("nucleo").Proyecto.crear(base, "auto cuatro").id
+    P.cambiar(base, w["id"], estado="listo", pid=pid4)
+    antes = len(llamadas["enviar"])
+    vuelta()
+    igual(P.leer(base, w["id"])["auto"]["paso"], "espera_ok",
+          "el vídeo ya no es de este proyecto: nivel 3 NO lo publica (espera tu OK)")
+    igual(len(llamadas["enviar"]), antes, "sin llamar a `enviar`")
+    try:
+        servidor.aprobar_publicar(w["id"], pet, {"rev": P.leer(base, w["id"])["auto"]["rev"]})
+        ok(False, "tenía que negarse")
+    except servidor.ErrorApi as fallo:
+        ok(fallo.codigo == 409, "ni con tu OK lo publica en las cuentas de otro cliente")
+    hechos_falsos["publicar"] = {}
+
+    print("\n  HORA VENCIDA Y VÍDEO BORRADO")
+    reloj["ahora"] = reloj["ahora"].replace(day=30, hour=19, minute=5)
+    vuelta()
+    w2 = P.leer(base, w["id"])
+    ok(w2["auto"]["hueco"] > "2026-11-30T19:05", f"espera tu OK y su hora pasó: se mueve ({w2['auto']['hueco']})")
+    ok(any("Nueva hora" in t for t in llamadas["telegram"]), "y avisa de la nueva hora")
+    hechos_falsos["borrados"] = (pid4,)
+    vuelta()
+    igual(P.leer(base, w["id"])["auto"]["paso"], "no_publicar",
+          "el vídeo se borró del Studio: «no se publica» y suelta su hueco")
+    hechos_falsos["borrados"] = ()
+
+    print("\n  ANTES DE GASTAR: [FALTA CTA] Y «HACER IGUALMENTE»")
+    for f in autos():
+        if f["auto"].get("paso") in A.SIN_PROGRAMAR:
+            P.cambiar_auto(base, f["id"], {"paso": "no_publicar"})
+    guiones["g3"]["estado"] = "usado"           # g3 «hecho a mano»: no se toca
+    reloj["ahora"] = reloj["ahora"].replace(day=30, hour=8, minute=0) + dt.timedelta(days=4)
+    n = len(autos())
+    vuelta()
+    igual(len(autos()), n, "g4 sin CTA: no se empieza (no se gasta)")
+    ok(servidor._AUTO_BLOQUEOS.get("c1", {}).get("gid") == "g4", "y queda dicho qué lo frena")
+    servidor.piloto_auto_hacer_igual("c1", pet, {"gid": "g4", "indice": 0})
+    vuelta()
+    igual(len(autos()), n + 1, "con «Hacer igualmente» sí se hace")
+    igual(servidor._AUTO_BLOQUEOS.get("c1"), None, "y el freno desaparece (sin aviso viejo)")
+
+
 def main():
     raiz = tempfile.mkdtemp(prefix="prueba_piloto_auto_")
     try:
@@ -359,6 +694,7 @@ def main():
         probar_razones()
         probar_envios()
         probar_piloto_con_auto(raiz)
+        probar_con_el_servidor(raiz)
     finally:
         shutil.rmtree(raiz, ignore_errors=True)
     print(f"\n  {_ok} comprobaciones bien, {len(_fallos)} fallos")

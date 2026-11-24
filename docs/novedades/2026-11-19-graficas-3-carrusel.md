@@ -22,10 +22,12 @@
   lámina, los textos de muestra que se quedaron sin cambiar y cuánto se ve en
   la cuadrícula del perfil.
 - **Ver en el móvil**: enseña el carrusel como se desliza en el teléfono.
-- **Guardar** un carrusel enseña una barra con lo que lleva; si cierras la
-  pestaña, sigue y lo encuentra al volver. Las láminas que no cambiaste no se
-  vuelven a pintar.
+- **Guardar** un carrusel enseña una barra con lo que lleva; si cierras el
+  editor mientras guarda, el guardado termina solo. Las láminas que no
+  cambiaste no se vuelven a pintar, así que volver a guardar es rápido.
 - **Descargas**: en la tarjeta de la pieza, el carrusel en **ZIP** (JPG o PNG),
-  en **PDF para LinkedIn** o una sola lámina. La tarjeta dice «N láminas».
+  en **PDF para LinkedIn** o solo la portada (PNG o JPG). La tarjeta dice «N
+  láminas». El ZIP lleva también el texto alternativo de cada lámina para
+  pegarlo al publicar (el que escribiste o, si no, sus textos).
 - Una pieza de una sola lámina sale igual que antes. No cuesta nada (no usa IA)
   y no toca ningún vídeo.

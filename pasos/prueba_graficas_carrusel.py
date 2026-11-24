@@ -337,6 +337,34 @@ def descargas(carpeta):
     except C.ErrorSinLaminas as fallo:
         ok("Preparar las láminas" in str(fallo), "sin las láminas pintadas, pide prepararlas (y no pinta nada)")
 
+    # la ficha pequeña la escribió main (sin «laminas»): sigue siendo un carrusel (árbitro del 24-11)
+    ruta_meta = os.path.join(G._carpeta_pieza(raiz, cid, pid), "capas.sello.json")
+    meta = G._leer_json(ruta_meta)
+    meta.pop("laminas", None)
+    with open(ruta_meta, "w", encoding="utf-8") as f:
+        json.dump(meta, f)
+    de_la_lista = next(p for p in G.listar_piezas(raiz, cid) if p["id"] == pid)
+    ok(de_la_lista.get("laminas") == 3, f"sin «laminas» en la ficha pequeña, se cuentan en capas.json ({de_la_lista.get('laminas')})")
+    try:
+        C.zip_laminas(raiz, cid, pid, "jpg")
+        ok(False, "y la descarga pide preparar las láminas, no da solo la primera")
+    except C.ErrorSinLaminas:
+        ok(True, "y la descarga pide preparar las láminas, no da solo la primera")
+
+    # el texto alternativo vacío sale de los textos de la lámina, de arriba abajo
+    sin_alt = carrusel()
+    for lam in sin_alt["laminas"]:
+        lam.pop("alt")
+    sin_alt["laminas"][1]["capas"].insert(1, _texto("arriba", "Primero esto.", y=2))
+    sin_alt["laminas"][1]["capas"].append(_texto("deco1", "“", rol="deco"))
+    limpio = C.limpiar_doc(sin_alt)
+    alt = C.alt_de_textos(limpio, 1)
+    ok(alt == "Primero esto. Idea 2", f"el texto alternativo vacío sale de sus textos, sin lo «en todas» ni adornos ({alt!r})")
+    r2 = C.guardar(raiz, cid, sin_alt, None)
+    contenido, _ = C.zip_laminas(raiz, cid, r2["id"], "jpg")
+    txt = zipfile.ZipFile(io.BytesIO(contenido)).read("textos-alternativos.txt").decode()
+    ok("Lámina 3: Idea 3" in txt, f"y va en el ZIP ({txt!r})")
+
 
 # ================================================================ las familias
 
@@ -496,6 +524,14 @@ def partir_y_montar(pincel):
     ok(not K._es_cifra("Hola 1 2 3 4 5 6 7 8") and K._es_cifra("-20 %") and K._es_cifra("S/ 190"), "qué es una cifra corta")
     _p, av = K.partir("\n\n".join(f"Punto {i}\nTexto" for i in range(30)))
     ok(len(_p) == 20 and _p[-1][0] == "cierre" and any("caben 20" in a for a in av), "más de 20 láminas: se cortan, con el cierre, y se avisa")
+    _p, av = K.partir("\n\n".join(["x" * 700] * 30))
+    ok(len([a for a in av if "no caben" in a or "no cabe" in a]) == 1 and any("19 párrafos" in a for a in av),
+       f"los párrafos que no caben se avisan una vez, y solo los que quedan ({av})")
+    _p, av = K.partir("T" * 700 + "\n\nhola")
+    ok(len(_p[0][1]["titulo"]) == C.MAX_TEXTO and any("Un párrafo no cabe" in a for a in av),
+       "una portada demasiado larga también avisa")
+    _p, av = K.partir("Título\n\n" + "\n".join("- " + "a" * 200 for _ in range(5)))
+    ok(not av, f"una lista larga con viñetas que caben no avisa ({av})")
     try:
         K.partir("   ")
         ok(False, "un texto vacío se rechaza")
@@ -527,6 +563,9 @@ def partir_y_montar(pincel):
     lam["capas"].append({"tipo": "forma", "id": "mia9", "rol": "", "nombre": "Mía", "x": 1, "y": 1, "w": 5, "h": 5})
     lam["capas"][-1]["relleno"] = {"color": "kit:acento"}
     lam["alt"] = "Mi texto alternativo"
+    r = K.montar_lamina(pincel, doc, 1, 10, "punto", None, None, None, [1, 2], "Alba")
+    nueva = r["laminas"][1]
+    ok(nueva["familia"] == 10, "unos textos que no son una lista de campos se ignoran (no un error 500)")
     r = K.montar_lamina(pincel, doc, 1, 10, "punto", None, None, None, None, "Alba")
     nueva = r["laminas"][1]
     ok(nueva["familia"] == 10 and nueva["tipo"] == "punto", "«Volver a montar» con otra familia")

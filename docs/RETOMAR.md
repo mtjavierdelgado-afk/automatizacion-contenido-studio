@@ -649,7 +649,10 @@ cachean como `app.js` (están en `ASSETS_SELLADOS`).
 Una pieza en capas puede tener de 1 a 20 láminas. Lo que no se ve leyendo el
 código:
 
-- **Una pieza de UNA lámina sale byte a byte igual que antes.** Todo lo nuevo
+- **Una pieza de UNA lámina sale igual que antes**: el PNG y el JPG, byte a
+  byte (comprobado por el árbitro guardando con `main` y con la rama). Su
+  `capas.json` puede llevar además `origen.envio` y el `id` de la lámina, que
+  `main` no mira. Todo lo nuevo
   del documento es opcional y solo se escribe si está: en la lámina `id`,
   `tipo`, `familia` y `alt`; en la capa `enlace`, `salvo` (primera, ultima,
   pdf) y `solo_horizontal`. `{n}/{total}` solo se sustituye con más de una
@@ -667,12 +670,22 @@ código:
   láminas nuevas con 4 fotos cada una, unos 17-18 s; volver a guardar con una
   cambiada, menos de 2 s. **Si cambias cómo se pinta, sube `PINTOR`** o se servirán
   láminas viejas. Ficheros: `capas_<guardado>/NN.png|jpg|pdf.jpg` y
-  `huellas.json`; `capas.png` es la lámina 1. Si el editor se cierra, el
-  trabajo sigue y al volver se reencuentra por `envio`.
-- **Descargas** (ZIP, PDF de LinkedIn y una lámina) se leen bajo
-  `cerrojo_pieza`. Si falta la carpeta de láminas (pieza guardada antes de esta
-  rama) dan 409 y la tarjeta ofrece «Preparar las láminas», que vuelve a
-  guardar como trabajo. El PDF mete los JPG tal cual (DCTDecode, sin
+  `huellas.json`; `capas.png` es la lámina 1. Solo se guardan las huellas: el
+  HTML de cada lámina (con sus fotos en base64) se arma justo antes de
+  pintarla; tenerlos todos a la vez eran 600 MB–1,7 GB con 20 láminas de 8
+  fotos (árbitro del 24-11). Si el editor se cierra, el trabajo sigue en el
+  servidor; si se reabre antes de que acabe, abre lo de antes y «Guardar» da
+  el 409 «ya se está guardando». Con la red cortada, tras 8 fallos el editor
+  mira si lo suyo se guardó por `origen.envio`; en una pieza NUEVA no puede, y
+  avisa de mirar la lista antes de volver a guardar (si no, nacería dos veces).
+- **Descargas** (ZIP, PDF de LinkedIn y una lámina, `/lamina/{n}.{ext}`,
+  que hoy no usa ninguna pantalla) se leen bajo `cerrojo_pieza`. El número de
+  láminas sale de la ficha pequeña o, si no lo trae (la escribió `main`, o se
+  cortó un guardado), de `capas.json` (`graficas._con_laminas`). Si falta la
+  carpeta de láminas de ese guardado (un carrusel guardado otra vez con
+  `main`), dan 409 y la tarjeta ofrece «Preparar las láminas», que vuelve a
+  guardar como trabajo. El texto alternativo vacío sale de los textos de la
+  lámina (`alt_de_textos`). El PDF mete los JPG tal cual (DCTDecode, sin
   recomprimir) y el título en UTF-16.
 - **Las familias** (`pasos/graficas_carrusel.py`): cada plantilla es una
   familia; su portada es la plantilla (`C.montar` con `textos_de_portada`) y

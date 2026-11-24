@@ -1693,6 +1693,7 @@
     } catch (e) {
       if (ED !== yo) return;
       if (e.status === 409) mostrarConflicto(e.message);
+      else if (e.sinSaber) avisoPantalla(`Ojo: ${e.message}.`, true);
       else avisoPantalla(`No se ha guardado: ${e.message}`, true);
     } finally {
       yo.guardando = false;
@@ -1726,8 +1727,13 @@
               return { id: piezaId, doc: leida.doc, avisos: [] };
             }
           } catch (_) { /* se informa abajo */ }
+          throw e;
         }
-        throw e;
+        // una pieza NUEVA no se puede buscar: volver a guardar podría dejarla dos veces
+        const corte = new Error('se ha cortado la conexión mientras se guardaba. Puede que se haya guardado: '
+          + 'cierra y mira la lista de piezas antes de volver a guardar');
+        corte.sinSaber = true;
+        throw corte;
       }
       if (t.estado === 'listo') return t.resultado;
       if (t.estado === 'error') {
@@ -1828,17 +1834,26 @@
   }
 
   /** Lleva una capa a todas las láminas (copias enlazadas, encima de todo). */
+  /** ¿Cabe la capa `c` en la lámina, quitando `fuera` (la que reemplaza)?
+   * Los mismos topes que el servidor: capas y fotos por lámina. */
+  function cabeEnLamina(lam, c, fuera) {
+    const quedan = lam.capas.filter(x => x !== fuera);
+    if (quedan.length >= LIMITES.capas) return false;
+    const esFoto = x => x.tipo === 'imagen' && x.src;
+    return !esFoto(c) || quedan.filter(esFoto).length < LIMITES.fotos;
+  }
+
   function marcarEnTodas(c) {
     if (c.enlace) return;
     c.enlace = nuevoIdCorto('e');
     let sinSitio = 0;
     ED.doc.laminas.forEach((lam, i) => {
       if (i === ED.lamina) return;
-      if (lam.capas.length >= LIMITES.capas) { sinSitio++; return; }
+      if (!cabeEnLamina(lam, c)) { sinSitio++; return; }
       lam.capas.push(Object.assign(copia(c), { id: nuevoId(), oculto: false }));
     });
     pintarTodo(); commit(); pintarPaneles(); pintarTira();
-    avisoPantalla(sinSitio ? `En todas menos ${sinSitio} lámina(s) que ya tienen ${LIMITES.capas} capas.`
+    avisoPantalla(sinSitio ? `En todas menos ${sinSitio} lámina(s) que ya están llenas (${LIMITES.capas} capas o ${LIMITES.fotos} fotos).`
       : 'Ahora sale en todas las láminas: lo que cambies aquí cambia en todas.');
   }
 
@@ -1886,14 +1901,19 @@
   }
 
   function fondoATodas(c) {
+    let sinSitio = 0;
     ED.doc.laminas.forEach((lam, i) => {
       if (i === ED.lamina) return;
       const nuevo = Object.assign(copia(c), { id: nuevoId(), oculto: false });
       delete nuevo.enlace;
-      if (lam.capas[0] && esFondo(lam.capas[0], lam)) lam.capas[0] = nuevo; else lam.capas.unshift(nuevo);
+      const viejo = lam.capas[0] && esFondo(lam.capas[0], lam) ? lam.capas[0] : null;
+      if (!cabeEnLamina(lam, nuevo, viejo)) { sinSitio++; return; }
+      if (viejo) lam.capas[0] = nuevo; else lam.capas.unshift(nuevo);
     });
     pintarTodo(); commit(); pintarTira();
-    avisoPantalla('Este fondo está ahora en todas las láminas (también en la portada y el cierre). Ctrl+Z lo deshace.');
+    avisoPantalla(sinSitio
+      ? `Este fondo está en todas menos ${sinSitio} lámina(s) que ya están llenas (${LIMITES.capas} capas o ${LIMITES.fotos} fotos). Ctrl+Z lo deshace.`
+      : 'Este fondo está ahora en todas las láminas (también en la portada y el cierre). Ctrl+Z lo deshace.');
   }
 
   /** Lo del carrusel en el panel de una capa. */

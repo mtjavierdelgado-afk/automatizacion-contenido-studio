@@ -920,7 +920,7 @@ def capas_que_valen(raiz, cid, pieza_id, ficha=None, exacto=False):
         return None
     meta = meta_capas(raiz, cid, pieza_id)
     if not exacto and meta and meta.get("sello") == ficha["sello"]:
-        return dict(meta)
+        return _con_laminas(raiz, cid, pieza_id, dict(meta), ficha["sello"])
     try:
         doc = _leer_json(os.path.join(_carpeta_pieza(raiz, cid, pieza_id), "capas.json"))
     except Exception:                                       # noqa: BLE001
@@ -928,11 +928,32 @@ def capas_que_valen(raiz, cid, pieza_id, ficha=None, exacto=False):
     origen = doc.get("origen") if isinstance(doc, dict) and isinstance(doc.get("origen"), dict) else {}
     if origen.get("sello") == ficha["sello"]:
         # capas.json es lo último que se guardó de verdad
-        return {"sello": ficha["sello"], "guardado": str(origen.get("guardado") or ""),
+        vale = {"sello": ficha["sello"], "guardado": str(origen.get("guardado") or ""),
                 "nombre": str(doc.get("nombre") or ""), "cambiada": str(doc.get("cambiada") or "")}
+        n = len(doc["laminas"]) if isinstance(doc.get("laminas"), list) else 0
+        if n > 1:
+            vale["laminas"] = n
+        return vale
     if meta and meta.get("sello") == ficha["sello"] and doc is None:
         return dict(meta)
     return None
+
+
+def _con_laminas(raiz, cid, pieza_id, vale, sello):
+    """Una ficha pequeña sin `laminas` (la escribió el código de antes de los
+    carruseles, o se cortó un guardado) no hace de un carrusel una pieza de una
+    lámina: se cuentan en capas.json (árbitro del 24-11)."""
+    if "laminas" in vale:
+        return vale
+    try:
+        doc = _leer_json(os.path.join(_carpeta_pieza(raiz, cid, pieza_id), "capas.json"))
+    except Exception:                                       # noqa: BLE001
+        return vale
+    origen = doc.get("origen") if isinstance(doc, dict) and isinstance(doc.get("origen"), dict) else {}
+    n = len(doc["laminas"]) if isinstance(doc.get("laminas"), list) else 0
+    if origen.get("sello") == sello and n > 1:
+        vale["laminas"] = n
+    return vale
 
 
 def listar_piezas(raiz, cid):

@@ -1425,19 +1425,23 @@ def pintar_laminas(doc, kit, imagen_de, logo=None, logo_oscuro=None, previas=Non
     memo = {}
     total = len(doc["laminas"])
     salida = [{"pdf": None, "huella_pdf": None} for _ in range(total)]
-    tareas = []                     # (lámina, «normal» o «pdf», documento, f, márgenes, faltan, huella)
+    # Solo se guardan las huellas: el HTML de cada lámina lleva sus fotos en
+    # base64 y tenerlos todos a la vez eran cientos de MB con 20 láminas de
+    # fotos (árbitro del 24-11). Se vuelve a armar justo antes de pintarla.
+    tareas = []                     # (lámina, «normal» o «pdf», huella)
     for i in range(total):
         documento, f, margenes, faltan = html_capas(doc, kit, imagen_de, logo, logo_oscuro, i, memo)
         huella = hashlib.sha256(f"{PINTOR}\0{sorted(faltan)}\0{documento}".encode()).hexdigest()[:32]
-        tareas.append((i, "normal", documento, f, margenes, faltan, huella))
+        tareas.append((i, "normal", huella))
         doc_pdf, f, margenes, faltan_pdf = html_capas(doc, kit, imagen_de, logo, logo_oscuro, i, memo, para_pdf=True)
         if doc_pdf != documento:
             huella_pdf = hashlib.sha256(f"{PINTOR}\0pdf\0{sorted(faltan_pdf)}\0{doc_pdf}".encode()).hexdigest()[:32]
-            tareas.append((i, "pdf", doc_pdf, f, margenes, faltan_pdf, huella_pdf))
+            tareas.append((i, "pdf", huella_pdf))
+        del documento, doc_pdf
     pendientes = {i: 0 for i in range(total)}
     por_pintar = []
     for tarea in tareas:
-        i, variante, huella = tarea[0], tarea[1], tarea[6]
+        i, variante, huella = tarea
         vieja = previas.get(huella)
         try:
             if vieja and variante == "normal" and vieja["png"]:
@@ -1461,8 +1465,11 @@ def pintar_laminas(doc, kit, imagen_de, logo=None, logo_oscuro=None, previas=Non
         tanda = por_pintar[desde:desde + LAMINAS_POR_TURNO]
 
         def trabajar(pincel, tanda=tanda):
-            for i, variante, documento, f, margenes, faltan, huella in tanda:
+            for i, variante, huella in tanda:
+                documento, f, margenes, faltan = html_capas(doc, kit, imagen_de, logo, logo_oscuro, i, memo,
+                                                            para_pdf=variante == "pdf")
                 png, avisos, _ = _pintar_documento(pincel, documento, f, margenes, faltan)
+                del documento
                 if variante == "normal":
                     salida[i].update(png=png, jpg=G.a_jpg(png), avisos=avisos, huella=huella)
                 else:
@@ -1624,7 +1631,9 @@ def laminas_de_pieza(raiz, cid, pieza_id):
             laminas.append({"png": _leer_bytes(png), "jpg": _leer_bytes(jpg),
                             "pdf": _leer_bytes(pdf) if os.path.isfile(pdf) else None})
         try:
-            alts = [str(lam.get("alt") or "") for lam in G._leer_json(_rutas(raiz, cid, pieza_id)["json"])["laminas"]]
+            guardado = G._leer_json(_rutas(raiz, cid, pieza_id)["json"])
+            alts = [str(lam.get("alt") or "").strip() or alt_de_textos(guardado, i)
+                    for i, lam in enumerate(guardado["laminas"])]
         except Exception:                                   # noqa: BLE001
             alts = []
         return {"nombre": nombre, "laminas": laminas, "alts": alts, "titulo": vale.get("nombre") or ""}
@@ -1638,6 +1647,31 @@ def lamina_suelta(raiz, cid, pieza_id, n, extension):
     if not isinstance(n, int) or not 1 <= n <= len(datos["laminas"]):
         raise G.ErrorNoEsta("esa lámina no está")
     return datos["laminas"][n - 1][extension], f"{datos['nombre']}-{n:02d}.{extension}"
+
+
+def alt_de_textos(doc, lamina):
+    """El texto alternativo de una lámina sin uno escrito: sus textos de arriba
+    abajo (sin los adornos ni lo que va «en todas», como el logo o «Desliza»),
+    con {n}/{total} puestos."""
+    total = len(doc["laminas"])
+    textos = []
+    for c in doc["laminas"][lamina].get("capas") or []:
+        if not isinstance(c, dict) or c.get("tipo") != "texto" or c.get("oculto") or c.get("enlace"):
+            continue
+        if c.get("rol") == "deco":
+            continue
+        txt = " ".join(str(c.get("txt") or "").split())
+        if total > 1:
+            txt = txt.replace("{n}", str(lamina + 1)).replace("{total}", str(total))
+        if txt:
+            try:
+                y = float(c.get("y") or 0)
+            except (TypeError, ValueError):
+                y = 0.0
+            textos.append((y, txt))
+    textos.sort(key=lambda t: t[0])
+    alt = ". ".join(t.rstrip(".") for _, t in textos)
+    return alt[:MAX_ALT]
 
 
 def zip_laminas(raiz, cid, pieza_id, extension="jpg"):

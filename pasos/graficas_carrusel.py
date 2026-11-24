@@ -529,7 +529,8 @@ def lamina(n, tipo, formato_id, colores, textos=None, marca="", previa=None):
     L = _Lienzo(fam, formato_id, colores, marca)
     previos = _textos_de(previa) if previa else {}
     t = dict(MUESTRA[tipo])
-    t.update({k: v for k, v in (textos or {}).items() if k in ROLES and isinstance(v, str)})
+    textos = textos if isinstance(textos, dict) else {}
+    t.update({k: v for k, v in textos.items() if k in ROLES and isinstance(v, str)})
     t.update(previos)
     if tipo == "cierre" and previos:
         t["guardalo"] = previos.get("guardalo", t["guardalo"])
@@ -574,6 +575,7 @@ def _restilar_en_todas(L, capa):
 def montar_lamina(pincel, doc, indice, n, tipo, kit=None, logo=None, logo_oscuro=None, textos=None, marca=""):
     """«Volver a montar» una lámina de un carrusel con la familia `n` y el tipo
     `tipo` (la portada, con su plantilla). -> el documento entero, limpio."""
+    textos = textos if isinstance(textos, dict) else {}
     doc = C.limpiar_doc(doc)
     if type(indice) is not int or not 0 <= indice < len(doc["laminas"]):
         raise ErrorGraficas("esa lámina no está")
@@ -637,12 +639,19 @@ def partir(texto):
     if not parrafos:
         raise ErrorGraficas("pega un texto: cada párrafo será una lámina")
     salida = []
+    largos = []                     # las láminas que salen de un párrafo que no cabe
     lineas0 = [x.strip() for x in parrafos[0].split("\n") if x.strip()]
-    salida.append(("portada", {"titulo": lineas0[0], "apoyo": " ".join(lineas0[1:])}))
+    apoyo0 = " ".join(lineas0[1:])
+    if len(lineas0[0]) > C.MAX_TEXTO or len(apoyo0) > C.MAX_TEXTO:
+        largos.append(0)
+    salida.append(("portada", {"titulo": lineas0[0][:C.MAX_TEXTO], "apoyo": apoyo0[:C.MAX_TEXTO]}))
     numero = 0
     for p in parrafos[1:]:
-        if len(p) > C.MAX_TEXTO:
-            avisos.append(f"Un párrafo tiene {len(p)} letras y caben {C.MAX_TEXTO} por texto: se ha cortado.")
+        if len(p) > C.MAX_TEXTO and not any(len(x) > C.MAX_TEXTO for x in p.split("\n")) and \
+                sum(1 for x in p.split("\n") if _RE_VINETA.match(x.strip())) >= 2:
+            pass                    # una lista larga: cada viñeta cabe en su texto
+        elif len(p) > C.MAX_TEXTO:
+            largos.append(len(salida))
         lineas = [x.strip() for x in p.split("\n") if x.strip()]
         vinetas = [_RE_VINETA.sub("", x) for x in lineas if _RE_VINETA.match(x)]
         if len(vinetas) >= 2:
@@ -664,6 +673,10 @@ def partir(texto):
     if len(salida) > C.MAX_LAMINAS:
         avisos.append(f"Salen {len(salida)} láminas y caben {C.MAX_LAMINAS}: se han quedado fuera las del final (menos el cierre).")
         salida = salida[:C.MAX_LAMINAS - 1] + [salida[-1]]
+    cortados = sum(1 for i in largos if i < len(salida) - 1)
+    if cortados:
+        avisos.append(f"{'Un párrafo no cabe' if cortados == 1 else f'{cortados} párrafos no caben'}: "
+                      f"caben {C.MAX_TEXTO} letras por texto y se ha cortado lo que sobra.")
     return salida, avisos
 
 

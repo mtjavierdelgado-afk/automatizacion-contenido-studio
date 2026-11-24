@@ -643,3 +643,50 @@ cachean como `app.js` (están en `ASSETS_SELLADOS`).
   Escape al renombrar no guarda; Supr no borra lo bloqueado; cerrar quita todos
   los oyentes; las letras se registran una vez por página.
 
+
+## 13. Gráficas: carruseles e historias (19-11-2026, rama `graficas-3-carrusel`)
+
+Una pieza en capas puede tener de 1 a 20 láminas. Lo que no se ve leyendo el
+código:
+
+- **Una pieza de UNA lámina sale byte a byte igual que antes.** Todo lo nuevo
+  del documento es opcional y solo se escribe si está: en la lámina `id`,
+  `tipo`, `familia` y `alt`; en la capa `enlace`, `salvo` (primera, ultima,
+  pdf) y `solo_horizontal`. `{n}/{total}` solo se sustituye con más de una
+  lámina. Los ids de lámina son `l1..ln` y deterministas (con ids al azar, «las
+  otras láminas no se tocan» fallaba al comparar).
+- **«En todas» son copias enlazadas**, no una capa compartida: cada lámina
+  lleva su copia con el mismo `enlace`, y el editor (`sincronizarEnlaces`, en
+  cada `commit`) copia a las demás lo que cambió salvo `id`, `oculto` y
+  `enlace`. Volver a una versión de `main` sin esta rama pierde los enlaces
+  (quedan como capas sueltas) y enseña `{n}/{total}` tal cual: no rompe nada.
+- **Guardar más de una lámina es un trabajo** (202 con `{trabajo, total}` y
+  `GET /capas/trabajo/{tid}`): se pinta por láminas, cede el turno cada 5 y
+  reutiliza las que no cambiaron por su huella (sha de `PINTOR` + lo que falta
+  + el HTML). Medido: 20 láminas nuevas, 17,8 s; volver a guardar con una
+  cambiada, 1,6 s. **Si cambias cómo se pinta, sube `PINTOR`** o se servirán
+  láminas viejas. Ficheros: `capas_<guardado>/NN.png|jpg|pdf.jpg` y
+  `huellas.json`; `capas.png` es la lámina 1. Si el editor se cierra, el
+  trabajo sigue y al volver se reencuentra por `envio`.
+- **Descargas** (ZIP, PDF de LinkedIn y una lámina) se leen bajo
+  `cerrojo_pieza`. Si falta la carpeta de láminas (pieza guardada antes de esta
+  rama) dan 409 y la tarjeta ofrece «Preparar las láminas», que vuelve a
+  guardar como trabajo. El PDF mete los JPG tal cual (DCTDecode, sin
+  recomprimir) y el título en UTF-16.
+- **Las familias** (`pasos/graficas_carrusel.py`): cada plantilla es una
+  familia; su portada es la plantilla (`C.montar` con `textos_de_portada`) y
+  las láminas de dentro salen de `_componer` (7 tipos, vertical y horizontal;
+  en horizontal solo `TIPOS_HORIZONTAL`). Los textos decorativos (comillas,
+  números grandes) llevan rol `deco` para que «Montar esta lámina» no los
+  duplique. Los colores salen del Kit por contraste (`_acento_sobre`); lo «en
+  todas» busca un color que se lea en el fondo Y en el alterno
+  (`_legible_en_todos`); si no hay, no sale en el cierre (`salvo` += ultima).
+- **La calidad de las familias está medida**, no mirada:
+  `prueba_graficas_carrusel` pinta más de 500 láminas (14 familias × 8 tipos ×
+  formatos × 3 Kits, uno oscuro y uno de poco contraste) y mide en Chromium que
+  ningún texto se salga (tolerancia 0,12 del tamaño de letra: la tinta de Anton
+  sobresale de su caja), que nada pise a otro texto ni cruce un adorno, el
+  contraste y la letra mínima. Si añades un adorno o un tipo, entra solo ahí.
+- **Partir un texto** es determinista (sin IA): primer párrafo, portada;
+  viñetas, lista (más de 5, en varias); una cifra corta, dato; lo demás,
+  puntos 01, 02…; el último, cierre. En horizontal las listas van como punto.

@@ -148,8 +148,8 @@
     lugar: 'Lugar del evento', i1: 'Elige', i2: 'Reserva', i3: 'Disfruta', cita: '«Volveremos seguro»', autor: 'Ana, clienta',
   };
   const PESOS = [300, 400, 500, 600, 700, 800, 900];
-  /** Los topes de `graficas_capas.py` (MAX_CAPAS, MAX_FOTOS, MAX_TEXTO): lo comprueba la suite. */
-  const LIMITES = { capas: 60, fotos: 8, texto: 600 };
+  /** Los topes de `graficas_capas.py` (MAX_CAPAS, MAX_FOTOS, MAX_LOGOS, MAX_TEXTO): lo comprueba la suite. */
+  const LIMITES = { capas: 60, fotos: 8, logos: 4, texto: 600 };
   const MAX_HIST = 150;
 
   let ED = null;          // el editor abierto (uno a la vez)
@@ -1833,16 +1833,17 @@
     }
   }
 
-  /** Lleva una capa a todas las láminas (copias enlazadas, encima de todo). */
   /** ¿Cabe la capa `c` en la lámina, quitando `fuera` (la que reemplaza)?
-   * Los mismos topes que el servidor: capas y fotos por lámina. */
+   * Los mismos topes que el servidor: capas, fotos y logos por lámina. */
   function cabeEnLamina(lam, c, fuera) {
     const quedan = lam.capas.filter(x => x !== fuera);
     if (quedan.length >= LIMITES.capas) return false;
     const esFoto = x => x.tipo === 'imagen' && x.src;
-    return !esFoto(c) || quedan.filter(esFoto).length < LIMITES.fotos;
+    if (esFoto(c) && quedan.filter(esFoto).length >= LIMITES.fotos) return false;
+    return c.tipo !== 'logo' || quedan.filter(x => x.tipo === 'logo').length < LIMITES.logos;
   }
 
+  /** Lleva una capa a todas las láminas (copias enlazadas, encima de todo). */
   function marcarEnTodas(c) {
     if (c.enlace) return;
     c.enlace = nuevoIdCorto('e');
@@ -1853,7 +1854,7 @@
       lam.capas.push(Object.assign(copia(c), { id: nuevoId(), oculto: false }));
     });
     pintarTodo(); commit(); pintarPaneles(); pintarTira();
-    avisoPantalla(sinSitio ? `En todas menos ${sinSitio} lámina(s) que ya están llenas (${LIMITES.capas} capas o ${LIMITES.fotos} fotos).`
+    avisoPantalla(sinSitio ? `En todas menos ${sinSitio} lámina(s) que ya están llenas (${LIMITES.capas} capas, ${LIMITES.fotos} fotos o ${LIMITES.logos} logos).`
       : 'Ahora sale en todas las láminas: lo que cambies aquí cambia en todas.');
   }
 
@@ -1912,7 +1913,7 @@
     });
     pintarTodo(); commit(); pintarTira();
     avisoPantalla(sinSitio
-      ? `Este fondo está en todas menos ${sinSitio} lámina(s) que ya están llenas (${LIMITES.capas} capas o ${LIMITES.fotos} fotos). Ctrl+Z lo deshace.`
+      ? `Este fondo está en todas menos ${sinSitio} lámina(s) que ya están llenas (${LIMITES.capas} capas, ${LIMITES.fotos} fotos o ${LIMITES.logos} logos). Ctrl+Z lo deshace.`
       : 'Este fondo está ahora en todas las láminas (también en la portada y el cierre). Ctrl+Z lo deshace.');
   }
 

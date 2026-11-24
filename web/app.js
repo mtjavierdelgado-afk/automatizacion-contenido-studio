@@ -36562,7 +36562,7 @@ function seccionGraficasDelProyecto(cid) {
     return h('div', { clase: 'tarjeta-pieza' },
       h('button', { clase: 'abrir-pieza', title: 'Abrir para cambiarla', onclick: abrir }, img),
       h('b', {}, p.nombre),
-      h('span', { clase: 'meta' }, enCapas ? `${p.medida} · en capas${p.laminas > 1 ? ` · ${p.laminas} láminas` : ''}` : p.medida),
+      h('span', { clase: 'meta' }, enCapas ? `${p.medida} · en capas` + (p.laminas > 1 ? ` · ${p.laminas} láminas` : '') : p.medida),
       h('div', { clase: 'fila' },
         p.laminas > 1 ? h('button', { clase: 'mini descargar-zip', title: 'Todas las láminas en JPG, numeradas, con sus textos alternativos',
           onclick: () => descargarLaminas(cid, p, 'zip') }, 'ZIP') : null,

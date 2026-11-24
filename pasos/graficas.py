@@ -945,8 +945,16 @@ def _con_laminas(raiz, cid, pieza_id, vale, sello):
     lámina: se cuentan en capas.json (árbitro del 24-11)."""
     if "laminas" in vale:
         return vale
+    carpeta = _carpeta_pieza(raiz, cid, pieza_id)
     try:
-        doc = _leer_json(os.path.join(_carpeta_pieza(raiz, cid, pieza_id), "capas.json"))
+        # sin ninguna carpeta de láminas no ha habido nunca un carrusel: no se
+        # lee capas.json (la lista lo pediría en cada pieza de una lámina)
+        if not any(n.startswith("capas_") for n in os.listdir(carpeta)):
+            return vale
+    except OSError:
+        return vale
+    try:
+        doc = _leer_json(os.path.join(carpeta, "capas.json"))
     except Exception:                                       # noqa: BLE001
         return vale
     origen = doc.get("origen") if isinstance(doc, dict) and isinstance(doc.get("origen"), dict) else {}

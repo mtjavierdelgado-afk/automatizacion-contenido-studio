@@ -338,6 +338,8 @@ def descargas(carpeta):
         ok("Preparar las láminas" in str(fallo), "sin las láminas pintadas, pide prepararlas (y no pinta nada)")
 
     # la ficha pequeña la escribió main (sin «laminas»): sigue siendo un carrusel (árbitro del 24-11)
+    # (main no borra la carpeta de láminas que había: aquí se borró arriba, vuelve vacía)
+    os.makedirs(carpeta1)
     ruta_meta = os.path.join(G._carpeta_pieza(raiz, cid, pid), "capas.sello.json")
     meta = G._leer_json(ruta_meta)
     meta.pop("laminas", None)
@@ -532,6 +534,8 @@ def partir_y_montar(pincel):
        "una portada demasiado larga también avisa")
     _p, av = K.partir("Título\n\n" + "\n".join("- " + "a" * 200 for _ in range(5)))
     ok(not av, f"una lista larga con viñetas que caben no avisa ({av})")
+    _p, av = K.partir("Título\n\n" + "t" * 316 + "\n" + "x" * 400)
+    ok(not av, f"un párrafo largo cuyo titular y texto caben por separado no avisa ({av})")
     try:
         K.partir("   ")
         ok(False, "un texto vacío se rechaza")

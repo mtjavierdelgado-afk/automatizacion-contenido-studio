@@ -647,11 +647,6 @@ def partir(texto):
     salida.append(("portada", {"titulo": lineas0[0][:C.MAX_TEXTO], "apoyo": apoyo0[:C.MAX_TEXTO]}))
     numero = 0
     for p in parrafos[1:]:
-        if len(p) > C.MAX_TEXTO and not any(len(x) > C.MAX_TEXTO for x in p.split("\n")) and \
-                sum(1 for x in p.split("\n") if _RE_VINETA.match(x.strip())) >= 2:
-            pass                    # una lista larga: cada viñeta cabe en su texto
-        elif len(p) > C.MAX_TEXTO:
-            largos.append(len(salida))
         lineas = [x.strip() for x in p.split("\n") if x.strip()]
         vinetas = [_RE_VINETA.sub("", x) for x in lineas if _RE_VINETA.match(x)]
         if len(vinetas) >= 2:
@@ -659,14 +654,20 @@ def partir(texto):
             grupos = [vinetas[i:i + MAX_VINETAS] for i in range(0, len(vinetas), MAX_VINETAS)]
             if len(grupos) > 1:
                 avisos.append(f"Una lista tiene {len(vinetas)} viñetas: va en {len(grupos)} láminas (caben {MAX_VINETAS} en cada una).")
+            if len(titulo) > C.MAX_TEXTO or any(len(v) > C.MAX_TEXTO for v in vinetas):
+                largos.append(len(salida))
             for k, grupo in enumerate(grupos):
-                t = {"titulo": titulo + (" (sigue)" if k else "")}
+                t = {"titulo": titulo[:C.MAX_TEXTO - 8] + (" (sigue)" if k else "")}
                 t.update({f"v{i + 1}": v[:C.MAX_TEXTO] for i, v in enumerate(grupo)})
                 salida.append(("lista", t))
         elif _es_cifra(lineas[0]) and len(lineas) > 1:
+            if len(" ".join(lineas[1:])) > C.MAX_TEXTO:
+                largos.append(len(salida))
             salida.append(("dato", {"cifra": lineas[0], "texto": " ".join(lineas[1:])[:C.MAX_TEXTO]}))
         else:
             numero += 1
+            if len(lineas[0]) > C.MAX_TEXTO or len(" ".join(lineas[1:])) > C.MAX_TEXTO:
+                largos.append(len(salida))
             salida.append(("punto", {"numero": f"{numero:02d}", "titulo": lineas[0][:C.MAX_TEXTO],
                                      "texto": " ".join(lineas[1:])[:C.MAX_TEXTO]}))
     salida.append(("cierre", {}))

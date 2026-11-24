@@ -397,6 +397,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/graficas/{cid}/piezas/{pieza_id}/capas` | Guarda la versión en capas de una pieza, al lado de la de siempre. Un |
 | `POST` | `/api/graficas/{cid}/piezas/{pieza_id}/comparar` | Pinta la pieza como siempre y convertida en capas, y dice si salen |
 | `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/fichero.{extension}` | El PNG o JPG de la pieza. Con `?antes=1`, la de siempre aunque haya una |
+| `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/lamina/{n}.{extension}` | Una lámina sola (desde 1), en PNG o JPG. |
+| `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/laminas.pdf` | El carrusel en PDF para LinkedIn: los JPG tal cual, sin «Desliza →». |
+| `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/laminas.zip` | Todas las láminas en un ZIP (JPG o PNG), con sus textos alternativos. |
+| `POST` | `/api/graficas/{cid}/piezas/{pieza_id}/laminas/preparar` | «Preparar las láminas»: vuelve a guardar lo último guardado, como trabajo |
 | `POST` | `/api/graficas/{cid}/vista` | Las miniaturas de los diseños con estos datos. No guarda nada. |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
@@ -573,4 +577,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**459 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**463 endpoints.** Escrito por `generar_api.py` desde `app.py`.

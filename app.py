@@ -25088,6 +25088,58 @@ def graficas_crear_en_capas(cid: str, peticion: Request, cuerpo: dict = Body(def
     return _guardar_capas(cid, None, peticion, cuerpo)
 
 
+def _descarga_capas(cid, pieza_id, peticion, fn, *args):
+    """Una descarga del carrusel: siempre con la clave del proyecto, y si faltan
+    las láminas, un 409 que la pantalla convierte en «Preparar las láminas»."""
+    _G, C, raiz, _kit, _logo, _oscuro = _contexto_capas(cid, peticion)
+    try:
+        return fn(raiz, cid, pieza_id, *args)
+    except C.ErrorSinLaminas as fallo:
+        raise ErrorApi(409, str(fallo))
+    except _G.ErrorGraficas as fallo:
+        raise ErrorApi(404 if isinstance(fallo, _G.ErrorNoEsta) else 400, str(fallo))
+
+
+def _adjunto(contenido, nombre, tipo):
+    return Response(contenido, media_type=tipo, headers={
+        "Content-Disposition": f'attachment; filename="{nombre}"', "Cache-Control": "no-store"})
+
+
+@app.get("/api/graficas/{cid}/piezas/{pieza_id}/laminas.zip")
+def graficas_zip_laminas(cid: str, pieza_id: str, peticion: Request, formato: str = "jpg"):
+    """Todas las láminas en un ZIP (JPG o PNG), con sus textos alternativos."""
+    contenido, nombre = _descarga_capas(cid, pieza_id, peticion, GRAFICAS_CAPAS.zip_laminas if GRAFICAS_CAPAS else None,
+                                        str(formato or "jpg").lower())
+    return _adjunto(contenido, nombre, "application/zip")
+
+
+@app.get("/api/graficas/{cid}/piezas/{pieza_id}/laminas.pdf")
+def graficas_pdf_laminas(cid: str, pieza_id: str, peticion: Request):
+    """El carrusel en PDF para LinkedIn: los JPG tal cual, sin «Desliza →»."""
+    contenido, nombre = _descarga_capas(cid, pieza_id, peticion, GRAFICAS_CAPAS.pdf_laminas if GRAFICAS_CAPAS else None)
+    return _adjunto(contenido, nombre, "application/pdf")
+
+
+@app.get("/api/graficas/{cid}/piezas/{pieza_id}/lamina/{n}.{extension}")
+def graficas_lamina_suelta(cid: str, pieza_id: str, n: int, extension: str, peticion: Request):
+    """Una lámina sola (desde 1), en PNG o JPG."""
+    contenido, nombre = _descarga_capas(cid, pieza_id, peticion, GRAFICAS_CAPAS.lamina_suelta if GRAFICAS_CAPAS else None,
+                                        n, extension)
+    return _adjunto(contenido, nombre, "image/png" if extension == "png" else "image/jpeg")
+
+
+@app.post("/api/graficas/{cid}/piezas/{pieza_id}/laminas/preparar")
+def graficas_preparar_laminas(cid: str, pieza_id: str, peticion: Request):
+    """«Preparar las láminas»: vuelve a guardar lo último guardado, como trabajo
+    con barra, para que las láminas estén pintadas (lo que se guardó desde
+    `main` solo tiene la primera). No cambia el diseño."""
+    _G, C, raiz, _kit, _logo, _oscuro = _contexto_capas(cid, peticion)
+    _ficha, doc = _por_capas(C.leer, raiz, cid, pieza_id)
+    if not doc:
+        raise ErrorApi(400, "esta pieza no está en capas: no hay láminas que preparar")
+    return _guardar_capas(cid, pieza_id, peticion, {"doc": doc})
+
+
 @app.get("/api/graficas/{cid}/capas/trabajo/{tid}")
 def graficas_trabajo_capas(cid: str, tid: str, peticion: Request):
     """Cómo va el guardado de un carrusel: láminas hechas, y al acabar lo que

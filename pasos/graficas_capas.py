@@ -77,7 +77,7 @@ TIPOS = ("texto", "imagen", "logo", "forma")
 #: no sale de ninguna familia: «Volver a montar a todas» la deja como está.
 TIPOS_LAMINA = ("portada", "punto", "lista", "dato", "antes_despues", "pasos", "cita", "cierre", "blanco")
 #: Dónde NO sale una capa «en todas» (se calcula al pintar, por la posición).
-SALVO = ("primera", "ultima")
+SALVO = ("primera", "ultima", "pdf")
 _RE_ID = re.compile(r"^[a-z0-9]{1,12}$")
 _RE_ROL = re.compile(r"^[a-z0-9_]{0,20}$")
 _RE_REF = re.compile(r"^(?:#[0-9A-F]{6}|kit:(?:principal|secundario|oscuro|claro|acento)"
@@ -592,7 +592,7 @@ def es_vertical(f):
     return f["H"] / f["W"] > 1.7
 
 
-def capas_de_lamina(doc, lamina, f):
+def capas_de_lamina(doc, lamina, f, para_pdf=False):
     """Las capas de una lámina tal como se pintan: sin las que su posición
     excluye («salvo» primera o última, «solo_horizontal» en vertical) y con
     {n}/{total} puestos. Con una sola lámina, {n} y {total} se dejan tal cual:
@@ -603,6 +603,8 @@ def capas_de_lamina(doc, lamina, f):
         salvo = c.get("salvo") or ()
         if ("primera" in salvo and lamina == 0) or ("ultima" in salvo and lamina == total - 1):
             continue
+        if para_pdf and "pdf" in salvo:
+            continue                    # el PDF de LinkedIn: sin «Desliza →»
         if c.get("solo_horizontal") and es_vertical(f):
             continue
         if total > 1 and c["tipo"] == "texto" and "{" in c["txt"]:
@@ -611,7 +613,7 @@ def capas_de_lamina(doc, lamina, f):
     return salida
 
 
-def html_capas(doc, kit=None, imagen_de=None, logo=None, logo_oscuro=None, lamina=0, memo=None):
+def html_capas(doc, kit=None, imagen_de=None, logo=None, logo_oscuro=None, lamina=0, memo=None, para_pdf=False):
     """El documento de una lámina. `imagen_de(nombre) -> ruta o None`. `memo`
     guarda cada fichero ya leído: con varias láminas, cada foto se lee una vez."""
     doc = limpiar_doc(doc)
@@ -624,7 +626,7 @@ def html_capas(doc, kit=None, imagen_de=None, logo=None, logo_oscuro=None, lamin
     imagen_de = imagen_de or (lambda _n: None)
     memo = {} if memo is None else memo
     cuerpo = "".join(_html_capa(c, doc, kit, colores, f, imagen_de, (logo, logo_oscuro), usadas, memo)
-                     for c in capas_de_lamina(doc, lamina, f))
+                     for c in capas_de_lamina(doc, lamina, f, para_pdf))
     faltan = [G.FUENTES[u][0] for u in usadas if not G.fuente_lista(u)]
     caras = "".join(G._css_de_fuente(u) for u in sorted(usadas))
     documento = (
@@ -1386,9 +1388,10 @@ def carpeta_laminas(raiz, cid, pieza_id, guardado):
 
 
 def _previas(raiz, cid, pieza_id):
-    """huella -> (png, jpg, avisos) del último guardado, para no volver a pintar
-    lo que no cambió. Solo lee, y nunca falla (sin nada, se pinta todo)."""
-    meta = G.meta_capas(raiz, cid, pieza_id) or {} if pieza_id else {}
+    """huella -> {png, jpg, avisos} del último guardado, para no volver a pintar
+    lo que no cambió (también la versión para el PDF, que solo tiene JPG). Solo
+    lee, y nunca falla (sin nada, se pinta todo)."""
+    meta = (G.meta_capas(raiz, cid, pieza_id) or {}) if pieza_id else {}
     guardado = re.sub(r"[^0-9a-f]", "", str(meta.get("guardado") or ""))[:16]
     if not guardado:
         return {}
@@ -1399,51 +1402,71 @@ def _previas(raiz, cid, pieza_id):
         for n, (huella, avisos) in enumerate(zip(indice["huellas"], indice["avisos"]), 1):
             png, jpg = (os.path.join(carpeta, f"{n:02d}.{e}") for e in ("png", "jpg"))
             if os.path.isfile(png) and os.path.isfile(jpg):
-                salida[huella] = (png, jpg, avisos)
+                salida[huella] = {"png": png, "jpg": jpg, "avisos": avisos}
+        for n, huella in enumerate(indice.get("huellas_pdf") or [], 1):
+            jpg = os.path.join(carpeta, f"{n:02d}.pdf.jpg")
+            if huella and os.path.isfile(jpg):
+                salida[huella] = {"png": None, "jpg": jpg, "avisos": []}
         return salida
     except Exception:                                       # noqa: BLE001
         return {}
 
 
 def pintar_laminas(doc, kit, imagen_de, logo=None, logo_oscuro=None, previas=None, avisar=None):
-    """-> [(png, jpg, avisos, huella)], una por lámina. Cada foto se lee una vez;
-    solo se pintan las láminas que cambiaron (huella), y el turno del
-    navegador se cede cada `LAMINAS_POR_TURNO`. `avisar(hechas, total)`."""
+    """-> [{png, jpg, avisos, huella, pdf, huella_pdf}], una por lámina. `pdf` es
+    el JPG para el PDF de LinkedIn (sin lo marcado «salvo pdf», como «Desliza
+    →»), solo si sale distinta; si no, None. Cada foto se lee una vez; solo se
+    pinta lo que cambió (huella), y el turno del navegador se cede cada
+    `LAMINAS_POR_TURNO`. `avisar(láminas hechas, total)`."""
     previas = previas or {}
     memo = {}
     total = len(doc["laminas"])
-    preparadas = []
+    salida = [{"pdf": None, "huella_pdf": None} for _ in range(total)]
+    tareas = []                     # (lámina, «normal» o «pdf», documento, f, márgenes, faltan, huella)
     for i in range(total):
         documento, f, margenes, faltan = html_capas(doc, kit, imagen_de, logo, logo_oscuro, i, memo)
         huella = hashlib.sha256(f"{PINTOR}\0{sorted(faltan)}\0{documento}".encode()).hexdigest()[:32]
-        preparadas.append((documento, f, margenes, faltan, huella))
-    salida = [None] * total
+        tareas.append((i, "normal", documento, f, margenes, faltan, huella))
+        doc_pdf, f, margenes, faltan_pdf = html_capas(doc, kit, imagen_de, logo, logo_oscuro, i, memo, para_pdf=True)
+        if doc_pdf != documento:
+            huella_pdf = hashlib.sha256(f"{PINTOR}\0pdf\0{sorted(faltan_pdf)}\0{doc_pdf}".encode()).hexdigest()[:32]
+            tareas.append((i, "pdf", doc_pdf, f, margenes, faltan_pdf, huella_pdf))
+    pendientes = {i: 0 for i in range(total)}
     por_pintar = []
-    for i, (_d, _f, _m, _fa, huella) in enumerate(preparadas):
+    for tarea in tareas:
+        i, variante, huella = tarea[0], tarea[1], tarea[6]
         vieja = previas.get(huella)
-        if vieja:
-            try:
-                with open(vieja[0], "rb") as a, open(vieja[1], "rb") as b:
-                    salida[i] = (a.read(), b.read(), list(vieja[2]), huella)
+        try:
+            if vieja and variante == "normal" and vieja["png"]:
+                with open(vieja["png"], "rb") as a, open(vieja["jpg"], "rb") as b:
+                    salida[i].update(png=a.read(), jpg=b.read(), avisos=list(vieja["avisos"]), huella=huella)
                 continue
-            except OSError:
-                pass
-        por_pintar.append(i)
-    hechas = total - len(por_pintar)
-    if avisar:
-        avisar(hechas, total)
+            if vieja and variante == "pdf":
+                with open(vieja["jpg"], "rb") as b:
+                    salida[i].update(pdf=b.read(), huella_pdf=huella)
+                continue
+        except OSError:
+            pass
+        pendientes[i] += 1
+        por_pintar.append(tarea)
+
+    def aviso():
+        if avisar:
+            avisar(sum(1 for v in pendientes.values() if not v), total)
+    aviso()
     for desde in range(0, len(por_pintar), LAMINAS_POR_TURNO):
         tanda = por_pintar[desde:desde + LAMINAS_POR_TURNO]
 
         def trabajar(pincel, tanda=tanda):
-            for i in tanda:
-                documento, f, margenes, faltan, huella = preparadas[i]
+            for i, variante, documento, f, margenes, faltan, huella in tanda:
                 png, avisos, _ = _pintar_documento(pincel, documento, f, margenes, faltan)
-                salida[i] = (png, G.a_jpg(png), avisos, huella)
+                if variante == "normal":
+                    salida[i].update(png=png, jpg=G.a_jpg(png), avisos=avisos, huella=huella)
+                else:
+                    salida[i].update(pdf=G.a_jpg(png), huella_pdf=huella)
+                pendientes[i] -= 1
         G._con_turno(trabajar)
-        hechas += len(tanda)
-        if avisar:
-            avisar(hechas, total)
+        aviso()
     return salida
 
 
@@ -1484,7 +1507,7 @@ def guardar(raiz, cid, doc, pieza_id=None, logo=None, logo_oscuro=None, avisar=N
     varias = len(doc["laminas"]) > 1
     if varias:
         laminas = pintar_laminas(doc, kit, imagen_de, logo, logo_oscuro, _previas(raiz, cid, None if nueva else pieza_id), avisar)
-        png, jpg, avisos = laminas[0][:3]
+        png, jpg, avisos = laminas[0]["png"], laminas[0]["jpg"], laminas[0]["avisos"]
     else:
         # una sola lámina: exactamente como antes de los carruseles
         laminas = []
@@ -1521,12 +1544,15 @@ def guardar(raiz, cid, doc, pieza_id=None, logo=None, logo_oscuro=None, avisar=N
             # 1 también es capas.png: la lista, la miniatura y `main` la ven)
             carpeta = carpeta_laminas(raiz, cid, pieza_id, doc["origen"]["guardado"])
             os.makedirs(carpeta, exist_ok=True)
-            for n, (png_n, jpg_n, _av, _h) in enumerate(laminas, 1):
-                _escribir_bytes(os.path.join(carpeta, f"{n:02d}.png"), png_n)
-                _escribir_bytes(os.path.join(carpeta, f"{n:02d}.jpg"), jpg_n)
+            for n, lam in enumerate(laminas, 1):
+                _escribir_bytes(os.path.join(carpeta, f"{n:02d}.png"), lam["png"])
+                _escribir_bytes(os.path.join(carpeta, f"{n:02d}.jpg"), lam["jpg"])
+                if lam["pdf"]:
+                    _escribir_bytes(os.path.join(carpeta, f"{n:02d}.pdf.jpg"), lam["pdf"])
             G._escribir_json(os.path.join(carpeta, "huellas.json"),
-                             {"huellas": [x[3] for x in laminas], "avisos": [x[2] for x in laminas]})
-        extra = {"avisos_laminas": [x[2] for x in laminas]} if varias else {}
+                             {"huellas": [x["huella"] for x in laminas], "avisos": [x["avisos"] for x in laminas],
+                              "huellas_pdf": [x["huella_pdf"] for x in laminas]})
+        extra = {"avisos_laminas": [x["avisos"] for x in laminas]} if varias else {}
         G._escribir_json(rutas["json"], dict(doc, avisos=avisos, cambiada=ahora, medida=f"{f['W']}×{f['H']}", **extra))
         meta = {"sello": ficha["sello"], "guardado": doc["origen"]["guardado"], "cambiada": ahora,
                 "nombre": doc["nombre"] or ficha.get("nombre") or ""}
@@ -1548,5 +1574,137 @@ def guardar(raiz, cid, doc, pieza_id=None, logo=None, logo_oscuro=None, avisar=N
                 shutil.rmtree(os.path.join(destino, nombre), ignore_errors=True)
     salida = {"id": pieza_id, "doc": doc, "avisos": avisos, "cambiada": ahora}
     if varias:
-        salida["avisos_laminas"] = [x[2] for x in laminas]
+        salida["avisos_laminas"] = [x["avisos"] for x in laminas]
     return salida
+
+
+# ====================================================================== descargar (graficas-3-carrusel)
+
+class ErrorSinLaminas(ErrorGraficas):
+    """Las láminas de este carrusel no están pintadas (por ejemplo, se guardó
+    desde `main`): hay que prepararlas, que es el mismo trabajo que guardar.
+    Una descarga NUNCA pinta: 20 láminas no caben en una petición."""
+
+
+def _nombre_fichero(nombre):
+    import unicodedata                                      # noqa: PLC0415
+    plano = unicodedata.normalize("NFKD", str(nombre or "")).encode("ascii", "ignore").decode()
+    plano = re.sub(r"[^A-Za-z0-9]+", "-", plano).strip("-").lower()[:40]
+    return plano or "pieza"
+
+
+def _leer_bytes(ruta):
+    with open(ruta, "rb") as fh:
+        return fh.read()
+
+
+def laminas_de_pieza(raiz, cid, pieza_id):
+    """-> {nombre, laminas: [{png, jpg, pdf}], alts}: los BYTES de cada lámina
+    de lo último guardado, leídos con el cerrojo de la pieza (un guardado a la
+    vez nunca deja una descarga a medias ni mezclada). Una pieza de una lámina,
+    o sin versión en capas, da su PNG/JPG de siempre."""
+    with G.cerrojo_pieza(cid, pieza_id):
+        ficha = G.leer_pieza(raiz, cid, pieza_id)
+        vale = G.capas_que_valen(raiz, cid, pieza_id, ficha)
+        nombre = _nombre_fichero((vale or {}).get("nombre") or ficha.get("nombre"))
+        total = (vale or {}).get("laminas")
+        if not vale or not isinstance(total, int) or total < 2:
+            png, jpg = (G.ruta_final(raiz, cid, pieza_id, e) for e in ("png", "jpg"))
+            return {"nombre": nombre, "laminas": [{"png": _leer_bytes(png), "jpg": _leer_bytes(jpg), "pdf": None}],
+                    "alts": [], "titulo": (vale or {}).get("nombre") or ficha.get("nombre") or ""}
+        carpeta = carpeta_laminas(raiz, cid, pieza_id, re.sub(r"[^0-9a-f]", "", str(vale.get("guardado") or ""))[:16])
+        laminas = []
+        for n in range(1, total + 1):
+            png, jpg, pdf = (os.path.join(carpeta, f"{n:02d}.{e}") for e in ("png", "jpg", "pdf.jpg"))
+            if not (os.path.isfile(png) and os.path.isfile(jpg)):
+                raise ErrorSinLaminas("faltan las láminas de este carrusel: pulsa «Preparar las láminas»")
+            laminas.append({"png": _leer_bytes(png), "jpg": _leer_bytes(jpg),
+                            "pdf": _leer_bytes(pdf) if os.path.isfile(pdf) else None})
+        try:
+            alts = [str(lam.get("alt") or "") for lam in G._leer_json(_rutas(raiz, cid, pieza_id)["json"])["laminas"]]
+        except Exception:                                   # noqa: BLE001
+            alts = []
+        return {"nombre": nombre, "laminas": laminas, "alts": alts, "titulo": vale.get("nombre") or ""}
+
+
+def lamina_suelta(raiz, cid, pieza_id, n, extension):
+    """-> (bytes, nombre de fichero) de la lámina `n` (desde 1)."""
+    if extension not in ("png", "jpg"):
+        raise ErrorGraficas("eso solo se descarga en PNG o JPG")
+    datos = laminas_de_pieza(raiz, cid, pieza_id)
+    if not isinstance(n, int) or not 1 <= n <= len(datos["laminas"]):
+        raise G.ErrorNoEsta("esa lámina no está")
+    return datos["laminas"][n - 1][extension], f"{datos['nombre']}-{n:02d}.{extension}"
+
+
+def zip_laminas(raiz, cid, pieza_id, extension="jpg"):
+    """-> (bytes, nombre): todas las láminas, `<pieza>-01.jpg`, `-02`…, y sus
+    textos alternativos (para pegarlos al publicar). Se arma en memoria."""
+    import zipfile                                          # noqa: PLC0415
+    if extension not in ("png", "jpg"):
+        raise ErrorGraficas("el ZIP va en JPG o en PNG")
+    datos = laminas_de_pieza(raiz, cid, pieza_id)
+    salida = io.BytesIO()
+    with zipfile.ZipFile(salida, "w", zipfile.ZIP_STORED) as z:
+        for n, lam in enumerate(datos["laminas"], 1):
+            z.writestr(f"{datos['nombre']}-{n:02d}.{extension}", lam[extension])
+        if any(datos["alts"]):
+            lineas = [f"Lámina {n}: {alt}" for n, alt in enumerate(datos["alts"], 1) if alt]
+            z.writestr("textos-alternativos.txt", "\n".join(lineas) + "\n")
+    return salida.getvalue(), f"{datos['nombre']}.zip"
+
+
+def _texto_pdf(texto):
+    """Una cadena de PDF que admite tildes: UTF-16 con su marca, en hexadecimal."""
+    return "<FEFF" + str(texto).encode("utf-16-be").hex().upper() + ">"
+
+
+def pdf_de_jpgs(jpgs, titulo=""):
+    """Un PDF con un JPG por página, metido TAL CUAL (DCTDecode): no se vuelve
+    a comprimir, así no pierde calidad. Páginas del tamaño de la lámina."""
+    from PIL import Image                                   # noqa: PLC0415
+    objetos = []
+
+    def nuevo(cuerpo):
+        objetos.append(cuerpo)
+        return len(objetos)
+    catalogo = nuevo(None)
+    paginas = nuevo(None)
+    hijos = []
+    for jpg in jpgs:
+        with Image.open(io.BytesIO(jpg)) as im:
+            w, h = im.size
+            gris = im.mode == "L"
+        ancho, alto = w * 0.5, h * 0.5                     # 1080 px → 540 pt
+        imagen = nuevo((f"<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace "
+                        f"/{'DeviceGray' if gris else 'DeviceRGB'} /BitsPerComponent 8 /Filter /DCTDecode "
+                        f"/Length {len(jpg)} >>\nstream\n").encode() + jpg + b"\nendstream")
+        dibujo = f"q {ancho:.2f} 0 0 {alto:.2f} 0 0 cm /I Do Q".encode()
+        contenido = nuevo(f"<< /Length {len(dibujo)} >>\nstream\n".encode() + dibujo + b"\nendstream")
+        hijos.append(nuevo((f"<< /Type /Page /Parent {paginas} 0 R /MediaBox [0 0 {ancho:.2f} {alto:.2f}] "
+                            f"/Resources << /XObject << /I {imagen} 0 R >> >> /Contents {contenido} 0 R >>").encode()))
+    objetos[catalogo - 1] = f"<< /Type /Catalog /Pages {paginas} 0 R >>".encode()
+    objetos[paginas - 1] = (f"<< /Type /Pages /Kids [{' '.join(f'{k} 0 R' for k in hijos)}] "
+                            f"/Count {len(hijos)} >>").encode()
+    info = nuevo(f"<< /Title {_texto_pdf(titulo)} /Producer (CrearIA Studio) >>".encode()) if titulo else None
+    salida = io.BytesIO()
+    salida.write(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    posiciones = []
+    for n, cuerpo in enumerate(objetos, 1):
+        posiciones.append(salida.tell())
+        salida.write(f"{n} 0 obj\n".encode() + cuerpo + b"\nendobj\n")
+    xref = salida.tell()
+    salida.write(f"xref\n0 {len(objetos) + 1}\n0000000000 65535 f \n".encode())
+    for p in posiciones:
+        salida.write(f"{p:010d} 00000 n \n".encode())
+    salida.write((f"trailer\n<< /Size {len(objetos) + 1} /Root {catalogo} 0 R"
+                  + (f" /Info {info} 0 R" if info else "") + f" >>\nstartxref\n{xref}\n%%EOF\n").encode())
+    return salida.getvalue()
+
+
+def pdf_laminas(raiz, cid, pieza_id):
+    """-> (bytes, nombre): el carrusel para LinkedIn, con el nombre de la pieza
+    de título y sin «Desliza →» (las láminas «para el PDF», si las hay)."""
+    datos = laminas_de_pieza(raiz, cid, pieza_id)
+    jpgs = [lam["pdf"] or lam["jpg"] for lam in datos["laminas"]]
+    return pdf_de_jpgs(jpgs, datos["titulo"]), f"{datos['nombre']}.pdf"

@@ -52,7 +52,7 @@ def carrusel(formato="v45"):
             _forma(f"f{i}"),
             _texto(f"t{i}", f"Idea {i}"),
             _texto(f"n{i}", "{n}/{total}", enlace="num", salvo=["primera"], solo_horizontal=True),
-            _texto(f"d{i}", "Desliza →", enlace="des", salvo=["primera", "ultima"], solo_horizontal=True),
+            _texto(f"d{i}", "Desliza →", enlace="des", salvo=["primera", "ultima", "pdf"], solo_horizontal=True),
             _texto(f"m{i}", "Marca", enlace="mar", salvo=["primera"]),
         ]}
     return {"version": 2, "formato": formato, "nombre": "Carrusel",
@@ -210,7 +210,7 @@ def guardar(carpeta):
     pid, guardado = r["id"], r["doc"]["origen"]["guardado"]
     destino = G._carpeta_pieza(raiz, cid, pid)
     carpeta1 = C.carpeta_laminas(raiz, cid, pid, guardado)
-    ok(sorted(os.listdir(carpeta1)) == ["01.jpg", "01.png", "02.jpg", "02.png", "03.jpg", "03.png", "huellas.json"],
+    ok(sorted(os.listdir(carpeta1)) == ["01.jpg", "01.png", "02.jpg", "02.pdf.jpg", "02.png", "03.jpg", "03.png", "huellas.json"],
        "cada lámina en PNG y JPG, numeradas, en la carpeta de este guardado")
     ok(open(os.path.join(destino, "capas.png"), "rb").read() == open(os.path.join(carpeta1, "01.png"), "rb").read(),
        "capas.png es la lámina 1 (la lista, la miniatura y `main` la ven)")
@@ -264,6 +264,78 @@ def guardar(carpeta):
     C.guardar(raiz, cid, leido, pid)
     ok(not [n for n in os.listdir(destino) if n.startswith("capas_")], "con una sola lámina no queda ninguna carpeta de láminas")
     ok("laminas" not in G.meta_capas(raiz, cid, pid), "ni el número de láminas en el sello")
+
+
+def descargas(carpeta):
+    print("descargar: ZIP, PDF de LinkedIn y una lámina suelta")
+    import io                                               # noqa: PLC0415
+    import zipfile                                          # noqa: PLC0415
+    raiz = os.path.join(carpeta, "descargas")
+    os.makedirs(raiz, exist_ok=True)
+    cid = "cafe"
+    doc = dict(carrusel(), nombre="Mi carrusel: 3 ideas ñandú")
+    r = C.guardar(raiz, cid, doc, None)
+    pid = r["id"]
+    guardado = r["doc"]["origen"]["guardado"]
+    carpeta1 = C.carpeta_laminas(raiz, cid, pid, guardado)
+    ok(os.path.isfile(os.path.join(carpeta1, "02.pdf.jpg")), "la lámina con «Desliza →» tiene su versión para el PDF")
+    ok(not os.path.exists(os.path.join(carpeta1, "03.pdf.jpg")), "la que no lo lleva, no (sale igual)")
+
+    contenido, nombre = C.zip_laminas(raiz, cid, pid, "jpg")
+    z = zipfile.ZipFile(io.BytesIO(contenido))
+    ok(nombre == "mi-carrusel-3-ideas-nandu.zip", f"el ZIP se llama como la pieza, sin tildes ({nombre})")
+    ok(z.namelist() == ["mi-carrusel-3-ideas-nandu-01.jpg", "mi-carrusel-3-ideas-nandu-02.jpg",
+                        "mi-carrusel-3-ideas-nandu-03.jpg", "textos-alternativos.txt"],
+       f"con las láminas en orden y los textos alternativos ({z.namelist()})")
+    ok(z.read("mi-carrusel-3-ideas-nandu-02.jpg") == open(os.path.join(carpeta1, "02.jpg"), "rb").read(),
+       "cada lámina tal cual se guardó")
+    ok("Lámina 2: Lámina 2" in z.read("textos-alternativos.txt").decode(), "el texto alternativo de cada una")
+    contenido, _ = C.zip_laminas(raiz, cid, pid, "png")
+    ok(zipfile.ZipFile(io.BytesIO(contenido)).namelist()[0].endswith("-01.png"), "también en PNG")
+    try:
+        C.zip_laminas(raiz, cid, pid, "gif")
+        ok(False, "un formato raro se rechaza")
+    except C.ErrorGraficas:
+        ok(True, "un formato raro se rechaza")
+
+    sola, nombre = C.lamina_suelta(raiz, cid, pid, 3, "png")
+    ok(sola == open(os.path.join(carpeta1, "03.png"), "rb").read() and nombre.endswith("-03.png"), "una lámina suelta, con su número")
+    for malo in (0, 4, "2"):
+        try:
+            C.lamina_suelta(raiz, cid, pid, malo, "png")
+            ok(False, f"la lámina {malo!r} no existe")
+        except C.ErrorGraficas:
+            ok(True, f"la lámina {malo!r} no existe")
+
+    pdf, nombre = C.pdf_laminas(raiz, cid, pid)
+    ok(nombre.endswith(".pdf") and pdf.startswith(b"%PDF-1.4"), "el PDF de LinkedIn")
+    jpg2_pdf = open(os.path.join(carpeta1, "02.pdf.jpg"), "rb").read()
+    ok(jpg2_pdf in pdf and open(os.path.join(carpeta1, "01.jpg"), "rb").read() in pdf,
+       "lleva los JPG tal cual (sin volver a comprimir), y el de la 2 es el de sin «Desliza →»")
+    ok(open(os.path.join(carpeta1, "02.jpg"), "rb").read() not in pdf, "no el de con «Desliza →»")
+    try:
+        import pypdf                                        # noqa: PLC0415
+        lector = pypdf.PdfReader(io.BytesIO(pdf))
+        ok(len(lector.pages) == 3, "con una página por lámina")
+        ok(lector.metadata.title == "Mi carrusel: 3 ideas ñandú", f"y el título de la pieza, con tildes ({lector.metadata.title!r})")
+        caja = lector.pages[0].mediabox
+        ok(abs(float(caja.width) / float(caja.height) - 1080 / 1350) < 1e-3, "páginas con la forma de la lámina")
+    except ImportError:
+        print("  (sin pypdf: el PDF solo se comprueba por dentro)")
+
+    # una pieza de una lámina descarga lo de siempre
+    una = C.guardar(raiz, cid, dict(carrusel(), laminas=carrusel()["laminas"][:1]), None)
+    contenido, _ = C.zip_laminas(raiz, cid, una["id"], "jpg")
+    ok(len(zipfile.ZipFile(io.BytesIO(contenido)).namelist()) == 1, "una pieza de una lámina: un ZIP con una")
+
+    # sin la carpeta (guardado desde main): la descarga no pinta, pide prepararlas
+    import shutil as sh                                     # noqa: PLC0415
+    sh.rmtree(carpeta1)
+    try:
+        C.zip_laminas(raiz, cid, pid, "jpg")
+        ok(False, "sin las láminas pintadas, pide prepararlas")
+    except C.ErrorSinLaminas as fallo:
+        ok("Preparar las láminas" in str(fallo), "sin las láminas pintadas, pide prepararlas (y no pinta nada)")
 
 
 # ================================================================ por la API
@@ -347,6 +419,27 @@ def por_la_api(carpeta):
         r = requests.put(base + f"/api/graficas/{cid}/piezas/{pid}/capas", json={"doc": doc}, timeout=60)
         e2 = esperar(r.json().get("trabajo"))
         ok(e2.get("estado") == "error" and e2.get("codigo") == 409, f"un guardado que pisaría a otro acaba en 409 ({e2})")
+        r = requests.get(base + f"/api/graficas/{cid}/piezas/{pid}/laminas.zip?formato=png", timeout=60)
+        ok(r.status_code == 200 and r.headers.get("content-type") == "application/zip"
+           and "attachment" in r.headers.get("content-disposition", ""), "el ZIP se descarga por la API")
+        r = requests.get(base + f"/api/graficas/{cid}/piezas/{pid}/laminas.pdf", timeout=60)
+        ok(r.status_code == 200 and r.content.startswith(b"%PDF"), "el PDF también")
+        r = requests.get(base + f"/api/graficas/{cid}/piezas/{pid}/lamina/2.jpg", timeout=60)
+        ok(r.status_code == 200 and r.headers.get("content-type") == "image/jpeg", "y una lámina suelta")
+        r = requests.get(base + f"/api/graficas/{cid}/piezas/{pid}/lamina/9.jpg", timeout=60)
+        ok(r.status_code == 404, "una lámina que no hay: 404")
+        # se borra la carpeta: 409 y «Preparar las láminas» la rehace
+        import shutil as sh                                 # noqa: PLC0415
+        destino = G._carpeta_pieza(os.path.join(carpeta, "proyectos"), cid, pid)
+        for nombre in os.listdir(destino):
+            if nombre.startswith("capas_"):
+                sh.rmtree(os.path.join(destino, nombre))
+        r = requests.get(base + f"/api/graficas/{cid}/piezas/{pid}/laminas.zip", timeout=60)
+        ok(r.status_code == 409 and "Preparar" in r.text, "sin las láminas, la descarga dice que hay que prepararlas (409)")
+        r = requests.post(base + f"/api/graficas/{cid}/piezas/{pid}/laminas/preparar", timeout=60)
+        ok(r.status_code == 202 and esperar(r.json().get("trabajo")).get("estado") == "listo", "«Preparar las láminas» es un trabajo")
+        r = requests.get(base + f"/api/graficas/{cid}/piezas/{pid}/laminas.zip", timeout=60)
+        ok(r.status_code == 200, "y después se descarga")
         r = requests.get(base + f"/api/graficas/{cid}/capas/trabajo/nohayeso", timeout=30)
         ok(r.status_code == 404 and "Vuelve a pulsar" in r.text, "un trabajo que no existe dice que se vuelva a guardar")
         r = requests.get(base + f"/api/graficas/otro/capas/trabajo/{tid}", timeout=30)
@@ -371,6 +464,7 @@ def main():
     carpeta = tempfile.mkdtemp(prefix="graficas_carrusel_")
     try:
         guardar(carpeta)
+        descargas(carpeta)
         por_la_api(os.path.join(carpeta, "api"))
     finally:
         shutil.rmtree(carpeta, ignore_errors=True)

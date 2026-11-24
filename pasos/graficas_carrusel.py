@@ -582,7 +582,18 @@ def montar_lamina(pincel, doc, indice, n, tipo, kit=None, logo=None, logo_oscuro
     familia(n)
     previa = doc["laminas"][indice]
     if tipo == "portada":
-        nuevo = C.montar(pincel, n, doc["formato"], doc, textos or {}, kit, logo, logo_oscuro, indice,
+        # lo que la plantilla nueva llama de otra manera: el titular es la cita
+        # de la Testimonio (9) y al revés; los pasos de la 12, los titulares de
+        # las láminas que siguen (árbitro del 24-11: sin esto, de la 1 a la 9 la
+        # portada se quedaba vacía)
+        faltan = _textos_que_faltan(doc, indice, n)
+        # un campo oculto de antes toma el texto que se ve con otro nombre
+        # (cambiaste la cita en la 9: al volver, el titular es la cita nueva)
+        doc["laminas"][indice] = dict(previa, capas=[
+            dict(c, txt=faltan[c["rol"]]) if c.get("oculto") and c["tipo"] == "texto" and c.get("rol") in faltan else c
+            for c in previa["capas"]])
+        textos = dict(faltan, **textos)
+        nuevo = C.montar(pincel, n, doc["formato"], doc, textos, kit, logo, logo_oscuro, indice,
                          ocultar_sin_sitio=True)
         lam = nuevo["laminas"][indice]
         lam["tipo"], lam["familia"] = "portada", n
@@ -594,6 +605,36 @@ def montar_lamina(pincel, doc, indice, n, tipo, kit=None, logo=None, logo_oscuro
     doc["laminas"][indice] = lamina(n, tipo, doc["formato"], colores, textos, marca, previa)
     _ids_unicos(doc, indice)
     return C.limpiar_doc(doc)
+
+
+def _textos_que_faltan(doc, indice, n):
+    """Los campos de la portada de la familia `n` sacados de los que ya hay con
+    otro nombre (C.montar usa antes los que ya están con su nombre)."""
+    hay = {}
+    for oculto in (False, True):            # lo que se ve manda; si no, lo oculto
+        for c in doc["laminas"][indice]["capas"]:
+            if c["tipo"] == "texto" and bool(c.get("oculto")) == oculto and c["rol"] in G.CAMPOS and c["txt"].strip():
+                hay.setdefault(c["rol"], c["txt"])
+    visibles = {c["rol"] for c in doc["laminas"][indice]["capas"]
+                if c["tipo"] == "texto" and not c.get("oculto") and c["txt"].strip()}
+    salida = {}
+    pares = (("titulo", "cita"), ("apoyo", "autor")) if n == 9 else (("cita", "titulo"), ("autor", "apoyo"))
+    for de, a in pares:
+        # solo si el texto de origen se ve, o si el de destino no existe
+        if de in hay and (de in visibles or a not in hay):
+            salida[a] = hay[de]
+    if n == 12:
+        siguientes = []
+        for i, lam in enumerate(doc["laminas"]):
+            if i == indice or lam.get("tipo") not in ("punto", "lista", "pasos", "dato"):
+                continue
+            t = next((c["txt"] for c in lam["capas"] if c["tipo"] == "texto" and not c.get("oculto")
+                      and c["rol"] in ("titulo", "cifra") and c["txt"].strip()), "")
+            if t:
+                siguientes.append(" ".join(t.split())[:50])
+        for k, v in enumerate(siguientes[:3], 1):
+            salida[f"i{k}"] = v
+    return salida
 
 
 def montar_todas(pincel, doc, n, kit=None, logo=None, logo_oscuro=None, marca=""):
@@ -833,11 +874,17 @@ def avisos_del_carrusel(doc):
 
     def titular(lam):
         for c in lam["capas"]:
-            if c["tipo"] == "texto" and c["rol"] in ("titulo", "cita", "cifra") and c["txt"].strip():
+            if c["tipo"] == "texto" and not c.get("oculto") and c["rol"] in ("titulo", "cita", "cifra") and c["txt"].strip():
                 return c["txt"].strip()
         return ""
     if len(L) < 2:
         return [{"nivel": "aviso", "texto": "Es una sola lámina: la nota es para carruseles."}]
+    a_la_vista = {" ".join(c["txt"].split()) for c in L[0]["capas"] if c["tipo"] == "texto" and not c.get("oculto")}
+    ocultos = [c for c in L[0]["capas"] if c["tipo"] == "texto" and c.get("oculto") and c["rol"] in G.CAMPOS
+               and c["txt"].strip() and " ".join(c["txt"].split()) not in a_la_vista]
+    if ocultos:
+        nota("aviso", f"La portada tiene {len(ocultos)} texto(s) oculto(s) que esta familia no usa "
+                      f"(«{ocultos[0]['txt'].strip()[:40]}»…): el ojo de la lista de capas los enseña.")
     portada = titular(L[0])
     palabras = len(portada.split())
     if not portada:

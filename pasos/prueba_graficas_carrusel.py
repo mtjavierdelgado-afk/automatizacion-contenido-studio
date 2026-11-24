@@ -527,11 +527,32 @@ def partir_y_montar(pincel):
     apoyo = [c for c in d1b["laminas"][0]["capas"] if c.get("rol") == "apoyo"]
     ok(len(apoyo) == 1 and not apoyo[0].get("oculto") and apoyo[0]["txt"] == "Y cómo evitarlos",
        "y al volver a una familia con sitio, sale otra vez (sin duplicarse)")
+    nota10 = " ".join(a["texto"] for a in K.avisos_del_carrusel(d10))
+    ok("texto(s) oculto(s)" in nota10 and "Y cómo evitarlos" in nota10, f"y la nota lo dice ({nota10[:120]})")
+    # la Testimonio (9) lleva cita y autor: el titular y el apoyo pasan ahí, y vuelven
+    def vistos(d):
+        return {c["rol"]: c["txt"] for c in d["laminas"][0]["capas"] if c["tipo"] == "texto" and not c.get("oculto")}
+    d9 = K.montar_todas(pincel, d1, 9, None, None, None, "Alba")
+    ok(vistos(d9).get("cita") == "5 errores al alquilar una consola" and vistos(d9).get("autor") == "Y cómo evitarlos",
+       f"de la familia 1 a la 9, el titular es la cita y el apoyo el autor ({vistos(d9)})")
+    for c in d9["laminas"][0]["capas"]:
+        if c.get("rol") == "cita":
+            c["txt"] = "Mi cita cambiada"
+    d9b = K.montar_todas(pincel, d9, 1, None, None, None, "Alba")
+    ok(vistos(d9b).get("titulo") == "Mi cita cambiada" and vistos(d9b).get("apoyo") == "Y cómo evitarlos",
+       f"y al volver, el titular es la cita (con lo que cambiaste) y el apoyo se ve ({vistos(d9b)})")
+    ok(not any("oculto" in a["texto"] for a in K.avisos_del_carrusel(d9b)),
+       "lo oculto que repite lo que se ve no se cuenta en la nota")
+    d12 = K.montar_todas(pincel, d1, 12, None, None, None, "Alba")
+    ok(vistos(d12).get("i1") == "No probar los mandos", f"la portada de Pasos (12) lleva los titulares que siguen ({vistos(d12).get('i1')!r})")
     _d, av = K.carrusel_desde_texto(pincel, base, 10, texto, "sustituir", None, None, None, "Alba")
     ok(any("no lleva texto de apoyo" in a for a in av), "partir con esa familia avisa de que el apoyo no sale")
-    nota = " ".join(str(a) for a in K.avisos_del_carrusel(d1))
-    ok("lámina 2" not in nota.split("muestra")[-1].split(":")[0] if "muestra" in nota else True,
-       f"el «01» de un punto escrito no cuenta como texto de muestra ({nota[:200]})")
+    import re as _re                                        # noqa: PLC0415
+    nota = " ".join(a["texto"] for a in K.avisos_del_carrusel(d1))
+    m = _re.search(r"textos de muestra en la lámina ([\d, ]+)", nota)
+    con_muestra = {int(x) for x in m.group(1).split(",")} if m else set()
+    puntos = {i + 1 for i, lam in enumerate(d1["laminas"]) if lam.get("tipo") == "punto"}
+    ok(not (con_muestra & puntos), f"los números de los puntos («01», «02») no cuentan como texto de muestra ({nota[:160]})")
 
     piezas, avisos = K.partir(texto)
     ok([p[0] for p in piezas] == ["portada", "punto", "lista", "lista", "dato", "punto", "cierre"],

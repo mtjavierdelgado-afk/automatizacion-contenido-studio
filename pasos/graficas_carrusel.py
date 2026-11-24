@@ -879,12 +879,16 @@ def avisos_del_carrusel(doc):
         return ""
     if len(L) < 2:
         return [{"nivel": "aviso", "texto": "Es una sola lámina: la nota es para carruseles."}]
-    a_la_vista = {" ".join(c["txt"].split()) for c in L[0]["capas"] if c["tipo"] == "texto" and not c.get("oculto")}
-    ocultos = [c for c in L[0]["capas"] if c["tipo"] == "texto" and c.get("oculto") and c["rol"] in G.CAMPOS
-               and c["txt"].strip() and " ".join(c["txt"].split()) not in a_la_vista]
+    # lo oculto que no se ve en ninguna lámina (los pasos de la 12 son los
+    # titulares de las siguientes: esos no cuentan), cada texto una vez
+    a_la_vista = {" ".join(c["txt"].split()) for lam in L for c in lam["capas"]
+                  if c["tipo"] == "texto" and not c.get("oculto")}
+    ocultos = sorted({" ".join(c["txt"].split()) for c in L[0]["capas"]
+                      if c["tipo"] == "texto" and c.get("oculto") and c["rol"] in G.CAMPOS and c["txt"].strip()}
+                     - a_la_vista)
     if ocultos:
         nota("aviso", f"La portada tiene {len(ocultos)} texto(s) oculto(s) que esta familia no usa "
-                      f"(«{ocultos[0]['txt'].strip()[:40]}»…): el ojo de la lista de capas los enseña.")
+                      f"(«{ocultos[0][:40]}»…): el ojo de la lista de capas los enseña.")
     portada = titular(L[0])
     palabras = len(portada.split())
     if not portada:

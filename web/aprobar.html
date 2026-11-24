@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<!-- LA PÁGINA DEL MÓVIL DEL PILOTO AUTOMÁTICO (rama piloto-2). Se abre desde el
+     aviso de Telegram: un vídeo, sus textos, su portada, su fecha y tres
+     botones. Ligera a propósito: no carga app.js. Detrás del mismo login que
+     el Studio; el enlace solo lleva el id del vídeo del piloto. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14112a">
+<title>Aprobar vídeo · CrearIA Studio</title>
+<script>try{var p=localStorage.getItem('paleta')||(localStorage.getItem('tema')==='claro'?'dia':'');if(p==='dia')document.documentElement.setAttribute('data-tema','claro');}catch(e){}</script>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="aprobar.css">
+</head>
+<body>
+<header class="ap-cabecera">
+  <img src="logo.svg" alt="" class="ap-logo" width="28" height="28">
+  <span class="ap-marca">CrearIA Studio</span>
+</header>
+<main id="ap" class="ap" aria-live="polite">
+  <p class="ap-cargando">Cargando el vídeo…</p>
+</main>
+<script src="aprobar.js"></script>
+</body>
+</html>

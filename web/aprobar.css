@@ -1,0 +1,136 @@
+/* La página del móvil del piloto automático (rama piloto-2). Una columna,
+   letra grande, botones de 44 px. Los colores, en variables (oscuro por
+   defecto, como el Studio; claro con data-tema="claro"). */
+:root {
+  --fondo: #14112a;
+  --tarjeta: #1e1a3a;
+  --borde: #322c5c;
+  --texto: #f1eefc;
+  --suave: #b4aed6;
+  --acento: #8b7cff;
+  --acento-texto: #ffffff;
+  --bien: #3ccf91;
+  --bien-fondo: rgba(60, 207, 145, 0.14);
+  --aviso: #ffb547;
+  --aviso-fondo: rgba(255, 181, 71, 0.14);
+  --mal: #ff6b7a;
+  --mal-fondo: rgba(255, 107, 122, 0.14);
+  --campo: #110e24;
+  --radio: 14px;
+}
+:root[data-tema="claro"] {
+  --fondo: #f6f5fb;
+  --tarjeta: #ffffff;
+  --borde: #e0dcf2;
+  --texto: #1b1733;
+  --suave: #5d5880;
+  --acento: #5b4ae6;
+  --acento-texto: #ffffff;
+  --bien: #13855a;
+  --bien-fondo: rgba(19, 133, 90, 0.1);
+  --aviso: #a35f00;
+  --aviso-fondo: rgba(214, 137, 16, 0.12);
+  --mal: #c0263a;
+  --mal-fondo: rgba(192, 38, 58, 0.09);
+  --campo: #faf9ff;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--fondo); color: var(--texto); }
+body {
+  font: 17px/1.45 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.ap-cabecera {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; border-bottom: 1px solid var(--borde);
+}
+.ap-logo { display: block; }
+.ap-marca { font-weight: 700; letter-spacing: 0.01em; }
+.ap { max-width: 560px; margin: 0 auto; padding: 16px 16px 120px; }
+.ap-cargando { color: var(--suave); }
+.ap h1 { font-size: 1.3rem; line-height: 1.25; margin: 4px 0 2px; overflow-wrap: anywhere; }
+.ap h2 { font-size: 1.05rem; margin: 0 0 10px; }
+.ap-sub { color: var(--suave); font-size: 0.95rem; margin: 0 0 12px; }
+
+.ap-estado {
+  border-radius: var(--radio); padding: 12px 14px; margin: 10px 0 16px;
+  background: var(--tarjeta); border: 1px solid var(--borde); font-weight: 600;
+}
+.ap-estado.bien { background: var(--bien-fondo); border-color: var(--bien); color: var(--bien); }
+.ap-estado.aviso { background: var(--aviso-fondo); border-color: var(--aviso); color: var(--aviso); }
+.ap-estado.mal { background: var(--mal-fondo); border-color: var(--mal); color: var(--mal); }
+
+.ap-bloque {
+  background: var(--tarjeta); border: 1px solid var(--borde); border-radius: var(--radio);
+  padding: 14px; margin: 0 0 14px;
+}
+.ap-video { width: 100%; max-height: 70vh; border-radius: 10px; background: #000; display: block; }
+.ap-razones { margin: 0; padding-left: 20px; }
+.ap-razones li { margin: 0 0 8px; }
+.ap-razones small { display: block; color: var(--suave); }
+
+details.ap-red { border-top: 1px solid var(--borde); padding: 8px 0; }
+details.ap-red:first-of-type { border-top: 0; }
+details.ap-red > summary {
+  cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center;
+  list-style-position: inside;
+}
+.ap-campo { display: block; margin: 10px 0; }
+.ap-campo span { display: block; font-size: 0.9rem; color: var(--suave); margin-bottom: 4px; }
+.ap input[type="text"], .ap input[type="datetime-local"], .ap textarea {
+  width: 100%; font: inherit; color: var(--texto); background: var(--campo);
+  border: 1px solid var(--borde); border-radius: 10px; padding: 10px 12px; min-height: 44px;
+}
+.ap textarea { min-height: 120px; resize: vertical; }
+.ap input:focus, .ap textarea:focus, .ap button:focus-visible, .ap summary:focus-visible {
+  outline: 2px solid var(--acento); outline-offset: 2px;
+}
+
+.ap button {
+  font: inherit; font-weight: 600; min-height: 44px; padding: 10px 16px; border-radius: 12px;
+  border: 1px solid var(--borde); background: var(--campo); color: var(--texto); cursor: pointer;
+}
+.ap button:disabled { opacity: 0.5; cursor: default; }
+.ap button.principal { background: var(--acento); color: var(--acento-texto); border-color: var(--acento); }
+.ap button.peligro { color: var(--mal); border-color: var(--mal); background: transparent; }
+.ap-fila { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.ap-fila button { flex: 1 1 auto; }
+
+.ap-opciones { list-style: none; margin: 8px 0; padding: 0; }
+.ap-opciones li {
+  display: flex; gap: 8px; align-items: center; justify-content: space-between;
+  padding: 8px 0; border-top: 1px solid var(--borde);
+}
+.ap-opciones li span { overflow-wrap: anywhere; }
+
+.ap-portadas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ap-portada { margin: 0; text-align: center; }
+.ap-portada img { width: 100%; border-radius: 10px; border: 2px solid transparent; display: block; }
+.ap-portada.elegida img { border-color: var(--bien); }
+.ap-portada figcaption { font-size: 0.9rem; color: var(--suave); margin-top: 4px; }
+.ap-vista { width: 100%; max-width: 280px; border-radius: 10px; display: block; margin: 8px auto; }
+
+.ap-huecos { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.ap-huecos button.elegido { border-color: var(--acento); color: var(--acento); }
+
+.ap-barra {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  background: var(--tarjeta); border-top: 1px solid var(--borde);
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+}
+.ap-barra .ap-fila { max-width: 560px; margin: 0 auto; }
+
+.ap-banda {
+  position: sticky; top: 0; z-index: 6; margin: 0 0 12px; padding: 12px 14px;
+  border-radius: var(--radio); background: var(--aviso-fondo); border: 1px solid var(--aviso);
+  color: var(--texto);
+}
+.ap-banda p { margin: 0 0 8px; font-weight: 600; }
+.ap-mensaje { color: var(--suave); font-size: 0.95rem; min-height: 1.2em; margin: 6px 0; }
+.ap-mensaje.mal { color: var(--mal); }
+.ap-mensaje.bien { color: var(--bien); }
+.ap-pie { color: var(--suave); font-size: 0.9rem; text-align: center; margin-top: 18px; }
+.ap-pie a { color: var(--acento); }
+.ap a { color: var(--acento); }
+.oculto { display: none !important; }

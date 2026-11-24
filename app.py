@@ -25237,8 +25237,15 @@ def _auto_validar_fecha(raiz, ficha, cuando, ahora_):
 
 @app.get("/api/aprobar/{vid}")
 def aprobar_ver(vid: str, peticion: Request):
-    """La página del móvil de un vídeo del piloto automático (todo en vivo)."""
+    """La página del móvil de un vídeo del piloto automático (todo en vivo).
+    Un vídeo de un proyecto con clave que este móvil no ha abierto: 423 con el
+    proyecto, para que la página pida su clave (como «Abrir» en el Studio)."""
     _auto()
+    ficha = _por_piloto(PILOTO.leer, raiz_proyectos(), vid)
+    if not _piloto_visible(ficha, _cerrados(peticion)):
+        raise ErrorApi(423, "este vídeo es de un proyecto con clave",
+                       {"cid": ficha.get("cid"),
+                        "proyecto": _auto_proyectos().get(AUTO.clave_proyecto(ficha.get("cid")), "")})
     return _auto_para_pagina(_auto_ficha_o_404(vid, peticion), peticion)
 
 

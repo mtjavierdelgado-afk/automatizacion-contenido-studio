@@ -45,6 +45,7 @@ import unicodedata
 import shutil
 import tempfile
 import sys
+import secrets
 import threading
 import time
 import uuid
@@ -25027,18 +25028,127 @@ def graficas_vista_capas(cid: str, peticion: Request, cuerpo: dict = Body(defaul
     return {"img": G._uri_jpg(G.a_jpg(png, 1080, 88)), "avisos": avisos, "lineas": lineas}
 
 
+# Un carrusel (más de una lámina) se guarda como TRABAJO (graficas-3-carrusel):
+# pintar 20 láminas pasa del corte de 60 s del proxy. Guardar devuelve al
+# momento el id del trabajo y la pantalla pregunta cómo va. Vive en memoria: si
+# el servicio se reinicia a mitad, no queda nada escrito (todo se escribe al
+# final, de una vez) y la pantalla pide volver a guardar.
+_TRABAJOS_CAPAS = {}
+_CERROJO_TRABAJOS_CAPAS = threading.Lock()
+_VIDA_TRABAJO_CAPAS = 3600
+
+
+def _guardar_capas(cid, pieza_id, peticion, cuerpo):
+    _G, C, raiz, _kit, logo, oscuro = _contexto_capas(cid, peticion)
+    doc = (cuerpo or {}).get("doc")
+    laminas = doc.get("laminas") if isinstance(doc, dict) else None
+    if not isinstance(laminas, list) or len(laminas) <= 1:
+        # una lámina: como siempre, en la misma petición
+        return _por_capas(C.guardar, raiz, cid, doc, pieza_id, logo, oscuro)
+    ahora = time.time()
+    with _CERROJO_TRABAJOS_CAPAS:
+        for tid in [t for t, v in _TRABAJOS_CAPAS.items() if v["fin"] and ahora - v["fin"] > _VIDA_TRABAJO_CAPAS]:
+            del _TRABAJOS_CAPAS[tid]
+        if pieza_id and any(v["cid"] == cid and v["pieza"] == pieza_id and not v["fin"] for v in _TRABAJOS_CAPAS.values()):
+            raise ErrorApi(409, "esta pieza ya se está guardando: espera a que termine")
+        tid = secrets.token_hex(8)
+        trabajo = {"id": tid, "cid": cid, "pieza": pieza_id or "", "estado": "pintando", "hechas": 0,
+                   "total": len(laminas), "resultado": None, "error": "", "codigo": 0, "fin": 0}
+        _TRABAJOS_CAPAS[tid] = trabajo
+
+    def avisar(hechas, total):
+        trabajo.update(hechas=hechas, total=total)
+
+    def correr():
+        try:
+            trabajo["resultado"] = C.guardar(raiz, cid, doc, pieza_id, logo, oscuro, avisar)
+            trabajo["estado"] = "listo"
+        except C.ErrorConflicto as fallo:
+            trabajo.update(estado="error", error=str(fallo), codigo=409)
+        except _G.ErrorGraficas as fallo:
+            trabajo.update(estado="error", error=str(fallo), codigo=404 if isinstance(fallo, _G.ErrorNoEsta) else 400)
+        except Exception as fallo:                          # noqa: BLE001
+            trabajo.update(estado="error", error=f"no se ha podido guardar: {fallo}", codigo=500)
+        finally:
+            trabajo["fin"] = time.time()
+    threading.Thread(target=correr, name=f"capas-{tid}", daemon=True).start()
+    return JSONResponse({"trabajo": tid, "total": len(laminas)}, status_code=202)
+
+
 @app.put("/api/graficas/{cid}/piezas/{pieza_id}/capas")
 def graficas_guardar_capas(cid: str, pieza_id: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """Guarda la versión en capas de una pieza, al lado de la de siempre."""
-    _G, C, raiz, _kit, logo, oscuro = _contexto_capas(cid, peticion)
-    return _por_capas(C.guardar, raiz, cid, (cuerpo or {}).get("doc"), pieza_id, logo, oscuro)
+    """Guarda la versión en capas de una pieza, al lado de la de siempre. Un
+    carrusel devuelve un trabajo (202) que se sigue en `.../capas/trabajo/{id}`."""
+    return _guardar_capas(cid, pieza_id, peticion, cuerpo)
 
 
 @app.post("/api/graficas/{cid}/capas", status_code=201)
 def graficas_crear_en_capas(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """Una pieza nueva que nace en capas."""
-    _G, C, raiz, _kit, logo, oscuro = _contexto_capas(cid, peticion)
-    return _por_capas(C.guardar, raiz, cid, (cuerpo or {}).get("doc"), None, logo, oscuro)
+    """Una pieza nueva que nace en capas (un carrusel, como trabajo: 202)."""
+    return _guardar_capas(cid, None, peticion, cuerpo)
+
+
+def _descarga_capas(cid, pieza_id, peticion, fn, *args):
+    """Una descarga del carrusel: siempre con la clave del proyecto, y si faltan
+    las láminas, un 409 que la pantalla convierte en «Preparar las láminas»."""
+    _G, C, raiz, _kit, _logo, _oscuro = _contexto_capas(cid, peticion)
+    try:
+        return fn(raiz, cid, pieza_id, *args)
+    except C.ErrorSinLaminas as fallo:
+        raise ErrorApi(409, str(fallo))
+    except _G.ErrorGraficas as fallo:
+        raise ErrorApi(404 if isinstance(fallo, _G.ErrorNoEsta) else 400, str(fallo))
+
+
+def _adjunto(contenido, nombre, tipo):
+    return Response(contenido, media_type=tipo, headers={
+        "Content-Disposition": f'attachment; filename="{nombre}"', "Cache-Control": "no-store"})
+
+
+@app.get("/api/graficas/{cid}/piezas/{pieza_id}/laminas.zip")
+def graficas_zip_laminas(cid: str, pieza_id: str, peticion: Request, formato: str = "jpg"):
+    """Todas las láminas en un ZIP (JPG o PNG), con sus textos alternativos."""
+    contenido, nombre = _descarga_capas(cid, pieza_id, peticion, GRAFICAS_CAPAS.zip_laminas if GRAFICAS_CAPAS else None,
+                                        str(formato or "jpg").lower())
+    return _adjunto(contenido, nombre, "application/zip")
+
+
+@app.get("/api/graficas/{cid}/piezas/{pieza_id}/laminas.pdf")
+def graficas_pdf_laminas(cid: str, pieza_id: str, peticion: Request):
+    """El carrusel en PDF para LinkedIn: los JPG tal cual, sin «Desliza →»."""
+    contenido, nombre = _descarga_capas(cid, pieza_id, peticion, GRAFICAS_CAPAS.pdf_laminas if GRAFICAS_CAPAS else None)
+    return _adjunto(contenido, nombre, "application/pdf")
+
+
+@app.get("/api/graficas/{cid}/piezas/{pieza_id}/lamina/{n}.{extension}")
+def graficas_lamina_suelta(cid: str, pieza_id: str, n: int, extension: str, peticion: Request):
+    """Una lámina sola (desde 1), en PNG o JPG."""
+    contenido, nombre = _descarga_capas(cid, pieza_id, peticion, GRAFICAS_CAPAS.lamina_suelta if GRAFICAS_CAPAS else None,
+                                        n, extension)
+    return _adjunto(contenido, nombre, "image/png" if extension == "png" else "image/jpeg")
+
+
+@app.post("/api/graficas/{cid}/piezas/{pieza_id}/laminas/preparar")
+def graficas_preparar_laminas(cid: str, pieza_id: str, peticion: Request):
+    """«Preparar las láminas»: vuelve a guardar lo último guardado, como trabajo
+    con barra, para que las láminas estén pintadas (lo que se guardó desde
+    `main` solo tiene la primera). No cambia el diseño."""
+    _G, C, raiz, _kit, _logo, _oscuro = _contexto_capas(cid, peticion)
+    _ficha, doc = _por_capas(C.leer, raiz, cid, pieza_id)
+    if not doc:
+        raise ErrorApi(400, "esta pieza no está en capas: no hay láminas que preparar")
+    return _guardar_capas(cid, pieza_id, peticion, {"doc": doc})
+
+
+@app.get("/api/graficas/{cid}/capas/trabajo/{tid}")
+def graficas_trabajo_capas(cid: str, tid: str, peticion: Request):
+    """Cómo va el guardado de un carrusel: láminas hechas, y al acabar lo que
+    devuelve un guardado (o el error, con su código: 409 si otra pestaña guardó antes)."""
+    _ficha_de_graficas(cid, peticion)
+    trabajo = _TRABAJOS_CAPAS.get(str(tid))
+    if not trabajo or trabajo["cid"] != cid:
+        raise ErrorApi(404, "No se guardó: el servicio se reinició a mitad. Vuelve a pulsar «Guardar».")
+    return {k: trabajo[k] for k in ("estado", "hechas", "total", "resultado", "error", "codigo")}
 
 
 # --- El editor con capas libres (rama graficas-2-editor, 12-11-2026;
@@ -25063,6 +25173,84 @@ def graficas_montar_capas(cid: str, peticion: Request, cuerpo: dict = Body(defau
     doc = _por_capas(G._con_turno, lambda p: C.montar(
         p, plantilla, formato, cuerpo.get("doc"), cuerpo.get("textos"), kit, logo, oscuro, lamina))
     return {"doc": doc}
+
+
+# --- Las familias de carrusel (rama graficas-3-carrusel; pasos/graficas_carrusel.py).
+# Componen láminas con el estilo de cada plantilla. No guardan nada ni llaman a una IA.
+
+try:
+    import graficas_carrusel as GRAFICAS_CARRUSEL  # noqa: E402
+    ERROR_GRAFICAS_CARRUSEL = ""
+except Exception as _fallo_carrusel:  # noqa: BLE001
+    GRAFICAS_CARRUSEL = None
+    ERROR_GRAFICAS_CARRUSEL = f"{type(_fallo_carrusel).__name__}: {_fallo_carrusel}"
+
+
+def _contexto_carrusel(cid, peticion):
+    if GRAFICAS_CARRUSEL is None:
+        raise ErrorApi(503, f"Los carruseles de Gráficas no se han podido cargar: {ERROR_GRAFICAS_CARRUSEL}")
+    G, C, raiz, kit, logo, oscuro = _contexto_capas(cid, peticion)
+    marca = (_ficha_de_graficas(cid, peticion) or {}).get("nombre") or ""
+    return G, GRAFICAS_CARRUSEL, kit, logo, oscuro, marca
+
+
+def _entero(valor, que):
+    if type(valor) is not int:
+        raise ErrorApi(400, f"{que} no vale")
+    return valor
+
+
+@app.get("/api/graficas/carrusel/catalogo")
+def graficas_catalogo_carrusel():
+    """Las familias (una por plantilla) y los tipos de lámina."""
+    if GRAFICAS_CARRUSEL is None:
+        raise ErrorApi(503, f"Los carruseles de Gráficas no se han podido cargar: {ERROR_GRAFICAS_CARRUSEL}")
+    return GRAFICAS_CARRUSEL.catalogo()
+
+
+@app.post("/api/graficas/{cid}/capas/lamina")
+def graficas_lamina_carrusel(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Una lámina de un carrusel: `donde` (posición) añade una nueva del `tipo`
+    y la `familia` pedidos; `lamina` (índice) vuelve a montar esa. -> {doc}"""
+    G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
+    cuerpo = cuerpo or {}
+    n, tipo = _entero(cuerpo.get("familia"), "esa familia"), str(cuerpo.get("tipo") or "")
+    if "donde" in cuerpo:
+        donde = _entero(cuerpo.get("donde"), "ese sitio")
+        doc = _por_capas(G._con_turno, lambda p: K.nueva_lamina(p, cuerpo.get("doc"), donde, n, tipo, kit, logo, oscuro, marca))
+    else:
+        i = _entero(cuerpo.get("lamina", 0), "esa lámina")
+        doc = _por_capas(G._con_turno, lambda p: K.montar_lamina(p, cuerpo.get("doc"), i, n, tipo, kit, logo, oscuro,
+                                                                 cuerpo.get("textos"), marca))
+    return {"doc": doc}
+
+
+@app.post("/api/graficas/{cid}/capas/montar-todas")
+def graficas_montar_todas(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Volver a montar a todas» con una familia (las «En blanco» no se tocan)."""
+    G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
+    cuerpo = cuerpo or {}
+    n = _entero(cuerpo.get("familia"), "esa familia")
+    return {"doc": _por_capas(G._con_turno, lambda p: K.montar_todas(p, cuerpo.get("doc"), n, kit, logo, oscuro, marca))}
+
+
+@app.post("/api/graficas/{cid}/capas/partir")
+def graficas_partir_texto(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Partir un texto en láminas», sin IA: cada párrafo, una lámina."""
+    G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
+    cuerpo = cuerpo or {}
+    n = _entero(cuerpo.get("familia"), "esa familia")
+    doc, avisos = _por_capas(G._con_turno, lambda p: K.carrusel_desde_texto(
+        p, cuerpo.get("doc"), n, cuerpo.get("texto"), str(cuerpo.get("modo") or "sustituir"), kit, logo, oscuro, marca))
+    return {"doc": doc, "avisos": avisos}
+
+
+@app.post("/api/graficas/{cid}/capas/nota")
+def graficas_nota_carrusel(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """La nota del carrusel (sin IA): portada, segunda portada, una idea por
+    lámina, número, cierre, textos alternativos y textos de muestra."""
+    _G, K, _kit, _logo, _oscuro, _marca = _contexto_carrusel(cid, peticion)
+    return {"nota": _por_capas(K.avisos_del_carrusel, (cuerpo or {}).get("doc"))}
 
 
 @app.get("/api/graficas/{cid}/logo/{variante}")

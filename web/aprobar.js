@@ -279,9 +279,58 @@ function bloqueTextos(d) {
   if (!pub) return null;
   const redes = d.redes || [];
   return h('section', { clase: 'ap-bloque' },
-    h('h2', { texto: 'Títulos y textos' }),
+    h('h2', { texto: 'Redes, títulos y textos' }),
+    bloqueRedes(d, pub),
     pub.escribiendo ? h('p', { clase: 'ap-sub', texto: 'Claude está escribiendo los textos…' }) : null,
     redes.map(red => bloqueRed(red, pub)));
+}
+
+/* EN QUÉ REDES SALE (pedido del dueño, 24-11): casillas con las redes del
+   proyecto. Una red nueva sin texto se la escribe Claude (sin coste en $). */
+function bloqueRedes(d, pub) {
+  const posibles = pub.redes_posibles || d.redes || [];
+  if (posibles.length < 2) return null;
+  if (!AP.redesBorrador) AP.redesBorrador = null;
+  const elegidas = AP.redesBorrador || d.redes || [];
+  const cambiadas = AP.redesBorrador && JSON.stringify([...AP.redesBorrador].sort()) !== JSON.stringify([...(d.redes || [])].sort());
+  return h('div', { clase: 'ap-redes' },
+    h('p', { clase: 'ap-sub', texto: 'Sale en:' }),
+    h('div', { clase: 'ap-casillas' }, posibles.map(red => h('label', { clase: 'ap-casilla-red' },
+      h('input', { type: 'checkbox', checked: elegidas.includes(red) ? true : null, onchange: (ev) => {
+        const base = AP.redesBorrador || [...(d.redes || [])];
+        AP.redesBorrador = ev.target.checked ? base.concat(red) : base.filter(x => x !== red);
+        pintar();
+      } }), h('span', { texto: nombreRed(red) })))),
+    cambiadas ? h('div', { clase: 'ap-fila' },
+      h('button', { clase: 'principal', texto: 'Guardar redes', disabled: AP.ocupado || !AP.redesBorrador.length,
+        onclick: guardarRedes }),
+      h('button', { texto: 'Deshacer', onclick: () => { AP.redesBorrador = null; pintar(); } })) : null);
+}
+
+async function guardarRedes() {
+  const redes = AP.redesBorrador || [];
+  if (!redes.length) { decir('Elige al menos una red.', 'mal'); return; }
+  await accion(async () => {
+    const r = await pedir(`/api/aprobar/${encodeURIComponent(VIDEO)}/redes`,
+      { method: 'POST', cuerpo: { rev: AP.datos.rev, redes } });
+    AP.redesBorrador = null;
+    AP.datos = r;
+    AP.crudo = JSON.stringify(r);
+    const nuevas = r.escribiendo_redes || [];
+    if (nuevas.length) esperarTextos();
+    return nuevas.length ? `Claude está escribiendo el texto de ${nuevas.map(nombreRed).join(', ')} (tarda un minuto).`
+      : 'Redes guardadas.';
+  });
+}
+
+/* Mientras Claude escribe, se pregunta más a menudo (la vuelta normal es de 15 s). */
+async function esperarTextos() {
+  for (let i = 0; i < 40; i += 1) {
+    await esperar(4000);
+    if (AP.ocupado) continue;
+    await cargar(false);
+    if (!((AP.datos || {}).publicar || {}).escribiendo) { decir('Textos escritos: revísalos.', 'bien'); return; }
+  }
 }
 
 function bloqueRed(red, pub) {
@@ -294,8 +343,11 @@ function bloqueRed(red, pub) {
     const boton = document.getElementById(`ap-guardar-${red}`);
     if (boton) boton.disabled = false;
   };
-  const opciones = (pub.titulos || {})[red] || [];
-  const pensando = !!(pub.trabajando || {})[`titulos_${red}`];
+  // con título (YouTube, Facebook): «Dame 4 títulos»; sin título (TikTok,
+  // Instagram…) lo que se ve primero es la primera línea: «Dame 3 ganchos»
+  const conTitulo = (pub.con_titulo_gancho || ['youtube', 'facebook']).includes(red);
+  const opciones = conTitulo ? ((pub.titulos || {})[red] || []) : (((pub.ganchos || {})[red] || []).map(g => ({ titulo: g })));
+  const pensando = !!(pub.trabajando || {})[`${conTitulo ? 'titulos' : 'ganchos'}_${red}`];
   return h('details', { clase: 'ap-red', open: AP.editando[red] || opciones.length ? true : null },
     h('summary', { texto: nombreRed(red) + (encaje.nivel === 'error' ? ' ⚠' : '') }),
     encaje.nivel === 'error' ? h('p', { clase: 'ap-mensaje mal', texto: encaje.texto }) : null,
@@ -309,12 +361,11 @@ function bloqueRed(red, pub) {
     h('div', { clase: 'ap-fila' },
       h('button', { id: `ap-guardar-${red}`, clase: 'principal', texto: 'Guardar', disabled: !AP.editando[red] || AP.ocupado,
         onclick: () => guardarTextos(red, false) }),
-      ['youtube', 'facebook'].includes(red)
-        ? h('button', { texto: pensando ? 'Pensando…' : '🎯 Dame 4 títulos', disabled: pensando || AP.ocupado,
-          onclick: () => dameTitulos(red) }) : null,
+      h('button', { texto: pensando ? 'Pensando…' : conTitulo ? '🎯 Dame 4 títulos' : '🎯 Dame 3 ganchos (primera línea)',
+        disabled: pensando || AP.ocupado, onclick: () => dameTitulos(red, conTitulo) }),
       red === 'youtube' ? h('button', { texto: 'Mejorar con vidIQ', disabled: AP.ocupado, onclick: mejorarVidiq }) : null),
     opciones.length ? h('ul', { clase: 'ap-opciones' }, opciones.map((o, i) =>
-      h('li', {}, h('span', { texto: o.titulo }), h('button', { texto: 'Usar', onclick: () => usarTitulo(red, i) })))) : null,
+      h('li', {}, h('span', { texto: o.titulo }), h('button', { texto: 'Usar', onclick: () => usarTitulo(red, i, conTitulo) })))) : null,
     red === 'youtube' && AP.vidiq ? bloqueVidiq() : null);
 }
 
@@ -348,28 +399,31 @@ async function guardarLoMio() {
   for (const red of redes) await guardarTextos(red, true);
 }
 
-async function dameTitulos(red) {
+async function dameTitulos(red, conTitulo) {
+  const que = conTitulo ? 'titulos' : 'ganchos';
   await accion(async () => {
-    await pedir(`/api/publicar/videos/${encodeURIComponent(AP.datos.pid)}/titulos`, { method: 'POST', cuerpo: { red } });
+    await pedir(`/api/publicar/videos/${encodeURIComponent(AP.datos.pid)}/${que}`, { method: 'POST', cuerpo: { red } });
     for (let i = 0; i < 40; i += 1) {
       await esperar(3000);
-      await cargar(true);
+      await cargar(false);
       const pub = AP.datos.publicar || {};
-      if (!(pub.trabajando || {})[`titulos_${red}`]) break;
+      if (!(pub.trabajando || {})[`${que}_${red}`]) break;
     }
-    return (((AP.datos.publicar || {}).titulos || {})[red] || []).length
-      ? 'Elige un título con «Usar».' : 'Claude no ha devuelto títulos: inténtalo otra vez.';
+    const hay = (((AP.datos.publicar || {})[que] || {})[red] || []).length;
+    if (!hay) return conTitulo ? 'Claude no ha devuelto títulos: inténtalo otra vez.' : 'Claude no ha devuelto ganchos: inténtalo otra vez.';
+    return conTitulo ? 'Elige un título con «Usar».' : 'Elige la primera línea con «Usar» (cambia solo esa línea del texto).';
   });
 }
 
-async function usarTitulo(red, indice) {
+async function usarTitulo(red, indice, conTitulo) {
+  const que = conTitulo === false ? 'ganchos' : 'titulos';
   await accion(async () => {
-    await pedir(`/api/publicar/videos/${encodeURIComponent(AP.datos.pid)}/titulos/usar`,
+    await pedir(`/api/publicar/videos/${encodeURIComponent(AP.datos.pid)}/${que}/usar`,
       { method: 'POST', cuerpo: { red, indice } });
     delete AP.borrador[red];
     delete AP.editando[red];
-    await cargar(true);
-    return 'Título puesto.';
+    await cargar(false);
+    return que === 'titulos' ? 'Título puesto.' : 'Primera línea puesta.';
   });
 }
 

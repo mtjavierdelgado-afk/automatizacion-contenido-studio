@@ -367,6 +367,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/aprobar/{vid}/fecha` | «Cambiar fecha» + OK: {rev, cuando}. Si ya estaba programado, se cancela |
 | `POST` | `/api/aprobar/{vid}/no-publicar` | «No publicar»: {rev, devolver?}. Si ya estaba en Upload-Post, se cancela |
 | `POST` | `/api/aprobar/{vid}/publicar` | «✓ Publicar así»: {rev, cuando?, desde?: movil|studio}. Lo programa en |
+| `POST` | `/api/aprobar/{vid}/redes` | Cambia en qué redes sale este vídeo: {rev, redes}. Solo antes del OK. |
 | `POST` | `/api/aprobar/{vid}/reintentar-red` | «Reintentar esta red» (una red que falló): {rev, red, cuando?}. Es un |
 | `POST` | `/api/aprobar/{vid}/ya-lo-mire` | «Ya lo miré»: {rev}. El dueño miró en Upload-Post la subida cortada a |
 | `GET` | `/api/claude/consumo` | El medidor de Claude: cupo de cada cuenta, avisos y consumo (solo lee). |
@@ -590,4 +591,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**476 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**477 endpoints.** Escrito por `generar_api.py` desde `app.py`.

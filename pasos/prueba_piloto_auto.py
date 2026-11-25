@@ -776,6 +776,35 @@ def _escenarios(servidor, base, pet, reloj, llamadas, hechos_falsos, guiones, pi
     vuelta()
     igual(len([f for f in autos() if f["gid"] == "gp"]), 1,
           "y «No publicar» sin devolver NO lo vuelve a hacer")
+    # redes desde la página del móvil (pedido del dueño, 24-11)
+    escritos = []
+    viejo_pf, viejo_et = servidor.publicar_ficha, servidor.publicar_escribir_textos
+    servidor.publicar_ficha = lambda pid, peticion: {"textos": {"tiktok": {"descripcion": "hola"}}}
+    servidor.publicar_escribir_textos = lambda pid, peticion, cuerpo: escritos.append(cuerpo["redes"])
+    try:
+        v7 = P.encolar(base, {"cid": "c1", "gid": "gr", "estilo": "e1",
+                              "auto": {"cid": "c1", "gid": "gr", "indice": 0, "hueco": "2026-12-22T19:00",
+                                       "redes": ["tiktok"], "modo": 2, "paso": "espera_ok", "rev": 0}})
+        pid7 = __import__("nucleo").Proyecto.crear(base, "auto siete").id
+        P.cambiar(base, v7["id"], estado="listo", pid=pid7)
+        r = servidor.aprobar_redes(v7["id"], pet, {"rev": 0, "redes": ["youtube", "tiktok"]})
+        igual(P.leer(base, v7["id"])["auto"]["redes"], ["tiktok", "youtube"],
+              "«Guardar redes» cambia en qué redes sale el vídeo")
+        igual(escritos, [["youtube"]], "y Claude escribe el texto SOLO de la red nueva")
+        igual(r.get("escribiendo_redes"), ["youtube"], "la página sabe que se está escribiendo")
+        try:
+            servidor.aprobar_redes(v7["id"], pet, {"rev": 0, "redes": ["tiktok"]})
+            ok(False, "un rev viejo tenía que dar 409")
+        except servidor.ErrorApi as fallo:
+            ok(fallo.codigo == 409, "con un rev viejo, 409 «otro sitio»")
+        P.cambiar_auto(base, v7["id"], {"paso": "programado"})
+        try:
+            servidor.aprobar_redes(v7["id"], pet, {"rev": P.leer(base, v7["id"])["auto"]["rev"], "redes": ["tiktok"]})
+            ok(False, "ya programado no se cambian las redes")
+        except servidor.ErrorApi as fallo:
+            ok(fallo.codigo == 409, "ya programado no se cambian las redes aquí")
+    finally:
+        servidor.publicar_ficha, servidor.publicar_escribir_textos = viejo_pf, viejo_et
     # m7: un aviso de Telegram no sube el rev (no da un «otro sitio» falso)
     rev = P.leer(base, v6["id"])["auto"]["rev"]
     servidor._auto_avisar(base, P.leer(base, v6["id"]), "razon", "prueba", clave="prueba_rev")

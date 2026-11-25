@@ -32,9 +32,13 @@ def _video(paso="espera_ok", clave="espera_ok", texto="⏳ espera tu OK · iría
                      "formato_redes": {"tiktok": {"titulo": 0, "limite": 2200},
                                        "youtube": {"titulo": 100, "limite": 5000}},
                      "encaje": {}, "portada": {}, "titulos": {}, "trabajando": {}, "escribiendo": False,
+                     "redes_posibles": ["tiktok", "instagram", "youtube", "facebook"],
+                     "ganchos": {"tiktok": ["¿Tu lámpara no alumbra? 💡"]},
+                     "con_titulo_gancho": ["youtube", "facebook"],
                      "error_textos": ""},
         "video": "", "portadas": [], "portada_puesta": "", "aprobado_por": "", "aprobado_el": "",
-        "telegram": True, "nombres_red": {"tiktok": "TikTok", "youtube": "YouTube"},
+        "telegram": True, "nombres_red": {"tiktok": "TikTok", "youtube": "YouTube", "instagram": "Instagram Reels",
+                                          "facebook": "Facebook"},
     }
 
 
@@ -65,6 +69,13 @@ def piloto_2_pagina_movil(navegador, datos):
             ok(pg.visible(".ap-estado", "espera tu OK"), f"[{tema}] dice «espera tu OK»")
             ok(pg.visible(".ap-razones li", "revisor"), f"[{tema}] y por qué mirarlo antes")
             ok(pg.visible("details.ap-red summary", "YouTube"), f"[{tema}] los textos de cada red")
+            ok(pg.visible(".ap-casilla-red", "Instagram Reels"), f"[{tema}] las casillas de las redes del proyecto")
+            # (TikTok sale abierto: ya tiene ganchos que elegir)
+            ok(pg.visible("details.ap-red button", "Dame 3 ganchos"), f"[{tema}] TikTok ofrece «🎯 Dame 3 ganchos»")
+            ok(pg.visible(".ap-opciones li", "lámpara"), f"[{tema}] con los ganchos para elegir")
+            pg.pulsar(".ap-casilla-red", "Instagram Reels")
+            ok(pg.visible(".ap-redes button", "Guardar redes"), f"[{tema}] marcar otra red ofrece «Guardar redes»")
+            pg.pulsar(".ap-redes button", "Deshacer")
             ok(pg.visible(".ap-barra button", "Publicar así") and pg.visible(".ap-barra button", "No publicar"),
                f"[{tema}] los botones «✓ Publicar así» y «No publicar»")
             ancho = pg.p.evaluate("document.documentElement.scrollWidth")

@@ -25278,6 +25278,12 @@ def _auto_para_pagina(ficha, peticion):
                 "encaje": {r: (fp.get("encaje") or {}).get(r) or {} for r in salida["redes"]},
                 "portada": fp.get("portada") or {},
                 "titulos": ((fp.get("seo") or {}).get("titulos")) or {},
+                # las redes que se pueden elegir (las del proyecto en Publicar) y
+                # los ganchos de primera línea (TikTok, Instagram…: sin título)
+                "redes_posibles": [r for r in (fp.get("redes_visibles") or []) if r in _publicar().REDES]
+                or list(salida["redes"]),
+                "ganchos": ((fp.get("seo") or {}).get("ganchos")) or {},
+                "con_titulo_gancho": list(_publicar().REDES_TITULO_GANCHO),
                 "trabajando": ((fp.get("seo") or {}).get("trabajando")) or {},
                 "escribiendo": bool(fp.get("escribiendo")),
                 "error_textos": fp.get("error_textos") or "",
@@ -25376,6 +25382,36 @@ def aprobar_publicar(vid: str, peticion: Request, cuerpo: dict = Body(default=No
         if not bien:
             raise ErrorApi(409, f"No se pudo programar: {texto}")
     return _auto_para_pagina(PILOTO.leer(raiz, vid), peticion)
+
+
+@app.post("/api/aprobar/{vid}/redes")
+def aprobar_redes(vid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Cambia en qué redes sale este vídeo: {rev, redes}. Solo antes del OK.
+    Las redes nuevas sin texto se las escribe Claude (con la membresía, sin
+    coste en dólares); la página lo enseña mientras escribe."""
+    _auto()
+    datos = _cuerpo(cuerpo)
+    rev = _auto_rev(datos)
+    PUB = _publicar()
+    redes = datos.get("redes")
+    if not isinstance(redes, list) or not redes or any(x not in PUB.REDES for x in redes):
+        raise ErrorApi(400, "elige al menos una red")
+    redes = [x for x in PUB.REDES if x in redes]
+    raiz = raiz_proyectos()
+    with _AUTO_LOCK:
+        ficha = _auto_ficha_o_404(vid, peticion)
+        if ficha.get("estado") not in ("listo", "revisar") or not ficha.get("pid"):
+            raise ErrorApi(409, "el vídeo todavía no está terminado")
+        ficha = _auto_cambiar(vid, rev, {"redes": redes}, si_paso=AUTO.SIN_PROGRAMAR)
+        pid = ficha["pid"]
+        _por_publicar(PUB.guardar_ficha, raiz, pid, {"redes": redes})
+    textos = (publicar_ficha(pid, peticion).get("textos") or {})
+    faltan = [x for x in redes if not str((textos.get(x) or {}).get("descripcion") or "").strip()]
+    if faltan:
+        publicar_escribir_textos(pid, peticion, {"redes": faltan})
+    salida = _auto_para_pagina(PILOTO.leer(raiz, vid), peticion)
+    salida["escribiendo_redes"] = faltan
+    return salida
 
 
 @app.post("/api/aprobar/{vid}/fecha")

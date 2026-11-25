@@ -993,7 +993,9 @@ llamada a la acción, falta portada o título, una red desconectada o que falla,
 el vídeo tocado a mano, el guion cambiado, otro proyecto o la hora ya pasada).
 
 **La página del móvil** (el enlace del aviso, o **Ver y aprobar ›** en el
-Studio): el vídeo, los textos de cada red (con **🎯 Dame 4 títulos** y
+Studio): el vídeo, **«Sale en:»** (marcar o quitar redes y **Guardar redes**; el
+texto de una red nueva lo escribe Claude), los textos de cada red (con **🎯 Dame 4
+títulos** en YouTube y Facebook, **🎯 Dame 3 ganchos** en las demás, y
 **Mejorar con vidIQ**), las portadas (**Elegir**, **Cambiar su texto**, **✦
 Hacer otra portada** y **Abrir el editor completo**), la fecha con **OK** y
 **✓ Publicar así**, **Cambiar fecha** y **No publicar**. Con el vídeo ya

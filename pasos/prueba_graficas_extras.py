@@ -314,6 +314,62 @@ def historias(pincel):
     ok("'/capas/historias'" in js and "Guarda primero este carrusel" in js, "el editor pide guardar antes y abre las historias aparte")
 
 
+def iconos(pincel):
+    print("iconos y pegatinas")
+    import io, tempfile, shutil                             # noqa: E401,PLC0415
+    from PIL import Image                                   # noqa: PLC0415
+    import graficas_iconos as I                             # noqa: PLC0415
+    cat = I.catalogo()
+    ok(len(cat) >= 50 and all(x["svg"] for x in cat), f"{len(cat)} iconos, todos con sus trazos")
+    marcas = ("instagram", "facebook", "whatsapp", "tiktok", "youtube", "twitter", "linkedin", "pinterest", "threads", "github")
+    ok(not any(m in x["id"] for x in cat for m in marcas), "ningún logo de red ni de marca")
+    licencia = os.path.join(I.CARPETA, "lucide", "LICENSE")
+    ok(os.path.isfile(licencia) and "ISC License" in open(licencia, encoding="utf-8").read(), "la licencia ISC de Lucide va con los iconos")
+    svgs = {f[:-4] for f in os.listdir(os.path.join(I.CARPETA, "lucide")) if f.endswith(".svg")}
+    ok(svgs == {i for i in I.NOMBRES if I.ORIGEN.get(i, "lucide") == "lucide"}, "cada icono copiado tiene su nombre en español, y al revés")
+    ok(all(not re.search(r"<(script|style|a|image|use)\b|on\w+=", x["svg"]) for x in cat), "solo trazos (nada de scripts ni enlaces)")
+    # un fichero con trampa no se cuela
+    viejo = I.CARPETA
+    raro = tempfile.mkdtemp(prefix="iconos_")
+    try:
+        os.makedirs(os.path.join(raro, "lucide"))
+        with open(os.path.join(raro, "lucide", "heart.svg"), "w", encoding="utf-8") as fh:
+            fh.write('<svg viewBox="0 0 24 24"><path d="M1 1"/><script>alert(1)</script></svg>')
+        I.CARPETA, memo = raro, dict(I._MEMO)
+        I._MEMO.clear()
+        ok(I.interior("heart") == "" and I.svg("heart", "#000000") == "", "un SVG con un script no se pinta")
+        ok(I.interior("../../app") == "" and I.interior("no-existe") == "", "ni un id raro ni uno que no está")
+    finally:
+        I.CARPETA = viejo
+        I._MEMO.clear()
+        I._MEMO.update(memo)
+        shutil.rmtree(raro, ignore_errors=True)
+    # la capa: se guarda, se pinta con el color del Kit y uno que ya no está no rompe nada
+    f = G.formato("v45")
+    capa = {"tipo": "icono", "id": "ic1", "icono": "star", "color": "kit:principal", "alfa": 1, "grosor": 3,
+            "x": 30, "y": 30, "w": 40, "h": 40 * f["W"] / f["H"]}
+    fantasma = dict(capa, id="ic2", icono="ya-no-esta", y=5, h=8, w=8)
+    doc = C.limpiar_doc({"version": 2, "formato": "v45", "laminas": [{"capas": [
+        {"tipo": "forma", "id": "f1", "x": 0, "y": 0, "w": 100, "h": 100, "relleno": {"color": "#FFFFFF", "alfa": 1}}, capa, fantasma]}]})
+    c = doc["laminas"][0]["capas"][1]
+    ok(c["tipo"] == "icono" and c["icono"] == "star" and c["grosor"] == 3 and c["color"] == "kit:principal", "la capa de icono se guarda")
+    ok(doc["laminas"][0]["capas"][2]["icono"] == "ya-no-esta", "un icono que ya no está se guarda igual (la pieza se abre)")
+    ok(C.limpiar_doc({"version": 2, "formato": "v45", "laminas": [{"capas": [dict(capa, grosor=99, icono="<x>")]}]})["laminas"][0]["capas"][0]
+       ["grosor"] == 4, "el grosor tiene su tope y un id raro se vacía")
+    html = C.html_capas(doc, None, lambda _n: None)[0]
+    ok(html.count("data:image/svg+xml;base64,") == 1, "se pinta el que está y el que no, no")
+    png, _a, _m = C.pintar(pincel, doc, None, lambda _n: None)
+    im = Image.open(io.BytesIO(png)).convert("RGB")
+    caja = im.crop((int(0.3 * f["W"]), int(0.3 * f["H"]), int(0.7 * f["W"]), int(0.3 * f["H"] + 0.4 * f["W"])))
+    principal = tuple(int(G.COLORES_DEFECTO["principal"][i:i + 2], 16) for i in (1, 3, 5))
+    cerca = sum(1 for px in caja.getdata() if sum(abs(a - b) for a, b in zip(px, principal)) < 40)
+    ok(cerca > 2000, f"la estrella sale con el color principal del Kit ({cerca} px)")
+    js = open(os.path.join(AQUI, "..", "web", "graficas_editor.js"), encoding="utf-8").read()
+    ok("'＋ Icono'" in js and "'＋ Pegatina'" in js and "/api/graficas/iconos" in js, "el editor ofrece iconos y pegatinas")
+    for ref in ("tinta:acento", "tinta:secundario", "tinta:claro", "kit:acento", "kit:secundario", "kit:claro"):
+        ok(C._RE_REF.fullmatch(ref) is not None, f"las pegatinas usan colores que se guardan ({ref})")
+
+
 def main():
     familias_nuevas()
     tarjeta_no_tapa_la_marca()
@@ -324,6 +380,7 @@ def main():
         tipos_nuevos_pintados(pincel)
         qr(pincel)
         historias(pincel)
+        iconos(pincel)
     finally:
         pincel.cerrar()
     print(f"\n{CUENTA['ok']} comprobaciones bien, {CUENTA['mal']} mal")

@@ -824,7 +824,7 @@ def historias(pincel, doc, kit=None, logo=None, logo_oscuro=None, marca=""):
         raise ErrorGraficas("este carrusel ya es vertical 9:16: ya vale para historias")
     for lam in doc["laminas"]:
         for c in lam["capas"]:
-            forma_fija = (c["tipo"] == "logo" or (c["tipo"] == "forma" and c.get("figura") == "elipse")
+            forma_fija = (c["tipo"] in ("logo", "icono") or (c["tipo"] == "forma" and c.get("figura") == "elipse")
                           or (c["tipo"] == "imagen" and (c.get("radio") == "elipse" or c.get("nombre") == "QR")))
             if not forma_fija or not c["w"]:
                 continue

@@ -156,6 +156,8 @@
   /** Las letras ya registradas en esta página: se cargan una vez, aunque el
    * editor se abra y se cierre muchas veces (fid -> promesa). */
   const LETRAS_DE_LA_PAGINA = {};
+  /** Los iconos (graficas-3c-extras): se piden una vez por página. */
+  const ICONOS = { lista: null, porId: {}, pidiendo: null };
 
   /**
    * Abre el editor.
@@ -371,6 +373,11 @@
 
   function cargarFotosDelDoc() {
     for (const c of capas()) if (c.tipo === 'imagen' && c.src) cargarFoto(c.src);
+    // y los iconos (graficas-3c-extras), si el documento lleva alguno
+    const yo = ED;
+    if (!ICONOS.lista && yo.doc.laminas.some(l => l.capas.some(c => c.tipo === 'icono'))) {
+      cargarIconos().then(() => { if (ED === yo) { pintarTodo(); pintarTira(); } }).catch(() => {});
+    }
   }
 
   function cargarLogos() {
@@ -464,6 +471,20 @@
         img.style.cssText = `position:absolute;display:block;max-width:none;left:${f6(x)}%;top:${f6(y)}%;width:${f6(w)}%;height:${f6(h)}%;`;
         img.src = foto.url;
         n.appendChild(img);
+      }
+    } else if (c.tipo === 'icono') {
+      // el mismo SVG que `graficas_iconos.svg` del servidor, con su color y su trazo
+      n = el('div');
+      n.style.cssText = cssCaja(c);
+      const uri = uriDeIcono(c, col);
+      if (uri) {
+        const img = el('img', { alt: '', draggable: 'false' });
+        img.style.cssText = 'display:block;width:100%;height:100%;max-width:none;max-height:none;object-fit:contain';
+        img.src = uri;
+        n.appendChild(img);
+      } else {
+        n.classList.add('ce-sin-logo');
+        n.appendChild(el('span', {}, ICONOS.lista ? 'Icono' : '…'));
       }
     } else if (c.tipo === 'logo') {
       const logo = logoDe(c, col);
@@ -839,6 +860,8 @@
       boton('＋ Botón', {}, () => anadir('boton')),
       sube, el('label', { clase: 'ce-btn', for: 'ce-subir-foto', tabindex: '0',
         onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sube.click(); } } }, '＋ Foto'),
+      boton('＋ Icono', { title: 'Iconos sencillos con los colores de tu Kit' }, () => elegirIcono(null)),
+      boton('＋ Pegatina', { title: '«Nuevo», «Guárdalo», un globo o una flecha' }, ev => abrirPegatinas(ev.currentTarget)),
       boton('＋ QR', { title: 'Tu WhatsApp o tu web en un código QR (gratis)' }, () => abrirQR()),
       hayVideos() ? boton('＋ Foto de un vídeo', { title: 'Una imagen que ya pagaste en un vídeo de este proyecto (gratis)' }, () => elegirFotoDeVideo(null)) : null,
       boton('＋ Logo del Kit', { disabled: !(ED.logos.normal || ED.logos.oscuro), title: ED.logos.normal || ED.logos.oscuro ? '' : 'Este proyecto aún no tiene logo: súbelo en «Logo»' }, () => anadir('logo')),
@@ -879,12 +902,14 @@
     if (c.tipo === 'texto') return 'T';
     if (c.tipo === 'imagen') return '▣';
     if (c.tipo === 'logo') return '◆';
+    if (c.tipo === 'icono') return '★';
     return c.figura === 'elipse' ? '●' : '■';
   }
 
   function nombreDe(c) {
     if (c.nombre) return c.nombre;
     if (c.tipo === 'texto') return (String(c.txt || '').trim().split('\n')[0] || 'Texto').slice(0, 28);
+    if (c.tipo === 'icono') return (ICONOS.porId[c.icono] || {}).nombre || 'Icono';
     return { imagen: 'Foto', logo: 'Logo', forma: c.figura === 'elipse' ? 'Círculo' : 'Forma' }[c.tipo];
   }
 
@@ -1104,7 +1129,7 @@
   function panelCapa(P, c) {
     const f = formato();
     const W = f.W, H = f.H, m = minLado();
-    const tipo = { texto: 'Texto', imagen: 'Foto', logo: 'Logo', forma: c.figura === 'elipse' ? 'Círculo' : 'Forma' }[c.tipo];
+    const tipo = { texto: 'Texto', imagen: 'Foto', logo: 'Logo', icono: 'Icono', forma: c.figura === 'elipse' ? 'Círculo' : 'Forma' }[c.tipo];
     P.appendChild(el('h2', {}, `${tipo}: ${nombreDe(c)}`));
     if (c.bloqueado) {
       P.appendChild(el('div', { clase: 'ce-nota' }, 'Bloqueada: no se mueve con el ratón. ',
@@ -1114,6 +1139,12 @@
     if (c.tipo === 'texto') panelTexto(P, c);
     if (c.tipo === 'forma') panelForma(P, c);
     if (c.tipo === 'imagen') panelFoto(P, c);
+    if (c.tipo === 'icono') {
+      P.appendChild(grupo('Icono',
+        boton('Cambiar el icono', { clase: 'ce-btn ce-ancho' }, () => elegirIcono(c.id)),
+        campoColor('Color', c.color, c.alfa, (ref, alfa) => { c.color = ref; c.alfa = alfa; }),
+        campoDeslizador('Grosor del trazo', c.grosor || 2, v => { c.grosor = v; }, 0.5, 4, 0.25, v => `${redondo(v, 2)}`)));
+    }
     if (c.tipo === 'logo') {
       P.appendChild(grupo('Logo',
         campoElegir('Qué logo', c.variante, [['auto', 'Según el fondo'], ['normal', 'El normal'], ['oscuro', 'El de fondo oscuro']], v => { c.variante = v; }),
@@ -1412,6 +1443,125 @@
     pintarPaneles();
   }
 
+  /* ---------------------------------------------------------------- iconos y pegatinas (graficas-3c-extras, B4)
+   * Los iconos son de web/iconos/ (Lucide, ISC, y unos propios): el servidor da
+   * sus trazos (GET /api/graficas/iconos) y aquí se pintan con el color de la capa. */
+
+  function uriDeIcono(c, col) {
+    const ic = ICONOS.porId[c.icono];
+    if (!ic) return '';
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${resolver(c.color, col)}" `
+      + `stroke-opacity="${c.alfa === undefined ? 1 : c.alfa}" stroke-width="${c.grosor || 2}" stroke-linecap="round" stroke-linejoin="round">${ic.svg}</svg>`;
+    return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+  }
+
+  async function cargarIconos() {
+    if (ICONOS.lista) return ICONOS.lista;
+    if (!ICONOS.pidiendo) {
+      const o = ED.opc;
+      ICONOS.pidiendo = o.pedir(`${o.base}/api/graficas/iconos`).then(r => {
+        ICONOS.lista = r.iconos || [];
+        for (const ic of ICONOS.lista) ICONOS.porId[ic.id] = ic;
+        return ICONOS.lista;
+      }).catch(e => { ICONOS.pidiendo = null; throw e; });
+    }
+    return ICONOS.pidiendo;
+  }
+
+  /** «＋ Icono» (paraId null) o «Cambiar el icono» de la capa `paraId`. */
+  async function elegirIcono(paraId) {
+    if (!paraId && capas().length >= LIMITES.capas) { avisoPantalla(`Una pieza admite hasta ${LIMITES.capas} capas.`, true); return; }
+    const yo = ED;
+    let lista;
+    try { lista = await cargarIconos(); } catch (e) { avisoPantalla(`No se han podido cargar los iconos: ${e.message}`, true); return; }
+    if (ED !== yo) return;
+    const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Elegir un icono' });
+    const cerrarModal = () => capaVista.remove();
+    const col = colores();
+    const muestra = { color: '#111111', alfa: 1, grosor: 2 };
+    const rejilla = el('div', { clase: 'ce-iconos' }, ...lista.map(ic => {
+      const img = el('img', { alt: '' });
+      img.src = uriDeIcono(Object.assign({ icono: ic.id }, muestra), col);
+      return el('button', { clase: 'ce-icono', type: 'button', title: ic.nombre, 'aria-label': ic.nombre, onclick: () => {
+        cerrarModal();
+        const existente = paraId && capa(paraId);
+        if (existente) {
+          existente.icono = ic.id;
+          existente.nombre = ic.nombre;
+          ED.sel = [existente.id];
+        } else {
+          const f = formato();
+          const [cx, cy] = centroVisible();
+          const lado = 14;
+          const c = capaNueva('icono', { nombre: ic.nombre, icono: ic.id, color: 'kit:principal', alfa: 1, grosor: 2, w: lado, h: lado * f.W / f.H });
+          c.x = cx - c.w / 2;
+          c.y = cy - c.h / 2;
+          capas().push(c);
+          ED.sel = [c.id];
+        }
+        pintarTodo();
+        commit();
+        pintarPaneles();
+      } }, img, el('span', {}, ic.nombre));
+    }));
+    capaVista.appendChild(el('div', { clase: 'ce-modal-cuerpo ce-modal-iconos' },
+      el('h2', {}, paraId ? 'Cambiar el icono' : 'Poner un icono'),
+      el('p', { clase: 'ce-pista' }, 'Salen con el color que elijas de tu Kit. Iconos de Lucide (licencia ISC) y propios; ninguno de redes ni de marcas.'),
+      rejilla, el('div', { clase: 'ce-botonera' }, boton('Cancelar', {}, cerrarModal))));
+    capaVista.addEventListener('pointerdown', ev => { if (ev.target === capaVista) cerrarModal(); });
+    ED.raiz.appendChild(capaVista);
+    const primero = rejilla.querySelector('button');
+    if (primero) primero.focus();
+  }
+
+  /** Las pegatinas: capas de siempre ya montadas (un texto con su fondo, un globo, una flecha). */
+  function pegatina(cual) {
+    const f = formato();
+    const prop = f.W / f.H;
+    const [cx, cy] = centroVisible();
+    const nuevas = [];
+    if (cual === 'nuevo') {
+      nuevas.push(capaDeTexto({ nombre: 'Pegatina «Nuevo»', txt: 'NUEVO', tam: 4.2, peso: 800, w: 24, h: 8, alin: 'centro', valign: 'centro',
+        color: 'tinta:acento', fondo: { color: 'kit:acento', alfa: 1 }, relleno: [1.4, 3, 1.4, 3], radio: 99, espaciado: 0.08, giro: -8 }));
+    } else if (cual === 'guardalo') {
+      nuevas.push(capaDeTexto({ nombre: 'Pegatina «Guárdalo»', txt: 'Guárdalo para después', tam: 3.8, peso: 800, w: 44, h: 8, alin: 'centro', valign: 'centro',
+        color: 'tinta:secundario', fondo: { color: 'kit:secundario', alfa: 1 }, relleno: [1.4, 3, 1.4, 3], radio: 2 }));
+    } else if (cual === 'globo') {
+      nuevas.push(capaDeTexto({ nombre: 'Globo', txt: '¡Escríbenos!', tam: 4.2, peso: 700, w: 40, h: 12, alin: 'centro', valign: 'centro',
+        color: 'tinta:claro', fondo: { color: 'kit:claro', alfa: 1 }, relleno: [2, 3, 2, 3], radio: 4 }));
+      nuevas.push(capaNueva('forma', { nombre: 'Pico del globo', figura: 'poligono', puntos: [[0, 0], [100, 0], [20, 100]], w: 6, h: 6 * prop,
+        relleno: { color: 'kit:claro', alfa: 1 }, borde: null, radio: 0, sombra: [] }));
+    } else if (cual === 'flecha') {
+      nuevas.push(capaNueva('icono', { nombre: 'Flecha curva', icono: 'flecha-curva', color: 'kit:acento', alfa: 1, grosor: 2.5, w: 18, h: 18 * prop }));
+    }
+    if (!nuevas.length) return;
+    if (capas().length + nuevas.length > LIMITES.capas) { avisoPantalla(`Una pieza admite hasta ${LIMITES.capas} capas.`, true); return; }
+    // centradas, y el pico, pegado debajo del globo
+    const [a, b] = nuevas;
+    a.x = cx - a.w / 2;
+    a.y = cy - a.h / 2;
+    if (b) { b.x = a.x + a.w * 0.2; b.y = a.y + a.h - 0.1; }
+    for (const c of nuevas) capas().push(c);
+    if (a.tipo === 'texto') cargarLetra(familiaDe(a));
+    if (a.tipo === 'icono') cargarIconos().then(() => pintarTodo()).catch(() => {});
+    ED.sel = nuevas.map(c => c.id);
+    pintarTodo();
+    commit();
+    pintarPaneles();
+    avisoPantalla(b ? 'Globo listo: el texto y su pico van elegidos juntos para moverlos a la vez.' : 'Pegatina lista: muévela, gírala o cambia su texto.');
+  }
+
+  function abrirPegatinas(ancla) {
+    const ya = ED.raiz.querySelector('.ce-menu-pegatinas');
+    if (ya) { ya.remove(); return; }
+    const menu = el('div', { clase: 'ce-menu-pegatinas', role: 'menu' },
+      ...[['nuevo', '«Nuevo»'], ['guardalo', '«Guárdalo»'], ['globo', 'Globo de diálogo'], ['flecha', 'Flecha curva']].map(([id, texto]) =>
+        boton(texto, { role: 'menuitem' }, () => { menu.remove(); pegatina(id); })));
+    ancla.insertAdjacentElement('afterend', menu);
+    const primero = menu.querySelector('button');
+    if (primero) primero.focus();
+  }
+
   async function subirFoto(fichero, paraId) {
     if (!paraId && capas().filter(c => c.tipo === 'imagen' && c.src).length >= LIMITES.fotos) { avisoPantalla(`Una pieza admite hasta ${LIMITES.fotos} fotos.`, true); return; }
     avisoPantalla('Subiendo la foto…');
@@ -1680,7 +1830,7 @@
     const f = ED.cat.formatos.find(x => x.id === nuevo);
     if (!f || f.id === viejo.id) return;
     for (const c of ED.doc.laminas.flatMap(l => l.capas)) {
-      const redonda = (c.tipo === 'forma' && c.figura === 'elipse') || (c.tipo === 'imagen' && c.radio === 'elipse') || c.tipo === 'logo';
+      const redonda = (c.tipo === 'forma' && c.figura === 'elipse') || (c.tipo === 'imagen' && (c.radio === 'elipse' || c.nombre === 'QR')) || c.tipo === 'logo' || c.tipo === 'icono';
       if (!redonda) continue;
       const wpx = c.w / 100 * viejo.W, hpx = c.h / 100 * viejo.H;
       // lo que era redondo (o un logo) conserva su forma: el alto se ajusta al ancho
@@ -2829,7 +2979,7 @@
     if (asa.includes('s')) h += ly;
     if (asa.includes('n')) h -= ly;
     const minimo = 4;
-    const proporcion = (c.tipo === 'texto' && esquina) || (esquina && (mantener !== (c.tipo === 'logo' || (c.tipo === 'forma' && c.figura === 'elipse') || (c.tipo === 'imagen' && c.radio === 'elipse'))));
+    const proporcion = (c.tipo === 'texto' && esquina) || (esquina && (mantener !== (c.tipo === 'logo' || c.tipo === 'icono' || (c.tipo === 'forma' && c.figura === 'elipse') || (c.tipo === 'imagen' && c.radio === 'elipse'))));
     if (proporcion) {
       const s = Math.max(Math.abs(w) / k0.w, 0.02);
       w = k0.w * s;

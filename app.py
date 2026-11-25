@@ -26717,6 +26717,14 @@ def graficas_nota_carrusel(cid: str, peticion: Request, cuerpo: dict = Body(defa
     return {"nota": _por_capas(K.avisos_del_carrusel, (cuerpo or {}).get("doc"))}
 
 
+@app.get("/api/graficas/iconos")
+def graficas_iconos():
+    """Los iconos que se pueden poner en una lámina (graficas-3c-extras): id,
+    nombre y sus trazos. Iconos de Lucide (ISC) y unos propios; sin marcas."""
+    import graficas_iconos as I  # noqa: E402,PLC0415
+    return {"iconos": I.catalogo()}
+
+
 @app.post("/api/graficas/{cid}/qr", status_code=201)
 def graficas_qr(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """Un QR con tu WhatsApp o tu web (graficas-3c-extras), hecho aquí con

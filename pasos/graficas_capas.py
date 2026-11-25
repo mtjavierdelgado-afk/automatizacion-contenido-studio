@@ -72,7 +72,7 @@ _TESTIGO_VAR = {"kit:principal": "a", "kit:secundario": "b", "kit:oscuro": "d", 
                 "kit:acento": "x", "tinta:principal": "ta", "tinta:secundario": "tb"}
 _DE_TESTIGO = {v: k for k, v in TESTIGOS.items()}
 
-TIPOS = ("texto", "imagen", "logo", "forma")
+TIPOS = ("texto", "imagen", "logo", "forma", "icono")
 #: Los tipos de lámina de un carrusel (graficas-3-carrusel). «blanco» es la que
 #: no sale de ninguna familia: «Volver a montar a todas» la deja como está.
 TIPOS_LAMINA = ("portada", "punto", "lista", "dato", "antes_despues", "pasos", "cita", "mito", "pregunta", "ranking",
@@ -246,6 +246,13 @@ def _limpiar_capa(capa, vistos):
             "radio": _radio(capa.get("radio")), "borde": _borde(capa.get("borde")),
             "sombra": _sombras(capa.get("sombra")),
         })
+    elif tipo == "icono":
+        # graficas-3c-extras: un icono de web/iconos/ (un id que ya no esté se
+        # guarda igual y no se pinta: la pieza nunca deja de abrirse)
+        icono = str(capa.get("icono") or "")
+        limpia.update({"icono": icono if re.fullmatch(r"[a-z0-9-]{1,40}", icono) else "",
+                       "color": _ref(capa.get("color"), "#000000"), "alfa": _num(capa.get("alfa", 1), 0, 1, 1),
+                       "grosor": _num(capa.get("grosor", 2), 0.5, 4, 2)})
     elif tipo == "logo":
         variante = capa.get("variante") if capa.get("variante") in ("auto", "normal", "oscuro") else "auto"
         fondo = capa.get("fondo_auto") if isinstance(capa.get("fondo_auto"), str) and capa.get("fondo_auto") in VAR_ROL else "l"
@@ -542,6 +549,13 @@ def _html_capa(capa, doc, kit, colores, f, imagen_de, logos, usadas, memo):
         return (f'<img data-c="{capa["id"]}" data-r="{capa["rol"]}" alt="" src="{_uri(ruta, memo)}" '
                 f'style="{estilo}display:block;max-width:none;object-fit:cover;'
                 f'object-position:{_f(enc["x"])}% {_f(enc["y"])}%;{recorte}">')
+    if tipo == "icono":
+        import graficas_iconos as I                         # noqa: PLC0415
+        uri = I.data_uri(capa["icono"], resolver_color(capa["color"], colores), capa["alfa"], capa["grosor"])
+        if not uri:
+            return ""
+        return (f'<img data-c="{capa["id"]}" data-r="{capa["rol"]}" alt="" src="{uri}" '
+                f'style="{_css_caja(capa, f)}display:block;max-width:none;object-fit:contain">')
     if tipo == "logo":
         normal, oscuro = logos
         ruta = normal

@@ -246,6 +246,21 @@ def fondo_tapado(pincel):
         laminas.append({"lam": d["laminas"][i], "i": i, "total": len(d["laminas"]), "f": {"W": 1080, "H": 1350}})
         verdad.append(antes == C.pintar(pincel, otro, None, lambda _n: None, lamina=i)[0])
     ok(verdad[-2:] == [False, True], f"(la capa «Menos en la última» tapa la 2 y no el cierre: {verdad[-2:]})")
+    # una capa girada: tapa si es lo bastante grande, y si no, no (árbitro del 25-11)
+    for x, w, giro, esperado in ((-20, 140, 5, True), (0, 100, 5, False), (-3, 106, 2, True)):
+        d2 = json.loads(json.dumps(d))
+        lam = d2["laminas"][1]
+        lam["capas"] = [c for c in lam["capas"] if not str(c.get("id", "")).startswith("tapa")]
+        lam["capas"].insert(1, {"tipo": "forma", "id": "girada", "rol": "", "x": x, "y": x, "w": w, "h": w, "giro": giro,
+                                "relleno": {"color": "#123456", "alfa": 1}})
+        d2 = C.limpiar_doc(d2)
+        antes = C.pintar(pincel, d2, None, lambda _n: None, lamina=1)[0]
+        otro = json.loads(json.dumps(d2))
+        otro["laminas"][1]["capas"][0]["relleno"] = {"color": "#00FF00", "alfa": 1}
+        tapada = antes == C.pintar(pincel, otro, None, lambda _n: None, lamina=1)[0]
+        ok(tapada == esperado, f"(pintada: girada {giro}° de {w} % {'tapa' if esperado else 'no tapa'}: {tapada})")
+        laminas.append({"lam": d2["laminas"][1], "i": 1, "total": len(d2["laminas"]), "f": {"W": 1080, "H": 1350}})
+        verdad.append(tapada)
     r = subprocess.run([node, "-e", _NODE_TAPADO, EDITOR_JS], input=json.dumps(laminas), capture_output=True,
                        text=True, timeout=120)
     if r.returncode:

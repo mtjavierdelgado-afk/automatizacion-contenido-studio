@@ -1902,10 +1902,28 @@
   }
 
   /** ¿Tapa esta capa la lámina entera, sin dejar ver nada de lo de abajo?
-   * (un rectángulo de color liso a sangre, o una foto a sangre, con foto o sin ella) */
-  function tapaTodo(c) {
-    if (c.oculto || c.giro || (c.opac != null && c.opac < 0.99) || c.recorte) return false;
-    if (!(c.x <= 0.5 && c.y <= 0.5 && c.x + c.w >= 99.5 && c.y + c.h >= 99.5)) return false;
+   * (un rectángulo de color liso a sangre, o una foto a sangre, con foto o sin ella;
+   * también girada si es lo bastante grande). `f`: el tamaño de la lámina. */
+  function tapaTodo(c, f) {
+    if (c.oculto || (c.opac != null && c.opac < 0.99) || c.recorte) return false;
+    if (c.giro) {
+      // girada: tapa si las cuatro esquinas de la lámina caen dentro de la caja
+      // girada (con 1 px de margen por el suavizado del borde). En píxeles,
+      // porque x va en % del ancho e y en % del alto (árbitro del 25-11)
+      if (!f) return false;
+      const X = c.x * f.W / 100, Y = c.y * f.H / 100, W = c.w * f.W / 100, H = c.h * f.H / 100;
+      const o = c.origen || [50, 50];
+      const px = X + o[0] / 100 * W, py = Y + o[1] / 100 * H;
+      const a = -c.giro * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
+      const dentro = ([qx, qy]) => {
+        const dx = qx - px, dy = qy - py;
+        const rx = px + dx * cos - dy * sin, ry = py + dx * sin + dy * cos;
+        return rx >= X + 1 && rx <= X + W - 1 && ry >= Y + 1 && ry <= Y + H - 1;
+      };
+      if (![[0, 0], [f.W, 0], [0, f.H], [f.W, f.H]].every(dentro)) return false;
+    } else if (!(c.x <= 0.5 && c.y <= 0.5 && c.x + c.w >= 99.5 && c.y + c.h >= 99.5)) {
+      return false;
+    }
     // una foto a sangre tapa, también sin foto: se pinta un bloque de color
     if (c.tipo === 'imagen') return !c.radio;
     if (c.tipo !== 'forma' || (c.figura && c.figura !== 'rect') || c.radio) return false;
@@ -1921,7 +1939,7 @@
   function fondoTapado(lam, i, total, f) {
     // lo que no sale en esta lámina («Menos en la primera», «Solo en el
     // carrusel» en historias) no tapa nada (árbitro del 25-11)
-    return lam.capas.slice(1).some(c => tapaTodo(c) && !(f && fueraDeLamina(c, i, total, f)));
+    return lam.capas.slice(1).some(c => tapaTodo(c, f) && !(f && fueraDeLamina(c, i, total, f)));
   }
 
   /** «la portada», «la lámina 3», «las láminas 2, 5 y 7» (números desde 1). */

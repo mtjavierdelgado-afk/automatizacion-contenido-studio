@@ -704,3 +704,37 @@ código:
 - **Partir un texto** es determinista (sin IA): primer párrafo, portada;
   viñetas, lista (más de 5, en varias); una cifra corta, dato; lo demás,
   puntos 01, 02…; el último, cierre. En horizontal las listas van como punto.
+
+### La portada al cambiar de familia y «Este fondo a todas» (24/25-11, `carrusel-portada` y `carrusel-cierre`)
+
+Salió al probar el carrusel en el servidor. Lo que hay que saber antes de
+«arreglarlo»:
+
+- **Los textos ocultos de la portada son a propósito.** Con «Montar esta
+  lámina» o «… y todas con esta familia», la portada llama a
+  `graficas_capas.montar(..., ocultar_sin_sitio=True)`: los campos que la
+  plantilla nueva no usa (el apoyo en la 10, la marca o la llamada en otras)
+  se quedan, pero ocultos. Antes se quedaban encima donde estaban y pisaban
+  a los de la plantilla (el apoyo sobre el botón de la 10). Si se vuelve a
+  una familia que sí los usa, salen otra vez. Por defecto (`False`, las
+  piezas de una lámina) `montar` hace lo de siempre, byte a byte.
+- **La Testimonio (9) y Pasos (12) cambian el nombre de los textos**
+  (`graficas_carrusel._textos_que_faltan`): a la 9, el titular pasa a la cita
+  y el apoyo al autor; desde la 9, al revés; en la 12, los tres pasos son los
+  titulares de las láminas que siguen. Un campo oculto toma el texto que se
+  ve con otro nombre (si cambiaste la cita en la 9, al volver el titular es
+  la cita nueva). Sin esto, de la 1 a la 9 la portada salía vacía.
+- **La nota no lee lo oculto** al buscar el titular, y avisa de los textos
+  ocultos que no se ven en ninguna lámina. No cuenta como «de muestra» el
+  número de un punto, las etiquetas «Antes»/«Después» ni «Guárdalo y
+  compártelo»; el cierre recién partido SÍ sale como muestra, a propósito.
+- **«Este fondo a todas» se salta las láminas cuyo fondo tapa otra capa**
+  (`fondoTapado` y `tapaTodo` en `web/graficas_editor.js`): las 14 portadas
+  de plantilla llevan encima del «Fondo» una capa a sangre (el degradado, la
+  foto o su bloque de color cuando no hay foto, que también tapa), así que
+  el fondo nuevo no se vería. Cuenta lo que de verdad se pinta en esa lámina
+  (no lo «Menos en la primera/última» ni lo «Solo en el carrusel» en
+  historias) y las capas giradas, en píxeles. El aviso
+  (`avisoFondoATodas`) dice exactamente dónde se ve, dónde no y por qué.
+  `prueba_graficas_carrusel` lo compara con lo pintado: cambiar el color del
+  fondo no cambia el PNG ⇔ el editor lo da por tapado.

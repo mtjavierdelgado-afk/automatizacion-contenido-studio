@@ -1133,11 +1133,19 @@ Claude la usa en todo lo que escribe para él.
 1. Abre un proyecto y entra en **⚙ Ajustes del proyecto → Kit de marca**. Elige los colores y las letras y pulsa **Guardar el kit**. El logo es el de la sección «Logo»; si quieres, sube otro para fondos oscuros.
 2. En el proyecto, pulsa **+ Nueva gráfica**.
 3. Elige **Red y tamaño**, escribe los textos y añade una imagen: subida o de un vídeo de ese proyecto.
-4. A la derecha elige uno de los 14 diseños. La vista se actualiza sola.
+4. A la derecha elige uno de los 16 diseños. La vista se actualiza sola.
 5. Si quieres, ajusta esa pieza: arrastra los textos sobre la vista, cambia su estilo en **Estilo del texto**, elige la parte de la foto en **Qué parte de la foto se ve**, y cambia colores o letra. Pulsa **Aplicar cambios** para verlo. Lo arrastrado y el tamaño de los textos valen para ese diseño y tamaño: al cambiarlos, cada texto vuelve a como viene.
 6. Pulsa **Guardar** y descárgala en PNG o JPG. Para TikTok, usa el JPG.
 
 Las piezas quedan en la sección **Gráficas** del proyecto, donde se pueden abrir, duplicar o borrar.
+
+### Carruseles (editor con capas)
+
+- **+ Diseño en capas** abre el editor. **Partir un texto en láminas** hace el carrusel (un párrafo, una lámina) y **＋ Lámina** añade una del tipo que quieras: punto, lista, dato, antes / después, pasos, cita, mito / realidad, pregunta, ranking, checklist, comparativa, precio / oferta o cierre.
+- **Familia de carrusel**: cada diseño (de los 16) es una familia con su letra, su adorno y sus colores del Kit.
+- En **Añadir**: **＋ Icono** (iconos con tus colores), **＋ Pegatina** («Nuevo», «Guárdalo», globo, flecha), **＋ QR** (tu WhatsApp o tu web) y **＋ De un vídeo** (una imagen ya pagada de un vídeo del proyecto, gratis).
+- **Hacer también las historias (9:16)**, con el carrusel guardado: abre la misma pieza en 9:16 como pieza aparte; revísala y guárdala.
+- **+ Carruseles en lote**, en la sección Gráficas del proyecto: pega varios carruseles separados por una línea con `---` (o un CSV de Excel o Sheets con las columnas familia, titular y una por lámina). Hasta 20 por tanda; luego ábrelos para cambiar los textos de muestra.
 
 ## Configuración (⚙)
 

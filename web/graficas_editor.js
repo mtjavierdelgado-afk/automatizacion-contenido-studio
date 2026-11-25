@@ -1901,20 +1901,84 @@
       && (c.tipo === 'forma' || c.tipo === 'imagen');
   }
 
+  /** ¿Tapa esta capa la lámina entera, sin dejar ver nada de lo de abajo?
+   * (un rectángulo de color liso a sangre, o una foto a sangre, con foto o sin ella) */
+  function tapaTodo(c) {
+    if (c.oculto || c.giro || (c.opac != null && c.opac < 0.99) || c.recorte) return false;
+    if (!(c.x <= 0.5 && c.y <= 0.5 && c.x + c.w >= 99.5 && c.y + c.h >= 99.5)) return false;
+    // una foto a sangre tapa, también sin foto: se pinta un bloque de color
+    if (c.tipo === 'imagen') return !c.radio;
+    if (c.tipo !== 'forma' || (c.figura && c.figura !== 'rect') || c.radio) return false;
+    const r = c.relleno;
+    if (!r) return false;
+    if (r.degradado) return (r.degradado.paradas || []).every(p => p.alfa == null || p.alfa >= 0.99);
+    return !!r.color && (r.alfa == null || r.alfa >= 0.99);
+  }
+
+  /** El fondo de la lámina no se ve si otra capa lo tapa entero: las portadas
+   * de plantilla llevan encima su propio fondo (el degradado de Neón nocturno,
+   * la foto a sangre…), prueba del 24-11. */
+  function fondoTapado(lam, i, total, f) {
+    // lo que no sale en esta lámina («Menos en la primera», «Solo en el
+    // carrusel» en historias) no tapa nada (árbitro del 25-11)
+    return lam.capas.slice(1).some(c => tapaTodo(c) && !(f && fueraDeLamina(c, i, total, f)));
+  }
+
+  /** «la portada», «la lámina 3», «las láminas 2, 5 y 7» (números desde 1). */
+  function nombrarLaminas(lista) {
+    const otras = lista.filter(n => n !== 1);
+    const y = l => (l.length === 1 ? String(l[0]) : `${l.slice(0, -1).join(', ')} y ${l[l.length - 1]}`);
+    const resto = !otras.length ? '' : (otras.length === 1 ? `la lámina ${otras[0]}` : `las láminas ${y(otras)}`);
+    if (!lista.includes(1)) return resto;
+    return resto ? `la portada y ${resto}` : 'la portada';
+  }
+
+  /** El aviso de «Este fondo a todas», que dice EXACTAMENTE dónde se ve:
+   * `r` = {actual, propiaTapada, puestas: [n], tapadas: [n], llenas: [n]} (números desde 1). */
+  function avisoFondoATodas(r) {
+    const llenas = `ya ${r.llenas.length === 1 ? 'está llena' : 'están llenas'} (${LIMITES.capas} capas, ${LIMITES.fotos} fotos o ${LIMITES.logos} logos)`;
+    const tapadas = r.tapadas.length === 1 && r.tapadas[0] === 1
+      ? 'la portada conserva el fondo de su plantilla, que va por encima'
+      : `en ${nombrarLaminas(r.tapadas)} no se vería, porque su diseño lleva encima su propio fondo`;
+    const partes = [];
+    const se_ve = r.puestas.length + (r.propiaTapada ? 0 : 1);
+    if (!r.puestas.length) {
+      partes.push('No se ha cambiado ninguna otra lámina:');
+      const porque = [];
+      if (r.tapadas.length) porque.push(tapadas);
+      if (r.llenas.length) porque.push(`${nombrarLaminas(r.llenas)} ${llenas}`);
+      partes.push(porque.length ? `${porque.join('; ')}.` : 'no hay otras láminas.');
+    } else {
+      partes.push(se_ve === 1
+        ? 'Este fondo se ve ahora en 1 lámina.'
+        : `Este fondo se ve ahora en ${se_ve} láminas.`);
+      if (r.tapadas.length) partes.push(`${tapadas.charAt(0).toUpperCase()}${tapadas.slice(1)}.`);
+      if (r.llenas.length) partes.push(`En ${nombrarLaminas(r.llenas)} no se ha puesto: ${llenas}.`);
+      partes.push('Ctrl+Z lo deshace.');
+    }
+    if (r.propiaTapada) {
+      partes.push(`Ojo: en ${r.actual === 1 ? 'esta portada' : `esta lámina (la ${r.actual})`} este fondo no se ve, porque otra capa de su diseño lo tapa.`);
+    }
+    return partes.join(' ');
+  }
+
   function fondoATodas(c) {
-    let sinSitio = 0;
+    const total = ED.doc.laminas.length;
+    const r = { actual: ED.lamina + 1, propiaTapada: fondoTapado(ED.doc.laminas[ED.lamina], ED.lamina, total, formato()),
+      puestas: [], tapadas: [], llenas: [] };
     ED.doc.laminas.forEach((lam, i) => {
       if (i === ED.lamina) return;
+      // su diseño lo taparía: no se cambia lo que no se iba a ver
+      if (fondoTapado(lam, i, total, formato())) { r.tapadas.push(i + 1); return; }
       const nuevo = Object.assign(copia(c), { id: nuevoId(), oculto: false });
       delete nuevo.enlace;
       const viejo = lam.capas[0] && esFondo(lam.capas[0], lam) ? lam.capas[0] : null;
-      if (!cabeEnLamina(lam, nuevo, viejo)) { sinSitio++; return; }
+      if (!cabeEnLamina(lam, nuevo, viejo)) { r.llenas.push(i + 1); return; }
       if (viejo) lam.capas[0] = nuevo; else lam.capas.unshift(nuevo);
+      r.puestas.push(i + 1);
     });
-    pintarTodo(); commit(); pintarTira();
-    avisoPantalla(sinSitio
-      ? `Este fondo está en todas menos ${sinSitio} lámina(s) que ya están llenas (${LIMITES.capas} capas, ${LIMITES.fotos} fotos o ${LIMITES.logos} logos). Ctrl+Z lo deshace.`
-      : 'Este fondo está ahora en todas las láminas (también en la portada y el cierre). Ctrl+Z lo deshace.');
+    if (r.puestas.length) { pintarTodo(); commit(); pintarTira(); }
+    avisoPantalla(avisoFondoATodas(r), !r.puestas.length);
   }
 
   /** Lo del carrusel en el panel de una capa. */
@@ -2808,7 +2872,7 @@
   window.EditorCapas = {
     abrir, version: 1, _estado: () => ED,
     // para pasos/prueba_graficas_editor.py: que la pantalla haga las mismas cuentas que el servidor
-    _cuentas: { fueraDeLamina, textoDeLamina, f6, luz, tintaPara, coloresFinales, resolver, cssColor, cssRelleno, cssBorde, cssRadio, cssSombras, cssCaja,
+    _cuentas: { fueraDeLamina, textoDeLamina, fondoTapado, avisoFondoATodas, nombrarLaminas, f6, luz, tintaPara, coloresFinales, resolver, cssColor, cssRelleno, cssBorde, cssRadio, cssSombras, cssCaja,
       LIMITES, CAMPOS_DE_MUESTRA },
   };
 }());

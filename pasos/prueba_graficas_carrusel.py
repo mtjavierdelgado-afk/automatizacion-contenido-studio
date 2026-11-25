@@ -197,6 +197,94 @@ def pantalla_igual():
        f"{len(casos)} casos iguales en la pantalla y en el PNG" + (f" (caso {malos[0]}: {salida[malos[0]]} != {esperado[malos[0]]})" if malos else ""))
 
 
+_NODE_TAPADO = r"""
+const fs = require('fs'), vm = require('vm');
+const ctx = { window: {}, document: {}, console };
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[process.argv.length - 1], 'utf8'), ctx);
+const K = ctx.window.EditorCapas._cuentas;
+process.stdout.write(JSON.stringify(JSON.parse(fs.readFileSync(0, 'utf8')).map(c => K.fondoTapado(c.lam, c.i, c.total, c.f))));
+"""
+
+
+def fondo_tapado(pincel):
+    """«Este fondo a todas» no toca una lámina cuyo fondo tapa otra capa (las
+    portadas de plantilla llevan su propio fondo encima, prueba del 24-11). La
+    verdad sale de pintar: si cambiar el color del fondo no cambia la imagen,
+    está tapado."""
+    print("«Este fondo a todas»: qué láminas tienen el fondo tapado")
+    node = shutil.which("node")
+    if not node:
+        print("  (sin Node: esta parte se omite)")
+        return
+    import graficas_carrusel as K                           # noqa: PLC0415
+    texto = "Titular de prueba\nY su apoyo\n\nUn punto\nCon su texto."
+    laminas, verdad = [], []
+    for n in range(1, 15):
+        base = {"version": 2, "formato": "v45", "nombre": "x", "laminas": [{"capas": []}]}
+        d, _ = K.carrusel_desde_texto(pincel, base, n, texto, "sustituir", None, None, None, "Alba")
+        for i in (0, 1):
+            antes = C.pintar(pincel, d, None, lambda _n: None, lamina=i)[0]
+            otro = json.loads(json.dumps(d))
+            otro["laminas"][i]["capas"][0]["relleno"] = {"color": "#00FF00", "alfa": 1}
+            despues = C.pintar(pincel, otro, None, lambda _n: None, lamina=i)[0]
+            laminas.append({"lam": d["laminas"][i], "i": i, "total": len(d["laminas"]), "f": {"W": 1080, "H": 1350}})
+            verdad.append(antes == despues)
+    # una capa a sangre «en todas» que no sale en el cierre («Menos en la
+    # última») no tapa su fondo; en las demás, sí
+    d, _ = K.carrusel_desde_texto(pincel, {"version": 2, "formato": "v45", "nombre": "x", "laminas": [{"capas": []}]},
+                                  1, texto, "sustituir", None, None, None, "Alba")
+    tapa = {"tipo": "forma", "id": "tapa", "rol": "", "x": 0, "y": 0, "w": 100, "h": 100, "enlace": "tp",
+            "salvo": ["ultima"], "relleno": {"color": "#123456", "alfa": 1}}
+    for lam in d["laminas"]:
+        lam["capas"].insert(1, dict(tapa, id=f"tapa{len(lam['capas'])}"))
+    d = C.limpiar_doc(d)
+    for i in (len(d["laminas"]) - 1, 1):
+        antes = C.pintar(pincel, d, None, lambda _n: None, lamina=i)[0]
+        otro = json.loads(json.dumps(d))
+        otro["laminas"][i]["capas"][0]["relleno"] = {"color": "#00FF00", "alfa": 1}
+        laminas.append({"lam": d["laminas"][i], "i": i, "total": len(d["laminas"]), "f": {"W": 1080, "H": 1350}})
+        verdad.append(antes == C.pintar(pincel, otro, None, lambda _n: None, lamina=i)[0])
+    ok(verdad[-2:] == [False, True], f"(la capa «Menos en la última» tapa la 2 y no el cierre: {verdad[-2:]})")
+    r = subprocess.run([node, "-e", _NODE_TAPADO, EDITOR_JS], input=json.dumps(laminas), capture_output=True,
+                       text=True, timeout=120)
+    if r.returncode:
+        ok(False, f"Node no ha podido correr fondoTapado: {r.stderr[-400:]}")
+        return
+    dice = json.loads(r.stdout)
+    malos = [(i // 2 + 1, "portada" if i % 2 == 0 else "dentro") for i, (a, b) in enumerate(zip(dice, verdad)) if a != b]
+    dice = dice[:28]
+    ok(not malos, f"el editor sabe qué fondos tapa el diseño, igual que el PNG ({len(dice)} láminas; distintas: {malos})")
+    ok(not any(dice[1::2]), "en las láminas de dentro de las 14 familias el fondo nunca está tapado")
+
+    # el aviso dice exactamente dónde se ve (pedido del dueño, 25-11)
+    casos = [
+        {"actual": 2, "propiaTapada": False, "puestas": [], "tapadas": [1], "llenas": [3, 4]},
+        {"actual": 1, "propiaTapada": True, "puestas": [2, 3, 4, 5, 6, 7, 8], "tapadas": [], "llenas": []},
+        {"actual": 2, "propiaTapada": False, "puestas": [3, 4, 5, 6, 7, 8], "tapadas": [1], "llenas": []},
+        {"actual": 2, "propiaTapada": False, "puestas": [], "tapadas": [], "llenas": [1, 3]},
+        {"actual": 2, "propiaTapada": False, "puestas": [4], "tapadas": [1, 3], "llenas": [5, 6]},
+    ]
+    codigo = (r"""const fs = require('fs'), vm = require('vm');
+const ctx = { window: {}, document: {}, console }; vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[process.argv.length - 1], 'utf8'), ctx);
+const K = ctx.window.EditorCapas._cuentas;
+process.stdout.write(JSON.stringify(JSON.parse(fs.readFileSync(0, 'utf8')).map(c => K.avisoFondoATodas(c))));""")
+    r = subprocess.run([node, "-e", codigo, EDITOR_JS], input=json.dumps(casos), capture_output=True, text=True, timeout=60)
+    if r.returncode:
+        ok(False, f"Node no ha podido correr el aviso: {r.stderr[-300:]}")
+        return
+    av = json.loads(r.stdout)
+    ok("la portada conserva" in av[0] and "las láminas 3 y 4 ya están llenas" in av[0],
+       f"sin ninguna cambiada, nombra las tapadas Y las llenas ({av[0]})")
+    ok("se ve ahora en 7 láminas" in av[1] and "en esta portada este fondo no se ve" in av[1],
+       f"desde una lámina tapada no se cuenta a sí misma, y lo dice ({av[1]})")
+    ok("se ve ahora en 7 láminas" in av[2] and "Ojo" not in av[2], f"desde una lámina que se ve, se cuenta ({av[2]})")
+    ok("la portada y la lámina 3 ya están llenas" in av[3], f"solo llenas: las nombra ({av[3]})")
+    ok("se ve ahora en 2 láminas" in av[4] and "la portada y la lámina 3 no se vería" in av[4]
+       and "las láminas 5 y 6 no se ha puesto" in av[4], f"puestas, tapadas y llenas a la vez ({av[4]})")
+
+
 # ================================================================ guardar
 
 def guardar(carpeta):
@@ -515,6 +603,45 @@ def partir_y_montar(pincel):
              "Lo que no falta\n- Uno\n- Dos\n- Tres\n- Cuatro\n- Cinco\n- Seis\n- Siete\n\n"
              "8 de 10\nfiestas terminan tarde\n\n"
              "Otro punto\nCon su texto.")
+    # prueba en el servidor del 24-11: con la familia 10 (sin texto de apoyo) el
+    # apoyo de la portada se quedaba encima del botón «Desliza →»
+    base = {"version": 2, "formato": "v45", "nombre": "x", "laminas": [{"capas": []}]}
+    d1, _av = K.carrusel_desde_texto(pincel, base, 1, texto, "sustituir", None, None, None, "Alba")
+    d10 = K.montar_todas(pincel, d1, 10, None, None, None, "Alba")
+    apoyo = [c for c in d10["laminas"][0]["capas"] if c.get("rol") == "apoyo"]
+    ok(len(apoyo) == 1 and apoyo[0].get("oculto") and apoyo[0]["txt"] == "Y cómo evitarlos",
+       "una portada cuya familia no tiene sitio para el apoyo lo conserva, pero oculto (no pisa el botón)")
+    d1b = K.montar_todas(pincel, d10, 1, None, None, None, "Alba")
+    apoyo = [c for c in d1b["laminas"][0]["capas"] if c.get("rol") == "apoyo"]
+    ok(len(apoyo) == 1 and not apoyo[0].get("oculto") and apoyo[0]["txt"] == "Y cómo evitarlos",
+       "y al volver a una familia con sitio, sale otra vez (sin duplicarse)")
+    nota10 = " ".join(a["texto"] for a in K.avisos_del_carrusel(d10))
+    ok("texto(s) oculto(s)" in nota10 and "Y cómo evitarlos" in nota10, f"y la nota lo dice ({nota10[:120]})")
+    # la Testimonio (9) lleva cita y autor: el titular y el apoyo pasan ahí, y vuelven
+    def vistos(d):
+        return {c["rol"]: c["txt"] for c in d["laminas"][0]["capas"] if c["tipo"] == "texto" and not c.get("oculto")}
+    d9 = K.montar_todas(pincel, d1, 9, None, None, None, "Alba")
+    ok(vistos(d9).get("cita") == "5 errores al alquilar una consola" and vistos(d9).get("autor") == "Y cómo evitarlos",
+       f"de la familia 1 a la 9, el titular es la cita y el apoyo el autor ({vistos(d9)})")
+    for c in d9["laminas"][0]["capas"]:
+        if c.get("rol") == "cita":
+            c["txt"] = "Mi cita cambiada"
+    d9b = K.montar_todas(pincel, d9, 1, None, None, None, "Alba")
+    ok(vistos(d9b).get("titulo") == "Mi cita cambiada" and vistos(d9b).get("apoyo") == "Y cómo evitarlos",
+       f"y al volver, el titular es la cita (con lo que cambiaste) y el apoyo se ve ({vistos(d9b)})")
+    ok(not any("oculto" in a["texto"] for a in K.avisos_del_carrusel(d9b)),
+       "lo oculto que repite lo que se ve no se cuenta en la nota")
+    d12 = K.montar_todas(pincel, d1, 12, None, None, None, "Alba")
+    ok(vistos(d12).get("i1") == "No probar los mandos", f"la portada de Pasos (12) lleva los titulares que siguen ({vistos(d12).get('i1')!r})")
+    _d, av = K.carrusel_desde_texto(pincel, base, 10, texto, "sustituir", None, None, None, "Alba")
+    ok(any("no lleva texto de apoyo" in a for a in av), "partir con esa familia avisa de que el apoyo no sale")
+    import re as _re                                        # noqa: PLC0415
+    nota = " ".join(a["texto"] for a in K.avisos_del_carrusel(d1))
+    m = _re.search(r"textos de muestra en la lámina ([\d, ]+)", nota)
+    con_muestra = {int(x) for x in m.group(1).split(",")} if m else set()
+    puntos = {i + 1 for i, lam in enumerate(d1["laminas"]) if lam.get("tipo") == "punto"}
+    ok(not (con_muestra & puntos), f"los números de los puntos («01», «02») no cuentan como texto de muestra ({nota[:160]})")
+
     piezas, avisos = K.partir(texto)
     ok([p[0] for p in piezas] == ["portada", "punto", "lista", "lista", "dato", "punto", "cierre"],
        f"cada párrafo a su tipo, y al final el cierre ({[p[0] for p in piezas]})")
@@ -737,6 +864,7 @@ def main():
     try:
         pieza_de_siempre_igual(pincel)
         partir_y_montar(pincel)
+        fondo_tapado(pincel)
         familias(pincel)
     finally:
         pincel.cerrar()

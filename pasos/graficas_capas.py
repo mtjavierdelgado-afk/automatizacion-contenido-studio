@@ -1232,7 +1232,8 @@ def contar_lineas(pincel):
 _ROLES_DE_PLANTILLA = frozenset(G.CAMPOS) | {"deco", "fondo", "foto", "logo"}
 
 
-def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=None, logo_oscuro=None, lamina=0):
+def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=None, logo_oscuro=None, lamina=0,
+           ocultar_sin_sitio=False):
     """«Volver a montar» y «Empezar de»: la plantilla `plantilla` en el tamaño
     `formato`, convertida en capas, con los textos y colores de `doc`.
 
@@ -1246,6 +1247,10 @@ def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=Non
       no cabe todo, es un error que lo dice, nunca un recorte).
     - El resto del documento (nombre, colores, letras, las otras láminas y el
       sello para guardar sin pisar nada) no cambia.
+    - `ocultar_sin_sitio` (la portada de un carrusel): los campos que la
+      plantilla nueva no usa se quedan, pero ocultos; encima, donde estaban,
+      pisaban a los de la plantilla (el texto de apoyo sobre el botón de la
+      plantilla 10, prueba del 24-11). El ojo de la lista los enseña.
     Solo cambia la lámina `lamina`. No escribe nada."""
     if type(plantilla) is not int or plantilla not in G._PL.PLANTILLAS:
         raise ErrorGraficas("esa plantilla no existe")
@@ -1289,6 +1294,9 @@ def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=Non
                 capa["color"], capa["alfa"] = original["color"], original["alfa"]
     sueltas = [c for c in capas if c["rol"] not in _ROLES_DE_PLANTILLA
                or (c["rol"] in G.CAMPOS and c["rol"] not in usados and c["tipo"] == "texto")]
+    if ocultar_sin_sitio:
+        sueltas = [dict(c, oculto=True) if c["tipo"] == "texto" and c["rol"] in G.CAMPOS and c["rol"] not in usados
+                   else c for c in sueltas]
     # una plantilla sin foto: la foto no se pierde; queda abajo del todo y
     # oculta (a sangre taparía la plantilla entera), lista para enseñarla
     con_foto = any(c["tipo"] == "imagen" for c in nuevas)

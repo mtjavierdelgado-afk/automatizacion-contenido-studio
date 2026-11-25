@@ -27,6 +27,7 @@ a una IA ni escribe nada: solo compone.
 """
 import re
 import secrets
+import unicodedata
 
 import graficas as G
 import graficas_capas as C
@@ -603,8 +604,19 @@ def _componer(L, tipo, t):
         antes["tachado"] = True
         capas.append(antes)
         y, alto = fila(0.37, 0.28)
-        capas.append(L.texto(t.get("precio", ""), x0, y, w, alto, 22, rol="precio", titulo=True, color=acento_g, mayus=False,
-                             cursiva=False, brillo=brillo, valign="centro", nombre="Precio"))
+        # la letra baja antes que partir el precio en dos líneas (árbitro del 25-11: «S/ 1 299,90» en TikTok):
+        # la caja tiene el alto de UNA línea, así «ajusta» la achica hasta que quepa a lo ancho
+        # y la letra de partida, según lo largo que es el precio («ajusta» solo baja hasta el 60 %)
+        lado = min(L.f["W"], L.f["H"]) / 100
+        letras = max(len(t.get("precio", "").strip()), 1)
+        tam = max(LETRA_MINIMA, min(L.tam(22), (w * L.f["W"] / 100) / (letras * 0.62) / lado))
+        una_linea = tam * lado / L.f["H"] * 100 * 1.18
+        alto_precio = min(alto, una_linea)
+        precio = L.texto(t.get("precio", ""), x0, y + (alto - alto_precio) / 2, w, alto_precio, 22, rol="precio",
+                         titulo=True, color=acento_g, mayus=False, cursiva=False, brillo=brillo, valign="centro",
+                         nombre="Precio", ajusta=True, interlineado=1.05)
+        precio["tam"] = round(tam, 2)
+        capas.append(precio)
         y, alto = fila(0.67, 0.13)
         capas.append(L.texto(t.get("texto", ""), x0, y, w * 0.94, alto, 4, rol="texto", color=tinta, ajusta=True))
         # el botón, ancho y bajo: su texto cabe en UNA línea (la letra baja antes que partirse)
@@ -927,7 +939,9 @@ def textos_de_portada(n, t, piezas=(), marca=""):
               "cita": "", "autor": "", "usuario": ""}
     if n == 15:
         # la tarjeta de «Publicación»: el @usuario sale del nombre de la marca
-        nombre = re.sub(r"[^a-z0-9_.]", "", (marca or "").lower().replace(" ", ""))
+        sin_tildes = "".join(ch for ch in unicodedata.normalize("NFD", (marca or "").lower())
+                             if unicodedata.category(ch) != "Mn")
+        nombre = re.sub(r"[^a-z0-9_.]", "", sin_tildes.replace(" ", ""))
         textos["usuario"] = f"@{nombre}"[:30] if nombre else "@tumarca"
     if n == 9:
         textos.update(cita=titulo, autor=apoyo or marca or "")

@@ -37047,7 +37047,9 @@ async function carruselesEnLoteGraficas(cid) {
       if (t.estado === 'error') { toast(t.error, true); break; }
     }
   } catch (e) {
-    toast(`No se ha podido seguir la tanda: ${e.message}. Lo hecho se queda guardado.`, true);
+    // cada carrusel se guarda al terminarlo: aunque se pierda la barra (un
+    // reinicio del servicio), lo hecho está en la lista
+    toast('Se ha perdido el seguimiento de la tanda (¿se reinició el servicio?). Los carruseles que ya estaban hechos siguen guardados: mira la lista.', true);
   } finally {
     delete GRAF.lotes[cid];
     GRAF.piezas[cid] = undefined;

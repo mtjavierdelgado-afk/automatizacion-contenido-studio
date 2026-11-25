@@ -26715,7 +26715,11 @@ def graficas_lote(cid: str, peticion: Request, cuerpo: dict = Body(default=None)
     entradas = _por_graficas(LOTE.leer, cuerpo.get("texto"))
     _por_graficas(K.familia, n)
     _por_graficas(G.formato, formato)
+    ahora = time.time()
     with _CERROJO_TRABAJOS_CAPAS:
+        # los trabajos acabados hace más de una hora se olvidan (como en _guardar_capas)
+        for viejo in [t for t, v in _TRABAJOS_CAPAS.items() if v["fin"] and ahora - v["fin"] > _VIDA_TRABAJO_CAPAS]:
+            del _TRABAJOS_CAPAS[viejo]
         if any(v["cid"] == cid and v.get("lote") and not v["fin"] for v in _TRABAJOS_CAPAS.values()):
             raise ErrorApi(409, "ya se está haciendo una tanda de carruseles en este proyecto: espera a que termine")
         tid = secrets.token_hex(8)

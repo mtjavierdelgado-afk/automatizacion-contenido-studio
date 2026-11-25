@@ -60,8 +60,8 @@ def familias_nuevas():
     t = K.textos_de_portada(15, {"titulo": "Hola"}, (), "Estado Play")
     ok(t["usuario"] == "@estadoplay", "el @usuario de la portada sale del nombre de la marca")
     ok(K.textos_de_portada(15, {}, (), "")["usuario"] == "@tumarca", "sin marca, «@tumarca»")
-    ok(re.fullmatch(r"@[a-z0-9_.]{1,29}", K.textos_de_portada(15, {}, (), "Ñandú & Cía!")["usuario"]) is not None,
-       "un nombre con símbolos da un @usuario limpio")
+    ok(K.textos_de_portada(15, {}, (), "Ñandú & Cía!")["usuario"] == "@nanducia", "un nombre con símbolos da un @usuario limpio")
+    ok(K.textos_de_portada(15, {}, (), "Peña Café")["usuario"] == "@penacafe", "las tildes y la ñ no se pierden: se quitan los acentos (árbitro)")
     for fid in FORMATOS:
         L = K._Lienzo(K.familia(16), fid, G.COLORES_DEFECTO, "Marca")
         if L.horiz:
@@ -113,7 +113,7 @@ LARGOS = {
     "comparativa": {"titulo": "¿Por qué alquilar con nosotros y no con otros?",
                     **{f"v{i}": f"Una ventaja bastante larga número {i}" for i in range(1, 6)}},
     "precio": {"titulo": "Pack fiesta: consola, cuatro mandos y diez juegos", "precio_antes": "S/ 1 250",
-               "precio": "S/ 990", "texto": "Hasta el 30 de noviembre, en Lima Metropolitana, con instalación incluida",
+               "precio": "S/ 1 299,90", "texto": "Hasta el 30 de noviembre, en Lima Metropolitana, con instalación incluida",
                "cta": "Resérvalo por WhatsApp"},
 }
 
@@ -165,7 +165,8 @@ def tipos_nuevos_pintados(pincel):
     print("los 6 tipos nuevos, pintados: 16 familias, 4 tamaños, 3 Kits y textos largos")
     import prueba_graficas_carrusel as P                    # noqa: PLC0415
     malas, cuenta = [], 0
-    for fid, kits in (("v45", list(P.KITS)), ("v34", ["de siempre"]), ("c11", ["de siempre"]), ("h916", ["de siempre"])):
+    for fid, kits in (("v45", list(P.KITS)), ("v34", ["de siempre"]), ("c11", ["de siempre"]), ("h916", ["de siempre"]),
+                      ("tt", ["de siempre", "poco contraste"]), ("pin", ["de siempre"])):
         f = G.formato(fid)
         for kit_n in kits:
             kit = P.KITS[kit_n]
@@ -211,10 +212,11 @@ def tipos_nuevos_pintados(pincel):
                             if signo["caja"]["b"] > preg["caja"]["t"]:
                                 malas.append(f"{et}: el «?» baja hasta el titular")
                         if t == "precio":
-                            boton = next(c for c in lam["capas"] if c.get("rol") == "cta")
-                            if lineas.get(boton["id"], 1) > 1:
-                                malas.append(f"{et}: el botón ocupa {lineas[boton['id']]} líneas")
-    ok(cuenta >= 600, f"{cuenta} láminas nuevas pintadas y medidas")
+                            for rol in ("cta", "precio"):
+                                capa = next(c for c in lam["capas"] if c.get("rol") == rol)
+                                if lineas.get(capa["id"], 1) > 1:
+                                    malas.append(f"{et}: «{rol}» ocupa {lineas[capa['id']]} líneas")
+    ok(cuenta >= 900, f"{cuenta} láminas nuevas pintadas y medidas")
     for m in malas[:30]:
         print("   ", m)
     ok(not malas, f"ningún texto se sale, pisa a otro, se lee mal ni baja de la letra mínima ({len(malas)} fallos)")
@@ -246,6 +248,14 @@ def qr(pincel):
     ok(Q.destino("whatsapp", "999 888 777") == "https://wa.me/51999888777", "un celular de Perú sin código lleva el 51")
     ok(Q.destino("whatsapp", "+51 (999) 888-777") == "https://wa.me/51999888777", "con +, espacios, guiones y paréntesis")
     ok(Q.destino("whatsapp", "34 600 111 222") == "https://wa.me/34600111222", "un número de otro país, tal cual")
+    ok(falla("whatsapp", "999888777", "Hola " * 40) and falla("whatsapp", "999888777", "😀" * 40),
+       "un mensaje largo (o con muchos emojis) se rechaza con una frase: el QR no se leería (árbitro)")
+    ok(falla("web", "crearia.tech/" + "a" * 160), "una web de más de 150 letras se rechaza")
+    try:
+        Q.png("😀" * 3000)
+        ok(False, "lo que no cabe en un QR da un error claro, nunca un 500")
+    except G.ErrorGraficas:
+        ok(True, "lo que no cabe en un QR da un error claro, nunca un 500")
     ok(Q.destino("whatsapp", "999888777", "Hola, quiero alquilar & reservar") ==
        "https://wa.me/51999888777?text=Hola%2C%20quiero%20alquilar%20%26%20reservar", "el mensaje va codificado")
     ok(falla("whatsapp", "llámame") and falla("whatsapp", "123") and falla("whatsapp", "1" * 16), "un WhatsApp que no es un número se rechaza")
@@ -390,6 +400,16 @@ def lote(pincel):
     e = LOTE.leer(csv_comas)
     ok([x["familia"] for x in e] == [16, None] and e[0]["texto"] == "Errores al alquilar\n\nNo probar\nPruébalos antes\n\n8 de 10\nfiestas",
        "un CSV con comas: cada fila un carrusel y «|» parte titular y frase")
+    tabs = "familia\ttitular\tlámina 2\tlámina 3\n" + "".join(
+        f"Gamer\t5 errores, y cómo evitarlos {i}\tNo probar los mandos, ni las pilas, ni el cable\tLlamar tarde, sin reservar, sin pedir boleta\n"
+        for i in range(3))
+    e = LOTE.leer(tabs)
+    ok(len(e) == 3 and e[0]["texto"].startswith("5 errores, y cómo evitarlos 0\n\nNo probar los mandos, ni las pilas"),
+       "pegado de Sheets con comas en los textos: el separador sale de la fila de títulos (árbitro)")
+    e = LOTE.leer('Familia;Titular;L1\nGamer;"Hola, qué tal";Uno, dos y tres\nGamer;Otro, más;Cuatro, cinco\n')
+    ok(len(e) == 2 and e[0]["nombre"] == "Hola, qué tal", "con punto y coma y comas dentro de las celdas")
+    e = LOTE.leer("Portada, lo que nadie te cuenta\n\nUna idea\nCon su frase.")
+    ok(len(e) == 1 and e[0]["nombre"] == "Portada, lo que nadie te cuenta", "una lista que empieza por «Portada,» no es un CSV (árbitro)")
     e = LOTE.leer("Familia;Titular;L1\nGamer;Hola;Uno | dos\n")
     ok(len(e) == 1 and e[0]["familia"] == 16, "con punto y coma (Excel en español)")
     e = LOTE.leer("titular\tl1\tl2\nHola\tUno\tDos\n")

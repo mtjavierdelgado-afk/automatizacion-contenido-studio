@@ -1478,7 +1478,9 @@
     const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Elegir un icono' });
     const cerrarModal = () => capaVista.remove();
     const col = colores();
-    const muestra = { color: '#111111', alfa: 1, grosor: 2 };
+    // la muestra, con el color del texto del tema (las casillas van sobre el fondo del panel)
+    const tinta = (getComputedStyle(ED.raiz).getPropertyValue('--texto') || '').trim();
+    const muestra = { color: /^#[0-9a-f]{6}$/i.test(tinta) ? tinta : resolver('kit:oscuro', col), alfa: 1, grosor: 2 };
     const rejilla = el('div', { clase: 'ce-iconos' }, ...lista.map(ic => {
       const img = el('img', { alt: '' });
       img.src = uriDeIcono(Object.assign({ icono: ic.id }, muestra), col);
@@ -1590,6 +1592,7 @@
     if (!hayVideos()) return;
     if (!paraId && capas().filter(c => c.tipo === 'imagen' && c.src).length >= LIMITES.fotos) { avisoPantalla(`Una pieza admite hasta ${LIMITES.fotos} fotos.`, true); return; }
     const yo = ED;
+    const laminaDeAntes = yo.lamina;
     const videos = yo.opc.videos();
     const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Foto de un vídeo' });
     const cerrarModal = () => capaVista.remove();
@@ -1612,7 +1615,7 @@
             try {
               const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/imagen/de-plano'), { method: 'POST', cuerpo: { pid, sid: pl.sid } });
               if (ED !== yo) return;
-              await ponerFoto(r.nombre, paraId);
+              await ponerFoto(r.nombre, paraId, { lamina: laminaDeAntes });
             } catch (e) {
               if (ED === yo) avisoPantalla(`No se ha podido usar esa imagen: ${e.message}`, true);
             }
@@ -1645,7 +1648,13 @@
     if (ED !== yo) return;
     ED.fotos[nombre] = foto;
     const f = formato();
-    const existente = paraId && capa(paraId);
+    // la lámina en la que se pidió (si mientras tanto se pasó a otra, va a la suya)
+    const lam = (o.lamina !== undefined && ED.doc.laminas[o.lamina]) || ED.doc.laminas[ED.lamina];
+    const existente = paraId && lam.capas.find(c => c.id === paraId);
+    if (!existente && lam.capas.filter(c => c.tipo === 'imagen' && c.src).length >= LIMITES.fotos) {
+      avisoPantalla(`Una lámina admite hasta ${LIMITES.fotos} fotos.`, true);
+      return;
+    }
     if (existente) {
       existente.src = nombre;
       existente.encuadre = { x: 50, y: 50, zoom: 1 };
@@ -1657,7 +1666,7 @@
       let w = ancho, h = ancho * f.W / f.H * ratio;
       if (h > 80) { w = w * 80 / h; h = 80; }
       const c = capaNueva('imagen', { nombre: o.nombre || 'Foto', src: nombre, encuadre: { x: 50, y: 50, zoom: 1 }, radio: 0, borde: null, sombra: [], w, h, x: cx - w / 2, y: cy - h / 2 });
-      capas().push(c);
+      lam.capas.push(c);
       ED.sel = [c.id];
     }
     pintarTodo();
@@ -1678,7 +1687,7 @@
     const cerrarModal = () => capaVista.remove();
     let tipo = 'whatsapp';
     const valor = el('input', { type: 'text', clase: 'ce-qr-valor', maxlength: '300', 'aria-label': 'Número o web', autocomplete: 'off' });
-    const mensaje = el('input', { type: 'text', clase: 'ce-qr-valor', maxlength: '200', 'aria-label': 'Mensaje que ya sale escrito (opcional)',
+    const mensaje = el('input', { type: 'text', clase: 'ce-qr-valor', maxlength: '80', 'aria-label': 'Mensaje que ya sale escrito (opcional)',
       placeholder: 'Mensaje que ya sale escrito (opcional)' });
     const error = el('small', { clase: 'ce-pista malo', 'aria-live': 'polite' });
     const pista = el('small', { clase: 'ce-pista' });
@@ -1691,24 +1700,38 @@
     const elegirTipo = el('div', { clase: 'ce-botonera', role: 'group', 'aria-label': 'Qué lleva el QR' },
       ...[['whatsapp', 'WhatsApp'], ['web', 'Web']].map(([id, texto]) => boton(texto, { 'data-tipo': id },
         () => { tipo = id; error.textContent = ''; pintarTipo(); valor.focus(); })));
+    let haciendo = false;
     const hacer = async () => {
+      if (haciendo) return;                 // un doble clic o dos Intro: un solo QR
       if (!valor.value.trim()) { valor.focus(); return; }
       error.textContent = '';
+      haciendo = true;
+      botonHacer.disabled = true;
+      let r;
       try {
-        const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/qr'), { method: 'POST', cuerpo: { tipo, valor: valor.value, mensaje: tipo === 'whatsapp' ? mensaje.value : '' } });
-        if (ED !== yo) return;
-        cerrarModal();
-        await ponerFoto(r.nombre, null, { ancho: 26, nombre: 'QR', aviso: `QR listo: lleva a ${r.destino}. Pruébalo con tu móvil antes de publicar.` });
+        r = await yo.opc.pedir(yo.opc.api(yo.cid, '/qr'), { method: 'POST', cuerpo: { tipo, valor: valor.value, mensaje: tipo === 'whatsapp' ? mensaje.value : '' } });
       } catch (e) {
         error.textContent = e.message;
+        haciendo = false;
+        botonHacer.disabled = false;
+        return;
+      }
+      if (ED !== yo) return;
+      cerrarModal();
+      try {
+        await ponerFoto(r.nombre, null, { ancho: 26, nombre: 'QR', lamina: laminaDeAntes, aviso: `QR listo: lleva a ${r.destino}. Pruébalo con tu móvil antes de publicar.` });
+      } catch (e) {
+        if (ED === yo) avisoPantalla(`No se ha podido poner el QR: ${e.message}`, true);
       }
     };
+    const laminaDeAntes = yo.lamina;
+    const botonHacer = boton('Hacer el QR', { clase: 'ce-btn ce-primario' }, () => hacer());
     valor.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); hacer(); } });
     capaVista.appendChild(el('div', { clase: 'ce-modal-cuerpo ce-modal-qr' },
       el('h2', {}, 'Poner un QR'),
       el('p', { clase: 'ce-pista' }, 'Se hace aquí mismo, gratis y sin salir a internet. Va en negro sobre blanco para que lo lea cualquier móvil.'),
       elegirTipo, valor, mensaje, pista, error,
-      el('div', { clase: 'ce-botonera' }, boton('Hacer el QR', { clase: 'ce-btn ce-primario' }, hacer), boton('Cancelar', {}, cerrarModal))));
+      el('div', { clase: 'ce-botonera' }, botonHacer, boton('Cancelar', {}, cerrarModal))));
     capaVista.addEventListener('pointerdown', ev => { if (ev.target === capaVista) cerrarModal(); });
     ED.raiz.appendChild(capaVista);
     pintarTipo();
@@ -2603,6 +2626,8 @@
       const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/capas/historias'), { method: 'POST', cuerpo: { doc: docParaEnviar() } });
       if (ED !== yo) return;
       await abrir(Object.assign({}, yo.opc, { pieza: null, duplicar: false, docInicial: r.doc }));
+      // es nueva y no está guardada: al cerrar sin guardar, que lo pregunte
+      if (ED && ED !== yo) { ED.guardado = ''; pintarEstado(); }
       if (ED && ED !== yo) avisoPantalla('Estas son las historias (9:16), aún sin guardar: revísalas y pulsa «Guardar». El carrusel de antes sigue igual.');
     } catch (e) {
       if (ED === yo) avisoPantalla(`No se han podido hacer las historias: ${e.message}`, true);

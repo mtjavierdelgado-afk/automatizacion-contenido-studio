@@ -49,15 +49,31 @@ def _familia(valor, donde):
     raise ErrorGraficas(f"{donde}: la familia «{valor[:40]}» no existe (usa su nombre o su número, del 1 al {max(K.FAMILIAS)})")
 
 
+def _primera(texto):
+    return next((linea for linea in texto.splitlines() if linea.strip()), "")
+
+
+def _separador(primera):
+    """El de la fila de títulos (no el de todo el texto: las frases llevan comas)."""
+    if "\t" in primera:
+        return "\t"
+    return max((",", ";"), key=primera.count)
+
+
 def _es_csv(texto):
-    primera = next((linea for linea in texto.splitlines() if linea.strip()), "")
-    celda = re.split(r"[,;\t]", primera, maxsplit=1)[0]
-    return bool(re.search(r"[,;\t]", primera)) and _sin_tildes(celda).strip('"') in ("familia", "titular", "portada")
+    """Un CSV si su primera línea es una fila de TÍTULOS: «titular» (o
+    «portada») como celda, y celdas cortas. «Portada, lo que nadie te cuenta»
+    es el titular de una lista, no una cabecera."""
+    primera = _primera(texto)
+    if not re.search(r"[,;\t]", primera):
+        return False
+    celdas = [_sin_tildes(c).strip().strip('"') for c in primera.split(_separador(primera))]
+    return (len(celdas) >= 2 and any(c in ("titular", "portada", "familia") for c in celdas)
+            and all(len(c) <= 25 and len(c.split()) <= 3 for c in celdas))
 
 
 def _desde_csv(texto):
-    muestra = texto[:2000]
-    separador = max((",", ";", "\t"), key=muestra.count)
+    separador = _separador(_primera(texto))
     filas = [f for f in csv.reader(io.StringIO(texto), delimiter=separador) if any(c.strip() for c in f)]
     cabecera = [_sin_tildes(c) for c in filas[0]]
     col_familia = cabecera.index("familia") if "familia" in cabecera else None

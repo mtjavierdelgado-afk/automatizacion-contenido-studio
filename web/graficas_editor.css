@@ -325,7 +325,7 @@ body.ce-abierto { overflow: hidden; }
 /* Iconos y pegatinas (graficas-3c-extras) */
 .ce-modal-iconos { width: min(760px, 100%); max-height: 88vh; overflow: auto; }
 .ce-iconos { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
-.ce-icono { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border: 1px solid var(--linea); border-radius: 8px; background: #ffffff; color: #111111; cursor: pointer; font: inherit; font-size: 11px; }
+.ce-icono { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border: 1px solid var(--linea); border-radius: 8px; background: var(--hueco); color: var(--texto); cursor: pointer; font: inherit; font-size: 11px; }
 .ce-icono img { width: 32px; height: 32px; }
 .ce-icono:hover, .ce-icono:focus-visible { border-color: var(--acento); outline: 2px solid var(--acento); outline-offset: 0; }
 .ce-menu-pegatinas { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; grid-column: 1 / -1; }

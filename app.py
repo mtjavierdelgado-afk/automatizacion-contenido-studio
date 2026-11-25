@@ -26701,6 +26701,46 @@ def graficas_partir_texto(cid: str, peticion: Request, cuerpo: dict = Body(defau
     return {"doc": doc, "avisos": avisos}
 
 
+@app.post("/api/graficas/{cid}/capas/lote", status_code=202)
+def graficas_lote(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Carruseles en lote (graficas-3c-extras): una lista (separada por ---) o
+    un CSV, y cada uno se guarda como pieza nueva. Sin IA y gratis. Es un
+    trabajo con barra (se sigue en `.../capas/trabajo/{id}`, como un guardado)."""
+    G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
+    _G, _C, raiz, _kit, _logo, _oscuro = _contexto_capas(cid, peticion)
+    import graficas_lote as LOTE  # noqa: E402,PLC0415
+    cuerpo = cuerpo or {}
+    n = _entero(cuerpo.get("familia"), "esa familia")
+    formato = str(cuerpo.get("formato") or G.FORMATO_DEFECTO)
+    entradas = _por_graficas(LOTE.leer, cuerpo.get("texto"))
+    _por_graficas(K.familia, n)
+    _por_graficas(G.formato, formato)
+    with _CERROJO_TRABAJOS_CAPAS:
+        if any(v["cid"] == cid and v.get("lote") and not v["fin"] for v in _TRABAJOS_CAPAS.values()):
+            raise ErrorApi(409, "ya se está haciendo una tanda de carruseles en este proyecto: espera a que termine")
+        tid = secrets.token_hex(8)
+        trabajo = {"id": tid, "cid": cid, "pieza": "", "lote": True, "estado": "pintando", "hechas": 0,
+                   "total": len(entradas), "resultado": None, "error": "", "codigo": 0, "fin": 0}
+        _TRABAJOS_CAPAS[tid] = trabajo
+    hechos = []
+
+    def avisar(hechas, total):
+        trabajo.update(hechas=hechas, total=total)
+
+    def correr():
+        try:
+            LOTE.hacer(raiz, cid, entradas, n, formato, G._con_turno, kit, logo, oscuro, marca, avisar, hechos)
+            trabajo.update(estado="listo", resultado={"piezas": hechos})
+        except Exception as fallo:                          # noqa: BLE001
+            # lo hecho se queda guardado: se dice cuántos salieron
+            trabajo.update(estado="error", resultado={"piezas": hechos}, codigo=400 if isinstance(fallo, G.ErrorGraficas) else 500,
+                           error=f"{fallo} ({len(hechos)} de {len(entradas)} carruseles ya están guardados)")
+        finally:
+            trabajo["fin"] = time.time()
+    threading.Thread(target=correr, name=f"lote-{tid}", daemon=True).start()
+    return JSONResponse({"trabajo": tid, "total": len(entradas)}, status_code=202)
+
+
 @app.post("/api/graficas/{cid}/capas/historias")
 def graficas_historias(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """«Hacer también las historias»: el mismo carrusel en 9:16 (no se guarda:

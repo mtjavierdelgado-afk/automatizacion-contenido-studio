@@ -36991,6 +36991,70 @@ async function abrirEditorCapasYa(cid, pieza, extra) {
   }, extra || {}));
 }
 
+/* «Carruseles en lote» (graficas-3c-extras): una lista separada por --- o un
+   CSV pegado de Excel o Sheets; cada uno se guarda como pieza nueva en un
+   trabajo con barra (POST /capas/lote, seguido en /capas/trabajo/{id}). */
+const EJEMPLO_LOTE_GRAFICAS = `Familia: Gamer
+5 errores al alquilar una consola
+
+No probar los mandos
+Pruébalos todos antes de la fiesta.
+
+---
+Familia: Publicación
+Cómo elegir el juego para tu fiesta
+
+Mira la edad de los invitados
+No es lo mismo un cumpleaños de 8 que uno de 30.`;
+
+async function carruselesEnLoteGraficas(cid) {
+  GRAF.lotes = GRAF.lotes || {};
+  if (GRAF.lotes[cid]) return;
+  let cat, car;
+  try {
+    [cat, car] = await Promise.all([catalogoGraficas(), pedir(`${BASE}/api/graficas/carrusel/catalogo`)]);
+  } catch (e) { toast(e.message, true); return; }
+  const r = await dialogo({
+    titulo: 'Carruseles en lote',
+    texto: 'Sin IA y gratis. Separa cada carrusel con una línea que solo diga ---; dentro, cada párrafo es una lámina (como «Partir un texto»). '
+      + 'Puedes empezar uno con «Familia: Gamer». También vale un CSV pegado de Excel o Sheets con las columnas familia, titular y una por lámina. Hasta 20 por tanda.',
+    campos: [
+      { clave: 'texto', etiqueta: 'Los carruseles', tipo: 'textarea', max: 60000, pista: EJEMPLO_LOTE_GRAFICAS },
+      { clave: 'familia', etiqueta: 'Familia (para los que no digan la suya)', tipo: 'select', valor: '1',
+        opciones: car.familias.map(f => ({ valor: String(f.n), nombre: `${f.n}. ${f.nombre}` })) },
+      { clave: 'formato', etiqueta: 'Tamaño', tipo: 'select', valor: cat.formato_defecto,
+        opciones: cat.formatos.map(f => ({ valor: f.id, nombre: `${f.nombre} · ${f.W}×${f.H}` })) },
+    ],
+    aceptar: 'Hacer los carruseles',
+  });
+  if (!r || !String(r.texto || '').trim()) return;
+  let inicio;
+  try {
+    inicio = await pedir(apiGraficas(cid, '/capas/lote'), { method: 'POST', cuerpo: { texto: r.texto, familia: Number(r.familia), formato: r.formato } });
+  } catch (e) { toast(e.message, true); return; }
+  const marcar = texto => { GRAF.lotes[cid] = texto; pintarLight(); };
+  marcar(`Haciendo 0 de ${inicio.total} carruseles…`);
+  let ultimo = 0;
+  try {
+    for (;;) {
+      await new Promise(ok => setTimeout(ok, 1500));
+      const t = await pedir(apiGraficas(cid, `/capas/trabajo/${inicio.trabajo}`));
+      if (t.hechas !== ultimo) { ultimo = t.hechas; marcar(`Haciendo ${t.hechas} de ${t.total} carruseles…`); }
+      if (t.estado === 'listo') {
+        toast(`${plural((t.resultado.piezas || []).length, 'carrusel hecho', 'carruseles hechos')}: ábrelos para revisar los textos de muestra antes de publicar.`);
+        break;
+      }
+      if (t.estado === 'error') { toast(t.error, true); break; }
+    }
+  } catch (e) {
+    toast(`No se ha podido seguir la tanda: ${e.message}. Lo hecho se queda guardado.`, true);
+  } finally {
+    delete GRAF.lotes[cid];
+    GRAF.piezas[cid] = undefined;
+    pintarLight();
+  }
+}
+
 function seccionGraficasDelProyecto(cid) {
   const caja = h('div', { clase: 'seccion-graficas' });
   const lista = GRAF.piezas[cid];
@@ -36998,6 +37062,9 @@ function seccionGraficasDelProyecto(cid) {
     h('h3', {}, 'Gráficas'),
     h('span', { clase: 'meta' }, lista ? plural(lista.length, 'pieza', 'piezas') : ''),
     h('span', { clase: 'crece' }),
+    GRAF.lotes && GRAF.lotes[cid] ? h('span', { clase: 'meta lote-graficas', role: 'status' }, GRAF.lotes[cid]) : null,
+    h('button', { clase: 'mini lote-en-capas', title: 'Muchos carruseles de una vez desde una lista o un CSV (sin IA, gratis)',
+      disabled: !!(GRAF.lotes && GRAF.lotes[cid]), onclick: () => carruselesEnLoteGraficas(cid) }, '+ Carruseles en lote'),
     h('button', { clase: 'mini nueva-en-capas', title: 'Un diseño libre: añade textos, fotos, logo y formas donde quieras',
       onclick: () => abrirEditorCapas(cid, null) }, '+ Diseño en capas')));
   if (lista === undefined) {

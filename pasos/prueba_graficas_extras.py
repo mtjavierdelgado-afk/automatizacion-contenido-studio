@@ -370,6 +370,63 @@ def iconos(pincel):
         ok(C._RE_REF.fullmatch(ref) is not None, f"las pegatinas usan colores que se guardan ({ref})")
 
 
+def lote(pincel):
+    print("carruseles en lote: una lista o un CSV")
+    import tempfile, shutil                                 # noqa: E401,PLC0415
+    import graficas_lote as LOTE                            # noqa: PLC0415
+
+    def falla(texto):
+        try:
+            LOTE.leer(texto)
+            return ""
+        except G.ErrorGraficas as e:
+            return str(e)
+    lista = "Familia: Gamer\n" + TEXTO + "\n---\nCómo elegir el juego\n\nMira la edad\nNo es lo mismo 8 que 30.\n\n---\n\n---\nFamilia: publicacion\nTres trucos\n\n- Uno\n- Dos\n- Tres"
+    e = LOTE.leer(lista)
+    ok([x["familia"] for x in e] == [16, None, 15], "la lista: cada uno con su familia (por nombre, sin tildes ni mayúsculas) o la elegida")
+    ok([x["nombre"] for x in e] == ["5 errores al alquilar una consola", "Cómo elegir el juego", "Tres trucos"], "cada uno se llama como su titular")
+    ok(not e[0]["texto"].lower().startswith("familia"), "la línea «Familia:» no entra en el carrusel")
+    csv_comas = 'familia,titular,lamina 1,lamina 2\n16,Errores al alquilar,"No probar | Pruébalos antes",8 de 10 | fiestas\n,Sin familia,Uno | dos,\n'
+    e = LOTE.leer(csv_comas)
+    ok([x["familia"] for x in e] == [16, None] and e[0]["texto"] == "Errores al alquilar\n\nNo probar\nPruébalos antes\n\n8 de 10\nfiestas",
+       "un CSV con comas: cada fila un carrusel y «|» parte titular y frase")
+    e = LOTE.leer("Familia;Titular;L1\nGamer;Hola;Uno | dos\n")
+    ok(len(e) == 1 and e[0]["familia"] == 16, "con punto y coma (Excel en español)")
+    e = LOTE.leer("titular\tl1\tl2\nHola\tUno\tDos\n")
+    ok(len(e) == 1 and e[0]["familia"] is None and e[0]["texto"] == "Hola\n\nUno\n\nDos", "con tabuladores (pegado de Excel o Sheets)")
+    ok("Galaxia" in falla("Familia: Galaxia\nHola"), "una familia que no existe se dice con su nombre")
+    ok("fila 2" in falla("familia,titular\n99,Hola\n"), "en el CSV se dice la fila")
+    ok("titular" in falla("familia,otra\n1,x\n"), "un CSV sin «titular» se rechaza")
+    ok("ningún" in falla("   \n---\n  "), "sin ningún carrusel se dice")
+    ok("caben 20" in falla("\n---\n".join(f"Carrusel {i}" for i in range(21))), "más de 20 por tanda se rechaza")
+    ok("demasiado" in falla("x" * 60001), "un texto enorme se rechaza")
+    raiz = tempfile.mkdtemp(prefix="graficas_lote_")
+    try:
+        vistos = []
+        hechos = LOTE.hacer(raiz, "cli", LOTE.leer(lista), 3, "v45", lambda fn: fn(pincel), None, None, None, "EstadoPlay",
+                            lambda h, t: vistos.append((h, t)))
+        ok(vistos == [(1, 3), (2, 3), (3, 3)], "la barra avanza de uno en uno")
+        ok(len(hechos) == 3 and all(x["id"] and x["laminas"] >= 2 for x in hechos), "se guardan 3 piezas nuevas, con sus láminas")
+        piezas = {p["id"]: p for p in G.listar_piezas(raiz, "cli")}
+        ok(all(x["id"] in piezas for x in hechos), "y salen en la lista de Gráficas")
+        _ficha, doc = C.leer(raiz, "cli", hechos[0]["id"])
+        ok(doc["nombre"] == "5 errores al alquilar una consola" and doc["laminas"][1].get("familia") == 16,
+           "con su nombre y su familia")
+        _ficha, doc = C.leer(raiz, "cli", hechos[1]["id"])
+        ok(doc["laminas"][1].get("familia") == 3, "el que no dice familia va con la elegida")
+        try:
+            LOTE.hacer(raiz, "cli", LOTE.leer("Hola"), 99, "v45", lambda fn: fn(pincel))
+            ok(False, "una familia elegida que no existe se rechaza")
+        except G.ErrorGraficas:
+            ok(True, "una familia elegida que no existe se rechaza")
+    finally:
+        shutil.rmtree(raiz, ignore_errors=True)
+    app = open(os.path.join(AQUI, "..", "app.py"), encoding="utf-8").read()
+    js = open(os.path.join(AQUI, "..", "web", "app.js"), encoding="utf-8").read()
+    ok('@app.post("/api/graficas/{cid}/capas/lote"' in app and "'/capas/lote'" in js and "+ Carruseles en lote" in js,
+       "la ruta y el botón «+ Carruseles en lote»")
+
+
 def main():
     familias_nuevas()
     tarjeta_no_tapa_la_marca()
@@ -381,6 +438,7 @@ def main():
         qr(pincel)
         historias(pincel)
         iconos(pincel)
+        lote(pincel)
     finally:
         pincel.cerrar()
     print(f"\n{CUENTA['ok']} comprobaciones bien, {CUENTA['mal']} mal")

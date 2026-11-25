@@ -231,7 +231,11 @@ _devolver() {
 _sitio_cliente() {
   local copias="$1" tmp="$2" sitio puerto
   sitio="$NGINX/sites-available/as-video-studio"
-  [ -f "$sitio" ] || return 0
+  if [ ! -f "$sitio" ]; then
+    no "no encuentro el sitio de nginx ($sitio): la pagina del cliente (/cliente/) no se abre"
+    echo "    (añadela a mano: ver despliegue/nginx-sitio.conf)"
+    return 0
+  fi
   grep -q 'zone=asvs_cliente' "$sitio" && return 0
   # EL `location / {` QUE LLEVA AL ESTUDIO (no el de un bloque del 80 que solo
   # redirige): el primero con un proxy_pass a 127.0.0.1 antes de cerrarse.
@@ -265,8 +269,11 @@ _sitio_cliente() {
       print "        limit_req zone=asvs_cliente burst=40 nodelay;"
       print "        limit_req_status 429;"
       print "        client_max_body_size 16k;"
-      print "        # el token va en la direccion: que no quede en el registro"
+      print "        # el token va en la direccion: que no quede en los registros (ni en el"
+      print "        # de accesos ni en el de errores, donde un 429 o el estudio caido"
+      print "        # escribirian la direccion entera; solo lo critico)"
       print "        access_log off;"
+      print "        error_log /var/log/nginx/as-video-studio.error.log crit;"
       print "        proxy_pass http://127.0.0.1:" puerto ";"
       print "        include /etc/nginx/snippets/asvs-proxy-largo.conf;"
       print "        # el estudio sabe asi que esto llego por la puerta publica"

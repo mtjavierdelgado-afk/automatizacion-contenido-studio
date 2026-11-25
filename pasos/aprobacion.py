@@ -83,8 +83,20 @@ def _ruta(raiz):
     return os.path.join(raiz, "_sistema", "publicar", "aprobaciones.json")
 
 
+#: Lo que se dice si el fichero de aprobaciones está dañado o no se puede leer
+ILEGIBLE = ("no puedo leer las aprobaciones de los clientes (el fichero está dañado o no se "
+            "puede abrir): no sale nada que espere a un cliente hasta arreglarlo")
+
+
 def _leer(raiz):
-    datos = leer_json(_ruta(raiz), {}) or {}
+    """FALLA CERRADO (árbitro del tren, 25-11): un fichero presente pero
+    dañado NO es «no hay enlaces». Leerlo como vacío dejaría salir vídeos sin
+    el «sí» del cliente y el siguiente guardado escribiría encima, perdiendo
+    todos los enlaces. Ilegible -> ErrorAprobacion (503) y no se escribe nada."""
+    try:
+        datos = leer_json(_ruta(raiz), {}, estricto=True) or {}
+    except (ValueError, OSError):
+        raise ErrorAprobacion(ILEGIBLE, 503) from None
     datos = datos if isinstance(datos, dict) else {}
     if not isinstance(datos.get("enlaces"), dict):
         datos["enlaces"] = {}

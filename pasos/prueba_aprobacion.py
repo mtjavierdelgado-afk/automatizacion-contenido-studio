@@ -168,6 +168,27 @@ def prueba_respuestas():
     ok(A.respuestas(raiz, pids=set()) == [], "y solo de los vídeos que se pueden ver")
     A.marcar_visto(raiz, token)
     ok(A.de_video(raiz, "v2")["visto"] is True, "abrirlo queda apuntado")
+    # (árbitro del tren, 25-11) un fichero DAÑADO no es «no hay enlaces»
+    ruta = os.path.join(raiz, "_sistema", "publicar", "aprobaciones.json")
+    with open(ruta, encoding="utf-8") as fh:
+        bueno = fh.read()
+    with open(ruta, "w", encoding="utf-8") as fh:
+        fh.write(bueno[: len(bueno) // 2])
+    for nombre, hacer in (("mirar si espera", lambda: A.espera_al_cliente(raiz, "v2", {}, [])),
+                          ("crear otro", lambda: A.crear(raiz, "v8", huella="h")),
+                          ("responder", lambda: A.responder(raiz, token, "aprobado", "", "h", {}))):
+        try:
+            hacer()
+            ok(False, f"con el fichero dañado, «{nombre}» no sigue como si nada")
+        except A.ErrorAprobacion as fallo:
+            ok(fallo.codigo == 503, f"con el fichero dañado, «{nombre}» da 503")
+    with open(ruta, encoding="utf-8") as fh:
+        ok(fh.read() == bueno[: len(bueno) // 2], "y no se escribe encima (no se pierden los enlaces)")
+    import publicar as P  # noqa: PLC0415
+    ok(P._espera_al_cliente(raiz, "v2", {"mp4_huella": "h1"}, {}, ["tiktok"]) == "ilegible",
+       "publicar lo lee como «no puedo leerlo» y NO deja salir el vídeo (falla cerrado)")
+    with open(ruta, "w", encoding="utf-8") as fh:
+        fh.write(bueno)
 
 
 def _error_de(P, raiz, info, ajustes, redes):
@@ -188,7 +209,7 @@ def prueba_sin_textos():
     info = {"pid": "v4", "montado": True, "mp4": mp4, "mp4_huella": "h1",
             "formato": "vertical", "duracion_s": 20}
     token = A.crear(raiz, "v4", huella="h1")["token"]
-    por_red = P.textos_para_el_cliente(P._leer_video(raiz, "v4"), {})
+    por_red = P.textos_para_el_cliente(P._leer_video(raiz, "v4"), {}, info)
     ok(por_red == {}, "todavía sin textos")
     huella = A.huella_de_lo_que_ve("h1", {}, [])
     try:
@@ -221,12 +242,12 @@ def prueba_enviar_espera():
     token = A.crear(raiz, "v3", huella="h1")["token"]
 
     def aprobar(decision="aprobado", comentario=""):
-        por_red = P.textos_para_el_cliente(P._leer_video(raiz, "v3"), ajustes)
+        por_red = P.textos_para_el_cliente(P._leer_video(raiz, "v3"), ajustes, info)
         redes = A.redes_que_ve(P._leer_video(raiz, "v3"), por_red, P.REDES)
         huellas = A.huellas_por_red("h1", {r: por_red[r] for r in redes})
         A.responder(raiz, token, decision, comentario, A.huella_de_lo_que_ve("h1", huellas, redes), huellas)
 
-    por_red = P.textos_para_el_cliente(P._leer_video(raiz, "v3"), ajustes)
+    por_red = P.textos_para_el_cliente(P._leer_video(raiz, "v3"), ajustes, info)
     ok("Reserva ya" in por_red["tiktok"]["texto"] and "Estado Play" in por_red["tiktok"]["texto"],
        "el cliente ve el texto que SALE (con su llamada a la acción y la firma)")
 
@@ -271,6 +292,21 @@ def prueba_enviar_espera():
     ok(sale(["instagram"]) != "", "y una red que el cliente no vio no sale")
     ok("falta el texto" in _error_de(P, raiz, info, ajustes, ["facebook"]),
        "una red sin texto dice «falta el texto», no lo del cliente")
+    # (árbitro del tren) lo que el cliente ve es lo que SALE: YouTube con su #Shorts
+    yt = P.textos_para_el_cliente(P._leer_video(raiz, "v3"), ajustes, info).get("youtube") or {}
+    ok("#Shorts" in (yt.get("titulo", "") + yt.get("texto", "")),
+       "el cliente ve el texto compuesto como se manda (YouTube con su #Shorts)")
+    # (árbitro del tren) un texto cambiado entre «Publicar» y la subida no se cuela
+    aprobar()
+    hechos = P.enviar(raiz, info, ajustes, {"redes": ["youtube"], "modo": "pendiente"}, en_hilo=False)
+    datos = P._leer_video(raiz, "v3")
+    datos["textos"]["youtube"]["descripcion"] = "cambiado justo antes de subir"
+    P._escribir(P._ruta_video(raiz, "v3"), datos)
+    lote = next(e["lote"] for e in P._leer_video(raiz, "v3")["envios"] if e["id"] == hechos[0]["id"])
+    P._subir_lote(raiz, info, ajustes, lote, en_hilo=False)
+    e = next(e for e in P._leer_video(raiz, "v3")["envios"] if e["id"] == hechos[0]["id"])
+    ok(e["estado"] == "fallido" and "no se ha mandado" in e.get("error", ""),
+       f"la subida vuelve a mirar con los textos que manda: no se cuela ({e['estado']}, {e.get('error')!r})")
     # reintentar un envío «comprobar» también espera al cliente
     datos = P._leer_video(raiz, "v3")
     datos["envios"].append({"id": "e-comprobar", "red": "tiktok", "lote": "abc123abc123",

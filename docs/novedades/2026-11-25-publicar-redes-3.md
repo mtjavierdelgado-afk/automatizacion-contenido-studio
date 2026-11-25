@@ -11,5 +11,10 @@
 - Su respuesta sale en la ficha (con su comentario) y en «Por publicar», en
   «Lo que han contestado tus clientes».
 - El cliente solo ve ese vídeo: nada más del Studio. Es gratis.
+- Con el **piloto automático**, un vídeo que espera al cliente se queda en
+  «espera tu OK» con el aviso; cuando el cliente lo apruebe, dale tú el OK
+  (el piloto no lo vuelve a intentar solo).
+- Si el fichero de las aprobaciones se dañara, no sale nada que espere a un
+  cliente hasta arreglarlo (se dice en la pantalla).
 - En el servidor, `asvs actualizar` abre esa única dirección (`/cliente/`) sin
   contraseña, con un límite de intentos.

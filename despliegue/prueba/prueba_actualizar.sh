@@ -264,7 +264,7 @@ ok 'awk "/location \\^~ \\/cliente\\//,/^    }/" "$T/etc/nginx/sites-available/a
 ok 'awk "/location \\^~ \\/cliente\\//,/^    }/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q "limit_req zone=asvs_cliente" && ! awk "/location \\^~ \\/cliente\\//,/^    }/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q auth_request' \
    "con su limite y SIN pasar por el login"
 ok 'grep -q "pagina del cliente" "$T/salida"' "y lo dice"
-ok 'grep -q "X-Asvs-Publico 1" "$T/etc/nginx/sites-available/as-video-studio" && grep -q "access_log off" "$T/etc/nginx/sites-available/as-video-studio" && grep -q "request_uri !~" "$T/etc/nginx/sites-available/as-video-studio"' \
+ok 'grep -q "X-Asvs-Publico 1" "$T/etc/nginx/sites-available/as-video-studio" && grep -q "access_log off" "$T/etc/nginx/sites-available/as-video-studio" && grep -q "error_log .* crit" "$T/etc/nginx/sites-available/as-video-studio" && grep -q "request_uri !~" "$T/etc/nginx/sites-available/as-video-studio"' \
    "marca lo publico, no deja el token en el registro y solo acepta las direcciones del cliente"
 ok 'diff <(awk "/location \\^~ \\/cliente\\//,/^    }/" "$T/etc/nginx/sites-available/as-video-studio" | sed "s/127.0.0.1:8111/127.0.0.1:8110/") <(awk "/location \\^~ \\/cliente\\//,/^    }/" "$DESPL/nginx-sitio.conf") >/dev/null' \
    "la location que añade es la MISMA que la de una instalacion nueva"
@@ -307,6 +307,10 @@ ok '[ $codigo -eq 0 ] && [ "$(grep -c "location ^~ /cliente/" "$T/etc/nginx/site
 ok '[ "$(awk "/location \\^~ \\/cliente\\//{print NR; exit}" "$T/etc/nginx/sites-available/as-video-studio")" -gt "$(grep -n "return 301" "$T/etc/nginx/sites-available/as-video-studio" | head -1 | cut -d: -f1)" ]' \
    "y no en el bloque que solo redirige, sino en el del estudio"
 ok '[ "$(grep -n "zone=asvs_cliente:" "$T/etc/nginx/sites-available/as-video-studio" | cut -d: -f1)" -lt "$(grep -n "^server {" "$T/etc/nginx/sites-available/as-video-studio" | head -1 | cut -d: -f1)" ]' "la zona, fuera de todo server"
+
+echo "[E4] sin el sitio de nginx: se avisa y se sigue"
+montar; rm -f "$T/etc/nginx/sites-available/as-video-studio"; correr; codigo=$?
+ok '[ $codigo -eq 0 ] && grep -q "no encuentro el sitio de nginx" "$T/salida"' "sale bien y dice que /cliente/ no se abre"
 
 echo "[F] falla algo al poner la configuracion (daemon-reload): se deshace y el estudio vuelve"
 montar; touch "$T/daemon_roto"; correr; codigo=$?

@@ -26737,6 +26737,19 @@ def graficas_logo(cid: str, variante: str, peticion: Request):
 # Nada de vídeos, params ni firmas (regla 1): se lee el MP4 y la ficha de
 # Publicar; lo único que se escribe es `_sistema/publicar/aprobaciones.json`.
 
+try:
+    from pasos.aprobacion import ErrorAprobacion as _ErrorAprobacion
+except ImportError:                                         # pragma: no cover
+    from aprobacion import ErrorAprobacion as _ErrorAprobacion
+
+
+@app.exception_handler(_ErrorAprobacion)
+async def _manejar_error_aprobacion(peticion, fallo):
+    """Un fallo de las aprobaciones (p. ej. el fichero dañado: 503) se dice con
+    su código, nunca como un 500 con la traza."""
+    return _respuesta_error(fallo.codigo, str(fallo))
+
+
 #: Las únicas rutas que pueden llegar por la puerta pública de nginx
 _RUTA_PUBLICA = re.compile(r"^/cliente/(_/cliente\.(js|css)|[A-Za-z0-9_-]{40,64}"
                            r"(/(datos|video\.mp4|respuesta))?)$")
@@ -26803,7 +26816,7 @@ def _lo_que_ve_el_cliente(ctx):
     P, aprob = _publicar(), _aprobacion()
     info = _info_para_publicar(ctx)
     datos = P._leer_video(raiz_proyectos(), ctx.id)
-    por_red = P.textos_para_el_cliente(datos, P.ajustes_de(raiz_proyectos(), info["cliente"]))
+    por_red = P.textos_para_el_cliente(datos, P.ajustes_de(raiz_proyectos(), info["cliente"]), info)
     redes = aprob.redes_que_ve(datos, por_red, P.REDES)
     huellas = aprob.huellas_por_red(info.get("mp4_huella") or "", {r: por_red[r] for r in redes})
     return {"info": info, "por_red": por_red, "redes": redes, "huellas": huellas,

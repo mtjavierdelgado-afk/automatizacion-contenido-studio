@@ -26807,7 +26807,7 @@ def _lo_que_ve_el_cliente(ctx):
     redes = aprob.redes_que_ve(datos, por_red, P.REDES)
     huellas = aprob.huellas_por_red(info.get("mp4_huella") or "", {r: por_red[r] for r in redes})
     return {"info": info, "por_red": por_red, "redes": redes, "huellas": huellas,
-            "huella": aprob.huella_de_lo_que_ve(huellas, redes)}
+            "huella": aprob.huella_de_lo_que_ve(info.get("mp4_huella") or "", huellas, redes)}
 
 
 def _ficha_para_cliente(registro):
@@ -26917,8 +26917,15 @@ def _aprobacion_para_dueno(ctx):
         datos = P._leer_video(raiz_proyectos(), ctx.id)
         ya = sorted({P.NOMBRE_RED.get(e.get("red"), e.get("red"))
                      for e in datos.get("envios") or [] if e.get("estado") in P.VIVOS})
+    # red a red, lo mismo que mirará `publicar.enviar`: cuáles salen ya y cuáles
+    # no (cambió su texto o el vídeo, o el cliente no la vio)
+    todas = aprob.huellas_por_red(ve["info"].get("mp4_huella") or "", ve["por_red"])
+    si = aprob.redes_aprobadas(raiz_proyectos(), ctx.id, todas)
     return {"enlace": enlace,
             "espera": aprob.espera_al_cliente(raiz_proyectos(), ctx.id, ve["huellas"], ve["redes"]),
+            "redes_aprobadas": [P.NOMBRE_RED.get(r, r) for r in P.REDES if r in si],
+            "redes_sin_aprobar": [P.NOMBRE_RED.get(r, r) for r in ve["redes"] if r not in si]
+            if enlace and enlace.get("estado") == "aprobado" else [],
             "dias_defecto": aprob.DIAS_DEFECTO, "dias_maximo": aprob.DIAS_MAXIMO,
             "aviso": ("Ojo: ya está publicado o programado en " + ", ".join(ya)
                       + ". Eso no espera al cliente; si quieres que espere, cancélalo.") if ya else ""}
@@ -26968,7 +26975,7 @@ def aprobaciones_respondidas(peticion: Request):
         if not r.get("vigente") and r.get("estado") == "cambios":
             envios = P._leer_video(raiz_proyectos(), r["pid"]).get("envios") or []
             if any(e.get("estado") == "publicado"
-                   and str(e.get("actualizado") or e.get("cuando") or "") > str(r.get("respondido_al") or "")
+                   and str(e.get("creado") or "") > str(r.get("respondido_al") or "")
                    for e in envios):
                 continue
         salida.append(r)

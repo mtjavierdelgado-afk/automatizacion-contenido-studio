@@ -159,7 +159,8 @@ def prueba_respuestas():
     t2 = {"instagram": {"titulo": "", "texto": "a #y"}}
     ok(A.huellas_por_red("m", t1) != A.huellas_por_red("m", t2), "un hashtag distinto cambia la huella")
     ok(A.huellas_por_red("m", t1) != A.huellas_por_red("m2", t1), "otro montaje también")
-    ok(A.huellas_por_red("", t1) == {} and A.huella_de_lo_que_ve({}, ["instagram"]) == "", "sin MP4 no hay huella")
+    ok(A.huellas_por_red("", t1) == {} and A.huella_de_lo_que_ve("", {}, ["instagram"]) == ""
+       and A.huella_de_lo_que_ve("m", {}, []) != "", "sin MP4 no hay huella (sin textos, sí)")
     ok(A.redes_que_ve({"redes": ["instagram", "tiktok"]}, {"tiktok": 1}, ["tiktok", "instagram"]) == ["tiktok"],
        "ve las redes elegidas que tienen texto")
     ok(A.redes_que_ve({"redes": []}, {"instagram": 1, "tiktok": 1}, ["tiktok", "instagram"]) == ["tiktok", "instagram"],
@@ -167,6 +168,39 @@ def prueba_respuestas():
     ok(A.respuestas(raiz, pids=set()) == [], "y solo de los vídeos que se pueden ver")
     A.marcar_visto(raiz, token)
     ok(A.de_video(raiz, "v2")["visto"] is True, "abrirlo queda apuntado")
+
+
+def _error_de(P, raiz, info, ajustes, redes):
+    try:
+        P.enviar(raiz, info, ajustes, {"redes": redes, "modo": "ahora", "confirmado": True}, en_hilo=False)
+        return ""
+    except P.ErrorPublicar as fallo:
+        return str(fallo)
+
+
+def prueba_sin_textos():
+    print("\n[3b] el vídeo se puede aprobar antes de escribir los textos")
+    import publicar as P  # noqa: PLC0415
+    raiz = _raiz()
+    mp4 = os.path.join(raiz, "v.mp4")
+    with open(mp4, "wb") as fh:
+        fh.write(b"mp4")
+    info = {"pid": "v4", "montado": True, "mp4": mp4, "mp4_huella": "h1",
+            "formato": "vertical", "duracion_s": 20}
+    token = A.crear(raiz, "v4", huella="h1")["token"]
+    por_red = P.textos_para_el_cliente(P._leer_video(raiz, "v4"), {})
+    ok(por_red == {}, "todavía sin textos")
+    huella = A.huella_de_lo_que_ve("h1", {}, [])
+    try:
+        A.responder(raiz, token, "aprobado", "", huella, {})
+        ok(True, "")
+    except A.ErrorAprobacion as fallo:
+        ok(False, f"sin textos, el vídeo se aprueba ({fallo})")
+    datos = P._leer_video(raiz, "v4")
+    datos["textos"] = {"tiktok": {"descripcion": "texto escrito después"}}
+    P._escribir(P._ruta_video(raiz, "v4"), datos)
+    ok("cliente" in _error_de(P, raiz, info, {"perfil": "x"}, ["tiktok"]),
+       "y el texto escrito después ya no lo vio: no sale sin que lo apruebe")
 
 
 def prueba_enviar_espera():
@@ -190,7 +224,7 @@ def prueba_enviar_espera():
         por_red = P.textos_para_el_cliente(P._leer_video(raiz, "v3"), ajustes)
         redes = A.redes_que_ve(P._leer_video(raiz, "v3"), por_red, P.REDES)
         huellas = A.huellas_por_red("h1", {r: por_red[r] for r in redes})
-        A.responder(raiz, token, decision, comentario, A.huella_de_lo_que_ve(huellas, redes), huellas)
+        A.responder(raiz, token, decision, comentario, A.huella_de_lo_que_ve("h1", huellas, redes), huellas)
 
     por_red = P.textos_para_el_cliente(P._leer_video(raiz, "v3"), ajustes)
     ok("Reserva ya" in por_red["tiktok"]["texto"] and "Estado Play" in por_red["tiktok"]["texto"],
@@ -231,7 +265,12 @@ def prueba_enviar_espera():
     datos["redes"] = ["youtube"]
     P._escribir(P._ruta_video(raiz, "v3"), datos)
     ok(sale(["youtube"]) == "", "quitar una red no le quita el «sí» a las demás")
+    datos = P._leer_video(raiz, "v3")
+    datos["textos"]["instagram"] = {"descripcion": "texto de Instagram que no vio"}
+    P._escribir(P._ruta_video(raiz, "v3"), datos)
     ok(sale(["instagram"]) != "", "y una red que el cliente no vio no sale")
+    ok("falta el texto" in _error_de(P, raiz, info, ajustes, ["facebook"]),
+       "una red sin texto dice «falta el texto», no lo del cliente")
     # reintentar un envío «comprobar» también espera al cliente
     datos = P._leer_video(raiz, "v3")
     datos["envios"].append({"id": "e-comprobar", "red": "tiktok", "lote": "abc123abc123",
@@ -372,6 +411,7 @@ def main():
         prueba_modulo()
         prueba_respuestas()
         prueba_enviar_espera()
+        prueba_sin_textos()
         prueba_rutas()
     finally:
         shutil.rmtree(CARPETA, ignore_errors=True)

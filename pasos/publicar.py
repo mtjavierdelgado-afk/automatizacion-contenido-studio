@@ -3097,7 +3097,10 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
         raise ErrorPublicar("falta confirmar el envío: nada sale sin tu OK", 400)
     # LA APROBACIÓN DEL CLIENTE (publicar-redes-3): con un enlace vigente que el
     # cliente no ha aprobado, el vídeo no sale (quedar en «espera tu OK», sí)
-    espera = (_espera_al_cliente(raiz, pid, info.get("mp4_huella") or "", ajustes, redes)
+    # (una red SIN texto se dice más abajo como «falta el texto»: no es cosa
+    # del cliente, así que aquí solo cuentan las que tienen)
+    con_texto = [r for r in redes if r in textos_para_el_cliente(_leer_video(raiz, pid), ajustes)]
+    espera = (_espera_al_cliente(raiz, pid, info.get("mp4_huella") or "", ajustes, con_texto)
               if modo != "pendiente" else "")
     if espera:
         raise ErrorPublicar(

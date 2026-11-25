@@ -123,12 +123,25 @@ def huellas_por_red(mp4_huella, por_red):
     return {red: _sello(str(mp4_huella), red, contenido) for red, contenido in (por_red or {}).items()}
 
 
-def huella_de_lo_que_ve(huellas, redes):
+def huella_de_lo_que_ve(mp4_huella, huellas, redes):
     """Una sola huella de todo lo que ve en la página (para «recarga, que ha
-    cambiado» al contestar). "" sin MP4."""
-    if not huellas:
+    cambiado» al contestar): el montaje y los textos de cada red. "" SOLO sin
+    MP4 (sin textos todavía, el vídeo sí se puede aprobar)."""
+    if not mp4_huella:
         return ""
-    return _sello([[r, huellas.get(r, "")] for r in redes])
+    return _sello(str(mp4_huella), [[r, (huellas or {}).get(r, "")] for r in redes])
+
+
+def redes_aprobadas(raiz, pid, huellas):
+    """Las redes del enlace vigente que el cliente aprobó TAL COMO ESTÁN ahora
+    (para que la ficha diga lo mismo que dirá `publicar.enviar`)."""
+    ahora = _ahora()
+    for registro in _leer(raiz)["enlaces"].values():
+        if registro.get("pid") == str(pid) and _vigente(registro, ahora) \
+                and registro.get("estado") == "aprobado":
+            aprobadas = registro.get("huellas_aprobadas") or {}
+            return [r for r, h in (huellas or {}).items() if h and aprobadas.get(r) == h]
+    return []
 
 
 #: Un enlace caducado o anulado se olvida pasado este tiempo (al pedir otro)

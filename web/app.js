@@ -37684,7 +37684,12 @@ function estadoEnlaceCliente(enlace, espera) {
       + 'apruebe lo nuevo. Pídele que abra el mismo enlace y lo vuelva a aprobar.');
   }
   if (enlace.estado === 'aprobado') {
-    return h('div', { clase: 'aprob-estado aprob-bien' }, `✓ El cliente lo aprobó (${cuando}).`,
+    const d = (APROB.porVideo[PUB.pid] || {}).datos || {};
+    const faltan = d.redes_sin_aprobar || [];
+    return h('div', { clase: 'aprob-estado aprob-bien' }, `✓ El cliente lo aprobó (${cuando})`
+      + ((d.redes_aprobadas || []).length ? ` para ${d.redes_aprobadas.join(', ')}.` : '.'),
+      faltan.length ? h('div', { clase: 'caja-aviso' }, `Sin su «sí» (cambió el texto o no la vio): ${faltan.join(', ')}. `
+        + 'Esas no salen hasta que lo vuelva a aprobar con el mismo enlace.') : null,
       enlace.comentario ? h('div', { clase: 'aprob-comentario' }, `«${enlace.comentario}»`) : null);
   }
   if (enlace.estado === 'cambios') {

@@ -67,7 +67,8 @@ def seccion(t):
 
 # ------------------------------------------------------------- Meta falso
 
-ESTADO = {"modo": "", "retirada": "", "uso": 0, "retraso": 0.0, "retraso_lote": 0.0, "peticiones": []}
+ESTADO = {"modo": "", "retirada": "", "uso": 0, "retraso": 0.0, "retraso_lote": 0.0, "retraso_fb": 0.0,
+          "peticiones": []}
 
 
 def _insights(pares):
@@ -149,6 +150,8 @@ class Falso(http.server.BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization") or ""
         if not dentro:
             ESTADO["peticiones"].append({"ruta": self.path, "auth": auth})
+        if ESTADO["retraso_fb"] and auth == f"Bearer {TOKEN_PAGINA}" and "video_insights" in self.path:
+            time.sleep(ESTADO["retraso_fb"])
         cab = {"X-App-Usage": json.dumps({"call_count": ESTADO["uso"], "total_time": 1})}
         modo = ESTADO["modo"]
         if modo == "caducado":
@@ -725,6 +728,37 @@ def prueba_publicar(base):
        f"un vídeo de Facebook lento no deja a Instagram sin leer ({r19.get('motivo')!r})")
     ok("tardó demasiado" in m_fb.get("meta_error", "") and m_fb.get("meta_al"),
        f"y ese vídeo lo dice, con su reloj ({m_fb.get('meta_error')!r})")
+    # (árbitro, 5.ª vuelta) lo mismo con TIEMPO DE VERDAD: Facebook espera de
+    # verdad su plazo; el vídeo queda apuntado (con reloj) y la vuelta
+    # siguiente lee Instagram
+    original_cm = P.cliente_meta
+    P.cliente_meta = lambda: MM.ClienteMeta(TOKEN, base=base, plazo=1)
+    ESTADO["retraso_fb"] = 1.6
+    plazo_antes, MM.PLAZO_S = MM.PLAZO_S, 1      # la misma proporción que 6 s / 12 s
+    try:
+        _video(raiz, "v20", [{"id": "t_ig", "red": "instagram", "estado": "publicado", "post_id": "reel2",
+                              "metricas": {}},
+                             {"id": "t_fb", "red": "facebook", "estado": "publicado",
+                              "post_id": f"{PAGINA}_555", "duracion_s": 20, "metricas": {}}])
+        P.medir_meta(raiz, ["v20"], forzar=True, hasta=time.time() + 1.8)
+        m_fb = _envio(raiz, "v20", "t_fb")["metricas"]
+        ok("tardó demasiado" in m_fb.get("meta_error", "") and m_fb.get("meta_al"),
+           f"con Facebook lento DE VERDAD, ese vídeo queda apuntado con su reloj ({m_fb.get('meta_error')!r})")
+        P.medir_meta(raiz, ["v20"], hasta=time.time() + 1.8)
+        ok(_envio(raiz, "v20", "t_ig")["metricas"].get("tiempo_medio_s") is not None,
+           "y la vuelta siguiente lee Instagram (no se queda sin leer para siempre)")
+    finally:
+        P.cliente_meta = original_cm
+        ESTADO["retraso_fb"] = 0.0
+        MM.PLAZO_S = plazo_antes
+    # (árbitro, 5.ª vuelta) un medio del lote con 200 y HTML, por el lector de verdad
+    cli11 = MM.ClienteMeta(TOKEN, base=base)
+    original_pedir = cli11._pedir
+    cli11._pedir = lambda metodo, url, cuerpo, token: (
+        [{"code": 200, "body": "<html>error</html>"}] if metodo == "POST" else original_pedir(metodo, url, cuerpo, token))
+    r11 = cli11.instagram(["reel1"])
+    ok("JSON" in r11.get("reel1", {}).get("detalle", "") and not cli11.sin_tiempo,
+       "un 200 con HTML en el lote de verdad es un error con reloj, no «no dio tiempo»")
     # (árbitro) con el cupo cerca o un fatal a mitad, lo bueno del lote se queda
     cli7 = MM.ClienteMeta(TOKEN, base=base)
     bueno = {"id": "x", "media_product_type": "REELS",

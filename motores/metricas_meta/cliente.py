@@ -265,7 +265,8 @@ class ClienteMeta:
             try:
                 cuerpo_item = json.loads(item.get("body") or "null")
             except (TypeError, ValueError):
-                cuerpo_item = None
+                # contestó, pero con algo que no es JSON: no es «no contestó»
+                cuerpo_item = NO_ES_JSON
             salida.append((int(_numero(item.get("code")) or 0), cuerpo_item))
         return salida
 
@@ -482,10 +483,10 @@ class ClienteMeta:
             if 200 <= codigo < 300 and isinstance(cuerpo, dict) and not cuerpo.get("error"):
                 salida.update(self._instagram_nodos([ident], {ident: cuerpo}))
                 continue
-            if 200 <= codigo < 300 and not isinstance(cuerpo, dict):
-                # un 200 que no es JSON (una página de error): con su reloj
+            if not isinstance(cuerpo, dict):
+                # contestó con algo que no es JSON (una página de error): con su reloj
                 salida[ident] = {"error": texto_para_envio(ErrorMeta("", "otro")),
-                                 "detalle": "Meta contestó algo que no es JSON"}
+                                 "detalle": f"Meta contestó algo que no es JSON (HTTP {codigo})"}
                 continue
             fallo = self._error(cuerpo, codigo or 400)
             if fallo.motivo in FATALES:
@@ -674,7 +675,9 @@ class ClienteMeta:
             try:
                 datos = self._get(ident, {"fields": campos}, token=token_pagina)
             except ErrorMeta as fallo:
-                if fallo.motivo in FATALES:
+                if fallo.motivo in FATALES or fallo.motivo == "lento":
+                    # «lento»: ya se gastó el plazo; probar la otra forma no
+                    # cabría y el vídeo se quedaría sin apuntar (árbitro, 5.ª vuelta)
                     raise
                 ultimo = fallo
                 continue          # con las de vídeo, por si no era un Reel
@@ -704,6 +707,10 @@ class ClienteMeta:
             }
         # «todavía no tiene las cifras» dice más que el rechazo de la otra forma
         raise vacio or ultimo or ErrorMeta("Meta no ha devuelto las cifras de este vídeo", "otro")
+
+
+#: Lo que deja `_lote` cuando Meta contestó con algo que no es JSON
+NO_ES_JSON = "<no es JSON>"
 
 
 def _detalle(*fallos):

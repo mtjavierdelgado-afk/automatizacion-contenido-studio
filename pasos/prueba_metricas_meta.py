@@ -561,7 +561,23 @@ def prueba_publicar(base):
        "el que no se encontró no se vuelve a buscar en cada «Actualizar»")
     # (árbitro) un error nuevo sin detalle no deja el detalle viejo
     P._apuntar_meta(raiz, {"i_nada": ("v11", {"error": "no es un Reel", "tipo": "FEED"}, {})})
-    ok("meta_detalle" not in _envio(raiz, "v11", "i_nada")["metricas"], "un error nuevo sin detalle borra el viejo")
+    det = _envio(raiz, "v11", "i_nada")["metricas"].get("meta_detalle", "")
+    ok("Unsupported" not in det and det.startswith("búsqueda por enlace"),
+       f"un error nuevo sin detalle borra lo viejo de Meta (lo de la búsqueda se queda) ({det[:60]!r})")
+    # (árbitro, 2.ª vuelta) una búsqueda cortada a medias no cuenta como hecha
+    original = MM.ClienteMeta.medios_ig
+    MM.ClienteMeta.medios_ig = lambda self, ig_id, paginas_max=4: ([], False)
+    try:
+        _video(raiz, "v13", [{"id": "i_m", "red": "instagram", "estado": "publicado", "post_id": "borradoUP91",
+                              "url": "https://www.instagram.com/reel/DCodigo_1/", "metricas": {}}])
+        r13 = P.medir_meta(raiz, ["v13"], forzar=True)
+    finally:
+        MM.ClienteMeta.medios_ig = original
+    m13 = _envio(raiz, "v13", "i_m")["metricas"]
+    ok("a medias" in m13.get("meta_detalle", "") and not m13.get("meta_busqueda_al"),
+       f"una búsqueda a medias lo dice y se repite en la próxima «Actualizar» ({m13.get('meta_detalle', '')[-70:]!r})")
+    ok(not any("tiempo" in x for x in r13.get("errores", [])),
+       "y cortar la búsqueda no avisa de «no dio tiempo» (lo demás se leyó)")
     ok(MM.shortcode_ig("https://www.instagram.com/usuario/reel/DCodigo_1/") == "DCodigo_1"
        and MM.shortcode_ig("https://instagram.com/p/AbC-12_x/") == "AbC-12_x"
        and MM.shortcode_ig("17900000000000001") == "" and MM.shortcode_ig("") == "",

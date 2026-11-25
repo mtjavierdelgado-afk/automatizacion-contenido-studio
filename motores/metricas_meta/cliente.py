@@ -472,22 +472,24 @@ class ClienteMeta:
         """Los medios de una cuenta de Instagram (id, shortcode, permalink),
         los más nuevos primero, hasta `paginas_max` páginas de 50. Para dar con
         el id de un Reel cuando el que trae el envío no es el de Meta (prueba
-        del servidor, 25-11: Instagram no contestaba ningún Reel)."""
+        del servidor, 25-11: Instagram no contestaba ningún Reel).
+        -> (medios, completo): `completo` es False si se cortó (tiempo o cupo)
+        antes de llegar al final o a `paginas_max`."""
         salida, despues = [], ""
         for _ in range(max(1, int(paginas_max))):
+            if self.cerca_del_cupo:
+                return salida, False
             params = {"fields": "id,shortcode,permalink,media_product_type", "limit": 50}
             if despues:
                 params["after"] = despues
-            if self.cerca_del_cupo:
-                break
             try:
                 datos = self._get(f"{ig_id}/media", params)
             except ErrorMeta as fallo:
-                # sin tiempo o sin cupo, vale lo leído hasta aquí
-                if fallo.motivo in ("tiempo", "cupo") and salida:
+                # sin tiempo o sin cupo: lo leído hasta aquí, y dicho que a medias
+                if fallo.motivo in ("tiempo", "cupo"):
                     if fallo.motivo == "cupo":
                         self.cerca_del_cupo = True
-                    break
+                    return salida, False
                 raise
             for m in datos.get("data") or []:
                 if isinstance(m, dict) and m.get("id"):
@@ -497,7 +499,7 @@ class ClienteMeta:
             despues = (((datos.get("paging") or {}).get("cursors") or {}).get("after") or "")
             if not despues or not (datos.get("paging") or {}).get("next"):
                 break
-        return salida
+        return salida, True
 
     # --------------------------------------------------------- facebook
 

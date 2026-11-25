@@ -4400,7 +4400,9 @@ def _medir_meta(raiz, pids, forzar, hasta, solo=None):
             _marcar_token(resultados, fb, fallo.motivo, "facebook")
     # los Reels que Meta no reconoce, por su enlace: DESPUÉS de Facebook, con
     # lo que quede de franja (no puede dejar a Facebook sin leer)
-    if sin_cifras and not motivos and _cabe(hasta) and not cli.cerca_del_cupo:
+    if sin_cifras and not motivos.get("instagram") \
+            and not any(m in MOTIVOS_DE_LAS_DOS for m in motivos.values()) \
+            and _cabe(hasta) and not cli.cerca_del_cupo:
         _ig_por_enlace(cli, sin_cifras, hasta, resultados)
     fatal = next((m for m in motivos.values() if m in MOTIVOS_DE_LAS_DOS), "") \
         or next((m for m in motivos.values() if m), "")
@@ -4502,30 +4504,44 @@ def _ig_por_enlace(cli, sin_cifras, hasta, resultados):
     if not cuentas:
         apuntar("búsqueda por enlace: el token no ve ninguna cuenta de Instagram")
         return
-    hallados, mirado = {}, []
+    hallados, mirado, completa = {}, [], True
+    sin_tiempo_antes = getattr(cli, "sin_tiempo", False)
     for cuenta in {c["ig_id"]: c for c in cuentas}.values():
-        if not _cabe(hasta) or cli.cerca_del_cupo or len(hallados) == len(buscados):
+        if not _cabe(hasta) or cli.cerca_del_cupo:
+            completa = False
+            break
+        if len(hallados) == len(buscados):
             break
         try:
-            medios = cli.medios_ig(cuenta["ig_id"])
+            medios, entera = cli.medios_ig(cuenta["ig_id"])
         except MM.ErrorMeta:
+            completa = False
             break
-        mirado.append("@" + (cuenta.get("ig_usuario") or cuenta["ig_id"]))
+        nombre = "@" + (cuenta.get("ig_usuario") or cuenta["ig_id"])
+        mirado.append(f"{nombre} ({len(medios)} más recientes)")
+        completa = completa and entera
         for m in medios:
             codigo = m.get("shortcode") or MM.shortcode_ig(m.get("permalink"))
             if codigo in buscados and m.get("id"):
                 hallados[codigo] = m["id"]
+        if not entera:
+            break
+    # cortarse la BÚSQUEDA no es «no dio tiempo» a leer: eso ya se leyó
+    cli.sin_tiempo = sin_tiempo_antes
     sin_hallar = [c for c in buscados if c not in hallados]
     if sin_hallar:
-        # lo que se buscó y dónde, para el diagnóstico (se guarda con el error)
+        # lo que se buscó y dónde, para el diagnóstico (se guarda con el error).
+        # Solo una búsqueda ENTERA cuenta como hecha (con su respiro): a medias,
+        # se dice así y la próxima «Actualizar» lo vuelve a intentar
         que = (f"búsqueda por enlace: {', '.join(sin_hallar[:3])} no está en "
-               f"{', '.join(mirado) or 'ninguna cuenta (no dio tiempo)'}")
+               f"{', '.join(mirado) or 'ninguna cuenta'}" if completa else
+               f"búsqueda por enlace a medias (no dio tiempo): mirado {', '.join(mirado) or 'nada'}")
         for codigo in sin_hallar:
             for pid, e, _ident in buscados[codigo]:
                 previo = (resultados.get(e["id"]) or (pid, {}, {}))[1]
                 if previo.get("error"):
                     detalle = " | ".join(x for x in (previo.get("detalle"), que) if x)[:300]
-                    resultados[e["id"]] = (pid, dict(previo, detalle=detalle, buscado=True), {})
+                    resultados[e["id"]] = (pid, dict(previo, detalle=detalle, buscado=completa), {})
     nuevos = {c: i for c, i in hallados.items()
               if any(i != ident for _p, _e, ident in buscados[c])}
     for codigo in hallados:
@@ -4629,7 +4645,10 @@ def _apuntar_meta(raiz, resultados):
                             nuevo += " | búsqueda por enlace" + viejo.split("búsqueda por enlace", 1)[1]
                         m["meta_detalle"] = nuevo[:300]
                     else:
-                        m.pop("meta_detalle", None)
+                        viejo = str(m.pop("meta_detalle", None) or "")
+                        if "búsqueda por enlace" in viejo:
+                            m["meta_detalle"] = ("búsqueda por enlace"
+                                                 + viejo.split("búsqueda por enlace", 1)[1])[:300]
                     if cifras.get("buscado"):
                         m["meta_busqueda_al"] = al
                     # con su reloj: un envío que Meta no contesta no se vuelve a

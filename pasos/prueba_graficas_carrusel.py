@@ -257,6 +257,33 @@ def fondo_tapado(pincel):
     ok(not malos, f"el editor sabe qué fondos tapa el diseño, igual que el PNG ({len(dice)} láminas; distintas: {malos})")
     ok(not any(dice[1::2]), "en las láminas de dentro de las 14 familias el fondo nunca está tapado")
 
+    # el aviso dice exactamente dónde se ve (pedido del dueño, 25-11)
+    casos = [
+        {"actual": 2, "propiaTapada": False, "puestas": [], "tapadas": [1], "llenas": [3, 4]},
+        {"actual": 1, "propiaTapada": True, "puestas": [2, 3, 4, 5, 6, 7, 8], "tapadas": [], "llenas": []},
+        {"actual": 2, "propiaTapada": False, "puestas": [3, 4, 5, 6, 7, 8], "tapadas": [1], "llenas": []},
+        {"actual": 2, "propiaTapada": False, "puestas": [], "tapadas": [], "llenas": [1, 3]},
+        {"actual": 2, "propiaTapada": False, "puestas": [4], "tapadas": [1, 3], "llenas": [5, 6]},
+    ]
+    codigo = (r"""const fs = require('fs'), vm = require('vm');
+const ctx = { window: {}, document: {}, console }; vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[process.argv.length - 1], 'utf8'), ctx);
+const K = ctx.window.EditorCapas._cuentas;
+process.stdout.write(JSON.stringify(JSON.parse(fs.readFileSync(0, 'utf8')).map(c => K.avisoFondoATodas(c))));""")
+    r = subprocess.run([node, "-e", codigo, EDITOR_JS], input=json.dumps(casos), capture_output=True, text=True, timeout=60)
+    if r.returncode:
+        ok(False, f"Node no ha podido correr el aviso: {r.stderr[-300:]}")
+        return
+    av = json.loads(r.stdout)
+    ok("la portada conserva" in av[0] and "las láminas 3 y 4 ya están llenas" in av[0],
+       f"sin ninguna cambiada, nombra las tapadas Y las llenas ({av[0]})")
+    ok("se ve ahora en 7 láminas" in av[1] and "en esta portada este fondo no se ve" in av[1],
+       f"desde una lámina tapada no se cuenta a sí misma, y lo dice ({av[1]})")
+    ok("se ve ahora en 7 láminas" in av[2] and "Ojo" not in av[2], f"desde una lámina que se ve, se cuenta ({av[2]})")
+    ok("la portada y la lámina 3 ya están llenas" in av[3], f"solo llenas: las nombra ({av[3]})")
+    ok("se ve ahora en 2 láminas" in av[4] and "la portada y la lámina 3 no se vería" in av[4]
+       and "las láminas 5 y 6 no se ha puesto" in av[4], f"puestas, tapadas y llenas a la vez ({av[4]})")
+
 
 # ================================================================ guardar
 

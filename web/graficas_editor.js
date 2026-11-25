@@ -1901,20 +1901,58 @@
       && (c.tipo === 'forma' || c.tipo === 'imagen');
   }
 
+  /** ¿Tapa esta capa la lámina entera, sin dejar ver nada de lo de abajo?
+   * (un rectángulo de color liso a sangre, o una foto a sangre, con foto o sin ella) */
+  function tapaTodo(c) {
+    if (c.oculto || c.giro || (c.opac != null && c.opac < 0.99) || c.recorte) return false;
+    if (!(c.x <= 0.5 && c.y <= 0.5 && c.x + c.w >= 99.5 && c.y + c.h >= 99.5)) return false;
+    // una foto a sangre tapa, también sin foto: se pinta un bloque de color
+    if (c.tipo === 'imagen') return !c.radio;
+    if (c.tipo !== 'forma' || (c.figura && c.figura !== 'rect') || c.radio) return false;
+    const r = c.relleno;
+    if (!r) return false;
+    if (r.degradado) return (r.degradado.paradas || []).every(p => p.alfa == null || p.alfa >= 0.99);
+    return !!r.color && (r.alfa == null || r.alfa >= 0.99);
+  }
+
+  /** El fondo de la lámina no se ve si otra capa lo tapa entero: las portadas
+   * de plantilla llevan encima su propio fondo (el degradado de Neón nocturno,
+   * la foto a sangre…), prueba del 24-11. */
+  function fondoTapado(lam) {
+    return lam.capas.slice(1).some(tapaTodo);
+  }
+
   function fondoATodas(c) {
     let sinSitio = 0;
+    const tapadas = [];
+    let puestas = 0;
     ED.doc.laminas.forEach((lam, i) => {
       if (i === ED.lamina) return;
+      // su diseño lo taparía: no se cambia lo que no se iba a ver
+      if (fondoTapado(lam)) { tapadas.push(i + 1); return; }
       const nuevo = Object.assign(copia(c), { id: nuevoId(), oculto: false });
       delete nuevo.enlace;
       const viejo = lam.capas[0] && esFondo(lam.capas[0], lam) ? lam.capas[0] : null;
       if (!cabeEnLamina(lam, nuevo, viejo)) { sinSitio++; return; }
       if (viejo) lam.capas[0] = nuevo; else lam.capas.unshift(nuevo);
+      puestas++;
     });
+    if (!puestas) {
+      avisoPantalla(tapadas.length
+        ? `No se ha cambiado nada: en ${tapadas.length === 1 ? 'la lámina' : 'las láminas'} ${tapadas.join(', ')} otra capa del diseño tapa el fondo.`
+        : 'No se ha cambiado nada: las demás láminas ya están llenas.', true);
+      return;
+    }
     pintarTodo(); commit(); pintarTira();
-    avisoPantalla(sinSitio
-      ? `Este fondo está en todas menos ${sinSitio} lámina(s) que ya están llenas (${LIMITES.capas} capas, ${LIMITES.fotos} fotos o ${LIMITES.logos} logos). Ctrl+Z lo deshace.`
-      : 'Este fondo está ahora en todas las láminas (también en la portada y el cierre). Ctrl+Z lo deshace.');
+    const partes = [`Este fondo está ahora en ${puestas + 1} láminas.`];
+    if (tapadas.length) {
+      partes.push(tapadas.length === 1 && tapadas[0] === 1
+        ? 'La portada conserva el fondo de su plantilla (lo lleva encima).'
+        : `En ${tapadas.length === 1 ? 'la lámina' : 'las láminas'} ${tapadas.join(', ')} no: su diseño lleva encima su propio fondo.`);
+    }
+    if (sinSitio) partes.push(`${sinSitio} lámina(s) ya están llenas (${LIMITES.capas} capas, ${LIMITES.fotos} fotos o ${LIMITES.logos} logos).`);
+    partes.push('Ctrl+Z lo deshace.');
+    avisoPantalla(partes.join(' '));
   }
 
   /** Lo del carrusel en el panel de una capa. */
@@ -2808,7 +2846,7 @@
   window.EditorCapas = {
     abrir, version: 1, _estado: () => ED,
     // para pasos/prueba_graficas_editor.py: que la pantalla haga las mismas cuentas que el servidor
-    _cuentas: { fueraDeLamina, textoDeLamina, f6, luz, tintaPara, coloresFinales, resolver, cssColor, cssRelleno, cssBorde, cssRadio, cssSombras, cssCaja,
+    _cuentas: { fueraDeLamina, textoDeLamina, fondoTapado, f6, luz, tintaPara, coloresFinales, resolver, cssColor, cssRelleno, cssBorde, cssRadio, cssSombras, cssCaja,
       LIMITES, CAMPOS_DE_MUESTRA },
   };
 }());

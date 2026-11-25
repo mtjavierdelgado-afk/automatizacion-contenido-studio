@@ -197,6 +197,50 @@ def pantalla_igual():
        f"{len(casos)} casos iguales en la pantalla y en el PNG" + (f" (caso {malos[0]}: {salida[malos[0]]} != {esperado[malos[0]]})" if malos else ""))
 
 
+_NODE_TAPADO = r"""
+const fs = require('fs'), vm = require('vm');
+const ctx = { window: {}, document: {}, console };
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[process.argv.length - 1], 'utf8'), ctx);
+const K = ctx.window.EditorCapas._cuentas;
+process.stdout.write(JSON.stringify(JSON.parse(fs.readFileSync(0, 'utf8')).map(l => K.fondoTapado(l))));
+"""
+
+
+def fondo_tapado(pincel):
+    """«Este fondo a todas» no toca una lámina cuyo fondo tapa otra capa (las
+    portadas de plantilla llevan su propio fondo encima, prueba del 24-11). La
+    verdad sale de pintar: si cambiar el color del fondo no cambia la imagen,
+    está tapado."""
+    print("«Este fondo a todas»: qué láminas tienen el fondo tapado")
+    node = shutil.which("node")
+    if not node:
+        print("  (sin Node: esta parte se omite)")
+        return
+    import graficas_carrusel as K                           # noqa: PLC0415
+    texto = "Titular de prueba\nY su apoyo\n\nUn punto\nCon su texto."
+    laminas, verdad = [], []
+    for n in range(1, 15):
+        base = {"version": 2, "formato": "v45", "nombre": "x", "laminas": [{"capas": []}]}
+        d, _ = K.carrusel_desde_texto(pincel, base, n, texto, "sustituir", None, None, None, "Alba")
+        for i in (0, 1):
+            antes = C.pintar(pincel, d, None, lambda _n: None, lamina=i)[0]
+            otro = json.loads(json.dumps(d))
+            otro["laminas"][i]["capas"][0]["relleno"] = {"color": "#00FF00", "alfa": 1}
+            despues = C.pintar(pincel, otro, None, lambda _n: None, lamina=i)[0]
+            laminas.append(d["laminas"][i])
+            verdad.append(antes == despues)
+    r = subprocess.run([node, "-e", _NODE_TAPADO, EDITOR_JS], input=json.dumps(laminas), capture_output=True,
+                       text=True, timeout=120)
+    if r.returncode:
+        ok(False, f"Node no ha podido correr fondoTapado: {r.stderr[-400:]}")
+        return
+    dice = json.loads(r.stdout)
+    malos = [(i // 2 + 1, "portada" if i % 2 == 0 else "dentro") for i, (a, b) in enumerate(zip(dice, verdad)) if a != b]
+    ok(not malos, f"el editor sabe qué fondos tapa el diseño, igual que el PNG ({len(dice)} láminas; distintas: {malos})")
+    ok(not any(dice[1::2]), "en las láminas de dentro de las 14 familias el fondo nunca está tapado")
+
+
 # ================================================================ guardar
 
 def guardar(carpeta):
@@ -776,6 +820,7 @@ def main():
     try:
         pieza_de_siempre_igual(pincel)
         partir_y_montar(pincel)
+        fondo_tapado(pincel)
         familias(pincel)
     finally:
         pincel.cerrar()

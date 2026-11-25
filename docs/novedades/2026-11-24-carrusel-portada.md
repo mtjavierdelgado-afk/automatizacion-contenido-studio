@@ -10,3 +10,7 @@
   titulares de las láminas que siguen.
 - «Revisar el carrusel» ya no cuenta como texto de muestra el número de un
   punto («01»), las etiquetas «Antes»/«Después» ni «Guárdalo y compártelo».
+- «Este fondo a todas» ya no dice que cambió la portada cuando no se ve: las
+  portadas de plantilla llevan encima su propio fondo (el degradado, la foto a
+  sangre…), así que se quedan con el suyo y el aviso lo dice. Las láminas de
+  dentro y el cierre cambian como antes.

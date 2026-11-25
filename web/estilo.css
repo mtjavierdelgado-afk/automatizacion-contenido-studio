@@ -5642,6 +5642,49 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .acciones-dialogo { justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .boton-piloto-guion { border-color: var(--acento); }
 .vacio-piloto { padding: 6px 0; }
+/* EL PILOTO AUTOMÁTICO (rama piloto-2): el resumen arriba del panel, la ficha
+   «🤖 Piloto automático», la etiqueta viva en la Parrilla y el enlace «Ver y
+   aprobar ›» (un <a> con pinta de botón, abre la página del móvil). */
+a.boton { display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  font: inherit; color: var(--texto); background: var(--boton); border: 1px solid var(--linea);
+  border-radius: 7px; padding: 6px 10px; text-decoration: none; cursor: pointer; }
+a.boton:hover { border-color: var(--acento); }
+a.boton.mini { padding: 3px 8px; font-size: 12px; border-radius: 8px; }
+a.boton.primario { background: var(--acento-relleno); color: var(--sobre-acento); border-color: var(--acento); font-weight: 600; }
+.resumen-auto { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; margin: 4px 0 10px;
+  border: 1px dashed var(--linea); border-radius: 10px; }
+.resumen-auto.encendido { border-style: solid; border-color: var(--acento); }
+.resumen-auto .fila { align-items: center; gap: 10px; flex-wrap: wrap; }
+.resumen-auto .caja-aviso button { margin-left: 8px; }
+.dialogo-auto .titulo-campo { margin-top: 6px; }
+.interruptor-auto { font-size: 15px; }
+.linea-auto { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px solid var(--linea); }
+.dias-auto { display: flex; gap: 4px; }
+.dia-auto { min-width: 34px; min-height: 34px; padding: 4px; font-weight: 600; }
+.dia-auto.puesto { background: var(--acento-relleno); color: var(--sobre-acento); border-color: var(--acento); }
+.dialogo-auto .hora-auto { width: auto; max-width: 150px; flex: none; }
+.redes-auto { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.casilla-auto { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; cursor: pointer;
+  text-transform: none; letter-spacing: 0; color: var(--texto); }
+.casilla-auto input { width: auto; margin: 0; }
+.fijos-auto { margin: 4px 0; padding-left: 20px; font-size: 13px; color: var(--tenue); }
+.proximos-auto { border-top: 1px solid var(--linea); padding-top: 8px; }
+.lista-proximos-auto { margin: 4px 0; padding-left: 18px; font-size: 13px; }
+.lista-proximos-auto li { margin: 2px 0; overflow-wrap: anywhere; }
+.aviso-texto { color: var(--aviso); }
+.bloque-auto-guion { border: 1px solid var(--acento); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; }
+.bloque-auto-guion ul { margin: 4px 0 8px; padding-left: 18px; }
+.bloque-auto-guion p { margin: 6px 0; }
+.bloque-auto-guion .fila { gap: 8px; flex-wrap: wrap; }
+.linea-auto-tarjeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tarjeta-telegram ol { margin: 6px 0; padding-left: 20px; }
+.tarjeta-telegram li { margin: 3px 0; }
+.tarjeta-telegram .fila { gap: 8px; flex-wrap: wrap; align-items: center; }
+@media (max-width: 700px) {
+  .linea-auto { align-items: flex-start; }
+  .dia-auto { min-width: 40px; min-height: 40px; }
+}
 @media (max-width: 700px) {
   .opciones-piloto { grid-template-columns: 1fr; }
   .portada-piloto { width: calc(50% - 5px); max-width: none; }

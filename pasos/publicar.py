@@ -4504,7 +4504,7 @@ def _ig_por_enlace(cli, sin_cifras, hasta, resultados):
     if not cuentas:
         apuntar(list(buscados), "búsqueda por enlace: el token no ve ninguna cuenta de Instagram", True)
         return
-    hallados, mirado, completa = {}, [], True
+    hallados, mirado, cerradas, completa = {}, [], [], True
     sin_tiempo_antes = getattr(cli, "sin_tiempo", False)
     for cuenta in {c["ig_id"]: c for c in cuentas}.values():
         if not _cabe(hasta) or cli.cerca_del_cupo:
@@ -4521,7 +4521,7 @@ def _ig_por_enlace(cli, sin_cifras, hasta, resultados):
                 break
             # Meta no deja leer los medios de ESA cuenta (p. ej. un #10): se
             # dice con lo que contestó, y cuenta como mirada
-            mirado.append(f"{nombre} no deja leer sus medios ({getattr(fallo, 'detalle', '') or fallo})"[:160])
+            cerradas.append(f"{nombre} no deja leer sus medios ({getattr(fallo, 'detalle', '') or fallo})"[:160])
             continue
         mirado.append(f"{nombre} ({len(medios)} más recientes)")
         completa = completa and entera
@@ -4535,9 +4535,11 @@ def _ig_por_enlace(cli, sin_cifras, hasta, resultados):
     cli.sin_tiempo = sin_tiempo_antes
     sin_hallar = [c for c in buscados if c not in hallados]
     if sin_hallar:
-        apuntar(sin_hallar, (f"búsqueda por enlace: no está en {', '.join(mirado) or 'ninguna cuenta'}"
+        partes = ([f"no está en {', '.join(mirado)}"] if mirado else []) + cerradas
+        apuntar(sin_hallar, ("búsqueda por enlace: " + ("; ".join(partes) or "no se miró ninguna cuenta")
                              if completa else
-                             f"búsqueda por enlace a medias (no dio tiempo): mirado {', '.join(mirado) or 'nada'}"),
+                             "búsqueda por enlace a medias (no dio tiempo): mirado "
+                             + ("; ".join(mirado + cerradas) or "nada")),
                 completa)
     nuevos = {c: i for c, i in hallados.items()
               if any(i != ident for _p, _e, ident in buscados[c])}
@@ -4667,6 +4669,9 @@ def _apuntar_meta(raiz, resultados):
                 m.pop("meta_detalle", None)
                 if cifras.get("busqueda"):
                     m["meta_busqueda"] = str(cifras["busqueda"])[:300]
+                else:
+                    # leído con su id de siempre: lo de una búsqueda vieja ya no vale
+                    m.pop("meta_busqueda", None)
                 if cifras.get("buscado"):
                     m["meta_busqueda_al"] = al
                 e["metricas"] = sin_ceros_imposibles(m)

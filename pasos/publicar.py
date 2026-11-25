@@ -3049,17 +3049,31 @@ def proxima_hora(hora):
 
 # ---------------------------------------------------------------- enviar
 
-def _espera_al_cliente(raiz, pid, mp4_huella=""):
-    """«pendiente», «cambios» o «cambiado» si el vídeo espera al cliente
-    (pasos/aprobacion.py); "" si no. Lo aprobado es el MP4 MÁS los textos que
-    vio: se comparan con los de ahora."""
+def textos_para_el_cliente(datos, ajustes):
+    """{red: {titulo, texto, primer_comentario}} de cada red con texto: lo que
+    SALE (la descripción con su llamada a la acción, la firma y los hashtags
+    que caben), para que el cliente apruebe eso mismo (publicar-redes-3)."""
+    salida = {}
+    for red in REDES:
+        t = ((datos or {}).get("textos") or {}).get(red) or {}
+        if not str(t.get("descripcion") or "").strip():
+            continue
+        salida[red] = {"titulo": str(t.get("titulo") or ""),
+                       "texto": _texto_para(t, ajustes or {}, "", red)[0],
+                       "primer_comentario": str(t.get("primer_comentario") or "")}
+    return salida
+
+
+def _espera_al_cliente(raiz, pid, mp4_huella, ajustes, redes):
+    """«pendiente», «cambios» o «cambiado» si el vídeo espera al cliente para
+    salir en esas redes (pasos/aprobacion.py); "" si no."""
     try:
         from pasos import aprobacion
     except ImportError:                                     # pragma: no cover
         import aprobacion
-    textos = aprobacion.textos_que_ve(_leer_video(raiz, pid), REDES)
+    por_red = textos_para_el_cliente(_leer_video(raiz, pid), ajustes)
     return aprobacion.espera_al_cliente(
-        raiz, pid, aprobacion.huella_de_lo_que_ve(mp4_huella, textos))
+        raiz, pid, aprobacion.huellas_por_red(mp4_huella, por_red), redes)
 
 
 def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
@@ -3083,12 +3097,13 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
         raise ErrorPublicar("falta confirmar el envío: nada sale sin tu OK", 400)
     # LA APROBACIÓN DEL CLIENTE (publicar-redes-3): con un enlace vigente que el
     # cliente no ha aprobado, el vídeo no sale (quedar en «espera tu OK», sí)
-    espera = (_espera_al_cliente(raiz, pid, info.get("mp4_huella") or "")
+    espera = (_espera_al_cliente(raiz, pid, info.get("mp4_huella") or "", ajustes, redes)
               if modo != "pendiente" else "")
     if espera:
         raise ErrorPublicar(
             ("el cliente ha pedido cambios en este vídeo" if espera == "cambios" else
-             "el vídeo o sus textos han cambiado después de que el cliente lo aprobara"
+             "el cliente no ha aprobado lo que saldría ahora (cambió el vídeo o el texto "
+             "de una red, o esa red no la vio)"
              if espera == "cambiado" else
              "el cliente todavía no ha aprobado este vídeo")
             + ": no sale hasta que lo apruebe. Si quieres publicarlo igualmente, anula "
@@ -3422,7 +3437,7 @@ def reintentar(raiz, info, ajustes, eid, en_hilo=True):
         if envio["lote"] in _SUBIENDO:
             raise ErrorPublicar("ese envío se está subiendo ahora mismo", 409)
         # LA APROBACIÓN DEL CLIENTE (publicar-redes-3): reintentar también espera
-        if _espera_al_cliente(raiz, pid, info.get("mp4_huella") or ""):
+        if _espera_al_cliente(raiz, pid, info.get("mp4_huella") or "", ajustes, [envio.get("red")]):
             raise ErrorPublicar("el cliente todavía no ha aprobado este vídeo (o lo cambiaste "
                                 "después): no sale hasta que lo apruebe, o anula su enlace", 409)
         if envio.get("modo") == "programado":

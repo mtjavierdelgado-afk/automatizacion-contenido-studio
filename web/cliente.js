@@ -88,9 +88,9 @@
       datos.redes.map(r => h('div', { class: 'cl-red' },
         h('h3', {}, r.nombre),
         r.titulo ? h('p', { class: 'cl-titulo' }, r.titulo) : null,
-        r.descripcion ? h('p', { class: 'cl-texto' }, r.descripcion)
-          : h('p', { class: 'cl-suave' }, 'Aún sin texto.'),
-        r.hashtags ? h('p', { class: 'cl-hashtags' }, r.hashtags) : null)));
+        h('p', { class: 'cl-texto' }, r.texto || ''),
+        r.primer_comentario ? h('p', { class: 'cl-comentario-red' },
+          h('span', { class: 'cl-suave' }, 'Primer comentario: '), r.primer_comentario) : null)));
   }
 
   function bloqueRespuesta() {

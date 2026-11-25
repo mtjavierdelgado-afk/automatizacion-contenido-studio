@@ -259,7 +259,7 @@ _sitio_cliente() {
       print "    location ^~ /cliente/ {"
       print "        # solo las direcciones de la pagina del cliente, escritas tal cual"
       print "        # (un «/a/../cliente/x» lo resuelve nginx, pero el estudio no)"
-      print "        if ($request_uri !~ \"^/cliente/(_/cliente\\.(js|css)|[A-Za-z0-9_-]{40,64}(/(datos|video\\.mp4|respuesta))?)(\\?[^/]*)?$\") {"
+      print "        if ($request_uri !~ \"^/cliente/(_/cliente\\.(js|css)|[A-Za-z0-9_-]{40,64}(/(datos|video\\.mp4|respuesta))?)(\\?.*)?$\") {"
       print "            return 404;"
       print "        }"
       print "        limit_req zone=asvs_cliente burst=40 nodelay;"

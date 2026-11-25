@@ -100,38 +100,35 @@ def huella_token(token):
     return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
 
 
-def _hashtags_legibles(valor):
-    if isinstance(valor, list):
-        return " ".join("#" + str(x).lstrip("#") for x in valor if str(x).strip())
-    return str(valor or "")
+def redes_que_ve(datos_publicar, por_red, orden):
+    """Las redes cuyo texto ve el cliente: las elegidas en la ficha que tienen
+    texto (o, sin elegir, todas las que lo tienen), en el orden de la pantalla.
+    `por_red` es `publicar.textos_para_el_cliente`."""
+    elegidas = (datos_publicar or {}).get("redes") or []
+    return [r for r in orden if r in elegidas and r in por_red] or \
+        [r for r in orden if r in por_red]
 
 
-def textos_que_ve(datos_publicar, redes_en_orden):
-    """Los textos que el cliente ve y aprueba: los de las redes elegidas en la
-    ficha (o, sin elegir, las que tienen texto), en el orden de la pantalla.
-    `datos_publicar` es lo de `publicar._leer_video`. -> [{red, titulo,
-    descripcion, hashtags}]. La página del cliente y el bloqueo de
-    `publicar.enviar` salen de AQUÍ, para que aprueben lo mismo."""
-    datos_publicar = datos_publicar if isinstance(datos_publicar, dict) else {}
-    textos = datos_publicar.get("textos") or {}
-    elegidas = [r for r in redes_en_orden if r in (datos_publicar.get("redes") or [])] or \
-        [r for r in redes_en_orden if str((textos.get(r) or {}).get("descripcion") or "").strip()]
-    salida = []
-    for red in elegidas:
-        t = textos.get(red) or {}
-        salida.append({"red": red, "titulo": str(t.get("titulo") or ""),
-                       "descripcion": str(t.get("descripcion") or ""),
-                       "hashtags": _hashtags_legibles(t.get("hashtags"))})
-    return salida
-
-
-def huella_de_lo_que_ve(mp4_huella, textos):
-    """El montaje (huella del MP4) MÁS los textos que ve: si cambia cualquiera
-    de los dos después de aprobarlo, lo aprobado deja de valer. "" sin MP4."""
-    if not mp4_huella:
-        return ""
-    bruto = json.dumps([str(mp4_huella), textos or []], ensure_ascii=False, sort_keys=True)
+def _sello(*partes):
+    bruto = json.dumps(list(partes), ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(bruto.encode("utf-8")).hexdigest()[:16]
+
+
+def huellas_por_red(mp4_huella, por_red):
+    """{red: huella} del montaje MÁS el texto que sale en ESA red. Lo aprobado
+    se guarda así, red a red: cambiar el vídeo o el texto de una red le quita
+    el «sí» a esa red; quitar una red no bloquea las demás. {} sin MP4."""
+    if not mp4_huella:
+        return {}
+    return {red: _sello(str(mp4_huella), red, contenido) for red, contenido in (por_red or {}).items()}
+
+
+def huella_de_lo_que_ve(huellas, redes):
+    """Una sola huella de todo lo que ve en la página (para «recarga, que ha
+    cambiado» al contestar). "" sin MP4."""
+    if not huellas:
+        return ""
+    return _sello([[r, huellas.get(r, "")] for r in redes])
 
 
 #: Un enlace caducado o anulado se olvida pasado este tiempo (al pedir otro)
@@ -225,21 +222,23 @@ def de_video(raiz, pid):
     return _publico(propios[-1])
 
 
-def espera_al_cliente(raiz, pid, huella=""):
-    """¿Espera este vídeo al cliente? Mientras sí, no sale (`publicar.enviar`).
-    `huella` es `huella_de_lo_que_ve` de AHORA (el MP4 y los textos).
+def espera_al_cliente(raiz, pid, huellas=None, redes=()):
+    """¿Espera este vídeo al cliente para salir en `redes`? Mientras sí, no
+    sale (`publicar.enviar`). `huellas` es `huellas_por_red` de AHORA.
     -> "pendiente" (aún no contesta), "cambios" (pidió cambios), "cambiado"
-    (lo aprobó, pero el vídeo o sus textos cambiaron después) o "" (puede salir).
-    Solo cuenta el enlace VIGENTE (anulado o caducado ya no para nada)."""
+    (lo aprobó, pero el vídeo o el texto de alguna de esas redes cambió, o esa
+    red no la vio) o "" (puede salir). Solo cuenta el enlace VIGENTE."""
     ahora = _ahora()
+    huellas = huellas or {}
     for registro in _leer(raiz)["enlaces"].values():
         if registro.get("pid") != str(pid) or not _vigente(registro, ahora):
             continue
         if registro.get("estado") != "aprobado":
             return registro.get("estado") or "pendiente"
-        # aprobado SIN huella (no había vídeo que ver) o con otra: no vale
-        if str(registro.get("huella_aprobada") or "") != str(huella or ""):
-            return "cambiado"
+        aprobadas = registro.get("huellas_aprobadas") or {}
+        for red in redes:
+            if not aprobadas.get(red) or aprobadas.get(red) != huellas.get(red):
+                return "cambiado"
     return ""
 
 
@@ -289,7 +288,7 @@ def normalizar_decision(decision):
     return str(decision or "").strip().lower()
 
 
-def responder(raiz, token, decision, comentario="", huella=""):
+def responder(raiz, token, decision, comentario="", huella="", huellas=None):
     """«aprobado» o «cambios», con un comentario (obligatorio si pide
     cambios). Puede cambiar de opinión mientras el enlace valga."""
     decision = normalizar_decision(decision)
@@ -312,6 +311,8 @@ def responder(raiz, token, decision, comentario="", huella=""):
         registro["respondido_al"] = ahora
         # lo que vio al contestar: aprobar ESTE montaje, no el que venga
         registro["huella_aprobada"] = str(huella or "") if decision == "aprobado" else ""
+        # y red a red, lo que vio de cada una (lo que mira `espera_al_cliente`)
+        registro["huellas_aprobadas"] = dict(huellas or {}) if decision == "aprobado" else {}
         historial = registro.setdefault("historial", [])
         historial.append({"estado": decision, "comentario": comentario, "al": ahora})
         del historial[:-TOPE_HISTORIAL]

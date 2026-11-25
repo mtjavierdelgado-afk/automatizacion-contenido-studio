@@ -122,13 +122,18 @@ def prueba_respuestas():
         ok(False, "solo aprobar o pedir cambios")
     except A.ErrorAprobacion:
         ok(True, "")
+    H1 = {"tiktok": "t1", "instagram": "i1"}
     A.responder(raiz, token, "cambios", "la música más baja", huella="h1")
-    ok(A.espera_al_cliente(raiz, "v2", "h1") == "cambios", "pidió cambios: sigue parado")
+    ok(A.espera_al_cliente(raiz, "v2", H1, ["tiktok"]) == "cambios", "pidió cambios: sigue parado")
     ok(A.de_video(raiz, "v2")["comentario"] == "la música más baja", "la ficha ve el comentario")
-    A.responder(raiz, token, "aprobado", "", huella="h1")
-    ok(A.espera_al_cliente(raiz, "v2", "h1") == "", "aprobado: ya puede salir")
-    ok(A.espera_al_cliente(raiz, "v2", "h2") == "cambiado",
-       "si el vídeo se vuelve a montar, lo aprobado ya no vale")
+    A.responder(raiz, token, "aprobado", "", huella="h1", huellas=H1)
+    ok(A.espera_al_cliente(raiz, "v2", H1, ["tiktok", "instagram"]) == "", "aprobado: ya puede salir")
+    ok(A.espera_al_cliente(raiz, "v2", {"tiktok": "t2", "instagram": "i1"}, ["tiktok"]) == "cambiado",
+       "si cambia lo de una red, esa red ya no vale")
+    ok(A.espera_al_cliente(raiz, "v2", {"tiktok": "t2", "instagram": "i1"}, ["instagram"]) == "",
+       "y las demás siguen aprobadas")
+    ok(A.espera_al_cliente(raiz, "v2", dict(H1, youtube="y1"), ["youtube"]) == "cambiado",
+       "una red que el cliente no vio no sale")
     largo = A.responder(raiz, token, "aprobado", "x" * 5000, huella="h1")
     ok(len(largo["comentario"]) == A.TOPE_COMENTARIO, "el comentario se corta en su tope")
     for _ in range(A.TOPE_HISTORIAL + 5):
@@ -147,15 +152,18 @@ def prueba_respuestas():
     datos["enlaces"][A.huella_token(otro)].update(estado="aprobado", huella_aprobada="")
     with open(os.path.join(raiz, "_sistema", "publicar", "aprobaciones.json"), "w", encoding="utf-8") as fh:
         json.dump(datos, fh)
-    ok(A.espera_al_cliente(raiz, "v9", "hX") == "cambiado",
+    ok(A.espera_al_cliente(raiz, "v9", {"tiktok": "hX"}, ["tiktok"]) == "cambiado",
        "un «sí» sin vídeo delante no vale cuando el vídeo ya está")
     ok(A.normalizar_decision(" Aprobado ") == "aprobado", "«Aprobado» con mayúscula es aprobar")
-    t1 = A.textos_que_ve({"redes": ["instagram"], "textos": {"instagram": {"descripcion": "a", "hashtags": ["x"]}}},
-                         ["tiktok", "instagram"])
-    t2 = A.textos_que_ve({"redes": ["instagram"], "textos": {"instagram": {"descripcion": "a", "hashtags": ["y"]}}},
-                         ["tiktok", "instagram"])
-    ok(A.huella_de_lo_que_ve("m", t1) != A.huella_de_lo_que_ve("m", t2), "un hashtag distinto cambia la huella")
-    ok(A.huella_de_lo_que_ve("", t1) == "", "sin MP4 no hay huella")
+    t1 = {"instagram": {"titulo": "", "texto": "a #x"}}
+    t2 = {"instagram": {"titulo": "", "texto": "a #y"}}
+    ok(A.huellas_por_red("m", t1) != A.huellas_por_red("m", t2), "un hashtag distinto cambia la huella")
+    ok(A.huellas_por_red("m", t1) != A.huellas_por_red("m2", t1), "otro montaje también")
+    ok(A.huellas_por_red("", t1) == {} and A.huella_de_lo_que_ve({}, ["instagram"]) == "", "sin MP4 no hay huella")
+    ok(A.redes_que_ve({"redes": ["instagram", "tiktok"]}, {"tiktok": 1}, ["tiktok", "instagram"]) == ["tiktok"],
+       "ve las redes elegidas que tienen texto")
+    ok(A.redes_que_ve({"redes": []}, {"instagram": 1, "tiktok": 1}, ["tiktok", "instagram"]) == ["tiktok", "instagram"],
+       "y sin elegir, las que tienen texto")
     ok(A.respuestas(raiz, pids=set()) == [], "y solo de los vídeos que se pueden ver")
     A.marcar_visto(raiz, token)
     ok(A.de_video(raiz, "v2")["visto"] is True, "abrirlo queda apuntado")
@@ -170,13 +178,35 @@ def prueba_enviar_espera():
         fh.write(b"mp4")
     info = {"pid": "v3", "montado": True, "mp4": mp4, "mp4_huella": "h1",
             "formato": "vertical", "duracion_s": 20}
+    ajustes = {"perfil": "x", "firma": "— Estado Play"}
+    datos = P._leer_video(raiz, "v3")
+    datos["redes"] = ["tiktok", "youtube"]
+    datos["textos"] = {"tiktok": {"descripcion": "Texto TikTok", "cta": "Reserva ya"},
+                       "youtube": {"descripcion": "Texto YouTube", "titulo": "Título"}}
+    P._escribir(P._ruta_video(raiz, "v3"), datos)
     token = A.crear(raiz, "v3", huella="h1")["token"]
 
-    def lo_que_ve():
-        return A.huella_de_lo_que_ve("h1", A.textos_que_ve(P._leer_video(raiz, "v3"), P.REDES))
+    def aprobar(decision="aprobado", comentario=""):
+        por_red = P.textos_para_el_cliente(P._leer_video(raiz, "v3"), ajustes)
+        redes = A.redes_que_ve(P._leer_video(raiz, "v3"), por_red, P.REDES)
+        huellas = A.huellas_por_red("h1", {r: por_red[r] for r in redes})
+        A.responder(raiz, token, decision, comentario, A.huella_de_lo_que_ve(huellas, redes), huellas)
+
+    por_red = P.textos_para_el_cliente(P._leer_video(raiz, "v3"), ajustes)
+    ok("Reserva ya" in por_red["tiktok"]["texto"] and "Estado Play" in por_red["tiktok"]["texto"],
+       "el cliente ve el texto que SALE (con su llamada a la acción y la firma)")
+
+    def sale(redes, mp4_huella="h1", ajustes_=None):
+        try:
+            P.enviar(raiz, dict(info, mp4_huella=mp4_huella), ajustes_ or ajustes,
+                     {"redes": redes, "modo": "ahora", "confirmado": True}, en_hilo=False)
+            return ""
+        except P.ErrorPublicar as fallo:
+            return str(fallo) if "cliente" in str(fallo) else ""
+
     for modo, extra in (("ahora", {}), ("programar", {"cuando": "2099-01-01T10:00"})):
         try:
-            P.enviar(raiz, info, {"perfil": "x"},
+            P.enviar(raiz, info, ajustes,
                      {"redes": ["tiktok"], "modo": modo, "confirmado": True, **extra}, en_hilo=False)
             ok(False, f"«{modo}» con el cliente sin contestar no sale")
         except P.ErrorPublicar as fallo:
@@ -184,47 +214,34 @@ def prueba_enviar_espera():
                and "anula" in str(fallo), f"«{modo}»: 409 y dice qué hacer ({fallo})")
     hechos = P.enviar(raiz, info, {}, {"redes": ["tiktok"], "modo": "pendiente"}, en_hilo=False)
     ok(hechos and hechos[0]["estado"] == "espera_ok", "dejarlo en «espera tu OK», sí")
-    A.responder(raiz, token, "cambios", "otro final", huella=lo_que_ve())
-    try:
-        P.enviar(raiz, info, {"perfil": "x"}, {"redes": ["youtube"], "modo": "ahora", "confirmado": True},
-                 en_hilo=False)
-        ok(False, "con cambios pedidos no sale")
-    except P.ErrorPublicar as fallo:
-        ok("pedido cambios" in str(fallo), "con cambios pedidos lo dice")
-    A.responder(raiz, token, "aprobado", huella=lo_que_ve())
-    try:
-        P.enviar(raiz, dict(info, mp4_huella="h2"), {"perfil": "x"},
-                 {"redes": ["youtube"], "modo": "ahora", "confirmado": True}, en_hilo=False)
-        ok(False, "otro montaje del aprobado no sale")
-    except P.ErrorPublicar as fallo:
-        ok("han cambiado" in str(fallo), "otro montaje: lo dice")
-    # los textos que vio también cuentan: cambiarlos después le quita el «sí»
+    aprobar("cambios", "otro final")
+    ok("pedido cambios" in sale(["youtube"]), "con cambios pedidos no sale, y lo dice")
+    aprobar()
+    ok(sale(["youtube"], mp4_huella="h2"), "otro montaje del aprobado no sale")
+    ok(sale(["youtube"], ajustes_=dict(ajustes, firma="otra firma")),
+       "otra firma del proyecto tampoco (el cliente vio la de antes)")
+    # la llamada a la acción de TikTok cambia: TikTok ya no vale, YouTube sí
     datos = P._leer_video(raiz, "v3")
-    datos["textos"]["tiktok"] = {"descripcion": "otro texto que el cliente no vio"}
+    datos["textos"]["tiktok"]["cta"] = "Escríbenos"
     P._escribir(P._ruta_video(raiz, "v3"), datos)
-    try:
-        P.enviar(raiz, info, {"perfil": "x"}, {"redes": ["youtube"], "modo": "ahora", "confirmado": True},
-                 en_hilo=False)
-        ok(False, "cambiar el texto después de aprobar lo vuelve a parar")
-    except P.ErrorPublicar as fallo:
-        ok("textos" in str(fallo), f"cambiar el texto después de aprobar lo vuelve a parar ({fallo})")
+    ok("no ha aprobado lo que saldría" in sale(["tiktok"]),
+       "cambiar la llamada a la acción después de aprobar lo vuelve a parar")
+    # quitar una red no bloquea las demás
+    datos = P._leer_video(raiz, "v3")
+    datos["redes"] = ["youtube"]
+    P._escribir(P._ruta_video(raiz, "v3"), datos)
+    ok(sale(["youtube"]) == "", "quitar una red no le quita el «sí» a las demás")
+    ok(sale(["instagram"]) != "", "y una red que el cliente no vio no sale")
     # reintentar un envío «comprobar» también espera al cliente
     datos = P._leer_video(raiz, "v3")
     datos["envios"].append({"id": "e-comprobar", "red": "tiktok", "lote": "abc123abc123",
                             "estado": "comprobar", "modo": "ahora", "cuando": "2099-01-01T10:00:00"})
     P._escribir(P._ruta_video(raiz, "v3"), datos)
     try:
-        P.reintentar(raiz, info, {"perfil": "x"}, "e-comprobar", en_hilo=False)
+        P.reintentar(raiz, info, ajustes, "e-comprobar", en_hilo=False)
         ok(False, "reintentar no se salta al cliente")
     except P.ErrorPublicar as fallo:
         ok(fallo.codigo == 409 and "cliente" in str(fallo), f"reintentar tampoco sale ({fallo})")
-    A.responder(raiz, token, "aprobado", huella=lo_que_ve())
-    # aprobado y el mismo montaje: lo que falte ya no es cosa del cliente
-    try:
-        P.enviar(raiz, info, {"perfil": "x"}, {"redes": ["youtube"], "modo": "ahora", "confirmado": True},
-                 en_hilo=False)
-    except P.ErrorPublicar as fallo:
-        ok("cliente" not in str(fallo), f"aprobado: el cliente ya no frena ({fallo})")
 
 
 def _video_montado(servidor, base, nombre):
@@ -287,7 +304,7 @@ def prueba_rutas():
         d = r.json()
         ok(d["video"] == "Reel de diciembre" and [x["red"] for x in d["redes"]] == ["tiktok", "instagram"],
            f"el nombre y las redes elegidas ({d.get('video')}, {[x['red'] for x in d['redes']]})")
-        ok(d["redes"][1]["hashtags"] == "#uno #dos", "los hashtags, legibles")
+        ok(d["redes"][1]["texto"].endswith("#uno #dos"), "el texto que sale, con sus hashtags")
         ok(d["estado"] == "pendiente" and d["fecha"] == "", "pendiente y aún sin fecha")
         texto = r.text
         ok(pid not in texto and base not in texto and "mp4_rel" not in texto and "perfil" not in texto,

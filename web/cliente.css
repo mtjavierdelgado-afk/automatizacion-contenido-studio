@@ -40,7 +40,7 @@ body {
 .cl-red h3 { margin: 0 0 4px; font-size: 14px; color: var(--cl-suave); font-weight: 600; }
 .cl-red .cl-titulo { margin: 0 0 4px; font-weight: 600; overflow-wrap: anywhere; }
 .cl-red .cl-texto { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.cl-red .cl-hashtags { margin: 6px 0 0; color: var(--cl-acento); overflow-wrap: anywhere; }
+.cl-red .cl-comentario-red { margin: 6px 0 0; overflow-wrap: anywhere; }
 .cl-botones { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
 .cl-boton {
   flex: 1 1 160px; min-height: 48px; padding: 10px 16px; border-radius: 10px; cursor: pointer;

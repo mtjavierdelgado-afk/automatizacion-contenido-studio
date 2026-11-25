@@ -13958,7 +13958,7 @@ function nombreDeDescarga(sid) {
 function descargarImagenPlano(e) {
   if (!e || !e.imagen) return null;
   return h('a', {
-    clase: 'boton mini', href: API.archivo(videoAbierto().pid, e.imagen),
+    clase: 'boton-enlace mini', href: API.archivo(videoAbierto().pid, e.imagen),
     download: nombreDeDescarga(e.id), title: 'Bajar esta imagen tal cual se generó (PNG)',
   }, '⬇ Descargar');
 }
@@ -28292,7 +28292,7 @@ function cabeceraVideoPublicar(f) {
         listo.estilo_nombre ? h('span', { clase: 'chip-enlace' }, `🎨 ${listo.estilo_nombre}`) : null,
         h('span', { clase: 'chip-enlace' }, `${f.formato} · ${mmss(f.duracion_s)}`))),
     h('div', { clase: 'fila acciones-cab-publicar' },
-      f.mp4 ? h('a', { clase: 'boton mini', href: API.archivo(f.pid, f.mp4), download: `${f.pid}.mp4` }, '⬇ Descargar MP4') : null,
+      f.mp4 ? h('a', { clase: 'boton-enlace mini', href: API.archivo(f.pid, f.mp4), download: `${f.pid}.mp4` }, '⬇ Descargar MP4') : null,
       h('button', { type: 'button', clase: 'mini fantasma', title: 'Abrir este vídeo en Crear',
         onclick: async () => { if (!(await guardarPendientePublicar())) return; irAModulo('crear'); abrirVideoLight(f.pid); } },
       'Abrir en Crear ›')));
@@ -37589,13 +37589,22 @@ const APROB = { porVideo: {}, pidiendo: {}, respuestas: null, respuestasAl: 0 };
    enlace sigue a mano después de recargar. Si el navegador no deja guardar,
    se queda en la página. */
 const TOKENS_CLIENTE = {};
-function tokenCliente(pid) {
-  try { return localStorage.getItem(`aprobacion-cliente:${pid}`) || TOKENS_CLIENTE[pid] || ''; } catch (e) { return TOKENS_CLIENTE[pid] || ''; }
-}
-function guardarTokenCliente(pid, token) {
-  if (token) TOKENS_CLIENTE[pid] = token; else delete TOKENS_CLIENTE[pid];
+/* Se guarda {token, id}: el token solo se enseña si es el del enlace VIGENTE
+   (pedido otro desde otro sitio, este ya no vale y no se ofrece). */
+function tokenCliente(pid, enlace) {
+  let guardado = TOKENS_CLIENTE[pid];
   try {
-    if (token) localStorage.setItem(`aprobacion-cliente:${pid}`, token);
+    const crudo = localStorage.getItem(`aprobacion-cliente:${pid}`);
+    if (crudo) guardado = JSON.parse(crudo);
+  } catch (e) { /* sin almacenamiento o algo raro guardado: vale lo de la página */ }
+  if (!guardado || !enlace || guardado.id !== enlace.id) return '';
+  return String(guardado.token || '');
+}
+function guardarTokenCliente(pid, token, id) {
+  const valor = token ? { token, id } : null;
+  if (valor) TOKENS_CLIENTE[pid] = valor; else delete TOKENS_CLIENTE[pid];
+  try {
+    if (valor) localStorage.setItem(`aprobacion-cliente:${pid}`, JSON.stringify(valor));
     else localStorage.removeItem(`aprobacion-cliente:${pid}`);
   } catch (e) { /* sin almacenamiento: vale lo de la página */ }
 }
@@ -37622,7 +37631,7 @@ async function pedirEnlaceCliente(pid, dias) {
   try {
     const d = await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/aprobacion`),
       { method: 'POST', cuerpo: { dias } });
-    guardarTokenCliente(pid, d.token);
+    guardarTokenCliente(pid, d.token, (d.enlace || {}).id);
     APROB.porVideo[pid] = { datos: d, al: Date.now() };
     toast('Enlace listo: cópialo y mándaselo al cliente');
   } catch (e) {
@@ -37698,7 +37707,7 @@ function bloqueAprobacionCliente(f) {
   if (leido.error) { caja.appendChild(h('div', { clase: 'meta' }, `No he podido mirarlo: ${leido.error}`)); return caja; }
   const d = leido.datos || {};
   const enlace = d.enlace;
-  const token = tokenCliente(pid);
+  const token = tokenCliente(pid, enlace);
   if (!enlace) {
     caja.appendChild(h('div', { clase: 'meta' }, 'Mándale al cliente un enlace privado: verá el vídeo, los textos y la fecha, '
       + 'y podrá aprobarlo o pedir cambios sin entrar a nada. Mientras no lo apruebe, este vídeo no sale.'));

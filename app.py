@@ -26797,13 +26797,17 @@ def _cliente_contexto(registro):
 
 
 def _lo_que_ve_el_cliente(ctx):
-    """(info, textos, huella): lo que el cliente ve y aprueba ahora mismo. La
-    huella junta el MP4 y los textos (`aprobacion.huella_de_lo_que_ve`): la
-    misma cuenta que hace `publicar.enviar` al decidir si el vídeo sale."""
+    """Lo que el cliente ve y aprueba ahora mismo: {info, por_red, redes,
+    huellas (por red), huella (de toda la página)}. Las mismas cuentas que hace
+    `publicar.enviar` al decidir si el vídeo sale."""
     P, aprob = _publicar(), _aprobacion()
     info = _info_para_publicar(ctx)
-    textos = aprob.textos_que_ve(P._leer_video(raiz_proyectos(), ctx.id), P.REDES)
-    return info, textos, aprob.huella_de_lo_que_ve(info.get("mp4_huella") or "", textos)
+    datos = P._leer_video(raiz_proyectos(), ctx.id)
+    por_red = P.textos_para_el_cliente(datos, P.ajustes_de(raiz_proyectos(), info["cliente"]))
+    redes = aprob.redes_que_ve(datos, por_red, P.REDES)
+    huellas = aprob.huellas_por_red(info.get("mp4_huella") or "", {r: por_red[r] for r in redes})
+    return {"info": info, "por_red": por_red, "redes": redes, "huellas": huellas,
+            "huella": aprob.huella_de_lo_que_ve(huellas, redes)}
 
 
 def _ficha_para_cliente(registro):
@@ -26812,9 +26816,10 @@ def _ficha_para_cliente(registro):
     perfiles, costes, rutas ni otros vídeos."""
     P = _publicar()
     ctx = _cliente_contexto(registro)
-    info, textos, huella = _lo_que_ve_el_cliente(ctx)
+    ve = _lo_que_ve_el_cliente(ctx)
+    info, huella = ve["info"], ve["huella"]
     datos = P._leer_video(raiz_proyectos(), ctx.id)
-    redes = [dict(t, nombre=P.NOMBRE_RED.get(t["red"], t["red"])) for t in textos]
+    redes = [dict(ve["por_red"][r], red=r, nombre=P.NOMBRE_RED.get(r, r)) for r in ve["redes"]]
     # la fecha prevista: el primer envío con hora que siga en pie
     fechas = sorted(str(e.get("cuando") or "") for e in datos.get("envios") or []
                     if e.get("estado") in ("espera_ok", "programado")
@@ -26885,7 +26890,8 @@ def cliente_responder(token: str, cuerpo: dict = Body(default=None)):
     registro = _cliente_registro(token)
     cuerpo = _cuerpo(cuerpo)
     ctx = _cliente_contexto(registro)
-    _info, _textos, huella = _lo_que_ve_el_cliente(ctx)
+    ve = _lo_que_ve_el_cliente(ctx)
+    huella = ve["huella"]
     decision = _aprobacion().normalizar_decision(cuerpo.get("decision"))
     # lo que aprueba es lo que ha visto: si el vídeo o los textos cambiaron
     # mientras tenía la página abierta, que la recargue
@@ -26893,7 +26899,7 @@ def cliente_responder(token: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(409, "El vídeo o sus textos acaban de cambiar: recarga la página para "
                             "ver lo nuevo antes de aprobarlo.")
     hecho = _por_aprobacion(_aprobacion().responder, raiz_proyectos(), token,
-                            decision, cuerpo.get("comentario"), huella)
+                            decision, cuerpo.get("comentario"), huella, ve["huellas"])
     ctx.bitacora.anotar("aprobacion_cliente", "render", {"estado": hecho["estado"]})
     anotar_global("aprobacion_cliente", {"pid": ctx.id, "estado": hecho["estado"]})
     return JSONResponse(hecho, headers=_CABECERAS_CLIENTE)
@@ -26904,14 +26910,15 @@ def _aprobacion_para_dueno(ctx):
     cliente y, mientras el enlace valga, lo que ya está programado o publicado
     (eso NO espera al cliente: se dice cada vez, no solo al pedir el enlace)."""
     P, aprob = _publicar(), _aprobacion()
-    _info, _textos, huella = _lo_que_ve_el_cliente(ctx)
+    ve = _lo_que_ve_el_cliente(ctx)
     enlace = aprob.de_video(raiz_proyectos(), ctx.id)
     ya = []
     if enlace and enlace.get("vigente"):
         datos = P._leer_video(raiz_proyectos(), ctx.id)
         ya = sorted({P.NOMBRE_RED.get(e.get("red"), e.get("red"))
                      for e in datos.get("envios") or [] if e.get("estado") in P.VIVOS})
-    return {"enlace": enlace, "espera": aprob.espera_al_cliente(raiz_proyectos(), ctx.id, huella),
+    return {"enlace": enlace,
+            "espera": aprob.espera_al_cliente(raiz_proyectos(), ctx.id, ve["huellas"], ve["redes"]),
             "dias_defecto": aprob.DIAS_DEFECTO, "dias_maximo": aprob.DIAS_MAXIMO,
             "aviso": ("Ojo: ya está publicado o programado en " + ", ".join(ya)
                       + ". Eso no espera al cliente; si quieres que espere, cancélalo.") if ya else ""}
@@ -26928,7 +26935,8 @@ def aprobacion_ver(pid: str, peticion: Request):
 def aprobacion_crear(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """{dias?, nota?} -> {token (SOLO ahora), enlace, …}. Anula los anteriores."""
     ctx = _ctx_publicable(pid, peticion)
-    info, _textos, huella = _lo_que_ve_el_cliente(ctx)
+    ve = _lo_que_ve_el_cliente(ctx)
+    info, huella = ve["info"], ve["huella"]
     if not info.get("montado"):
         raise ErrorApi(409, "este vídeo todavía no está montado: móntalo antes de pedir "
                             "la aprobación del cliente")
@@ -26952,7 +26960,19 @@ def aprobaciones_respondidas(peticion: Request):
     """Las respuestas de los clientes, para la Cola (solo de los vídeos que
     se pueden ver: los de un proyecto con clave sin abrir no salen)."""
     pids = {v["pid"] for v in _videos_para_publicar(peticion)}
-    return {"respuestas": _aprobacion().respuestas(raiz_proyectos(), pids)}
+    P = _publicar()
+    salida = []
+    for r in _aprobacion().respuestas(raiz_proyectos(), pids):
+        # un «pidió cambios» de un enlace ya cerrado deja de salir cuando el
+        # vídeo se publicó después (ya está atendido)
+        if not r.get("vigente") and r.get("estado") == "cambios":
+            envios = P._leer_video(raiz_proyectos(), r["pid"]).get("envios") or []
+            if any(e.get("estado") == "publicado"
+                   and str(e.get("actualizado") or e.get("cuando") or "") > str(r.get("respondido_al") or "")
+                   for e in envios):
+                continue
+        salida.append(r)
+    return {"respuestas": salida}
 
 
 def main():

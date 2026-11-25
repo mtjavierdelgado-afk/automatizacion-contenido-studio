@@ -4387,6 +4387,9 @@ def _medir_meta(raiz, pids, forzar, hasta, solo=None):
             _avisar_meta(errores, "instagram", fallo)
             _marcar_token(resultados, ig, fallo.motivo, "instagram")
     global_ig = motivos.get("instagram") in MOTIVOS_DE_LAS_DOS
+    if motivos.get("instagram") == "caducado":
+        # el token entero: las tarjetas de Facebook también lo dicen
+        _marcar_token(resultados, fb, "caducado", "facebook")
     if fb and not global_ig and _cabe(hasta) and not cli.cerca_del_cupo:
         try:
             leidos += _leer_fb(raiz, cli, fb, hasta, resultados)
@@ -4430,6 +4433,8 @@ def _avisar_meta(errores, red, fallo):
                        f"{PERMISO_DE[red]}; genera uno nuevo con él")
     elif fallo.motivo in AVISOS_META:
         errores.append(AVISOS_META[fallo.motivo])
+    elif fallo.motivo == "paginas":
+        errores.append(f"{NOMBRE_RED.get(red, red)}: {fallo}; vuelve a pulsar «Actualizar» más tarde")
     else:
         # nunca el mensaje crudo de Meta (en inglés) en la pantalla
         errores.append(f"{NOMBRE_RED.get(red, red)}: {MM.texto_para_envio(fallo)}")
@@ -4456,7 +4461,14 @@ def _leer_fb(raiz, cli, fb, hasta, resultados):
     Lo que falla por UN post (borrado, sin video) se apunta en ese envio, con
     su reloj, y se sigue con los demas (arbitro del tren, 25-11)."""
     leidos = 0
-    paginas = cli.paginas()
+    try:
+        paginas = cli.paginas()
+    except MM.ErrorMeta as fallo:
+        if fallo.motivo in MM.FATALES:
+            raise
+        # no es cosa de un vídeo: es la lista de páginas del token
+        raise MM.ErrorMeta("no se han podido leer las páginas a las que llega el token de Meta",
+                           "paginas") from None
     for pid, e in fb:
         if not _cabe(hasta) or cli.cerca_del_cupo:
             break
@@ -4581,7 +4593,8 @@ class _HiloMeta:
                      if m.get(k) is not None}
         if m.get("ocupado"):
             r.setdefault("errores", []).append(
-                "Instagram y Facebook: ya se están leyendo desde otra pestaña; espera un momento")
+                "Instagram y Facebook: ya se están leyendo (hay otro «Actualizar» en marcha); "
+                "espera un momento")
         if m.get("errores"):
             r["errores"] = (r.get("errores") or []) + m["errores"]
 

@@ -534,6 +534,19 @@ def prueba_publicar(base):
        and not mf.get("meta_error") and any("Instagram" in x and "instagram_manage_insights" in x
                                            for x in r11["errores"]),
        f"sin el permiso de Instagram, Facebook se lee igual y solo Instagram lo dice ({r11['errores']})")
+    # con el token caducado, también las tarjetas de Facebook lo dicen
+    _video(raiz, "v14", [{"id": "i_cad", "red": "instagram", "estado": "a_mano", "post_id": "reel1",
+                          "metricas": {}},
+                         {"id": "f_cad", "red": "facebook", "estado": "a_mano",
+                          "post_id": f"{PAGINA}_555", "metricas": {}}])
+    ESTADO["modo"] = "caducado"
+    try:
+        P.medir_meta(raiz, ["v14"], forzar=True)
+    finally:
+        ESTADO["modo"] = ""
+    ok("caducado" in _envio(raiz, "v14", "f_cad")["metricas"].get("meta_error", "")
+       and "caducado" in _envio(raiz, "v14", "i_cad")["metricas"].get("meta_error", ""),
+       "token caducado: las tarjetas de las dos redes lo dicen")
     # sin token a secas, ninguna tarjeta se toca (basta el aviso general)
     _poner_token("")
     _video(raiz, "v8", [{"id": "e_st", "red": "instagram", "estado": "a_mano", "post_id": "reel1",
@@ -625,7 +638,7 @@ def prueba_publicar(base):
         r13 = P.medir(raiz, ["v12"], forzar=True)
     finally:
         P._LOCK_META.release()
-    ok(any("otra pestaña" in x for x in r13.get("errores", [])),
+    ok(any("otro «Actualizar» en marcha" in x for x in r13.get("errores", [])),
        "con Meta ya leyéndose desde otra pestaña, «Actualizar» lo dice")
     # si la primera vuelta ya dijo que no (caducado, cupo…), no hay segunda
     llamadas = []

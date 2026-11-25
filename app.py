@@ -26755,18 +26755,49 @@ _RUTA_PUBLICA = re.compile(r"^/cliente/(_/cliente\.(js|css)|[A-Za-z0-9_-]{40,64}
                            r"(/(datos|video\.mp4|respuesta))?)$")
 
 
-@app.middleware("http")
-async def _solo_lo_publico(peticion: Request, siguiente):
-    """SEGUNDA BARRERA de la página del cliente: nginx marca con X-Asvs-Publico
-    lo que entra SIN login por `location ^~ /cliente/`. nginx ya filtra la
-    dirección, pero resuelve los «..» y el estudio no: si algo marcado como
-    público no es exactamente una ruta del cliente, aquí no pasa."""
-    if peticion.headers.get("x-asvs-publico"):
-        cruda = peticion.scope.get("raw_path") or peticion.url.path.encode()
+class _SoloLoPublico:
+    """SEGUNDA BARRERA de la página del cliente, en ASGI puro (no envuelve ni
+    retrasa el vídeo con Range ni las respuestas que se van mandando poco a
+    poco, como haría un middleware «http»):
+    - nginx marca con X-Asvs-Publico lo que entra SIN login por
+      `location ^~ /cliente/`. nginx ya filtra la dirección, pero resuelve los
+      «..» y el estudio no: lo marcado que no sea EXACTAMENTE una ruta del
+      cliente, aquí no pasa (404).
+    - Un fallo imprevisto en /cliente/<token>… se apunta SIN la dirección
+      (llevaría el token al registro del servicio)."""
+
+    def __init__(self, siguiente):
+        self.siguiente = siguiente
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            return await self.siguiente(scope, receive, send)
+        cruda = scope.get("raw_path") or str(scope.get("path") or "").encode()
         cruda = cruda.decode("latin-1") if isinstance(cruda, bytes) else str(cruda)
-        if not _RUTA_PUBLICA.match(cruda):
-            return _respuesta_error(404, "no existe")
-    return await siguiente(peticion)
+        cabeceras = dict(scope.get("headers") or [])
+        if cabeceras.get(b"x-asvs-publico") and not _RUTA_PUBLICA.match(cruda):
+            return await _respuesta_error(404, "no existe")(scope, receive, send)
+        if not cruda.startswith("/cliente/"):
+            return await self.siguiente(scope, receive, send)
+        empezada = False
+
+        async def enviar(mensaje):
+            nonlocal empezada
+            if mensaje.get("type") == "http.response.start":
+                empezada = True
+            await send(mensaje)
+        try:
+            await self.siguiente(scope, receive, enviar)
+        except Exception:                                   # noqa: BLE001
+            marca = uuid.uuid4().hex[:8]
+            print(f"[500 {marca}] {scope.get('method')} /cliente/… (sin el token)\n"
+                  + traceback.format_exc(limit=8), file=sys.stderr, flush=True)
+            if not empezada:
+                await _respuesta_error(500, "Algo ha fallado: inténtalo de nuevo más tarde.",
+                                       {"marca": marca})(scope, receive, send)
+
+
+app.add_middleware(_SoloLoPublico)
 
 
 def _aprobacion():

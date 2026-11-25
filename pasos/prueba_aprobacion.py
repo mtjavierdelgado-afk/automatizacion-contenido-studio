@@ -417,6 +417,19 @@ def prueba_rutas():
            and c.get("/api/proyectos", headers=pub).status_code == 404,
            "por la puerta pública, nada del Studio pasa (aunque nginx se equivocara)")
         ok(c.get(f"/cliente/{token}/datos?x=1", headers=pub).status_code == 200, "con su ?v= también")
+        # (CIS 1b) un fallo imprevisto en /cliente/<token>… no lleva el token al registro
+        import contextlib  # noqa: PLC0415
+        import io  # noqa: PLC0415
+        original_ficha = servidor._ficha_para_cliente
+        servidor._ficha_para_cliente = lambda registro: 1 / 0
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                r = TestClient(servidor.app, raise_server_exceptions=False).get(f"/cliente/{token}/datos")
+        finally:
+            servidor._ficha_para_cliente = original_ficha
+        ok(r.status_code == 500 and token not in err.getvalue() and "sin el token" in err.getvalue()
+           and token not in r.text, f"un 500 en /cliente/ no apunta el token ({r.status_code})")
         r = c.post(f"/cliente/{token}/respuesta", json={"decision": "aprobado", "v": d["v"]})
         ok(r.status_code == 200 and r.json()["estado"] == "aprobado", "aprobar lo que vio")
         r = c.get(f"/api/publicar/videos/{pid}/aprobacion")

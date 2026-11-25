@@ -17,4 +17,8 @@
 - Si el fichero de las aprobaciones se dañara, no sale nada que espere a un
   cliente hasta arreglarlo (se dice en la pantalla).
 - En el servidor, `asvs actualizar` abre esa única dirección (`/cliente/`) sin
-  contraseña, con un límite de intentos.
+  contraseña, con un límite de intentos, en el fichero del sitio que nginx usa
+  de verdad. **La primera vez, actualiza dos veces** (`asvs actualizar` y otra
+  vez `asvs actualizar`): la primera la hace el `asvs` de antes, que aún no
+  sabe abrir esa dirección; desde entonces, la configuración la hace siempre
+  el `asvs` nuevo que trae el código.

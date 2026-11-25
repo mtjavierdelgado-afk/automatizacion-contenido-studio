@@ -144,10 +144,12 @@ class Falso(http.server.BaseHTTPRequestHandler):
                 {"id": PAGINA, "name": "SUYU", "access_token": TOKEN_PAGINA,
                  "instagram_business_account": {"id": "1784", "username": "casas_con_diseno"}},
                 {"id": "999", "name": "Otra", "access_token": "EAABOTRAPAGINA00000000"}]}, cab)
-        if not ruta and "ids" in q:
-            if auth != f"Bearer {TOKEN}":
-                return self._error(190, "token raro")
-            ids = q["ids"].split(",")
+        if "ids" in q:
+            # lo que contesta Meta desde v26.0 (servidor, 25-11)
+            return self._error(100, "The ids query parameter is deprecated in v26.0+.", codigo=500)
+        if len(ruta) == 1 and auth == f"Bearer {TOKEN}":
+            # un medio de Instagram, de uno en uno: GET /<id>?fields=…
+            ids = [ruta[0]]
             if modo == "permiso_ig":
                 return self._error(10, "(#10) Application does not have permission for this action")
             if any(i.startswith("antes") for i in ids) and "insights" in campos:
@@ -174,7 +176,7 @@ class Falso(http.server.BaseHTTPRequestHandler):
                     pedidas = campos.split("metric(")[1].split(")")[0].split(",")
                     nodo["insights"] = _insights([(n, m[n]) for n in pedidas if n in m])
                 salida[i] = nodo
-            return self._responder(200, salida, cab)
+            return self._responder(200, salida[ids[0]], cab)
         if len(ruta) == 2 and ruta[1] == "media":
             # los medios de la cuenta de Instagram (para dar con el id de un Reel)
             if auth != f"Bearer {TOKEN}":
@@ -232,7 +234,8 @@ def prueba_motor(base):
     ESTADO.update(modo="", retirada="", uso=0, peticiones=[])
     cli = MM.ClienteMeta(TOKEN, base=base)
     r = cli.instagram(["reel1", "reel2"])
-    igual(len(ESTADO["peticiones"]), 1, "dos Reels en UNA llamada (?ids=)")
+    igual(len(ESTADO["peticiones"]), 2, "dos Reels, una llamada cada uno (GET /<id>: Meta ya no acepta ?ids=)")
+    ok(not any("ids=" in p["ruta"] for p in ESTADO["peticiones"]), "y nunca con ?ids=")
     igual((r["reel1"]["tiempo_medio_s"], r["reel1"]["tiempo_total_s"], r["reel1"]["salto_3s"],
            r["reel1"]["reposts"]), (6.7, 1543.9, 0.513, 2),
           "milisegundos a segundos y el % de salto en fracción (las unidades del 12-11)")
@@ -245,9 +248,11 @@ def prueba_motor(base):
     ESTADO["peticiones"] = []
     r = cli.instagram(["reel1", "bad9", "reel2"])
     ok(r["reel1"].get("tiempo_medio_s") == 6.7 and r["reel2"].get("tiempo_medio_s") == 3.0
-       and "error" in r["bad9"], "un id malo tumba el lote: se repite de uno en uno y los buenos llegan")
+       and "error" in r["bad9"], "un id malo no estropea a los demás: los buenos llegan")
     # el malo, solo, se pregunta además por su tipo (¿foto o métrica retirada?)
-    igual(len(ESTADO["peticiones"]), 5, "el lote, los tres de uno en uno y el tipo del malo")
+    igual(len(ESTADO["peticiones"]), 4, "los tres de uno en uno y el tipo del malo")
+    ok(MM.ClienteMeta(TOKEN, base=base).instagram(["../me/accounts"])["../me/accounts"].get("error"),
+       "un id con barras no llega a la ruta de la llamada")
 
     ESTADO["retirada"] = "reels_skip_rate"
     cli2 = MM.ClienteMeta(TOKEN, base=base)

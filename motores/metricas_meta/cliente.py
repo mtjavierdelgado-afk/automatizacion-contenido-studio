@@ -362,50 +362,44 @@ class ClienteMeta:
     # -------------------------------------------------------- instagram
 
     def instagram(self, ids):
-        """Las cifras de retención de estos medios de Instagram. Un medio que
-        no es un Reel trae {"error": …}: Meta solo da retención de Reels."""
+        """Las cifras de retención de estos medios de Instagram, DE UNO EN UNO
+        (`GET /<id>?fields=…`): desde v26.0 Meta ya no acepta `?ids=` (HTTP 500
+        #100 «The ids query parameter is deprecated in v26.0+», servidor
+        25-11). Un medio que no es un Reel trae {"error": …}: Meta solo da
+        retención de Reels. Lo leído antes de quedarse sin tiempo o sin cupo
+        se devuelve."""
         ids = [str(i) for i in ids if i]
         salida = {}
-        metricas = list(METRICAS_IG)
-        for i in range(0, len(ids), TOPE_LOTE):
+        for ident in dict.fromkeys(ids):
             if self.cerca_del_cupo:
                 break
-            trozo = ids[i:i + TOPE_LOTE]
             try:
-                salida.update(self._instagram_lote(trozo, metricas, salida))
+                salida.update(self._instagram_uno(ident))
             except ErrorMeta as fallo:
                 if fallo.motivo == "tiempo":
                     break           # lo leído hasta aquí vale; el resto, otra vuelta
                 if fallo.motivo == "cupo":
-                    # lo leído en el lote antes del aviso se queda (árbitro, 24-11)
                     self.cerca_del_cupo = True
                     break
                 raise
         return salida
 
-    def _instagram_lote(self, trozo, metricas, hechos=None):
-        """Un lote; si Meta lo rechaza, de uno en uno. `hechos` (lo ya
-        contestado en esta vuelta) se va llenando para no perderlo si se
-        acaba el tiempo a medias."""
-        metricas = [m for m in metricas if m not in self.retiradas]
+    def _instagram_uno(self, ident):
+        """Un medio, con sus métricas en la misma llamada. Si Meta lo rechaza,
+        `_instagram_solo` mira por qué (no es un Reel, una métrica retirada…)."""
+        if not re.fullmatch(r"[A-Za-z0-9_]{1,80}", ident):
+            # va en la RUTA de la llamada: nada que pueda apuntar a otra cosa
+            return {ident: {"error": "Meta no ha devuelto las cifras de este vídeo",
+                            "detalle": "el id del envío no parece un id de Instagram"}}
+        metricas = [m for m in METRICAS_IG if m not in self.retiradas]
         campos = "id,media_product_type,permalink,insights.metric(%s)" % ",".join(metricas)
         try:
-            datos = self._get("", {"ids": ",".join(trozo), "fields": campos})
+            nodo = self._get(ident, {"fields": campos})
         except ErrorMeta as fallo:
             if fallo.motivo in FATALES:
                 raise
-            if len(trozo) == 1:
-                return self._instagram_solo(trozo[0], metricas, fallo)
-            # un id malo (o una foto, a la que Meta no le acepta las métricas de
-            # Reel) tumba el lote entero: de uno en uno, sin retirar nada
-            salida = hechos if hechos is not None else {}
-            for uno in trozo:
-                if self.cerca_del_cupo:
-                    break
-                if uno not in salida:
-                    salida.update(self._instagram_lote([uno], metricas))
-            return {k: salida[k] for k in trozo if k in salida}
-        return self._instagram_nodos(trozo, datos)
+            return self._instagram_solo(ident, metricas, fallo)
+        return self._instagram_nodos([ident], {ident: nodo})
 
     def _instagram_solo(self, ident, metricas, fallo):
         """Un medio que Meta rechaza: ¿es que no es un Reel, o que Meta ya no
@@ -413,12 +407,12 @@ class ClienteMeta:
         Reel, se dice; si lo es y el fallo nombraba una métrica, esa métrica se
         retira (para todos) y se pide otra vez sin ella, una sola vez."""
         try:
-            nodo = self._get("", {"ids": ident, "fields": "id,media_product_type,permalink"})
+            nodo = self._get(ident, {"fields": "id,media_product_type,permalink"})
         except ErrorMeta as otro:
             if otro.motivo in FATALES:
                 raise
             return {ident: {"error": texto_para_envio(fallo), "detalle": _detalle(fallo, otro)}}
-        nodo = nodo.get(ident) if isinstance(nodo.get(ident), dict) else {}
+        nodo = nodo if isinstance(nodo, dict) else {}
         tipo = str(nodo.get("media_product_type") or "")
         if tipo and tipo != "REELS":
             return {ident: {"error": "no es un Reel (Meta solo da la retención de los Reels)",
@@ -433,12 +427,12 @@ class ClienteMeta:
             resto = [m for m in metricas if m != fallo.metrica]
             campos = "id,media_product_type,permalink,insights.metric(%s)" % ",".join(resto)
             try:
-                datos = self._get("", {"ids": ident, "fields": campos})
+                datos = self._get(ident, {"fields": campos})
             except ErrorMeta as otra_vez:
                 if otra_vez.motivo in FATALES:
                     raise
                 return {ident: {"error": texto_para_envio(otra_vez), "detalle": _detalle(otra_vez)}}
-            return self._instagram_nodos([ident], datos)
+            return self._instagram_nodos([ident], {ident: datos})
         return {ident: {"error": texto_para_envio(fallo), "detalle": _detalle(fallo)}}
 
     def _instagram_nodos(self, trozo, datos):

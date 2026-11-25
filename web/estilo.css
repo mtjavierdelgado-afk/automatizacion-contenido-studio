@@ -5964,3 +5964,5 @@ a.boton.primario { background: var(--acento-relleno); color: var(--sobre-acento)
   border: 1px solid var(--linea); }
 .aprob-chip.aprob-bien { border-color: var(--ok-borde); }
 .aprob-chip.aprob-cambios { color: var(--aviso-texto); background: var(--aviso-fondo); border-color: transparent; }
+.aprob-botones .etiqueta-campo { flex: 0 0 auto; }
+.aprob-botones select { width: auto; }

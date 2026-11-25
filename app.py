@@ -26739,17 +26739,16 @@ def graficas_logo(cid: str, variante: str, peticion: Request):
 
 def _aprobacion():
     try:
-        from pasos import aprobacion as A
+        from pasos import aprobacion as modulo_aprobacion
     except ImportError:                                     # pragma: no cover
-        import aprobacion as A
-    return A
+        import aprobacion as modulo_aprobacion
+    return modulo_aprobacion
 
 
 def _por_aprobacion(fn, *args, **kwargs):
-    A = _aprobacion()
     try:
         return fn(*args, **kwargs)
-    except A.ErrorAprobacion as fallo:
+    except _aprobacion().ErrorAprobacion as fallo:
         raise ErrorApi(fallo.codigo, str(fallo)) from None
 
 
@@ -26847,6 +26846,7 @@ def cliente_pagina(token: str):
 
 @app.get("/cliente/{token}/datos")
 def cliente_datos(token: str):
+    """Lo que ve el cliente: el vídeo, los textos de cada red y la fecha."""
     registro = _cliente_registro(token)
     ficha = _ficha_para_cliente(registro)
     _aprobacion().marcar_visto(raiz_proyectos(), token)
@@ -26855,6 +26855,7 @@ def cliente_datos(token: str):
 
 @app.get("/cliente/{token}/video.mp4")
 def cliente_video(token: str, peticion: Request):
+    """El MP4 de ahora del vídeo (con Range, para poder saltar)."""
     registro = _cliente_registro(token)
     ctx = _cliente_contexto(registro)
     mp4, _rel = _mp4_del_video(ctx.proyecto)
@@ -26868,7 +26869,7 @@ def cliente_video(token: str, peticion: Request):
 
 @app.post("/cliente/{token}/respuesta")
 def cliente_responder(token: str, cuerpo: dict = Body(default=None)):
-    """{decision: aprobado|cambios, comentario}"""
+    """{decision: «aprobado» o «cambios», comentario, v: el montaje que vio}"""
     registro = _cliente_registro(token)
     cuerpo = _cuerpo(cuerpo)
     ctx = _cliente_contexto(registro)
@@ -26888,10 +26889,10 @@ def cliente_responder(token: str, cuerpo: dict = Body(default=None)):
 
 
 def _aprobacion_para_dueno(pid, huella=""):
-    A = _aprobacion()
-    enlace = A.de_video(raiz_proyectos(), pid)
-    return {"enlace": enlace, "espera": A.espera_al_cliente(raiz_proyectos(), pid, huella),
-            "dias_defecto": A.DIAS_DEFECTO, "dias_maximo": A.DIAS_MAXIMO}
+    aprob = _aprobacion()
+    enlace = aprob.de_video(raiz_proyectos(), pid)
+    return {"enlace": enlace, "espera": aprob.espera_al_cliente(raiz_proyectos(), pid, huella),
+            "dias_defecto": aprob.DIAS_DEFECTO, "dias_maximo": aprob.DIAS_MAXIMO}
 
 
 @app.get("/api/publicar/videos/{pid}/aprobacion")

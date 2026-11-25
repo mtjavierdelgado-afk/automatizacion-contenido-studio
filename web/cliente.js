@@ -171,7 +171,8 @@
   }
 
   function pintar() {
-    raiz.replaceChildren(
+    // replaceChildren escribe «null» por cada hueco: solo los nodos de verdad
+    raiz.replaceChildren(...[
       cabecera(),
       datos.cambiado ? nota('cl-aviso', 'El vídeo ha cambiado desde que lo aprobaste. Míralo otra vez y vuelve a aprobarlo si te parece bien.') : null,
       bloqueVideo(),
@@ -179,7 +180,8 @@
       bloqueRespuesta(),
       h('p', { class: 'cl-pie' }, datos.caduca
         ? `Este enlace es solo para ti y vale hasta el ${fechaBonita(datos.caduca, false)}.`
-        : 'Este enlace es solo para ti.'));
+        : 'Este enlace es solo para ti.'),
+    ].filter(Boolean));
   }
 
   async function cargar() {

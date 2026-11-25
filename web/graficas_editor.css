@@ -317,3 +317,7 @@ body.ce-abierto { overflow: hidden; }
 .ce-plano { padding: 0; border: 2px solid transparent; border-radius: 8px; background: var(--panel); cursor: pointer; overflow: hidden; aspect-ratio: 16 / 9; }
 .ce-plano:hover, .ce-plano:focus-visible { border-color: var(--acento); }
 .ce-plano img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+/* «Poner un QR» (graficas-3c-extras) */
+.ce-modal-qr { width: min(480px, 100%); }
+.ce-qr-valor { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--linea); background: var(--hueco); color: var(--texto); font: inherit; }

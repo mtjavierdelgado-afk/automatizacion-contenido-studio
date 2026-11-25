@@ -220,6 +220,67 @@ def tipos_nuevos_pintados(pincel):
     ok(not malas, f"ningún texto se sale, pisa a otro, se lee mal ni baja de la letra mínima ({len(malas)} fallos)")
 
 
+def _leer_qr(png_o_jpg):
+    """El texto de un QR en una imagen, con OpenCV si está (si no, None y se dice)."""
+    try:
+        import cv2                                          # noqa: PLC0415
+        import numpy as np                                  # noqa: PLC0415
+    except ImportError:
+        return None
+    im = cv2.imdecode(np.frombuffer(png_o_jpg, np.uint8), cv2.IMREAD_COLOR)
+    texto, _puntos, _ = cv2.QRCodeDetector().detectAndDecode(im)
+    return texto
+
+
+def qr(pincel):
+    print("el QR del cierre: WhatsApp o web, hecho aquí y legible")
+    import tempfile, shutil                                 # noqa: E401,PLC0415
+    import graficas_qr as Q                                 # noqa: PLC0415
+
+    def falla(*a):
+        try:
+            Q.destino(*a)
+            return False
+        except G.ErrorGraficas:
+            return True
+    ok(Q.destino("whatsapp", "999 888 777") == "https://wa.me/51999888777", "un celular de Perú sin código lleva el 51")
+    ok(Q.destino("whatsapp", "+51 (999) 888-777") == "https://wa.me/51999888777", "con +, espacios, guiones y paréntesis")
+    ok(Q.destino("whatsapp", "34 600 111 222") == "https://wa.me/34600111222", "un número de otro país, tal cual")
+    ok(Q.destino("whatsapp", "999888777", "Hola, quiero alquilar & reservar") ==
+       "https://wa.me/51999888777?text=Hola%2C%20quiero%20alquilar%20%26%20reservar", "el mensaje va codificado")
+    ok(falla("whatsapp", "llámame") and falla("whatsapp", "123") and falla("whatsapp", "1" * 16), "un WhatsApp que no es un número se rechaza")
+    ok(Q.destino("web", "crearia.tech") == "https://crearia.tech", "una web sin https lo lleva")
+    ok(Q.destino("web", "http://estadoplay.pe/alquiler") == "http://estadoplay.pe/alquiler", "con su http y su ruta, tal cual")
+    ok(falla("web", "javascript:alert(1)") and falla("web", "ftp://x.pe") and falla("web", "http://localhost")
+       and falla("web", "mi web.com") and falla("web", "") and falla("web", "a." + "b" * 300), "una web rara se rechaza")
+    ok(falla("correo", "x@y.pe"), "solo WhatsApp o web")
+    req = open(os.path.join(AQUI, "..", "requirements.txt"), encoding="utf-8").read()
+    ok(re.search(r"^segno==\d", req, re.M) is not None, "segno va fijado en requirements.txt (lo instala asvs actualizar)")
+    app = open(os.path.join(AQUI, "..", "app.py"), encoding="utf-8").read()
+    ok('@app.post("/api/graficas/{cid}/qr"' in app, "la ruta del QR existe")
+    raiz = tempfile.mkdtemp(prefix="graficas_qr_")
+    try:
+        r = Q.hacer(raiz, "cli", "web", "crearia.tech/carrusel?x=1")
+        ok(re.fullmatch(r"img_[0-9a-f]{16}\.jpg", r["nombre"]) and r["destino"] == "https://crearia.tech/carrusel?x=1",
+           "se guarda como una imagen más")
+        ruta = G.ruta_imagen(raiz, "cli", r["nombre"])
+        leido = _leer_qr(open(ruta, "rb").read())
+        if leido is None:
+            print("   (sin OpenCV: no se lee el QR, solo se genera)")
+        else:
+            ok(leido == r["destino"], f"el JPG guardado se lee con un lector de QR ({leido!r})")
+            # y pintado en el cierre, a un 22 % del ancho, en el tamaño más pequeño
+            for fid in ("v45", "c11", "h916"):
+                lam = K.lamina(16, "cierre", fid, G.COLORES_DEFECTO, None, "M")
+                lam["capas"].append({"tipo": "imagen", "id": "qr1", "src": r["nombre"], "x": 70, "y": 40, "w": 22,
+                                     "h": 22 * G.formato(fid)["W"] / G.formato(fid)["H"], "encuadre": {"x": 50, "y": 50, "zoom": 1}})
+                doc = C.limpiar_doc({"version": 2, "formato": fid, "laminas": [{"capas": []}, lam]})
+                png, _a, _m = C.pintar(pincel, doc, None, lambda n: G.ruta_imagen(raiz, "cli", n), None, None, 1)
+                ok(_leer_qr(png) == r["destino"], f"pintado en el cierre ({fid}, 22 % del ancho) se sigue leyendo")
+    finally:
+        shutil.rmtree(raiz, ignore_errors=True)
+
+
 def main():
     familias_nuevas()
     tarjeta_no_tapa_la_marca()
@@ -228,6 +289,7 @@ def main():
     try:
         pintadas(pincel)
         tipos_nuevos_pintados(pincel)
+        qr(pincel)
     finally:
         pincel.cerrar()
     print(f"\n{CUENTA['ok']} comprobaciones bien, {CUENTA['mal']} mal")

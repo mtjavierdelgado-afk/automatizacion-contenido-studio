@@ -14,6 +14,8 @@ python-multipart==0.0.32
 
 pillow==12.3.0
 numpy==2.5.2
+# Los QR de Gráficas (pasos/graficas_qr.py): Python puro, licencia BSD, sin salir a internet
+segno==1.6.6
 
 requests==2.34.2
 # Solo por el camino de la voz por websocket (pasos/p4_voz), pero sin el ese

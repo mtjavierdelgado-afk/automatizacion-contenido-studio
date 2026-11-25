@@ -830,6 +830,7 @@
       boton('＋ Botón', {}, () => anadir('boton')),
       sube, el('label', { clase: 'ce-btn', for: 'ce-subir-foto', tabindex: '0',
         onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sube.click(); } } }, '＋ Foto'),
+      boton('＋ QR', { title: 'Tu WhatsApp o tu web en un código QR (gratis)' }, () => abrirQR()),
       hayVideos() ? boton('＋ Foto de un vídeo', { title: 'Una imagen que ya pagaste en un vídeo de este proyecto (gratis)' }, () => elegirFotoDeVideo(null)) : null,
       boton('＋ Logo del Kit', { disabled: !(ED.logos.normal || ED.logos.oscuro), title: ED.logos.normal || ED.logos.oscuro ? '' : 'Este proyecto aún no tiene logo: súbelo en «Logo»' }, () => anadir('logo')),
       boton('＋ Rectángulo', {}, () => anadir('rect')),
@@ -1478,7 +1479,8 @@
   }
 
   /** Pone en la lámina una foto ya guardada en Gráficas (subida o sacada de un vídeo). */
-  async function ponerFoto(nombre, paraId) {
+  async function ponerFoto(nombre, paraId, opciones) {
+    const o = opciones || {};
     const yo = ED;
     const foto = await comoDataUrl(yo.opc.api(yo.cid, `/imagen/${encodeURIComponent(nombre)}`));
     if (ED !== yo) return;
@@ -1492,16 +1494,66 @@
     } else {
       const ratio = foto.iw && foto.ih ? foto.ih / foto.iw : 1;
       const [cx, cy] = centroVisible();
-      let w = 60, h = 60 * f.W / f.H * ratio;
+      const ancho = o.ancho || 60;
+      let w = ancho, h = ancho * f.W / f.H * ratio;
       if (h > 80) { w = w * 80 / h; h = 80; }
-      const c = capaNueva('imagen', { nombre: 'Foto', src: nombre, encuadre: { x: 50, y: 50, zoom: 1 }, radio: 0, borde: null, sombra: [], w, h, x: cx - w / 2, y: cy - h / 2 });
+      const c = capaNueva('imagen', { nombre: o.nombre || 'Foto', src: nombre, encuadre: { x: 50, y: 50, zoom: 1 }, radio: 0, borde: null, sombra: [], w, h, x: cx - w / 2, y: cy - h / 2 });
       capas().push(c);
       ED.sel = [c.id];
     }
     pintarTodo();
     commit();
     pintarPaneles();
-    avisoPantalla('Foto lista.');
+    avisoPantalla(o.aviso || 'Foto lista.');
+  }
+
+  /**
+   * «＋ QR» (graficas-3c-extras, B1): tu WhatsApp o tu web en un QR, hecho en el
+   * servidor sin salir a internet (POST /qr). Entra como una capa de foto
+   * cuadrada; negro sobre blanco a propósito (con colores, muchos móviles no lo leen).
+   */
+  function abrirQR() {
+    if (capas().filter(c => c.tipo === 'imagen' && c.src).length >= LIMITES.fotos) { avisoPantalla(`Una pieza admite hasta ${LIMITES.fotos} fotos.`, true); return; }
+    const yo = ED;
+    const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Poner un QR' });
+    const cerrarModal = () => capaVista.remove();
+    let tipo = 'whatsapp';
+    const valor = el('input', { type: 'text', clase: 'ce-qr-valor', maxlength: '300', 'aria-label': 'Número o web', autocomplete: 'off' });
+    const mensaje = el('input', { type: 'text', clase: 'ce-qr-valor', maxlength: '200', 'aria-label': 'Mensaje que ya sale escrito (opcional)',
+      placeholder: 'Mensaje que ya sale escrito (opcional)' });
+    const error = el('small', { clase: 'ce-pista malo', 'aria-live': 'polite' });
+    const pista = el('small', { clase: 'ce-pista' });
+    const pintarTipo = () => {
+      valor.placeholder = tipo === 'whatsapp' ? '999 999 999 (Perú) o con el código del país' : 'crearia.tech';
+      pista.textContent = tipo === 'whatsapp' ? 'Al escanearlo se abre un chat de WhatsApp contigo.' : 'Al escanearlo se abre tu web.';
+      mensaje.hidden = tipo !== 'whatsapp';
+      for (const b of elegirTipo.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.tipo === tipo));
+    };
+    const elegirTipo = el('div', { clase: 'ce-botonera', role: 'group', 'aria-label': 'Qué lleva el QR' },
+      ...[['whatsapp', 'WhatsApp'], ['web', 'Web']].map(([id, texto]) => boton(texto, { 'data-tipo': id },
+        () => { tipo = id; error.textContent = ''; pintarTipo(); valor.focus(); })));
+    const hacer = async () => {
+      if (!valor.value.trim()) { valor.focus(); return; }
+      error.textContent = '';
+      try {
+        const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/qr'), { method: 'POST', cuerpo: { tipo, valor: valor.value, mensaje: tipo === 'whatsapp' ? mensaje.value : '' } });
+        if (ED !== yo) return;
+        cerrarModal();
+        await ponerFoto(r.nombre, null, { ancho: 26, nombre: 'QR', aviso: `QR listo: lleva a ${r.destino}. Pruébalo con tu móvil antes de publicar.` });
+      } catch (e) {
+        error.textContent = e.message;
+      }
+    };
+    valor.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); hacer(); } });
+    capaVista.appendChild(el('div', { clase: 'ce-modal-cuerpo ce-modal-qr' },
+      el('h2', {}, 'Poner un QR'),
+      el('p', { clase: 'ce-pista' }, 'Se hace aquí mismo, gratis y sin salir a internet. Va en negro sobre blanco para que lo lea cualquier móvil.'),
+      elegirTipo, valor, mensaje, pista, error,
+      el('div', { clase: 'ce-botonera' }, boton('Hacer el QR', { clase: 'ce-btn ce-primario' }, hacer), boton('Cancelar', {}, cerrarModal))));
+    capaVista.addEventListener('pointerdown', ev => { if (ev.target === capaVista) cerrarModal(); });
+    ED.raiz.appendChild(capaVista);
+    pintarTipo();
+    valor.focus();
   }
 
   function elegir(id, sumar) {

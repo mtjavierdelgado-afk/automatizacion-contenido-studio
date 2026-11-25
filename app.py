@@ -26709,6 +26709,17 @@ def graficas_nota_carrusel(cid: str, peticion: Request, cuerpo: dict = Body(defa
     return {"nota": _por_capas(K.avisos_del_carrusel, (cuerpo or {}).get("doc"))}
 
 
+@app.post("/api/graficas/{cid}/qr", status_code=201)
+def graficas_qr(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Un QR con tu WhatsApp o tu web (graficas-3c-extras), hecho aquí con
+    segno, sin salir a internet. Se guarda como una imagen más. Gratis."""
+    _ficha_de_graficas(cid, peticion)
+    import graficas_qr as Q  # noqa: E402,PLC0415
+    cuerpo = cuerpo or {}
+    return _por_graficas(Q.hacer, raiz_proyectos(), cid, str(cuerpo.get("tipo") or ""), cuerpo.get("valor"),
+                         cuerpo.get("mensaje") or "")
+
+
 @app.get("/api/graficas/{cid}/logo/{variante}")
 def graficas_logo(cid: str, variante: str, peticion: Request):
     """El logo del proyecto («normal») o el de fondo oscuro del Kit («oscuro»),

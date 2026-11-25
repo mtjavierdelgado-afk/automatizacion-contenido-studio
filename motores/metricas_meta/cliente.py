@@ -54,10 +54,10 @@ BASE = "https://graph.facebook.com"
 #: detrás del proxy (corta a los 60 s): quien llama reparte su franja.
 PLAZO_S = 6
 #: Cuántos medios van en una llamada por lotes (la Batch API de Graph: un
-#: POST con hasta 50 GET dentro). Meta los cuenta sueltos para el cupo, pero
+#: POST con hasta 50 GET dentro; 25 para que un lote quepa en su plazo). Meta los cuenta sueltos para el cupo, pero
 #: ahorra viajes: con una llamada por Reel, una cuenta con muchos Reels se
 #: comía la franja y Facebook no se leía nunca (árbitro, 25-11).
-TOPE_LOTE = 50
+TOPE_LOTE = 25
 
 METRICAS_IG = ("ig_reels_avg_watch_time", "ig_reels_video_view_total_time",
                "reels_skip_rate", "reposts")
@@ -243,9 +243,11 @@ class ClienteMeta:
         """LA BATCH API: varios GET en UN POST (`batch=[{method, relative_url}]`).
         -> [(código, datos|None)] en el mismo orden; None si Meta no contestó a
         esa (p. ej. se le acabó el tiempo a ella sola)."""
+        # el token, también en el CUERPO (así lo documenta Meta para los lotes;
+        # nunca en la URL), además de la cabecera
         cuerpo = urllib.parse.urlencode({
             "batch": json.dumps([{"method": "GET", "relative_url": r} for r in rutas]),
-            "include_headers": "false"}).encode("utf-8")
+            "include_headers": "false", "access_token": token or self.token or ""}).encode("utf-8")
         datos = self._pedir("POST", f"{self.base}/{self.version}/", cuerpo, token)
         if not isinstance(datos, list):
             raise self._error(datos if isinstance(datos, dict) else None, 200)
@@ -281,8 +283,12 @@ class ClienteMeta:
             crudo, codigo, cabeceras = fallo.read() or b"", fallo.code, fallo.headers
         except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError,
                 http.client.HTTPException, OSError) as fallo:
-            raise ErrorMeta(tachar(f"no se ha podido hablar con Meta: {fallo}", self._claves),
-                            "red") from None
+            error = ErrorMeta(tachar(f"no se ha podido hablar con Meta: {fallo}", self._claves),
+                              "red")
+            # se le acabó el PLAZO a esta llamada (Meta lenta), no es que no haya red
+            error.plazo_vencido = isinstance(fallo, (socket.timeout, TimeoutError)) or isinstance(
+                getattr(fallo, "reason", None), (socket.timeout, TimeoutError))
+            raise error from None
         self._mirar_uso(cabeceras)
         try:
             datos = json.loads(crudo.decode("utf-8") or "null")
@@ -442,6 +448,12 @@ class ClienteMeta:
         try:
             respuestas = self._lote([f"{ident}?{query}" for ident in validos])
         except ErrorMeta as fallo:
+            if fallo.motivo == "red" and getattr(fallo, "plazo_vencido", False):
+                # un lote que tarda más que su plazo es cosa de ESTE lote (50 GET
+                # de métricas son lentos): Instagram para aquí y Facebook se lee
+                # igual. Sin red de verdad, sigue siendo «red»
+                self.sin_tiempo = True
+                raise ErrorMeta(str(fallo), "tiempo", detalle=fallo.detalle) from None
             if fallo.motivo in FATALES:
                 raise
             # el lote entero no vale (Meta no lo acepta): de uno en uno
@@ -452,7 +464,8 @@ class ClienteMeta:
             return
         for ident, (codigo, cuerpo) in zip(validos, respuestas):
             if cuerpo is None:
-                continue                # Meta no contestó a este: otra vuelta
+                self.sin_tiempo = True  # Meta no contestó a este: otra vuelta
+                continue
             if 200 <= codigo < 300 and isinstance(cuerpo, dict) and not cuerpo.get("error"):
                 salida.update(self._instagram_nodos([ident], {ident: cuerpo}))
                 continue

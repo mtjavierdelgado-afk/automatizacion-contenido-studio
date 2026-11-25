@@ -648,8 +648,8 @@ def prueba_publicar(base):
     _video(raiz, "v15", muchos)
     r15 = P.medir_meta(raiz, ["v15"], forzar=True, hasta=time.time() + P.TOPE_META_S)
     lotes = [x for x in ESTADO["peticiones"] if x.get("lote") is not None]
-    ok(len(lotes) == 2 and sum(len(x["lote"]) for x in lotes) == 60,
-       f"60 Reels en 2 llamadas por lotes ({[len(x['lote']) for x in lotes]})")
+    ok(len(lotes) == 3 and sum(len(x["lote"]) for x in lotes) == 60,
+       f"60 Reels en 3 llamadas por lotes de 25 ({[len(x['lote']) for x in lotes]})")
     ok(_envio(raiz, "v15", "m_fb")["metricas"].get("curva") and not r15.get("motivo"),
        f"y Facebook se lee igual ({r15.get('motivo')!r})")
     # (árbitro) un fallo de red en el 2.º lote no tira lo leído en el 1.º
@@ -671,7 +671,27 @@ def prueba_publicar(base):
         MM.ClienteMeta._lote = original_lote
     leidos16 = [e for e in P._leer_video(raiz, "v16")["envios"] if (e.get("metricas") or {}).get("meta_al")
                 and not e["metricas"].get("meta_error")]
-    ok(len(leidos16) == 50, f"un fallo de red en el 2.º lote guarda los 50 del 1.º ({len(leidos16)})")
+    ok(len(leidos16) >= 25 and all(not e["id"].startswith(tuple(f"m{i}b" for i in range(25, 50)))
+                                   for e in leidos16 if e["id"] in {f"m{i}b" for i in range(25, 50)}),
+       f"un fallo de red en el 2.º lote guarda los 25 del 1.º ({len(leidos16)})")
+    # (árbitro) un lote que tarda más que su plazo no deja sin leer Facebook
+    cuenta["n"] = 0
+
+    def segundo_lento(self, rutas, token=None):
+        cuenta["n"] += 1
+        if cuenta["n"] == 2:
+            lento = MM.ErrorMeta("no se ha podido hablar con Meta: timed out", "red")
+            lento.plazo_vencido = True
+            raise lento
+        return original_lote(self, rutas, token)
+    MM.ClienteMeta._lote = segundo_lento
+    try:
+        _video(raiz, "v17", [dict(e, id=e["id"] + "c", metricas={}) for e in muchos])
+        r17 = P.medir_meta(raiz, ["v17"], forzar=True)
+    finally:
+        MM.ClienteMeta._lote = original_lote
+    ok(_envio(raiz, "v17", "m_fbc")["metricas"].get("curva") and r17.get("motivo") != "red",
+       f"y Facebook se lee igual ({r17.get('motivo')!r})")
     # árbitro del tren, 25-11 (1): un post de página BORRADO no corta Facebook
     _video(raiz, "v9", [{"id": "f_borr", "red": "facebook", "estado": "a_mano",
                          "post_id": f"{PAGINA}_999", "metricas": {}},

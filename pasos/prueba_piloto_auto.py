@@ -779,7 +779,10 @@ def _escenarios(servidor, base, pet, reloj, llamadas, hechos_falsos, guiones, pi
     # redes desde la página del móvil (pedido del dueño, 24-11)
     escritos = []
     viejo_pf, viejo_et = servidor.publicar_ficha, servidor.publicar_escribir_textos
-    servidor.publicar_ficha = lambda pid, peticion: {"textos": {"tiktok": {"descripcion": "hola"}}}
+    estado_pf = {"escribiendo": False}
+    servidor.publicar_ficha = lambda pid, peticion: {
+        "textos": {"tiktok": {"descripcion": "hola"}, "facebook": {"descripcion": "sin título"}},
+        "redes_visibles": ["tiktok", "youtube", "facebook"], "escribiendo": estado_pf["escribiendo"]}
     servidor.publicar_escribir_textos = lambda pid, peticion, cuerpo: escritos.append(cuerpo["redes"])
     try:
         v7 = P.encolar(base, {"cid": "c1", "gid": "gr", "estilo": "e1",
@@ -797,6 +800,25 @@ def _escenarios(servidor, base, pet, reloj, llamadas, hechos_falsos, guiones, pi
             ok(False, "un rev viejo tenía que dar 409")
         except servidor.ErrorApi as fallo:
             ok(fallo.codigo == 409, "con un rev viejo, 409 «otro sitio»")
+        rev7 = P.leer(base, v7["id"])["auto"]["rev"]
+        try:
+            servidor.aprobar_redes(v7["id"], pet, {"rev": rev7, "redes": ["instagram"]})
+            ok(False, "una red que el proyecto no tiene tenía que negarse")
+        except servidor.ErrorApi as fallo:
+            ok(fallo.codigo == 400, "una red que no es del proyecto no se deja")
+        estado_pf["escribiendo"] = True
+        try:
+            servidor.aprobar_redes(v7["id"], pet, {"rev": rev7, "redes": ["tiktok", "youtube", "facebook"]})
+            ok(False, "con Claude escribiendo tenía que esperar")
+        except servidor.ErrorApi as fallo:
+            ok(fallo.codigo == 409 and "escribiendo" in fallo.mensaje,
+               "con Claude escribiendo, otra red espera (no se queda sin texto)")
+        igual(P.leer(base, v7["id"])["auto"]["redes"], ["tiktok", "youtube"], "y no se tocó nada")
+        estado_pf["escribiendo"] = False
+        escritos.clear()
+        servidor.aprobar_redes(v7["id"], pet, {"rev": rev7, "redes": ["tiktok", "youtube", "facebook"]})
+        igual(escritos, [["youtube", "facebook"]],
+              "una red con título que solo trae descripción también se manda a escribir")
         P.cambiar_auto(base, v7["id"], {"paso": "programado"})
         try:
             servidor.aprobar_redes(v7["id"], pet, {"rev": P.leer(base, v7["id"])["auto"]["rev"], "redes": ["tiktok"]})

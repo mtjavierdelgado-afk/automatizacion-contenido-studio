@@ -296,7 +296,8 @@ function bloqueRedes(d, pub) {
   return h('div', { clase: 'ap-redes' },
     h('p', { clase: 'ap-sub', texto: 'Sale en:' }),
     h('div', { clase: 'ap-casillas' }, posibles.map(red => h('label', { clase: 'ap-casilla-red' },
-      h('input', { type: 'checkbox', checked: elegidas.includes(red) ? true : null, onchange: (ev) => {
+      h('input', { type: 'checkbox', checked: elegidas.includes(red) ? true : null,
+        disabled: pub.escribiendo ? true : null, onchange: (ev) => {
         const base = AP.redesBorrador || [...(d.redes || [])];
         AP.redesBorrador = ev.target.checked ? base.concat(red) : base.filter(x => x !== red);
         pintar();

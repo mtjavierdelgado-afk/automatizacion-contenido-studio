@@ -25402,11 +25402,23 @@ def aprobar_redes(vid: str, peticion: Request, cuerpo: dict = Body(default=None)
         ficha = _auto_ficha_o_404(vid, peticion)
         if ficha.get("estado") not in ("listo", "revisar") or not ficha.get("pid"):
             raise ErrorApi(409, "el vídeo todavía no está terminado")
-        ficha = _auto_cambiar(vid, rev, {"redes": redes}, si_paso=AUTO.SIN_PROGRAMAR)
         pid = ficha["pid"]
+        fp = publicar_ficha(pid, peticion)
+        posibles = [x for x in (fp.get("redes_visibles") or []) if x in PUB.REDES] or \
+            list(ficha["auto"].get("redes") or [])
+        if any(x not in posibles for x in redes):
+            raise ErrorApi(400, "esa red no está en las de este proyecto (Publicar → Ajustes)")
+        if fp.get("escribiendo"):
+            # con Claude escribiendo, una red más se quedaría guardada y sin texto
+            raise ErrorApi(409, "Claude está escribiendo los textos: espera un minuto y vuelve a intentarlo")
+        if int(ficha["auto"].get("rev") or 0) != rev or ficha["auto"].get("paso") not in AUTO.SIN_PROGRAMAR:
+            raise ErrorApi(409, "Esto se cambió en otro sitio hace un momento: mira lo nuevo")
+        # PUBLICAR PRIMERO: si falla, el piloto no queda con otras redes
         _por_publicar(PUB.guardar_ficha, raiz, pid, {"redes": redes})
+        _auto_cambiar(vid, rev, {"redes": redes}, si_paso=AUTO.SIN_PROGRAMAR)
     textos = (publicar_ficha(pid, peticion).get("textos") or {})
-    faltan = [x for x in redes if not str((textos.get(x) or {}).get("descripcion") or "").strip()]
+    faltan = [x for x in redes if not str((textos.get(x) or {}).get("descripcion") or "").strip()
+              or (x in PUB.CON_TITULO and not str((textos.get(x) or {}).get("titulo") or "").strip())]
     if faltan:
         publicar_escribir_textos(pid, peticion, {"redes": faltan})
     salida = _auto_para_pagina(PILOTO.leer(raiz, vid), peticion)

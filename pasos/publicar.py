@@ -4177,10 +4177,18 @@ def _segunda_pasada_meta(raiz, pids, arranque, r):
     if (r.get("meta") or {}).get("motivo") or (r.get("meta") or {}).get("a_medias"):
         return              # la primera vuelta ya dijo que no (caducado, cupo, red…)
     if meta_sin_leer := _envios_meta(raiz, pids, False, solo_nunca=True):
-        hasta = min(time.time() + TOPE_META_S, arranque + TOPE_VUELTA_S - 1)
+        # sin pasar de la franja de los seguidores (la ruta del proyecto los
+        # pide despues si da tiempo: arbitro del tren, 25-11)
+        hasta = min(time.time() + TOPE_META_S, arranque + TOPE_VUELTA_S - 1,
+                    arranque + TOPE_SEGUIDORES_S - 1)
         if not _cabe(hasta):
             return
-        m = medir_meta(raiz, pids, hasta=hasta, solo={e["id"] for _p, e in meta_sin_leer})
+        try:
+            m = medir_meta(raiz, pids, hasta=hasta, solo={e["id"] for _p, e in meta_sin_leer})
+        except Exception as fallo:                       # noqa: BLE001
+            # como en el hilo: «Actualizar» no puede caer por esto
+            r.setdefault("errores", []).append(f"Instagram y Facebook: {str(fallo)[:150]}")
+            return
         if m.get("ocupado"):
             return
         previo = dict(r.get("meta") or {})
@@ -4254,14 +4262,17 @@ TARJETA_META = {
 }
 
 
-def _marcar_token(resultados, envios, motivo):
-    """Los envíos que se quedaron sin leer por un problema del token llevan
-    en su tarjeta ese problema (y no el de una lectura anterior)."""
-    texto = TARJETA_META.get(motivo)
+def _marcar_token(resultados, envios, motivo, red=None):
+    """Los envíos (de esa red) que se quedaron sin leer por un problema del
+    token llevan en su tarjeta ese problema (y no el de una lectura anterior)."""
+    if motivo == "sin_permiso" and red in PERMISO_DE:
+        texto = f"al token de Meta le falta el permiso {PERMISO_DE[red]}"
+    else:
+        texto = TARJETA_META.get(motivo)
     if not texto:
         return
     for pid, e in envios:
-        if e["id"] not in resultados:
+        if e["id"] not in resultados and (red is None or e["red"] == red):
             resultados[e["id"]] = (pid, {"error": texto, "sin_reloj": True}, {})
 
 
@@ -4359,69 +4370,125 @@ def _medir_meta(raiz, pids, forzar, hasta, solo=None):
     cli.hasta = hasta
     if not getattr(cli, "simulado", False) and not cli.token:
         return dict(vacio, errores=[AVISOS_META["sin_token"]], motivo="sin_token")
-    leidos, hechos, errores = 0, 0, []
     resultados = {}                 # id del envio -> (pid, cifras|{"error"}, extra)
-    fatal = ""
-    try:
-        # INSTAGRAM: resolver y pedir las cifras en la misma llamada, en lotes
-        ig = [(pid, e) for pid, e in envios if e["red"] == "instagram"]
-        for i in range(0, len(ig), MM.TOPE_LOTE):
-            if not _cabe(hasta) or cli.cerca_del_cupo:
-                break
-            trozo = ig[i:i + MM.TOPE_LOTE]
-            ids = [str(e.get("meta_id") or e.get("post_id")) for _p, e in trozo]
-            cifras = cli.instagram(ids)
-            for (pid, e), ident in zip(trozo, ids):
-                if ident in cifras:
-                    leidos += 1
-                    resultados[e["id"]] = (pid, cifras[ident], {"meta_id": ident})
-        # FACEBOOK: con el token de la pagina (me/accounts solo si hace falta)
-        fb = [(pid, e) for pid, e in envios if e["red"] == "facebook"]
-        if fb and _cabe(hasta) and not cli.cerca_del_cupo:
-            paginas = cli.paginas()
-            for pid, e in fb:
-                if not _cabe(hasta) or cli.cerca_del_cupo:
-                    break
-                ajustes_pagina = _pagina_del_perfil(raiz, e.get("perfil"))
-                pagina = _pagina_de(paginas, e, ajustes_pagina)
-                if not pagina:
-                    resultados[e["id"]] = (pid, {"error": "el token de Meta no llega a la "
-                                                          "página de este vídeo"}, {})
-                    continue
-                ident = str(e.get("meta_id") or e.get("post_id") or "")
-                if MM.es_pagina_post(ident) and not e.get("meta_id"):
-                    ident = cli.resolver_fb(pagina["token"], ident)
-                    if not ident:
-                        resultados[e["id"]] = (pid, {"error": "ese post de Facebook no lleva "
-                                                              "vídeo"}, {})
-                        continue
-                    if not _cabe(hasta):
-                        break
-                cifras = cli.facebook(pagina["token"], [(ident, e.get("duracion_s"))])
-                if ident in cifras:
-                    leidos += 1
-                    extra = {"meta_id": ident}
-                    if cifras[ident].get("tipo"):
-                        extra["meta_tipo"] = cifras[ident]["tipo"]
-                    resultados[e["id"]] = (pid, cifras[ident], extra)
-    except MM.ErrorMeta as fallo:
-        fatal = fallo.motivo
-        errores.append(AVISOS_META.get(fallo.motivo) or f"Instagram y Facebook: {fallo}"[:200])
-        _marcar_token(resultados, envios, fallo.motivo)
+    errores = []
+    # CADA RED POR SU LADO (arbitro del tren, 25-11): un token sin
+    # instagram_manage_insights no puede dejar sin leer Facebook, ni marcar sus
+    # tarjetas. Lo que vale para las dos (caducado, cupo, red, tiempo) si para.
+    motivos = {}
+    ig = [(pid, e) for pid, e in envios if e["red"] == "instagram"]
+    fb = [(pid, e) for pid, e in envios if e["red"] == "facebook"]
+    leidos = 0
+    if ig:
+        try:
+            leidos += _leer_ig(cli, ig, hasta, resultados)
+        except MM.ErrorMeta as fallo:
+            motivos["instagram"] = fallo.motivo
+            _avisar_meta(errores, "instagram", fallo)
+            _marcar_token(resultados, ig, fallo.motivo, "instagram")
+    global_ig = motivos.get("instagram") in MOTIVOS_DE_LAS_DOS
+    if fb and not global_ig and _cabe(hasta) and not cli.cerca_del_cupo:
+        try:
+            leidos += _leer_fb(raiz, cli, fb, hasta, resultados)
+        except MM.ErrorMeta as fallo:
+            motivos["facebook"] = fallo.motivo
+            _avisar_meta(errores, "facebook", fallo)
+            _marcar_token(resultados, fb, fallo.motivo, "facebook")
+    fatal = next((m for m in motivos.values() if m in MOTIVOS_DE_LAS_DOS), "") \
+        or next((m for m in motivos.values() if m), "")
     if getattr(cli, "retiradas", None):
         errores.append("Instagram y Facebook: Meta ya no da " + ", ".join(sorted(set(cli.retiradas)))
                        + "; esa cifra no se ha podido leer")
-    if cli.cerca_del_cupo and not fatal:
+    if cli.cerca_del_cupo and fatal != "cupo":
         errores.append(AVISOS_META["cupo"])
         fatal = "cupo"          # y sin segunda vuelta: no se vuelve a llamar a Meta
     if getattr(cli, "sin_tiempo", False) and fatal != "tiempo":
         errores.append(AVISOS_META["tiempo"])
     hechos = _apuntar_meta(raiz, resultados)
+    vistos, unicos = set(), []
+    for x in errores:
+        if x not in vistos:
+            vistos.add(x)
+            unicos.append(x)
     r = {"leidos": leidos, "actualizados": hechos,
-         "pendientes": max(0, len(envios) - len(resultados)), "errores": errores[:5]}
+         "pendientes": max(0, len(envios) - len(resultados)), "errores": unicos[:5]}
     if fatal:
         r["motivo"] = fatal
     return r
+
+
+#: Lo que para las dos redes a la vez (el token entero, el cupo, la red, el
+#: tiempo). «sin_permiso» NO: cada red pide su permiso.
+MOTIVOS_DE_LAS_DOS = ("sin_token", "caducado", "cupo", "red", "tiempo")
+#: El permiso que pide cada red, para decirlo bien en la pantalla
+PERMISO_DE = {"instagram": "instagram_manage_insights", "facebook": "read_insights"}
+
+
+def _avisar_meta(errores, red, fallo):
+    if fallo.motivo == "sin_permiso":
+        errores.append(f"{NOMBRE_RED.get(red, red)}: al token de Meta le falta el permiso "
+                       f"{PERMISO_DE[red]}; genera uno nuevo con él")
+    elif fallo.motivo in AVISOS_META:
+        errores.append(AVISOS_META[fallo.motivo])
+    else:
+        # nunca el mensaje crudo de Meta (en inglés) en la pantalla
+        errores.append(f"{NOMBRE_RED.get(red, red)}: {MM.texto_para_envio(fallo)}")
+
+
+def _leer_ig(cli, ig, hasta, resultados):
+    """Instagram: resolver y pedir las cifras en la misma llamada, en lotes."""
+    leidos = 0
+    for i in range(0, len(ig), MM.TOPE_LOTE):
+        if not _cabe(hasta) or cli.cerca_del_cupo:
+            break
+        trozo = ig[i:i + MM.TOPE_LOTE]
+        ids = [str(e.get("meta_id") or e.get("post_id")) for _p, e in trozo]
+        cifras = cli.instagram(ids)
+        for (pid, e), ident in zip(trozo, ids):
+            if ident in cifras:
+                leidos += 1
+                resultados[e["id"]] = (pid, cifras[ident], {"meta_id": ident})
+    return leidos
+
+
+def _leer_fb(raiz, cli, fb, hasta, resultados):
+    """Facebook: con el token de la pagina (me/accounts solo si hace falta).
+    Lo que falla por UN post (borrado, sin video) se apunta en ese envio, con
+    su reloj, y se sigue con los demas (arbitro del tren, 25-11)."""
+    leidos = 0
+    paginas = cli.paginas()
+    for pid, e in fb:
+        if not _cabe(hasta) or cli.cerca_del_cupo:
+            break
+        ajustes_pagina = _pagina_del_perfil(raiz, e.get("perfil"))
+        pagina = _pagina_de(paginas, e, ajustes_pagina)
+        if not pagina:
+            resultados[e["id"]] = (pid, {"error": "el token de Meta no llega a la "
+                                                  "página de este vídeo"}, {})
+            continue
+        ident = str(e.get("meta_id") or e.get("post_id") or "")
+        if MM.es_pagina_post(ident) and not e.get("meta_id"):
+            try:
+                ident = cli.resolver_fb(pagina["token"], ident)
+            except MM.ErrorMeta as fallo:
+                if fallo.motivo in MM.FATALES:
+                    raise
+                resultados[e["id"]] = (pid, {"error": MM.texto_para_envio(fallo)}, {})
+                continue
+            if not ident:
+                resultados[e["id"]] = (pid, {"error": "ese post de Facebook no lleva "
+                                                      "vídeo"}, {})
+                continue
+            if not _cabe(hasta):
+                break
+        cifras = cli.facebook(pagina["token"], [(ident, e.get("duracion_s"))])
+        if ident in cifras:
+            leidos += 1
+            extra = {"meta_id": ident}
+            if cifras[ident].get("tipo"):
+                extra["meta_tipo"] = cifras[ident]["tipo"]
+            resultados[e["id"]] = (pid, cifras[ident], extra)
+    return leidos
 
 
 def _apuntar_meta(raiz, resultados):
@@ -4510,8 +4577,11 @@ class _HiloMeta:
             r.setdefault("errores", []).append(
                 "Instagram y Facebook: no dio tiempo esta vez; vuelve a pulsar «Actualizar»")
             return
-        r["meta"] = {k: m.get(k) for k in ("leidos", "actualizados", "pendientes", "motivo")
+        r["meta"] = {k: m.get(k) for k in ("leidos", "actualizados", "pendientes", "motivo", "ocupado")
                      if m.get(k) is not None}
+        if m.get("ocupado"):
+            r.setdefault("errores", []).append(
+                "Instagram y Facebook: ya se están leyendo desde otra pestaña; espera un momento")
         if m.get("errores"):
             r["errores"] = (r.get("errores") or []) + m["errores"]
 

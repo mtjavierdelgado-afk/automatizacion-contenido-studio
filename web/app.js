@@ -29306,7 +29306,7 @@ const NOMBRES_METRICA = {
   nuevos_seguidores: 'seguidores nuevos', visitas_perfil: 'visitas al perfil',
   vistas_facebook: 'vistas en Facebook',
   // retencion-meta: de Instagram, las veces que se compartió en el propio perfil
-  reposts: 'reposts',
+  reposts: 'republicaciones',
 };
 
 /* «3 h 20 min», «12 min», «45 s»: el tiempo total visto de TikTok. */
@@ -29477,7 +29477,8 @@ function textoRetencion(m) {
   // retencion-meta (Instagram): la parte que lo saltó en los 3 primeros
   // segundos, lo que dice si el gancho funciona. Con pocas vistas no dice nada
   // (el mismo mínimo que la interacción) y no se escribe
-  if (typeof m.salto_3s === 'number' && !(typeof m.vistas === 'number' && m.vistas < MIN_VISTAS_SALTO)) {
+  // el mismo criterio que la suma del servidor: con las vistas sabidas y 50 o más
+  if (typeof m.salto_3s === 'number' && typeof m.vistas === 'number' && m.vistas >= MIN_VISTAS_SALTO) {
     partes.push(`${porcentaje(m.salto_3s)} lo saltó en los 3 primeros segundos`);
   }
   return partes.join(' · ');

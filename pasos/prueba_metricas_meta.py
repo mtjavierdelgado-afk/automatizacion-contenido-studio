@@ -101,9 +101,11 @@ class Falso(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(crudo)
 
-    def _error(self, num, mensaje, codigo=400):
-        self._responder(codigo, {"error": {"message": mensaje, "type": "OAuthException",
-                                           "code": num}})
+    def _error(self, num, mensaje, codigo=400, sub=None):
+        err = {"message": mensaje, "type": "OAuthException", "code": num}
+        if sub:
+            err["error_subcode"] = sub
+        self._responder(codigo, {"error": err})
 
     def do_GET(self):
         if ESTADO["retraso"]:
@@ -143,6 +145,11 @@ class Falso(http.server.BaseHTTPRequestHandler):
             if auth != f"Bearer {TOKEN}":
                 return self._error(190, "token raro")
             ids = q["ids"].split(",")
+            if modo == "permiso_ig":
+                return self._error(10, "(#10) Application does not have permission for this action")
+            if any(i.startswith("antes") for i in ids) and "insights" in campos:
+                return self._error(10, "(#10) Media posted before business account conversion",
+                                   sub=2108006)
             if any(i.startswith("borrado") for i in ids):
                 # lo que da Meta de un id borrado (#100, subcódigo 33)
                 return self._error(100, "Unsupported get request. Object with ID 'borrado1' does not "
@@ -170,6 +177,11 @@ class Falso(http.server.BaseHTTPRequestHandler):
             if auth != f"Bearer {TOKEN_PAGINA}":
                 return self._error(190, "se esperaba el token de la página")
             if "attachments" in campos:
+                if ident.endswith("_999"):
+                    # un post de página borrado (#100, subcódigo 33)
+                    return self._error(100, f"Unsupported get request. Object with ID '{ident}' does "
+                                            "not exist, cannot be loaded due to missing permissions, "
+                                            "or does not support this operation", sub=33)
                 return self._responder(200, {"id": ident, "attachments": {"data": [
                     {"media_type": "video", "target": {"id": "reel77"}}]}}, cab)
             if "video_insights" in campos:
@@ -486,6 +498,42 @@ def prueba_publicar(base):
     ok(not r7.get("motivo") and mo.get("tiempo_medio_s") is not None
        and "permiso" not in mb.get("meta_error", "") and mb.get("meta_al"),
        f"un Reel borrado no corta la vuelta ni dice «falta un permiso» ({mb.get('meta_error')!r})")
+    # árbitro del tren, 25-11 (1): un post de página BORRADO no corta Facebook
+    _video(raiz, "v9", [{"id": "f_borr", "red": "facebook", "estado": "a_mano",
+                         "post_id": f"{PAGINA}_999", "metricas": {}},
+                        {"id": "f_bien", "red": "facebook", "estado": "a_mano",
+                         "post_id": f"{PAGINA}_555", "duracion_s": 20, "metricas": {}}])
+    r9 = P.medir_meta(raiz, ["v9"], forzar=True)
+    mb, mo = _envio(raiz, "v9", "f_borr")["metricas"], _envio(raiz, "v9", "f_bien")["metricas"]
+    ok(not r9.get("motivo") and mo.get("curva") and mb.get("meta_error") and mb.get("meta_al")
+       and "Unsupported" not in mb["meta_error"] and not any("Unsupported" in x for x in r9["errores"]),
+       f"un post de Facebook borrado se apunta en su tarjeta (en castellano, con reloj) y el otro se lee "
+       f"({r9.get('motivo')!r}, {mb.get('meta_error')!r})")
+    # (2) un #10 de UN Reel (publicado antes de pasar a profesional) no es del token
+    _video(raiz, "v10", [{"id": "i_antes", "red": "instagram", "estado": "a_mano", "post_id": "antes1",
+                          "metricas": {}},
+                         {"id": "i_bien", "red": "instagram", "estado": "a_mano", "post_id": "reel2",
+                          "metricas": {}}])
+    r10 = P.medir_meta(raiz, ["v10"], forzar=True)
+    ma, mo = _envio(raiz, "v10", "i_antes")["metricas"], _envio(raiz, "v10", "i_bien")["metricas"]
+    ok(not r10.get("motivo") and mo.get("salto_3s") is not None and "profesional" in ma.get("meta_error", "")
+       and ma.get("meta_al"),
+       f"un Reel de antes de la cuenta profesional se dice en su tarjeta y los demás se leen ({ma.get('meta_error')!r})")
+    # (3) sin instagram_manage_insights, Facebook se lee igual y sus tarjetas no se tocan
+    _video(raiz, "v11", [{"id": "i_np", "red": "instagram", "estado": "a_mano", "post_id": "reel1",
+                          "metricas": {}},
+                         {"id": "f_np", "red": "facebook", "estado": "a_mano",
+                          "post_id": f"{PAGINA}_555", "duracion_s": 20, "metricas": {}}])
+    ESTADO["modo"] = "permiso_ig"
+    try:
+        r11 = P.medir_meta(raiz, ["v11"], forzar=True)
+    finally:
+        ESTADO["modo"] = ""
+    mi, mf = _envio(raiz, "v11", "i_np")["metricas"], _envio(raiz, "v11", "f_np")["metricas"]
+    ok("instagram_manage_insights" in mi.get("meta_error", "") and mf.get("curva")
+       and not mf.get("meta_error") and any("Instagram" in x and "instagram_manage_insights" in x
+                                           for x in r11["errores"]),
+       f"sin el permiso de Instagram, Facebook se lee igual y solo Instagram lo dice ({r11['errores']})")
     # sin token a secas, ninguna tarjeta se toca (basta el aviso general)
     _poner_token("")
     _video(raiz, "v8", [{"id": "e_st", "red": "instagram", "estado": "a_mano", "post_id": "reel1",
@@ -547,6 +595,38 @@ def prueba_publicar(base):
     P.actualizar_metricas = up_trae_el_numero
     r = P.medir(raiz, ["v3"])
     P.actualizar_metricas = lambda *a, **k: dict(vacia)
+    # (4) la segunda vuelta no tumba «Actualizar» si algo raro falla dentro
+    _video(raiz, "v12", [{"id": "e_12", "red": "instagram", "estado": "publicado", "lote": "l12",
+                          "metricas": {}}])
+
+    def up_trae_otro(*_a, **_k):
+        datos = P._leer_video(raiz, "v12")
+        datos["envios"][0]["post_id"] = "reel2"
+        P._escribir(P._ruta_video(raiz, "v12"), datos)
+        return dict(vacia)
+    llamadas_raras = {"n": 0}
+    antes_mm = P.medir_meta
+
+    def medir_raro(*a, **k):
+        llamadas_raras["n"] += 1
+        if llamadas_raras["n"] == 2:
+            raise RuntimeError("algo raro")
+        return antes_mm(*a, **k)
+    P.actualizar_metricas, P.medir_meta = up_trae_otro, medir_raro
+    try:
+        r12 = P.medir(raiz, ["v12"])
+    finally:
+        P.actualizar_metricas, P.medir_meta = (lambda *a, **k: dict(vacia)), antes_mm
+    ok(llamadas_raras["n"] == 2 and any("algo raro" in x for x in r12.get("errores", [])),
+       "si la segunda vuelta falla, «Actualizar» contesta igual y lo dice")
+    # (8) con otra lectura de Meta en marcha, la respuesta lo dice
+    P._LOCK_META.acquire()
+    try:
+        r13 = P.medir(raiz, ["v12"], forzar=True)
+    finally:
+        P._LOCK_META.release()
+    ok(any("otra pestaña" in x for x in r13.get("errores", [])),
+       "con Meta ya leyéndose desde otra pestaña, «Actualizar» lo dice")
     # si la primera vuelta ya dijo que no (caducado, cupo…), no hay segunda
     llamadas = []
     antes_meta2 = P.medir_meta

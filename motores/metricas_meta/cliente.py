@@ -92,7 +92,10 @@ FATALES = ("sin_token", "sin_permiso", "caducado", "cupo", "red", "tiempo")
 #: Lo que se guarda en el envío cuando Meta no da sus cifras: en castellano y
 #: sin el mensaje crudo de Meta (en inglés y con detalles que no ayudan).
 TEXTO_DE_MOTIVO = {
-    "metrica": "Meta no da una de las cifras de este vídeo",
+    "metrica": "Meta no da alguna de las cifras de esta publicación",
+    "pocas_vistas": "Meta aún no da sus cifras: todavía tiene muy pocas vistas",
+    "antes_profesional": "Meta no da las cifras de lo publicado antes de pasar la cuenta a "
+                         "profesional",
     "otro": "Meta no ha devuelto las cifras de este vídeo",
     "vacio": "Meta todavía no tiene las cifras de este vídeo (tarda hasta dos días)",
 }
@@ -286,6 +289,14 @@ class ClienteMeta:
         mensaje = tachar(str(err.get("message") or f"Meta ha contestado {codigo}")[:300],
                          self._claves)
         num = int(_numero(err.get("code")) or 0)
+        sub = int(_numero(err.get("error_subcode")) or 0)
+        # #10 que son de UN solo vídeo, no del token (árbitro del tren, 25-11):
+        # se apuntan en ese envío, con su reloj, y se sigue con los demás
+        if sub == 2108006 or re.search(r"before business account conversion", mensaje, re.IGNORECASE):
+            return ErrorMeta(f"publicado antes de pasar la cuenta a profesional: {mensaje}",
+                             "antes_profesional")
+        if re.search(r"not enough viewers", mensaje, re.IGNORECASE):
+            return ErrorMeta(f"todavía con muy pocas vistas: {mensaje}", "pocas_vistas")
         if num == 190 or codigo == 401:
             return ErrorMeta("el token de Meta ha caducado o ya no vale: genera uno nuevo y "
                              f"pégalo en Configuración ({mensaje})", "caducado")
@@ -393,7 +404,7 @@ class ClienteMeta:
         nodo = nodo.get(ident) if isinstance(nodo.get(ident), dict) else {}
         tipo = str(nodo.get("media_product_type") or "")
         if tipo and tipo != "REELS":
-            return {ident: {"error": "no es un Reel: Meta solo da la retención de los Reels",
+            return {ident: {"error": "no es un Reel (Meta solo da la retención de los Reels)",
                             "tipo": tipo}}
         if fallo.motivo == "metrica" and fallo.metrica in metricas and len(metricas) > 1:
             self.retiradas.append(fallo.metrica)
@@ -417,7 +428,7 @@ class ClienteMeta:
                 continue
             tipo = str(nodo.get("media_product_type") or "")
             if tipo and tipo != "REELS":
-                salida[ident] = {"error": "no es un Reel: Meta solo da la retención de los Reels",
+                salida[ident] = {"error": "no es un Reel (Meta solo da la retención de los Reels)",
                                  "tipo": tipo}
                 continue
             m = _metricas(nodo)

@@ -5903,3 +5903,6 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .cuando-confirmado { color: var(--ok); margin-top: 4px; }
 .cuando-confirmado.sin-hora { color: var(--aviso); }
 @media (max-width: 640px) { .ok-cuando-publicar { min-height: 44px; min-width: 56px; } }
+
+/* ---------------- PUBLICAR · retención de Instagram y Facebook (retencion-meta, 19-11) */
+.aviso-meta-envio { color: var(--aviso); }

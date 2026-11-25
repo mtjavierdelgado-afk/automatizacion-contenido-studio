@@ -4164,7 +4164,28 @@ def medir(raiz, pids, forzar=False):
         # se espera a Meta como mucho hasta el final de la franja de la peticion
         meta.esperar(arranque + TOPE_VUELTA_S)
     meta.mezclar_en(r)
+    _segunda_pasada_meta(raiz, pids, arranque, r)
     return r
+
+
+def _segunda_pasada_meta(raiz, pids, arranque, r):
+    """El numero del post de Instagram o Facebook lo trae Upload-Post en su
+    primera lectura en vivo, que corre A LA VEZ que Meta: un video recien
+    publicado llega a Meta sin numero y se quedaria sin retencion hasta el
+    siguiente «Actualizar». Si queda tiempo en la peticion, una segunda vuelta
+    SOLO para los que nunca leyo Meta y ya tienen numero."""
+    if meta_sin_leer := _envios_meta(raiz, pids, False, solo_nunca=True):
+        hasta = min(time.time() + TOPE_META_S, arranque + TOPE_VUELTA_S - 1)
+        if not _cabe(hasta):
+            return
+        m = medir_meta(raiz, pids, hasta=hasta, solo={e["id"] for _p, e in meta_sin_leer})
+        if m.get("ocupado"):
+            return
+        previo = r.get("meta") or {}
+        r["meta"] = {k: (previo.get(k) or 0) + (m.get(k) or 0) for k in ("leidos", "actualizados")}
+        if m.get("errores"):
+            vistos = set(r.get("errores") or [])
+            r["errores"] = (r.get("errores") or []) + [x for x in m["errores"] if x not in vistos]
 
 
 def _medir_upload_post(raiz, pids, forzar, arranque):
@@ -4228,9 +4249,10 @@ def cliente_meta():
     return MM.ClienteMeta(_token_meta(), base=os.environ.get("ESTUDIO_META_BASE") or None)
 
 
-def _envios_meta(raiz, pids, forzar):
+def _envios_meta(raiz, pids, forzar, solo_nunca=False, solo=None):
     """[(pid, envio)] de Instagram y Facebook que toca leer: lo nunca leido
-    primero, y lo leido hace menos de RESPIRO_META_S fuera (salvo `forzar`)."""
+    primero, y lo leido hace menos de RESPIRO_META_S fuera (salvo `forzar`).
+    `solo_nunca`: solo los que Meta no ha leido nunca; `solo`: esos ids."""
     ahora = ahora_lima()
     salida = []
     for pid in pids:
@@ -4239,7 +4261,12 @@ def _envios_meta(raiz, pids, forzar):
                 continue
             if not (e.get("meta_id") or e.get("post_id")):
                 continue
-            al = _leer_momento((e.get("metricas") or {}).get("meta_al"))
+            if solo is not None and e.get("id") not in solo:
+                continue
+            m_e = e.get("metricas") or {}
+            if solo_nunca and (m_e.get("meta_al") or m_e.get("meta_error")):
+                continue
+            al = _leer_momento(m_e.get("meta_al"))
             if al and not forzar and (ahora - al).total_seconds() < RESPIRO_META_S:
                 continue
             salida.append(((ahora - al).total_seconds() if al else float("inf"), pid, e))
@@ -4273,13 +4300,13 @@ def _pagina_de(paginas, e, ajustes_pagina):
     return con_token[0] if len(con_token) == 1 else None
 
 
-def medir_meta(raiz, pids, forzar=False, hasta=None):
-    """La retencion de Instagram y Facebook de estos videos.
-    -> {"leidos", "actualizados", "pendientes", "errores": [...], "ocupado"?}"""
+def medir_meta(raiz, pids, forzar=False, hasta=None, solo=None):
+    """La retencion de Instagram y Facebook de estos videos (`solo`: esos
+    envios). -> {"leidos", "actualizados", "pendientes", "errores": [...], "ocupado"?}"""
     if not _LOCK_META.acquire(blocking=False):
         return {"leidos": 0, "actualizados": 0, "pendientes": 0, "errores": [], "ocupado": True}
     try:
-        return _medir_meta(raiz, pids, forzar, hasta or time.time() + TOPE_META_S)
+        return _medir_meta(raiz, pids, forzar, hasta or time.time() + TOPE_META_S, solo=solo)
     finally:
         _LOCK_META.release()
 
@@ -4288,8 +4315,8 @@ def _cabe(hasta):
     return time.time() + MM.PLAZO_S <= hasta
 
 
-def _medir_meta(raiz, pids, forzar, hasta):
-    envios = _envios_meta(raiz, pids, forzar)
+def _medir_meta(raiz, pids, forzar, hasta, solo=None):
+    envios = _envios_meta(raiz, pids, forzar, solo=solo)
     vacio = {"leidos": 0, "actualizados": 0, "pendientes": 0, "errores": []}
     if not envios:
         return vacio

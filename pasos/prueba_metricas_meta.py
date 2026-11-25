@@ -437,7 +437,25 @@ def prueba_publicar(base):
     ok(tardo < 2.5 and r.get("meta", {}).get("a_medias")
        and any("no dio tiempo" in x for x in r["errores"]),
        f"si Meta tarda más que la franja, «Actualizar» no espera ({tardo:.1f} s) y lo dice")
-    ok(not P._LOCK_META.locked() or True, "el cerrojo de Meta no se queda tomado")
+    P.medir_meta(raiz, ["v1"], forzar=True)
+    ok(not P._LOCK_META.locked(), "tras una lectura de Meta, su cerrojo queda libre")
+    # recién publicado: el número del post lo trae Upload-Post en la MISMA
+    # vuelta en la que Meta ya ha empezado sin él → segunda vuelta para ese
+    ig_ok = next(e for e in P._leer_video(raiz, "v1")["envios"] if e["red"] == "instagram")
+    _video(raiz, "v3", [{"id": "e_nuevo", "red": "instagram", "estado": "publicado",
+                         "lote": "l3", "perfil": "p", "metricas": {}}])
+
+    def up_trae_el_numero(*_a, **_k):
+        datos = P._leer_video(raiz, "v3")
+        datos["envios"][0]["post_id"] = ig_ok.get("meta_id") or ig_ok.get("post_id")
+        P._escribir(P._ruta_video(raiz, "v3"), datos)
+        return dict(vacia)
+    P.actualizar_metricas = up_trae_el_numero
+    r = P.medir(raiz, ["v3"])
+    P.actualizar_metricas = lambda *a, **k: dict(vacia)
+    m = _envio(raiz, "v3", "e_nuevo")["metricas"]
+    ok(m.get("meta_al") and m.get("salto_3s") is not None,
+       f"recién publicado: el número llega de Upload-Post y Meta lo lee en la misma «Actualizar» ({r.get('meta')})")
     # dos «Actualizar» a la vez no lanzan dos lecturas de Meta
     P._LOCK_META.acquire()
     try:

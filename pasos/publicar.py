@@ -3790,7 +3790,7 @@ META_POR_RED = {
 }
 #: Lo que Meta deja en `metricas` ademas de sus cifras: cuando se leyo y por
 #: que no se pudo. Upload-Post no lo borra al apuntar lo suyo.
-META_RELOJ = ("meta_al", "meta_error", "meta_detalle", "meta_busqueda_al")
+META_RELOJ = ("meta_al", "meta_error", "meta_detalle", "meta_busqueda", "meta_busqueda_al")
 
 
 def _claves_de_upload_post(red):
@@ -4473,10 +4473,11 @@ def _ig_por_enlace(cli, sin_cifras, hasta, resultados):
     las cifras de ningún Reel con el id que trae Upload-Post). Con el código
     corto de su enlace (instagram.com/reel/<código>/) se busca en los medios
     de las cuentas de Instagram del token y, si sale otro id, se pide con ese
-    y se guarda como `meta_id`. Si no aparece, se queda el error de antes con
-    lo que pasó en la búsqueda (en `meta_detalle`). Una búsqueda por envío y
-    respiro (`meta_busqueda_al`), aunque se pulse «Actualizar» seguido: cuesta
-    varias llamadas. Nunca lanza: lo que no da tiempo, otra vuelta."""
+    y se guarda como `meta_id`. Lo que pasó en la búsqueda va en su propia
+    clave (`meta_busqueda`), aparte de lo que dijo Meta (`meta_detalle`).
+    Una búsqueda HECHA (entera, o que Meta no dejó hacer) lleva su respiro
+    (`meta_busqueda_al`) aunque se pulse «Actualizar» seguido; una cortada
+    por tiempo o cupo se repite la próxima vez. Nunca lanza."""
     ahora = ahora_lima()
     buscados = {}
     for pid, e, ident in sin_cifras:
@@ -4489,20 +4490,19 @@ def _ig_por_enlace(cli, sin_cifras, hasta, resultados):
     if not buscados:
         return
 
-    def apuntar(que):
-        for lista in buscados.values():
-            for pid, e, _ident in lista:
+    def apuntar(codigos, que, hecha):
+        for codigo in codigos:
+            for pid, e, _ident in buscados[codigo]:
                 previo = (resultados.get(e["id"]) or (pid, {}, {}))[1]
                 if previo.get("error"):
-                    detalle = " | ".join(x for x in (previo.get("detalle"), que) if x)[:300]
-                    resultados[e["id"]] = (pid, dict(previo, detalle=detalle, buscado=True), {})
+                    resultados[e["id"]] = (pid, dict(previo, busqueda=que[:300], buscado=hecha), {})
 
     try:
         cuentas = [p for p in cli.paginas() if p.get("ig_id")]
     except MM.ErrorMeta:
         return
     if not cuentas:
-        apuntar("búsqueda por enlace: el token no ve ninguna cuenta de Instagram")
+        apuntar(list(buscados), "búsqueda por enlace: el token no ve ninguna cuenta de Instagram", True)
         return
     hallados, mirado, completa = {}, [], True
     sin_tiempo_antes = getattr(cli, "sin_tiempo", False)
@@ -4512,12 +4512,17 @@ def _ig_por_enlace(cli, sin_cifras, hasta, resultados):
             break
         if len(hallados) == len(buscados):
             break
+        nombre = "@" + (cuenta.get("ig_usuario") or cuenta["ig_id"])
         try:
             medios, entera = cli.medios_ig(cuenta["ig_id"])
-        except MM.ErrorMeta:
-            completa = False
-            break
-        nombre = "@" + (cuenta.get("ig_usuario") or cuenta["ig_id"])
+        except MM.ErrorMeta as fallo:
+            if fallo.motivo in ("tiempo", "cupo") or fallo.motivo in MOTIVOS_DE_LAS_DOS:
+                completa = False
+                break
+            # Meta no deja leer los medios de ESA cuenta (p. ej. un #10): se
+            # dice con lo que contestó, y cuenta como mirada
+            mirado.append(f"{nombre} no deja leer sus medios ({getattr(fallo, 'detalle', '') or fallo})"[:160])
+            continue
         mirado.append(f"{nombre} ({len(medios)} más recientes)")
         completa = completa and entera
         for m in medios:
@@ -4530,29 +4535,16 @@ def _ig_por_enlace(cli, sin_cifras, hasta, resultados):
     cli.sin_tiempo = sin_tiempo_antes
     sin_hallar = [c for c in buscados if c not in hallados]
     if sin_hallar:
-        # lo que se buscó y dónde, para el diagnóstico (se guarda con el error).
-        # Solo una búsqueda ENTERA cuenta como hecha (con su respiro): a medias,
-        # se dice así y la próxima «Actualizar» lo vuelve a intentar
-        que = (f"búsqueda por enlace: {', '.join(sin_hallar[:3])} no está en "
-               f"{', '.join(mirado) or 'ninguna cuenta'}" if completa else
-               f"búsqueda por enlace a medias (no dio tiempo): mirado {', '.join(mirado) or 'nada'}")
-        for codigo in sin_hallar:
-            for pid, e, _ident in buscados[codigo]:
-                previo = (resultados.get(e["id"]) or (pid, {}, {}))[1]
-                if previo.get("error"):
-                    detalle = " | ".join(x for x in (previo.get("detalle"), que) if x)[:300]
-                    resultados[e["id"]] = (pid, dict(previo, detalle=detalle, buscado=completa), {})
+        apuntar(sin_hallar, (f"búsqueda por enlace: no está en {', '.join(mirado) or 'ninguna cuenta'}"
+                             if completa else
+                             f"búsqueda por enlace a medias (no dio tiempo): mirado {', '.join(mirado) or 'nada'}"),
+                completa)
     nuevos = {c: i for c, i in hallados.items()
               if any(i != ident for _p, _e, ident in buscados[c])}
-    for codigo in hallados:
-        if codigo not in nuevos:
-            # está, y con el MISMO id: el fallo no es el id (permiso, cuenta…)
-            for pid, e, _ident in buscados[codigo]:
-                previo = (resultados.get(e["id"]) or (pid, {}, {}))[1]
-                if previo.get("error"):
-                    detalle = " | ".join(x for x in (previo.get("detalle"), "búsqueda por enlace: "
-                                                     "es el mismo id, el fallo no es el id") if x)[:300]
-                    resultados[e["id"]] = (pid, dict(previo, detalle=detalle, buscado=True), {})
+    mismos = [c for c in hallados if c not in nuevos]
+    if mismos:
+        # está, y con el MISMO id: el fallo no es el id (permiso, cuenta…)
+        apuntar(mismos, "búsqueda por enlace: es el mismo id, el fallo no es el id", True)
     if not nuevos or not _cabe(hasta) or cli.cerca_del_cupo:
         return
     try:
@@ -4562,7 +4554,9 @@ def _ig_por_enlace(cli, sin_cifras, hasta, resultados):
     for codigo, nuevo in nuevos.items():
         for pid, e, _viejo in buscados[codigo]:
             if nuevo in cifras:
-                resultados[e["id"]] = (pid, dict(cifras[nuevo], buscado=True), {"meta_id": nuevo})
+                que = f"búsqueda por enlace: encontrado con otro id ({nuevo})"
+                resultados[e["id"]] = (pid, dict(cifras[nuevo], busqueda=que, buscado=True),
+                                       {"meta_id": nuevo})
 
 
 def _leer_fb(raiz, cli, fb, hasta, resultados):
@@ -4637,18 +4631,12 @@ def _apuntar_meta(raiz, resultados):
                     # lo que dijo Meta, sin tokens, para el diagnóstico del servidor
                     # (y nada de uno viejo junto a un error nuevo)
                     if cifras.get("detalle"):
-                        nuevo = str(cifras["detalle"])
-                        viejo = str(m.get("meta_detalle") or "")
-                        # lo que se vio al buscarlo por su enlace se queda hasta
-                        # la próxima búsqueda (que va con su respiro)
-                        if not cifras.get("buscado") and "búsqueda por enlace" in viejo:
-                            nuevo += " | búsqueda por enlace" + viejo.split("búsqueda por enlace", 1)[1]
-                        m["meta_detalle"] = nuevo[:300]
+                        m["meta_detalle"] = str(cifras["detalle"])[:300]
                     else:
-                        viejo = str(m.pop("meta_detalle", None) or "")
-                        if "búsqueda por enlace" in viejo:
-                            m["meta_detalle"] = ("búsqueda por enlace"
-                                                 + viejo.split("búsqueda por enlace", 1)[1])[:300]
+                        m.pop("meta_detalle", None)
+                    # lo de la búsqueda por enlace, en su clave: se SUSTITUYE
+                    if cifras.get("busqueda"):
+                        m["meta_busqueda"] = str(cifras["busqueda"])[:300]
                     if cifras.get("buscado"):
                         m["meta_busqueda_al"] = al
                     # con su reloj: un envío que Meta no contesta no se vuelve a
@@ -4677,6 +4665,8 @@ def _apuntar_meta(raiz, resultados):
                             m["media_vista"] = round(parte, 4)
                 m["meta_al"], m["meta_error"] = al, ""
                 m.pop("meta_detalle", None)
+                if cifras.get("busqueda"):
+                    m["meta_busqueda"] = str(cifras["busqueda"])[:300]
                 if cifras.get("buscado"):
                     m["meta_busqueda_al"] = al
                 e["metricas"] = sin_ceros_imposibles(m)

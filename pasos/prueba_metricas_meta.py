@@ -535,8 +535,8 @@ def prueba_publicar(base):
     ok(_envio(raiz, "v11", "i_up")["metricas"].get("tiempo_medio_s") == 4.2
        and not any("borradoUP77" in x["ruta"] for x in ESTADO["peticiones"][-6:]),
        "la vuelta siguiente usa el id de verdad (no vuelve al de Upload-Post)")
-    ok("búsqueda por enlace" in e_nada["metricas"].get("meta_detalle", "")
-       and "@casas_con_diseno" in e_nada["metricas"]["meta_detalle"],
+    ok("búsqueda por enlace" in e_nada["metricas"].get("meta_busqueda", "")
+       and "@casas_con_diseno" in e_nada["metricas"]["meta_busqueda"],
        "y dice dónde se buscó su enlace sin encontrarlo")
     ok(e_nada["metricas"].get("meta_busqueda_al"), "con la hora de la búsqueda")
     # (árbitro) la búsqueda va DESPUÉS de Facebook: no lo deja sin leer
@@ -553,29 +553,45 @@ def prueba_publicar(base):
        f"la búsqueda por enlace va después de leer Facebook ({i_fb} < {i_media})")
     ok(sum("me/accounts" in x for x in rutas) == 1, "y la lista de páginas se pide una vez por vuelta")
     # (árbitro) una búsqueda por envío y respiro, aunque se pulse seguido
-    ok("búsqueda por enlace" in _envio(raiz, "v11", "i_nada")["metricas"].get("meta_detalle", ""),
-       "lo que se vio al buscarlo sigue en el detalle mientras no se vuelve a buscar")
+    ok("búsqueda por enlace" in _envio(raiz, "v11", "i_nada")["metricas"].get("meta_busqueda", ""),
+       "lo que se vio al buscarlo sigue mientras no se vuelve a buscar")
     antes = sum("/media" in x["ruta"] for x in ESTADO["peticiones"])
     P.medir_meta(raiz, ["v11"], forzar=True)
     ok(sum("/media" in x["ruta"] for x in ESTADO["peticiones"]) == antes,
        "el que no se encontró no se vuelve a buscar en cada «Actualizar»")
     # (árbitro) un error nuevo sin detalle no deja el detalle viejo
     P._apuntar_meta(raiz, {"i_nada": ("v11", {"error": "no es un Reel", "tipo": "FEED"}, {})})
-    det = _envio(raiz, "v11", "i_nada")["metricas"].get("meta_detalle", "")
-    ok("Unsupported" not in det and det.startswith("búsqueda por enlace"),
-       f"un error nuevo sin detalle borra lo viejo de Meta (lo de la búsqueda se queda) ({det[:60]!r})")
+    m_n = _envio(raiz, "v11", "i_nada")["metricas"]
+    ok("meta_detalle" not in m_n and m_n.get("meta_busqueda", "").startswith("búsqueda por enlace"),
+       "un error nuevo sin detalle borra lo viejo de Meta (lo de la búsqueda, en su clave, se queda)")
     # (árbitro, 2.ª vuelta) una búsqueda cortada a medias no cuenta como hecha
     original = MM.ClienteMeta.medios_ig
     MM.ClienteMeta.medios_ig = lambda self, ig_id, paginas_max=4: ([], False)
     try:
         _video(raiz, "v13", [{"id": "i_m", "red": "instagram", "estado": "publicado", "post_id": "borradoUP91",
                               "url": "https://www.instagram.com/reel/DCodigo_1/", "metricas": {}}])
-        r13 = P.medir_meta(raiz, ["v13"], forzar=True)
+        for _ in range(3):
+            r13 = P.medir_meta(raiz, ["v13"], forzar=True)
     finally:
         MM.ClienteMeta.medios_ig = original
     m13 = _envio(raiz, "v13", "i_m")["metricas"]
-    ok("a medias" in m13.get("meta_detalle", "") and not m13.get("meta_busqueda_al"),
-       f"una búsqueda a medias lo dice y se repite en la próxima «Actualizar» ({m13.get('meta_detalle', '')[-70:]!r})")
+    ok(m13.get("meta_busqueda", "").count("a medias") == 1 and not m13.get("meta_busqueda_al")
+       and "búsqueda" not in m13.get("meta_detalle", ""),
+       f"una búsqueda a medias lo dice UNA vez (tres vueltas) y se repite la próxima vez ({m13.get('meta_busqueda')!r})")
+    # (árbitro, 3.ª vuelta) Meta no deja leer los medios de la cuenta (#10)
+    def sin_permiso_medios(self, ig_id, paginas_max=4):
+        raise MM.ErrorMeta("(#10) sin permiso", "otro", detalle="HTTP 403 #10/ Application does not have permission")
+    MM.ClienteMeta.medios_ig = sin_permiso_medios
+    try:
+        _video(raiz, "v14", [{"id": "i_p", "red": "instagram", "estado": "publicado", "post_id": "borradoUP92",
+                              "url": "https://www.instagram.com/reel/DCodigo_1/", "metricas": {}}])
+        P.medir_meta(raiz, ["v14"], forzar=True)
+        m14 = _envio(raiz, "v14", "i_p")["metricas"]
+        ok("no deja leer sus medios" in m14.get("meta_busqueda", "") and "#10" in m14["meta_busqueda"]
+           and m14.get("meta_busqueda_al"),
+           f"si Meta no deja leer los medios, se dice con su #10 y lleva su respiro ({m14.get('meta_busqueda')!r})")
+    finally:
+        MM.ClienteMeta.medios_ig = original
     ok(not any("tiempo" in x for x in r13.get("errores", [])),
        "y cortar la búsqueda no avisa de «no dio tiempo» (lo demás se leyó)")
     ok(MM.shortcode_ig("https://www.instagram.com/usuario/reel/DCodigo_1/") == "DCodigo_1"

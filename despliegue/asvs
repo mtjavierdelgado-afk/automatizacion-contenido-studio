@@ -236,7 +236,26 @@ _sitio_cliente() {
     echo "    (añadela a mano: ver despliegue/nginx-sitio.conf)"
     return 0
   fi
-  grep -q 'zone=asvs_cliente' "$sitio" && return 0
+  if grep -q 'zone=asvs_cliente' "$sitio"; then
+    # YA ESTA (p. ej. de una prueba de la rama con una version anterior): solo
+    # se le añade lo que le falte, el error_log que no deja el token
+    grep -q 'as-video-studio.error.log crit' "$sitio" && return 0
+    awk '
+      { print }
+      /location \^~ \/cliente\// { dentro = 1 }
+      dentro && /access_log off;/ && !puesto {
+        print "        error_log /var/log/nginx/as-video-studio.error.log crit;"; puesto = 1 }
+      dentro && /^    }/ { dentro = 0 }' "$sitio" > "$tmp"
+    _poner "$tmp" "$sitio" 644 "$copias" || return 0
+    if nginx -t >/dev/null 2>&1; then
+      si "nginx: la pagina del cliente ya no deja el token en el registro de errores"
+      systemctl reload nginx || no "nginx no se ha podido recargar: mira  systemctl status nginx"
+    else
+      _devolver "$copias" "$sitio"
+      no "nginx NO acepta el cambio de la pagina del cliente: he dejado el sitio como estaba"
+    fi
+    return 0
+  fi
   # EL `location / {` QUE LLEVA AL ESTUDIO (no el de un bloque del 80 que solo
   # redirige): el primero con un proxy_pass a 127.0.0.1 antes de cerrarse.
   # -> «<linea> <puerto>»

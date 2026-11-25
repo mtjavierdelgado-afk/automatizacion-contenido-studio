@@ -3339,6 +3339,7 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
     if espera:
         motivo = _por_que_espera(espera) + ": no se ha mandado"
         _actualizar_lote(raiz, pid, lote, lambda e: e.update(estado="fallido", error=motivo))
+        _SUBIENDO.discard(lote)          # (reintentar lo apuntó antes de llamar)
         return
     campos = {}
     compuestos = {}
@@ -3462,9 +3463,10 @@ def reintentar(raiz, info, ajustes, eid, en_hilo=True):
         if envio["lote"] in _SUBIENDO:
             raise ErrorPublicar("ese envío se está subiendo ahora mismo", 409)
         # LA APROBACIÓN DEL CLIENTE (publicar-redes-3): reintentar también espera
-        if _espera_al_cliente(raiz, pid, info, ajustes, [envio.get("red")]):
-            raise ErrorPublicar("el cliente todavía no ha aprobado este vídeo (o lo cambiaste "
-                                "después): no sale hasta que lo apruebe, o anula su enlace", 409)
+        espera = _espera_al_cliente(raiz, pid, info, ajustes, [envio.get("red")])
+        if espera:
+            raise ErrorPublicar(_por_que_espera(espera) + ": no sale hasta que lo apruebe, o "
+                                "anula su enlace", 409)
         if envio.get("modo") == "programado":
             momento = _leer_momento(envio.get("cuando"))
             if momento and momento <= ahora_lima() + dt.timedelta(minutes=2):

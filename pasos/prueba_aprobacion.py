@@ -188,6 +188,13 @@ def prueba_respuestas():
     ok(P._espera_al_cliente(raiz, "v2", {"mp4_huella": "h1"}, {}, ["tiktok"]) == "ilegible",
        "publicar lo lee como «no puedo leerlo» y NO deja salir el vídeo (falla cerrado)")
     with open(ruta, "w", encoding="utf-8") as fh:
+        fh.write("[]")
+    try:
+        A.espera_al_cliente(raiz, "v2", {}, [])
+        ok(False, "un JSON que no es lo nuestro tampoco es «no hay enlaces»")
+    except A.ErrorAprobacion as fallo:
+        ok(fallo.codigo == 503, "un JSON que no es lo nuestro ([]) también da 503")
+    with open(ruta, "w", encoding="utf-8") as fh:
         fh.write(bueno)
 
 
@@ -424,6 +431,22 @@ def prueba_rutas():
         ok(len({x.json()["error"] for x in respuestas}) == 1, "y siempre el mismo texto")
         ok(c.get(f"/cliente/{malo}").status_code == 200, "la página sale igual (la dice al cargar)")
 
+        ruta_ap = os.path.join(base, "_sistema", "publicar", "aprobaciones.json")
+        with open(ruta_ap, encoding="utf-8") as fh:
+            guardado = fh.read()
+        with open(ruta_ap, "w", encoding="utf-8") as fh:
+            fh.write("{roto")
+        r = c.get(f"/cliente/{token}/datos")
+        ok(r.status_code == 503 and "más tarde" in r.json().get("error", "")
+           and "Studio" not in r.json().get("error", "") and "fichero" not in r.json().get("error", ""),
+           f"con el fichero dañado, el cliente ve «inténtalo más tarde» y nada de dentro ({r.status_code})")
+        r = c.post(f"/api/publicar/videos/{pid}/enviar", json={"redes": ["tiktok"], "modo": "ahora",
+                                                                "confirmado": True})
+        ok(r.status_code == 409 and "no puedo leer" in r.json().get("error", ""),
+           "y «Publicar» no sale: dice que no puede leer las aprobaciones")
+        ok(c.get(f"/api/publicar/videos/{pid}/aprobacion").status_code == 503, "la ficha da 503 con su texto")
+        with open(ruta_ap, "w", encoding="utf-8") as fh:
+            fh.write(guardado)
         ident = A.de_video(base, pid)["id"]
         r = c.delete(f"/api/publicar/videos/{pid}/aprobacion/{ident}")
         ok(r.status_code == 200 and r.json()["enlace"]["vigente"] is False, "el dueño lo anula")

@@ -37766,14 +37766,19 @@ function bloqueRespuestasClientes() {
     if (!APROB.cargandoRespuestas) {
       APROB.cargandoRespuestas = true;
       pedir(rutaPublicar('/aprobaciones'))
-        .then(d => { APROB.respuestas = d.respuestas || []; })
-        .catch(() => { APROB.respuestas = APROB.respuestas || []; })
+        .then(d => { APROB.respuestas = d.respuestas || []; APROB.errorRespuestas = ''; })
+        .catch(e => { APROB.respuestas = APROB.respuestas || []; APROB.errorRespuestas = e.message; })
         .finally(() => { APROB.respuestasAl = Date.now(); APROB.cargandoRespuestas = false;
           if (MODULOS.actual === 'publicar' && PUB.seccion === 'porpublicar') repintarPublicarSinPisar(); });
     }
   }
   // los que piden cambios se quedan aunque el enlace se cierre: no se pierden
   const lista = (APROB.respuestas || []).filter(r => r.vigente || r.estado === 'cambios').slice(0, 5);
+  if (!lista.length && APROB.errorRespuestas) {
+    // que no desaparezca sin decir por qué (p. ej. el fichero de aprobaciones dañado)
+    return h('section', { clase: 'bloque aprob-respuestas' }, h('h3', {}, 'Lo que han contestado tus clientes'),
+      h('div', { clase: 'caja-aviso' }, `No se han podido leer: ${APROB.errorRespuestas}`));
+  }
   if (!lista.length) return null;
   const nombres = {};
   ((PUB.cola || {}).listos || []).forEach(v => { nombres[v.pid] = v.nombre || v.pid; });

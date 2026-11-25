@@ -26794,8 +26794,14 @@ _CABECERAS_CLIENTE = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nof
 
 
 def _cliente_registro(token):
-    """El enlace del token, o 404 con el mismo texto para todo lo que no vale."""
-    registro = _aprobacion().de_token(raiz_proyectos(), token)
+    """El enlace del token, o 404 con el mismo texto para todo lo que no vale.
+    Si las aprobaciones no se pueden leer, un 503 con un texto para el cliente
+    (nada de cómo va el Studio por dentro)."""
+    aprob = _aprobacion()
+    try:
+        registro = aprob.de_token(raiz_proyectos(), token)
+    except aprob.ErrorAprobacion:
+        raise ErrorApi(503, aprob.NO_SE_PUEDE_AHORA) from None
     if not registro:
         raise ErrorApi(404, _ENLACE_NO_VALE)
     return registro

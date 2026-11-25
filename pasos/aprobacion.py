@@ -94,12 +94,14 @@ def _leer(raiz):
     el «sí» del cliente y el siguiente guardado escribiría encima, perdiendo
     todos los enlaces. Ilegible -> ErrorAprobacion (503) y no se escribe nada."""
     try:
-        datos = leer_json(_ruta(raiz), {}, estricto=True) or {}
+        datos = leer_json(_ruta(raiz), {}, estricto=True)
     except (ValueError, OSError):
         raise ErrorAprobacion(ILEGIBLE, 503) from None
-    datos = datos if isinstance(datos, dict) else {}
-    if not isinstance(datos.get("enlaces"), dict):
-        datos["enlaces"] = {}
+    if datos is None or not isinstance(datos, dict) \
+            or not isinstance(datos.get("enlaces", {}), dict):
+        # un JSON válido pero que no es lo nuestro: tampoco es «no hay enlaces»
+        raise ErrorAprobacion(ILEGIBLE, 503)
+    datos.setdefault("enlaces", {})
     return datos
 
 
@@ -283,6 +285,11 @@ def respuestas(raiz, pids=None):
 
 
 # ------------------------------------------------------------ el cliente
+
+#: Lo que ve el CLIENTE si las aprobaciones no se pueden leer (sin detalles
+#: de dentro del Studio)
+NO_SE_PUEDE_AHORA = "Ahora mismo no se puede abrir este enlace: inténtalo de nuevo más tarde."
+
 
 def de_token(raiz, token):
     """El enlace de este token si vale (bien formado, existe, no anulado, no

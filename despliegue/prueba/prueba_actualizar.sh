@@ -308,6 +308,15 @@ ok '[ "$(awk "/location \\^~ \\/cliente\\//{print NR; exit}" "$T/etc/nginx/sites
    "y no en el bloque que solo redirige, sino en el del estudio"
 ok '[ "$(grep -n "zone=asvs_cliente:" "$T/etc/nginx/sites-available/as-video-studio" | cut -d: -f1)" -lt "$(grep -n "^server {" "$T/etc/nginx/sites-available/as-video-studio" | head -1 | cut -d: -f1)" ]' "la zona, fuera de todo server"
 
+echo "[E5] un sitio con la location de antes (sin error_log): se le añade solo eso"
+montar; correr
+sed -i '/as-video-studio.error.log crit/d' "$T/etc/nginx/sites-available/as-video-studio"; cp "$T/etc/nginx/sites-available/as-video-studio" "$T/viejo/sin_error_log"
+correr; codigo=$?
+ok '[ $codigo -eq 0 ] && [ "$(grep -c "as-video-studio.error.log crit" "$T/etc/nginx/sites-available/as-video-studio")" = 1 ] && [ "$(grep -c "location ^~ /cliente/" "$T/etc/nginx/sites-available/as-video-studio")" = 1 ]' \
+   "se añade el error_log una vez, sin duplicar la location"
+ok '[ "$(diff "$T/viejo/sin_error_log" "$T/etc/nginx/sites-available/as-video-studio" | grep -c "^>")" = 1 ] && ! diff "$T/viejo/sin_error_log" "$T/etc/nginx/sites-available/as-video-studio" | grep -q "^<"' \
+   "y no cambia nada más"
+
 echo "[E4] sin el sitio de nginx: se avisa y se sigue"
 montar; rm -f "$T/etc/nginx/sites-available/as-video-studio"; correr; codigo=$?
 ok '[ $codigo -eq 0 ] && grep -q "no encuentro el sitio de nginx" "$T/salida"' "sale bien y dice que /cliente/ no se abre"

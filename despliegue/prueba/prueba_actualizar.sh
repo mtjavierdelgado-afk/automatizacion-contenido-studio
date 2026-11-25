@@ -259,11 +259,15 @@ ok '[ "$(grep -c "location ^~ /cliente/" "$T/etc/nginx/sites-available/as-video-
    "se le añade la pagina del cliente: su location y su zona, una vez"
 ok '[ "$(grep -n "location ^~ /cliente/" "$T/etc/nginx/sites-available/as-video-studio" | cut -d: -f1)" -lt "$(grep -n "location / {" "$T/etc/nginx/sites-available/as-video-studio" | cut -d: -f1)" ] && [ "$(grep -n "zone=asvs_cliente:" "$T/etc/nginx/sites-available/as-video-studio" | cut -d: -f1)" -lt "$(grep -n "^server {" "$T/etc/nginx/sites-available/as-video-studio" | head -1 | cut -d: -f1)" ]' \
    "la location antes de «location / {» y la zona fuera de server"
-ok 'awk "/location \\^~ \\/cliente\\//,/}/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q "proxy_pass http://127.0.0.1:8111;"' \
+ok 'awk "/location \\^~ \\/cliente\\//,/^    }/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q "proxy_pass http://127.0.0.1:8111;"' \
    "con el MISMO puerto que usa el estudio en ese sitio (8111)"
-ok 'awk "/location \\^~ \\/cliente\\//,/}/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q "limit_req zone=asvs_cliente" && ! awk "/location \\^~ \\/cliente\\//,/}/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q auth_request' \
+ok 'awk "/location \\^~ \\/cliente\\//,/^    }/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q "limit_req zone=asvs_cliente" && ! awk "/location \\^~ \\/cliente\\//,/^    }/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q auth_request' \
    "con su limite y SIN pasar por el login"
 ok 'grep -q "pagina del cliente" "$T/salida"' "y lo dice"
+ok 'grep -q "X-Asvs-Publico 1" "$T/etc/nginx/sites-available/as-video-studio" && grep -q "access_log off" "$T/etc/nginx/sites-available/as-video-studio" && grep -q "request_uri !~" "$T/etc/nginx/sites-available/as-video-studio"' \
+   "marca lo publico, no deja el token en el registro y solo acepta las direcciones del cliente"
+ok 'diff <(awk "/location \\^~ \\/cliente\\//,/^    }/" "$T/etc/nginx/sites-available/as-video-studio" | sed "s/127.0.0.1:8111/127.0.0.1:8110/") <(awk "/location \\^~ \\/cliente\\//,/^    }/" "$DESPL/nginx-sitio.conf") >/dev/null' \
+   "la location que añade es la MISMA que la de una instalacion nueva"
 ok 'grep -q "^exec /usr/bin/navegador-falso --no-sandbox --disable-dev-shm-usage" "$T/binarios/estudio-edge"' \
    "el lanzador del navegador, al dia y con el MISMO navegador"
 ok 'grep -qx "ESTUDIO_LOTES=3" "$T/raiz/datos/entorno" && grep -qx "PROPIA=la_mia" "$T/raiz/datos/entorno" && [ "$(grep -c "^PUERTO=" "$T/raiz/datos/entorno")" = 1 ] && [ "$(grep -c "^ESTUDIO_LOTES=" "$T/raiz/datos/entorno")" = 1 ]' \
@@ -289,6 +293,20 @@ echo "[E2] un sitio sin «location / {»: no se toca y se avisa"
 montar; sed -i 's|location / {|location /otra {|' "$T/etc/nginx/sites-available/as-video-studio"; cp "$T/etc/nginx/sites-available/as-video-studio" "$T/viejo/raro"; correr; codigo=$?
 ok '[ $codigo -eq 0 ] && cmp -s "$T/etc/nginx/sites-available/as-video-studio" "$T/viejo/raro"' "sale bien y el sitio queda igual"
 ok 'grep -q "añadela a mano" "$T/salida"' "y dice que se añada a mano"
+
+echo "[E3] un bloque del 80 con su propio «location / {» delante: la de /cliente/ va al del estudio"
+montar
+python3 - "$T/etc/nginx/sites-available/as-video-studio" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+s = s.replace("server {", "server {\n    listen 8080;\n    location / { return 301 https://$host$request_uri; }\n}\n\nserver {", 1)
+open(p, "w").write(s)
+PY
+correr; codigo=$?
+ok '[ $codigo -eq 0 ] && [ "$(grep -c "location ^~ /cliente/" "$T/etc/nginx/sites-available/as-video-studio")" = 1 ]' "sale bien, con una sola location /cliente/"
+ok '[ "$(awk "/location \\^~ \\/cliente\\//{print NR; exit}" "$T/etc/nginx/sites-available/as-video-studio")" -gt "$(grep -n "return 301" "$T/etc/nginx/sites-available/as-video-studio" | head -1 | cut -d: -f1)" ]' \
+   "y no en el bloque que solo redirige, sino en el del estudio"
+ok '[ "$(grep -n "zone=asvs_cliente:" "$T/etc/nginx/sites-available/as-video-studio" | cut -d: -f1)" -lt "$(grep -n "^server {" "$T/etc/nginx/sites-available/as-video-studio" | head -1 | cut -d: -f1)" ]' "la zona, fuera de todo server"
 
 echo "[F] falla algo al poner la configuracion (daemon-reload): se deshace y el estudio vuelve"
 montar; touch "$T/daemon_roto"; correr; codigo=$?

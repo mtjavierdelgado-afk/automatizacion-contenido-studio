@@ -3049,15 +3049,17 @@ def proxima_hora(hora):
 
 # ---------------------------------------------------------------- enviar
 
-def _espera_al_cliente(raiz, pid, huella=""):
-    """«pendiente» o «cambios» si el vídeo espera al cliente (pasos/aprobacion.py);
-    "" si no. Si el módulo falla, no se bloquea nada que antes salía."""
+def _espera_al_cliente(raiz, pid, mp4_huella=""):
+    """«pendiente», «cambios» o «cambiado» si el vídeo espera al cliente
+    (pasos/aprobacion.py); "" si no. Lo aprobado es el MP4 MÁS los textos que
+    vio: se comparan con los de ahora."""
     try:
         from pasos import aprobacion
     except ImportError:                                     # pragma: no cover
         import aprobacion
-    return aprobacion.espera_al_cliente(raiz, pid, huella)
-
+    textos = aprobacion.textos_que_ve(_leer_video(raiz, pid), REDES)
+    return aprobacion.espera_al_cliente(
+        raiz, pid, aprobacion.huella_de_lo_que_ve(mp4_huella, textos))
 
 
 def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
@@ -3086,7 +3088,7 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
     if espera:
         raise ErrorPublicar(
             ("el cliente ha pedido cambios en este vídeo" if espera == "cambios" else
-             "el vídeo se ha vuelto a montar después de que el cliente lo aprobara"
+             "el vídeo o sus textos han cambiado después de que el cliente lo aprobara"
              if espera == "cambiado" else
              "el cliente todavía no ha aprobado este vídeo")
             + ": no sale hasta que lo apruebe. Si quieres publicarlo igualmente, anula "
@@ -3419,6 +3421,10 @@ def reintentar(raiz, info, ajustes, eid, en_hilo=True):
                                 "(«comprobar»); lo demás se publica otra vez como envío nuevo", 409)
         if envio["lote"] in _SUBIENDO:
             raise ErrorPublicar("ese envío se está subiendo ahora mismo", 409)
+        # LA APROBACIÓN DEL CLIENTE (publicar-redes-3): reintentar también espera
+        if _espera_al_cliente(raiz, pid, info.get("mp4_huella") or ""):
+            raise ErrorPublicar("el cliente todavía no ha aprobado este vídeo (o lo cambiaste "
+                                "después): no sale hasta que lo apruebe, o anula su enlace", 409)
         if envio.get("modo") == "programado":
             momento = _leer_momento(envio.get("cuando"))
             if momento and momento <= ahora_lima() + dt.timedelta(minutes=2):

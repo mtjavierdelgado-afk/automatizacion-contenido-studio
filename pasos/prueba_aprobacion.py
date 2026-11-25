@@ -98,6 +98,12 @@ def prueba_modulo():
         ok(False, "un enlace caducado no puede responder")
     except A.ErrorAprobacion as fallo:
         ok(fallo.codigo == 404, "responder con un enlace caducado es 404")
+    datos = json.loads(_fichero(raiz))
+    datos["enlaces"][A.huella_token(tercero["token"])]["caduca"] = "2000-01-01T00:00:00"
+    with open(os.path.join(raiz, "_sistema", "publicar", "aprobaciones.json"), "w", encoding="utf-8") as fh:
+        json.dump(datos, fh)
+    A.crear(raiz, "v1")
+    ok(A.huella_token(tercero["token"]) not in _fichero(raiz), "lo caducado hace mucho se olvida al pedir otro")
 
 
 def prueba_respuestas():
@@ -130,6 +136,26 @@ def prueba_respuestas():
     registro = json.loads(_fichero(raiz))["enlaces"][A.huella_token(token)]
     ok(len(registro["historial"]) == A.TOPE_HISTORIAL, "el historial no crece sin fin")
     ok([r["pid"] for r in A.respuestas(raiz)] == ["v2"], "la Cola ve la respuesta")
+    try:
+        A.responder(raiz, token, "aprobado", huella="")
+        ok(False, "sin vídeo que ver no se aprueba")
+    except A.ErrorAprobacion as fallo:
+        ok(fallo.codigo == 409, "sin vídeo que ver, aprobar da 409")
+    otro = A.crear(raiz, "v9", huella="")["token"]
+    A.responder(raiz, otro, "cambios", "algo", huella="")
+    datos = json.loads(_fichero(raiz))
+    datos["enlaces"][A.huella_token(otro)].update(estado="aprobado", huella_aprobada="")
+    with open(os.path.join(raiz, "_sistema", "publicar", "aprobaciones.json"), "w", encoding="utf-8") as fh:
+        json.dump(datos, fh)
+    ok(A.espera_al_cliente(raiz, "v9", "hX") == "cambiado",
+       "un «sí» sin vídeo delante no vale cuando el vídeo ya está")
+    ok(A.normalizar_decision(" Aprobado ") == "aprobado", "«Aprobado» con mayúscula es aprobar")
+    t1 = A.textos_que_ve({"redes": ["instagram"], "textos": {"instagram": {"descripcion": "a", "hashtags": ["x"]}}},
+                         ["tiktok", "instagram"])
+    t2 = A.textos_que_ve({"redes": ["instagram"], "textos": {"instagram": {"descripcion": "a", "hashtags": ["y"]}}},
+                         ["tiktok", "instagram"])
+    ok(A.huella_de_lo_que_ve("m", t1) != A.huella_de_lo_que_ve("m", t2), "un hashtag distinto cambia la huella")
+    ok(A.huella_de_lo_que_ve("", t1) == "", "sin MP4 no hay huella")
     ok(A.respuestas(raiz, pids=set()) == [], "y solo de los vídeos que se pueden ver")
     A.marcar_visto(raiz, token)
     ok(A.de_video(raiz, "v2")["visto"] is True, "abrirlo queda apuntado")
@@ -145,6 +171,9 @@ def prueba_enviar_espera():
     info = {"pid": "v3", "montado": True, "mp4": mp4, "mp4_huella": "h1",
             "formato": "vertical", "duracion_s": 20}
     token = A.crear(raiz, "v3", huella="h1")["token"]
+
+    def lo_que_ve():
+        return A.huella_de_lo_que_ve("h1", A.textos_que_ve(P._leer_video(raiz, "v3"), P.REDES))
     for modo, extra in (("ahora", {}), ("programar", {"cuando": "2099-01-01T10:00"})):
         try:
             P.enviar(raiz, info, {"perfil": "x"},
@@ -155,20 +184,41 @@ def prueba_enviar_espera():
                and "anula" in str(fallo), f"«{modo}»: 409 y dice qué hacer ({fallo})")
     hechos = P.enviar(raiz, info, {}, {"redes": ["tiktok"], "modo": "pendiente"}, en_hilo=False)
     ok(hechos and hechos[0]["estado"] == "espera_ok", "dejarlo en «espera tu OK», sí")
-    A.responder(raiz, token, "cambios", "otro final", huella="h1")
+    A.responder(raiz, token, "cambios", "otro final", huella=lo_que_ve())
     try:
         P.enviar(raiz, info, {"perfil": "x"}, {"redes": ["youtube"], "modo": "ahora", "confirmado": True},
                  en_hilo=False)
         ok(False, "con cambios pedidos no sale")
     except P.ErrorPublicar as fallo:
         ok("pedido cambios" in str(fallo), "con cambios pedidos lo dice")
-    A.responder(raiz, token, "aprobado", huella="h1")
+    A.responder(raiz, token, "aprobado", huella=lo_que_ve())
     try:
         P.enviar(raiz, dict(info, mp4_huella="h2"), {"perfil": "x"},
                  {"redes": ["youtube"], "modo": "ahora", "confirmado": True}, en_hilo=False)
         ok(False, "otro montaje del aprobado no sale")
     except P.ErrorPublicar as fallo:
-        ok("vuelto a montar" in str(fallo), "otro montaje: lo dice")
+        ok("han cambiado" in str(fallo), "otro montaje: lo dice")
+    # los textos que vio también cuentan: cambiarlos después le quita el «sí»
+    datos = P._leer_video(raiz, "v3")
+    datos["textos"]["tiktok"] = {"descripcion": "otro texto que el cliente no vio"}
+    P._escribir(P._ruta_video(raiz, "v3"), datos)
+    try:
+        P.enviar(raiz, info, {"perfil": "x"}, {"redes": ["youtube"], "modo": "ahora", "confirmado": True},
+                 en_hilo=False)
+        ok(False, "cambiar el texto después de aprobar lo vuelve a parar")
+    except P.ErrorPublicar as fallo:
+        ok("textos" in str(fallo), f"cambiar el texto después de aprobar lo vuelve a parar ({fallo})")
+    # reintentar un envío «comprobar» también espera al cliente
+    datos = P._leer_video(raiz, "v3")
+    datos["envios"].append({"id": "e-comprobar", "red": "tiktok", "lote": "abc123abc123",
+                            "estado": "comprobar", "modo": "ahora", "cuando": "2099-01-01T10:00:00"})
+    P._escribir(P._ruta_video(raiz, "v3"), datos)
+    try:
+        P.reintentar(raiz, info, {"perfil": "x"}, "e-comprobar", en_hilo=False)
+        ok(False, "reintentar no se salta al cliente")
+    except P.ErrorPublicar as fallo:
+        ok(fallo.codigo == 409 and "cliente" in str(fallo), f"reintentar tampoco sale ({fallo})")
+    A.responder(raiz, token, "aprobado", huella=lo_que_ve())
     # aprobado y el mismo montaje: lo que falte ya no es cosa del cliente
     try:
         P.enviar(raiz, info, {"perfil": "x"}, {"redes": ["youtube"], "modo": "ahora", "confirmado": True},
@@ -259,6 +309,15 @@ def prueba_rutas():
         r = c.post(f"/api/publicar/videos/{pid}/enviar",
                    json={"redes": ["tiktok"], "modo": "ahora", "confirmado": True})
         ok(r.status_code == 409 and "cambios" in r.json()["error"], "con cambios pedidos, «Publicar» da 409")
+        r = c.post(f"/cliente/{token}/respuesta", json={"decision": " Aprobado ", "v": "viejo"})
+        ok(r.status_code == 409, "«Aprobado» con mayúscula tampoco se salta el «recarga»")
+        pub = {"X-Asvs-Publico": "1"}
+        ok(c.get(f"/cliente/{token}/datos", headers=pub).status_code == 200,
+           "por la puerta pública, la ruta del cliente pasa")
+        ok(c.get(f"/api/publicar/videos/{pid}/aprobacion", headers=pub).status_code == 404
+           and c.get("/api/proyectos", headers=pub).status_code == 404,
+           "por la puerta pública, nada del Studio pasa (aunque nginx se equivocara)")
+        ok(c.get(f"/cliente/{token}/datos?x=1", headers=pub).status_code == 200, "con su ?v= también")
         r = c.post(f"/cliente/{token}/respuesta", json={"decision": "aprobado", "v": d["v"]})
         ok(r.status_code == 200 and r.json()["estado"] == "aprobado", "aprobar lo que vio")
         r = c.get(f"/api/publicar/videos/{pid}/aprobacion")

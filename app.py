@@ -26737,6 +26737,25 @@ def graficas_logo(cid: str, variante: str, peticion: Request):
 # Nada de vídeos, params ni firmas (regla 1): se lee el MP4 y la ficha de
 # Publicar; lo único que se escribe es `_sistema/publicar/aprobaciones.json`.
 
+#: Las únicas rutas que pueden llegar por la puerta pública de nginx
+_RUTA_PUBLICA = re.compile(r"^/cliente/(_/cliente\.(js|css)|[A-Za-z0-9_-]{40,64}"
+                           r"(/(datos|video\.mp4|respuesta))?)$")
+
+
+@app.middleware("http")
+async def _solo_lo_publico(peticion: Request, siguiente):
+    """SEGUNDA BARRERA de la página del cliente: nginx marca con X-Asvs-Publico
+    lo que entra SIN login por `location ^~ /cliente/`. nginx ya filtra la
+    dirección, pero resuelve los «..» y el estudio no: si algo marcado como
+    público no es exactamente una ruta del cliente, aquí no pasa."""
+    if peticion.headers.get("x-asvs-publico"):
+        cruda = peticion.scope.get("raw_path") or peticion.url.path.encode()
+        cruda = cruda.decode("latin-1") if isinstance(cruda, bytes) else str(cruda)
+        if not _RUTA_PUBLICA.match(cruda):
+            return _respuesta_error(404, "no existe")
+    return await siguiente(peticion)
+
+
 def _aprobacion():
     try:
         from pasos import aprobacion as modulo_aprobacion
@@ -26777,10 +26796,14 @@ def _cliente_contexto(registro):
         raise ErrorApi(404, _ENLACE_NO_VALE) from None
 
 
-def _texto_hashtags(valor):
-    if isinstance(valor, list):
-        return " ".join("#" + str(x).lstrip("#") for x in valor if str(x).strip())
-    return str(valor or "")
+def _lo_que_ve_el_cliente(ctx):
+    """(info, textos, huella): lo que el cliente ve y aprueba ahora mismo. La
+    huella junta el MP4 y los textos (`aprobacion.huella_de_lo_que_ve`): la
+    misma cuenta que hace `publicar.enviar` al decidir si el vídeo sale."""
+    P, aprob = _publicar(), _aprobacion()
+    info = _info_para_publicar(ctx)
+    textos = aprob.textos_que_ve(P._leer_video(raiz_proyectos(), ctx.id), P.REDES)
+    return info, textos, aprob.huella_de_lo_que_ve(info.get("mp4_huella") or "", textos)
 
 
 def _ficha_para_cliente(registro):
@@ -26789,23 +26812,13 @@ def _ficha_para_cliente(registro):
     perfiles, costes, rutas ni otros vídeos."""
     P = _publicar()
     ctx = _cliente_contexto(registro)
-    info = _info_para_publicar(ctx)
+    info, textos, huella = _lo_que_ve_el_cliente(ctx)
     datos = P._leer_video(raiz_proyectos(), ctx.id)
-    textos = datos.get("textos") or {}
-    elegidas = [r for r in P.REDES if r in (datos.get("redes") or [])] or \
-        [r for r in P.REDES if str((textos.get(r) or {}).get("descripcion") or "").strip()]
-    redes = []
-    for red in elegidas:
-        t = textos.get(red) or {}
-        redes.append({"red": red, "nombre": P.NOMBRE_RED.get(red, red),
-                      "titulo": str(t.get("titulo") or ""),
-                      "descripcion": str(t.get("descripcion") or ""),
-                      "hashtags": _texto_hashtags(t.get("hashtags"))})
+    redes = [dict(t, nombre=P.NOMBRE_RED.get(t["red"], t["red"])) for t in textos]
     # la fecha prevista: el primer envío con hora que siga en pie
     fechas = sorted(str(e.get("cuando") or "") for e in datos.get("envios") or []
                     if e.get("estado") in ("espera_ok", "programado")
                     and not e.get("sin_hora") and e.get("cuando"))
-    huella = info.get("mp4_huella") or ""
     return {
         "video": info.get("nombre") or "", "proyecto": info.get("cliente_nombre") or "",
         "hay_video": bool(info.get("montado")), "formato": info.get("formato") or "",
@@ -26814,9 +26827,8 @@ def _ficha_para_cliente(registro):
         "estado": registro.get("estado") or "pendiente",
         "comentario": registro.get("comentario") or "",
         "respondido_al": registro.get("respondido_al") or "",
-        # aprobó un montaje anterior: se le enseña el nuevo para que lo mire
-        "cambiado": bool(registro.get("estado") == "aprobado" and huella
-                         and registro.get("huella_aprobada")
+        # aprobó otra cosa (otro montaje u otros textos): que lo vuelva a mirar
+        "cambiado": bool(registro.get("estado") == "aprobado"
                          and registro.get("huella_aprobada") != huella),
         "v": huella,
     }
@@ -26873,55 +26885,58 @@ def cliente_responder(token: str, cuerpo: dict = Body(default=None)):
     registro = _cliente_registro(token)
     cuerpo = _cuerpo(cuerpo)
     ctx = _cliente_contexto(registro)
-    huella = _publicar().huella_mp4(_mp4_del_video(ctx.proyecto)[0]) \
-        if _mp4_del_video(ctx.proyecto)[0] else ""
-    # lo que aprueba es lo que ha visto: si el vídeo cambió mientras tenía la
-    # página abierta, que la recargue
-    visto = str(cuerpo.get("v") or "")
-    if cuerpo.get("decision") == "aprobado" and visto != huella:
-        raise ErrorApi(409, "El vídeo acaba de cambiar: recarga la página para ver el nuevo "
-                            "antes de aprobarlo.")
+    _info, _textos, huella = _lo_que_ve_el_cliente(ctx)
+    decision = _aprobacion().normalizar_decision(cuerpo.get("decision"))
+    # lo que aprueba es lo que ha visto: si el vídeo o los textos cambiaron
+    # mientras tenía la página abierta, que la recargue
+    if decision == "aprobado" and str(cuerpo.get("v") or "") != huella:
+        raise ErrorApi(409, "El vídeo o sus textos acaban de cambiar: recarga la página para "
+                            "ver lo nuevo antes de aprobarlo.")
     hecho = _por_aprobacion(_aprobacion().responder, raiz_proyectos(), token,
-                            cuerpo.get("decision"), cuerpo.get("comentario"), huella)
+                            decision, cuerpo.get("comentario"), huella)
     ctx.bitacora.anotar("aprobacion_cliente", "render", {"estado": hecho["estado"]})
     anotar_global("aprobacion_cliente", {"pid": ctx.id, "estado": hecho["estado"]})
     return JSONResponse(hecho, headers=_CABECERAS_CLIENTE)
 
 
-def _aprobacion_para_dueno(pid, huella=""):
-    aprob = _aprobacion()
-    enlace = aprob.de_video(raiz_proyectos(), pid)
-    return {"enlace": enlace, "espera": aprob.espera_al_cliente(raiz_proyectos(), pid, huella),
-            "dias_defecto": aprob.DIAS_DEFECTO, "dias_maximo": aprob.DIAS_MAXIMO}
+def _aprobacion_para_dueno(ctx):
+    """Lo que ve la ficha: el último enlace (sin token), si el vídeo espera al
+    cliente y, mientras el enlace valga, lo que ya está programado o publicado
+    (eso NO espera al cliente: se dice cada vez, no solo al pedir el enlace)."""
+    P, aprob = _publicar(), _aprobacion()
+    _info, _textos, huella = _lo_que_ve_el_cliente(ctx)
+    enlace = aprob.de_video(raiz_proyectos(), ctx.id)
+    ya = []
+    if enlace and enlace.get("vigente"):
+        datos = P._leer_video(raiz_proyectos(), ctx.id)
+        ya = sorted({P.NOMBRE_RED.get(e.get("red"), e.get("red"))
+                     for e in datos.get("envios") or [] if e.get("estado") in P.VIVOS})
+    return {"enlace": enlace, "espera": aprob.espera_al_cliente(raiz_proyectos(), ctx.id, huella),
+            "dias_defecto": aprob.DIAS_DEFECTO, "dias_maximo": aprob.DIAS_MAXIMO,
+            "aviso": ("Ojo: ya está publicado o programado en " + ", ".join(ya)
+                      + ". Eso no espera al cliente; si quieres que espere, cancélalo.") if ya else ""}
 
 
 @app.get("/api/publicar/videos/{pid}/aprobacion")
 def aprobacion_ver(pid: str, peticion: Request):
     """El último enlace de aprobación del vídeo (sin el token: no se guarda)."""
     ctx = _ctx_publicable(pid, peticion)
-    return _aprobacion_para_dueno(ctx.id, _info_para_publicar(ctx).get("mp4_huella") or "")
+    return _aprobacion_para_dueno(ctx)
 
 
 @app.post("/api/publicar/videos/{pid}/aprobacion")
 def aprobacion_crear(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """{dias?, nota?} -> {token (SOLO ahora), enlace, …}. Anula los anteriores."""
     ctx = _ctx_publicable(pid, peticion)
-    info = _info_para_publicar(ctx)
+    info, _textos, huella = _lo_que_ve_el_cliente(ctx)
     if not info.get("montado"):
         raise ErrorApi(409, "este vídeo todavía no está montado: móntalo antes de pedir "
                             "la aprobación del cliente")
     cuerpo = _cuerpo(cuerpo)
     hecho = _por_aprobacion(_aprobacion().crear, raiz_proyectos(), ctx.id,
-                            cuerpo.get("dias"), cuerpo.get("nota"), info.get("mp4_huella"))
+                            cuerpo.get("dias"), cuerpo.get("nota"), huella)
     ctx.bitacora.anotar("aprobacion_enlace", "render", {"caduca": hecho["enlace"]["caduca"]})
-    # un envío ya programado en Upload-Post NO espera al cliente: se avisa
-    datos = _publicar()._leer_video(raiz_proyectos(), ctx.id)
-    ya = sorted({_publicar().NOMBRE_RED.get(e.get("red"), e.get("red"))
-                 for e in datos.get("envios") or [] if e.get("estado") in _publicar().VIVOS})
-    return {"token": hecho["token"], **_aprobacion_para_dueno(ctx.id, info.get("mp4_huella")),
-            "aviso": ("Ojo: ya está publicado o programado en " + ", ".join(ya)
-                      + ". Eso no espera al cliente; si quieres que espere, cancélalo.")
-            if ya else ""}
+    return {"token": hecho["token"], **_aprobacion_para_dueno(ctx)}
 
 
 @app.delete("/api/publicar/videos/{pid}/aprobacion/{ident}")
@@ -26929,7 +26944,7 @@ def aprobacion_anular(pid: str, ident: str, peticion: Request):
     ctx = _ctx_publicable(pid, peticion)
     _por_aprobacion(_aprobacion().anular, raiz_proyectos(), ctx.id, ident)
     ctx.bitacora.anotar("aprobacion_anulada", "render", {})
-    return _aprobacion_para_dueno(ctx.id, _info_para_publicar(ctx).get("mp4_huella") or "")
+    return _aprobacion_para_dueno(ctx)
 
 
 @app.get("/api/publicar/aprobaciones")

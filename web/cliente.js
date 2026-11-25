@@ -156,6 +156,12 @@
         enviar.textContent = eleccion === 'cambios' ? 'Enviar los cambios' : 'Enviar mi aprobación';
       }
     });
+    if (!datos.hay_video) {
+      // sin vídeo que mirar no se aprueba nada (se puede volver más tarde)
+      caja.append(h('h2', {}, '¿Lo publicamos así?'),
+        h('p', { class: 'cl-suave' }, 'Cuando el vídeo esté disponible podrás aprobarlo aquí mismo. Vuelve a abrir este enlace más tarde.'));
+      return caja;
+    }
     caja.append(
       h('h2', {}, '¿Lo publicamos así?'),
       h('p', { class: 'cl-suave' }, 'Mira el vídeo y los textos. Si está bien, apruébalo; si no, dinos qué cambiarías.'),

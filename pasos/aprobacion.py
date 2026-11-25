@@ -22,6 +22,7 @@ Nada de params ni firmas de vídeo (regla 1): esto no toca ningún proyecto.
 import datetime as dt
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
@@ -99,6 +100,57 @@ def huella_token(token):
     return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
 
 
+def _hashtags_legibles(valor):
+    if isinstance(valor, list):
+        return " ".join("#" + str(x).lstrip("#") for x in valor if str(x).strip())
+    return str(valor or "")
+
+
+def textos_que_ve(datos_publicar, redes_en_orden):
+    """Los textos que el cliente ve y aprueba: los de las redes elegidas en la
+    ficha (o, sin elegir, las que tienen texto), en el orden de la pantalla.
+    `datos_publicar` es lo de `publicar._leer_video`. -> [{red, titulo,
+    descripcion, hashtags}]. La página del cliente y el bloqueo de
+    `publicar.enviar` salen de AQUÍ, para que aprueben lo mismo."""
+    datos_publicar = datos_publicar if isinstance(datos_publicar, dict) else {}
+    textos = datos_publicar.get("textos") or {}
+    elegidas = [r for r in redes_en_orden if r in (datos_publicar.get("redes") or [])] or \
+        [r for r in redes_en_orden if str((textos.get(r) or {}).get("descripcion") or "").strip()]
+    salida = []
+    for red in elegidas:
+        t = textos.get(red) or {}
+        salida.append({"red": red, "titulo": str(t.get("titulo") or ""),
+                       "descripcion": str(t.get("descripcion") or ""),
+                       "hashtags": _hashtags_legibles(t.get("hashtags"))})
+    return salida
+
+
+def huella_de_lo_que_ve(mp4_huella, textos):
+    """El montaje (huella del MP4) MÁS los textos que ve: si cambia cualquiera
+    de los dos después de aprobarlo, lo aprobado deja de valer. "" sin MP4."""
+    if not mp4_huella:
+        return ""
+    bruto = json.dumps([str(mp4_huella), textos or []], ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(bruto.encode("utf-8")).hexdigest()[:16]
+
+
+#: Un enlace caducado o anulado se olvida pasado este tiempo (al pedir otro)
+DIAS_HASTA_OLVIDAR = 90
+
+
+def _olvidar_viejos(datos, ahora):
+    limite = ahora - dt.timedelta(days=DIAS_HASTA_OLVIDAR)
+    for clave in list(datos["enlaces"]):
+        registro = datos["enlaces"][clave]
+        if _vigente(registro, ahora):
+            continue
+        caduca = _leer_momento(registro.get("caduca")) or ahora
+        respondido = _leer_momento(registro.get("respondido_al"))
+        ultimo = max([m for m in (caduca, respondido) if m] or [ahora])
+        if ultimo < limite:
+            del datos["enlaces"][clave]
+
+
 def _vigente(registro, ahora=None):
     if not isinstance(registro, dict) or registro.get("anulado"):
         return False
@@ -144,6 +196,7 @@ def crear(raiz, pid, dias=None, nota="", huella=""):
                 otro["anulado"] = True
                 otro["anulado_por"] = "otro enlace"
         datos["enlaces"][huella_token(token)] = registro
+        _olvidar_viejos(datos, ahora)
         _escribir(raiz, datos)
     return {"token": token, "enlace": _publico(registro)}
 
@@ -174,8 +227,9 @@ def de_video(raiz, pid):
 
 def espera_al_cliente(raiz, pid, huella=""):
     """¿Espera este vídeo al cliente? Mientras sí, no sale (`publicar.enviar`).
+    `huella` es `huella_de_lo_que_ve` de AHORA (el MP4 y los textos).
     -> "pendiente" (aún no contesta), "cambios" (pidió cambios), "cambiado"
-    (lo aprobó, pero el vídeo se ha vuelto a montar después) o "" (puede salir).
+    (lo aprobó, pero el vídeo o sus textos cambiaron después) o "" (puede salir).
     Solo cuenta el enlace VIGENTE (anulado o caducado ya no para nada)."""
     ahora = _ahora()
     for registro in _leer(raiz)["enlaces"].values():
@@ -183,8 +237,8 @@ def espera_al_cliente(raiz, pid, huella=""):
             continue
         if registro.get("estado") != "aprobado":
             return registro.get("estado") or "pendiente"
-        aprobada = str(registro.get("huella_aprobada") or "")
-        if huella and aprobada and aprobada != str(huella):
+        # aprobado SIN huella (no había vídeo que ver) o con otra: no vale
+        if str(registro.get("huella_aprobada") or "") != str(huella or ""):
             return "cambiado"
     return ""
 
@@ -231,10 +285,14 @@ def marcar_visto(raiz, token):
             _escribir(raiz, datos)
 
 
+def normalizar_decision(decision):
+    return str(decision or "").strip().lower()
+
+
 def responder(raiz, token, decision, comentario="", huella=""):
     """«aprobado» o «cambios», con un comentario (obligatorio si pide
     cambios). Puede cambiar de opinión mientras el enlace valga."""
-    decision = str(decision or "").strip().lower()
+    decision = normalizar_decision(decision)
     if decision not in DECISIONES:
         raise ErrorAprobacion("elige «Aprobar» o «Pedir cambios»")
     comentario = str(comentario or "").strip()[:TOPE_COMENTARIO]
@@ -246,6 +304,8 @@ def responder(raiz, token, decision, comentario="", huella=""):
         registro = datos["enlaces"].get(buscada)
         if not _FORMA_TOKEN.match(str(token or "")) or not _vigente(registro):
             raise ErrorAprobacion("este enlace ya no vale", 404)
+        if decision == "aprobado" and not huella:
+            raise ErrorAprobacion("todavía no hay vídeo que aprobar: vuelve a mirarlo más tarde", 409)
         ahora = _iso(_ahora())
         registro["estado"] = decision
         registro["comentario"] = comentario

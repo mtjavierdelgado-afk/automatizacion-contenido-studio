@@ -233,30 +233,46 @@ _sitio_cliente() {
   sitio="$NGINX/sites-available/as-video-studio"
   [ -f "$sitio" ] || return 0
   grep -q 'zone=asvs_cliente' "$sitio" && return 0
-  # el mismo destino que ya usa `location / {` (el puerto del estudio)
-  puerto="$(awk '/^[[:space:]]*location \/ \{/ {d=1} d && /proxy_pass http:\/\/127\.0\.0\.1:[0-9]+/ {
-              match($0, /127\.0\.0\.1:[0-9]+/); print substr($0, RSTART + 10, RLENGTH - 10); exit }' "$sitio")"
+  # EL `location / {` QUE LLEVA AL ESTUDIO (no el de un bloque del 80 que solo
+  # redirige): el primero con un proxy_pass a 127.0.0.1 antes de cerrarse.
+  # -> «<linea> <puerto>»
+  local hallado linea
+  hallado="$(awk '
+    /^[[:space:]]*location[[:space:]]+\/[[:space:]]*\{/ { dentro = NR; next }
+    dentro && /^[[:space:]]*}/ { dentro = 0 }
+    dentro && /proxy_pass http:\/\/127\.0\.0\.1:[0-9]+/ {
+      match($0, /127\.0\.0\.1:[0-9]+/); print dentro, substr($0, RSTART + 10, RLENGTH - 10); exit }' "$sitio")"
+  linea="${hallado%% *}"; puerto="${hallado##* }"
   if [ -z "$puerto" ]; then
     no "no encuentro «location / {» con su proxy_pass en el sitio de nginx: la pagina del cliente (/cliente/) no se abre"
     echo "    (añadela a mano: ver despliegue/nginx-sitio.conf)"
     return 0
   fi
-  awk -v puerto="$puerto" '
+  awk -v puerto="$puerto" -v linea="$linea" '
     !zona && /^[[:space:]]*server[[:space:]]*\{/ {
       print "# La pagina del CLIENTE (publicar-redes-3): sin login, la protege el token del enlace."
       print "limit_req_zone $binary_remote_addr zone=asvs_cliente:10m rate=60r/m;"
       print ""; zona = 1
     }
-    !loc && /^[[:space:]]*location \/ \{/ {
+    NR == linea {
       print "    # ---- La pagina del cliente: sin login, solo /cliente/ (asvs actualizar) ----"
       print "    location ^~ /cliente/ {"
+      print "        # solo las direcciones de la pagina del cliente, escritas tal cual"
+      print "        # (un «/a/../cliente/x» lo resuelve nginx, pero el estudio no)"
+      print "        if ($request_uri !~ \"^/cliente/(_/cliente\\.(js|css)|[A-Za-z0-9_-]{40,64}(/(datos|video\\.mp4|respuesta))?)(\\?[^/]*)?$\") {"
+      print "            return 404;"
+      print "        }"
       print "        limit_req zone=asvs_cliente burst=40 nodelay;"
       print "        limit_req_status 429;"
       print "        client_max_body_size 16k;"
+      print "        # el token va en la direccion: que no quede en el registro"
+      print "        access_log off;"
       print "        proxy_pass http://127.0.0.1:" puerto ";"
       print "        include /etc/nginx/snippets/asvs-proxy-largo.conf;"
+      print "        # el estudio sabe asi que esto llego por la puerta publica"
+      print "        proxy_set_header X-Asvs-Publico 1;"
       print "    }"
-      print ""; loc = 1
+      print ""
     }
     { print }' "$sitio" > "$tmp"
   _poner "$tmp" "$sitio" 644 "$copias" || return 0

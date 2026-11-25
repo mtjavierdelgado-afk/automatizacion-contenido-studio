@@ -4174,7 +4174,8 @@ def _segunda_pasada_meta(raiz, pids, arranque, r):
     publicado llega a Meta sin numero y se quedaria sin retencion hasta el
     siguiente «Actualizar». Si queda tiempo en la peticion, una segunda vuelta
     SOLO para los que nunca leyo Meta y ya tienen numero."""
-    if (r.get("meta") or {}).get("motivo") or (r.get("meta") or {}).get("a_medias"):
+    if (r.get("meta") or {}).get("motivo") or (r.get("meta") or {}).get("a_medias") \
+            or (r.get("meta") or {}).get("sin_tiempo"):
         return              # la primera vuelta ya dijo que no (caducado, cupo, red…)
     if meta_sin_leer := _envios_meta(raiz, pids, False, solo_nunca=True):
         # sin pasar de la franja de los seguidores (la ruta del proyecto los
@@ -4418,7 +4419,8 @@ def _medir_meta(raiz, pids, forzar, hasta, solo=None):
     if cli.cerca_del_cupo and fatal != "cupo":
         errores.append(AVISOS_META["cupo"])
         fatal = "cupo"          # y sin segunda vuelta: no se vuelve a llamar a Meta
-    if getattr(cli, "sin_tiempo", False) and fatal != "tiempo":
+    sin_tiempo = bool(getattr(cli, "sin_tiempo", False))
+    if sin_tiempo and fatal != "tiempo":
         errores.append(AVISOS_META["tiempo"])
     hechos = _apuntar_meta(raiz, resultados)
     vistos, unicos = set(), []
@@ -4430,6 +4432,8 @@ def _medir_meta(raiz, pids, forzar, hasta, solo=None):
          "pendientes": max(0, len(envios) - len(resultados)), "errores": unicos[:5]}
     if fatal:
         r["motivo"] = fatal
+    if sin_tiempo:
+        r["sin_tiempo"] = True      # sin segunda pasada: repetiría lo mismo
     return r
 
 
@@ -4727,7 +4731,8 @@ class _HiloMeta:
             r.setdefault("errores", []).append(
                 "Instagram y Facebook: no dio tiempo esta vez; vuelve a pulsar «Actualizar»")
             return
-        r["meta"] = {k: m.get(k) for k in ("leidos", "actualizados", "pendientes", "motivo", "ocupado")
+        r["meta"] = {k: m.get(k) for k in ("leidos", "actualizados", "pendientes", "motivo", "ocupado",
+                                           "sin_tiempo")
                      if m.get(k) is not None}
         if m.get("ocupado"):
             r.setdefault("errores", []).append(

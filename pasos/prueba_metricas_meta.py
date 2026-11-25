@@ -680,9 +680,7 @@ def prueba_publicar(base):
     def segundo_lento(self, rutas, token=None):
         cuenta["n"] += 1
         if cuenta["n"] == 2:
-            lento = MM.ErrorMeta("no se ha podido hablar con Meta: timed out", "red")
-            lento.plazo_vencido = True
-            raise lento
+            raise MM.ErrorMeta("no se ha podido hablar con Meta: timed out", "lento")
         return original_lote(self, rutas, token)
     MM.ClienteMeta._lote = segundo_lento
     try:
@@ -705,6 +703,70 @@ def prueba_publicar(base):
         ESTADO["retraso_lote"] = 0.0
     ok(_envio(raiz, "v18", "m_fbd")["metricas"].get("curva") and r18.get("motivo") != "red",
        f"con un lote lento de verdad, Facebook se lee igual ({r18.get('motivo')!r}, {r18.get('errores')})")
+    ok(MM._TOPE_LOTE_ACTUAL < MM.TOPE_LOTE,
+       f"y las vueltas siguientes piden lotes más pequeños ({MM._TOPE_LOTE_ACTUAL})")
+    MM._TOPE_LOTE_ACTUAL = MM.TOPE_LOTE
+    # (árbitro, 4.ª vuelta) un vídeo de Facebook LENTO no deja a Instagram sin leer
+    original_fb = MM.ClienteMeta._facebook_uno
+
+    def fb_lento(self, token_pagina, ident, duracion):
+        raise MM.ErrorMeta("no se ha podido hablar con Meta: timed out", "lento")
+    MM.ClienteMeta._facebook_uno = fb_lento
+    try:
+        _video(raiz, "v19", [{"id": "s_ig", "red": "instagram", "estado": "publicado", "post_id": "reel1",
+                              "metricas": {}},
+                             {"id": "s_fb", "red": "facebook", "estado": "publicado",
+                              "post_id": f"{PAGINA}_555", "duracion_s": 20, "metricas": {}}])
+        r19 = P.medir_meta(raiz, ["v19"], forzar=True)
+    finally:
+        MM.ClienteMeta._facebook_uno = original_fb
+    m_ig, m_fb = _envio(raiz, "v19", "s_ig")["metricas"], _envio(raiz, "v19", "s_fb")["metricas"]
+    ok(m_ig.get("tiempo_medio_s") is not None and not r19.get("motivo"),
+       f"un vídeo de Facebook lento no deja a Instagram sin leer ({r19.get('motivo')!r})")
+    ok("tardó demasiado" in m_fb.get("meta_error", "") and m_fb.get("meta_al"),
+       f"y ese vídeo lo dice, con su reloj ({m_fb.get('meta_error')!r})")
+    # (árbitro) con el cupo cerca o un fatal a mitad, lo bueno del lote se queda
+    cli7 = MM.ClienteMeta(TOKEN, base=base)
+    bueno = {"id": "x", "media_product_type": "REELS",
+             "insights": _insights([("ig_reels_avg_watch_time", 5000)])}
+
+    def lote_mezclado(rutas, token=None):
+        cli7.cerca_del_cupo = True
+        return [(200, dict(bueno, id="a1")), (400, {"error": {"code": 1, "message": "raro"}}),
+                (200, dict(bueno, id="a3")), (200, "<html>no es json</html>")]
+    cli7._lote = lote_mezclado
+    r7 = cli7.instagram(["a1", "a2", "a3", "a4"])
+    ok(r7.get("a1", {}).get("tiempo_medio_s") == 5.0 and r7.get("a3", {}).get("tiempo_medio_s") == 5.0,
+       f"con el cupo cerca, lo que ya llegó en el lote se queda ({sorted(r7)})")
+    ok("error" in r7.get("a4", {}) and "JSON" in r7["a4"].get("detalle", ""),
+       "un 200 que no es JSON es un error con su reloj, no «no dio tiempo»")
+    cli8 = MM.ClienteMeta(TOKEN, base=base)
+    cli8._lote = lambda rutas, token=None: [(200, dict(bueno, id="b1")),
+                                             (400, {"error": {"code": 4, "message": "(#4) limit"}}),
+                                             (200, dict(bueno, id="b3"))]
+    r8 = cli8.instagram(["b1", "b2", "b3"])
+    ok(cli8.cerca_del_cupo and r8.get("b1", {}).get("tiempo_medio_s") == 5.0
+       and r8.get("b3", {}).get("tiempo_medio_s") == 5.0,
+       f"un «espera» de Meta a mitad del lote para, y lo de antes Y de después se queda ({sorted(r8)})")
+    cli10 = MM.ClienteMeta(TOKEN, base=base)
+    cli10._lote = lambda rutas, token=None: [(200, dict(bueno, id="c1")),
+                                              (401, {"error": {"code": 190, "message": "expired"}}),
+                                              (200, dict(bueno, id="c3"))]
+    try:
+        cli10.instagram(["c1", "c2", "c3"])
+        ok(False, "un token caducado a mitad del lote se lanza")
+    except MM.ErrorMeta as fallo:
+        ok(fallo.motivo == "caducado" and set(getattr(fallo, "parcial", {})) == {"c1", "c3"},
+           f"un token caducado a mitad del lote se lanza con lo leído ({sorted(getattr(fallo, 'parcial', {}))})")
+    # (árbitro) Meta retira una métrica: UN lote más, no dos llamadas por medio
+    ESTADO.update(retirada="reels_skip_rate", peticiones=[])
+    cli9 = MM.ClienteMeta(TOKEN, base=base)
+    r9b = cli9.instagram([f"reel{i}" for i in range(200, 210)])
+    ESTADO["retirada"] = ""
+    ok(len(ESTADO["peticiones"]) == 2 and cli9.retiradas == ["reels_skip_rate"]
+       and all("error" not in v for v in r9b.values()),
+       f"una métrica retirada: 2 llamadas para 10 Reels y apuntada una vez "
+       f"({len(ESTADO['peticiones'])}, {cli9.retiradas})")
     # árbitro del tren, 25-11 (1): un post de página BORRADO no corta Facebook
     _video(raiz, "v9", [{"id": "f_borr", "red": "facebook", "estado": "a_mano",
                          "post_id": f"{PAGINA}_999", "metricas": {}},

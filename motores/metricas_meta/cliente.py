@@ -58,6 +58,10 @@ PLAZO_S = 6
 #: Meta los cuenta sueltos para el cupo, pero ahorra viajes: con una llamada por Reel, una cuenta con muchos Reels se
 #: comía la franja y Facebook no se leía nunca (árbitro, 25-11).
 TOPE_LOTE = 25
+#: Si un lote se pasa de plazo, los siguientes van a la mitad (hasta este
+#: mínimo), y así se quedan mientras dure el servicio
+TOPE_LOTE_MINIMO = 5
+_TOPE_LOTE_ACTUAL = TOPE_LOTE
 
 METRICAS_IG = ("ig_reels_avg_watch_time", "ig_reels_video_view_total_time",
                "reels_skip_rate", "reposts")
@@ -103,6 +107,7 @@ TEXTO_DE_MOTIVO = {
                          "profesional",
     "otro": "Meta no ha devuelto las cifras de este vídeo",
     "vacio": "Meta todavía no tiene las cifras de este vídeo (tarda hasta dos días)",
+    "lento": "Meta tardó demasiado en contestar con este vídeo; se volverá a pedir",
 }
 
 
@@ -283,11 +288,13 @@ class ClienteMeta:
             crudo, codigo, cabeceras = fallo.read() or b"", fallo.code, fallo.headers
         except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError,
                 http.client.HTTPException, OSError) as fallo:
-            error = ErrorMeta(tachar(f"no se ha podido hablar con Meta: {fallo}", self._claves),
-                              "red")
-            # se le acabó el PLAZO a esta llamada (Meta lenta), no es que no haya red
-            error.plazo_vencido = isinstance(fallo, (socket.timeout, TimeoutError)) or isinstance(
+            # SE LE ACABÓ EL PLAZO a esta llamada (Meta lenta): no es que no haya
+            # red. «lento» no es fatal: es cosa de ESA llamada (un vídeo, un
+            # lote), no de las dos redes (árbitro, 25-11)
+            vencido = isinstance(fallo, (socket.timeout, TimeoutError)) or isinstance(
                 getattr(fallo, "reason", None), (socket.timeout, TimeoutError))
+            error = ErrorMeta(tachar(f"no se ha podido hablar con Meta: {fallo}", self._claves),
+                              "lento" if vencido else "red")
             raise error from None
         self._mirar_uso(cabeceras)
         try:
@@ -409,11 +416,12 @@ class ClienteMeta:
         ids = [i for i in dict.fromkeys(str(x) for x in ids if x)]
         salida = {}
         try:
-            for i in range(0, len(ids), TOPE_LOTE):
+            tope = _TOPE_LOTE_ACTUAL
+            for i in range(0, len(ids), tope):
                 if self.cerca_del_cupo:
                     break
                 try:
-                    self._instagram_lote(ids[i:i + TOPE_LOTE], salida)
+                    self._instagram_lote(ids[i:i + tope], salida)
                 except ErrorMeta as fallo:
                     if fallo.motivo == "tiempo":
                         break       # lo leído hasta aquí vale; el resto, otra vuelta
@@ -430,7 +438,7 @@ class ClienteMeta:
         metricas = [m for m in METRICAS_IG if m not in self.retiradas]
         return metricas, "id,media_product_type,permalink,insights.metric(%s)" % ",".join(metricas)
 
-    def _instagram_lote(self, trozo, salida):
+    def _instagram_lote(self, trozo, salida, _sin_reintento=False):
         """Un lote por la Batch API; lo que Meta rechaza de UN medio se mira
         de uno en uno (`_instagram_solo`). Va llenando `salida`."""
         validos = []
@@ -448,10 +456,12 @@ class ClienteMeta:
         try:
             respuestas = self._lote([f"{ident}?{query}" for ident in validos])
         except ErrorMeta as fallo:
-            if fallo.motivo == "red" and getattr(fallo, "plazo_vencido", False):
+            if fallo.motivo == "lento":
                 # un lote que tarda más que su plazo es cosa de ESTE lote (25 GET
-                # de métricas son lentos): Instagram para aquí y Facebook se lee
-                # igual. Sin red de verdad, sigue siendo «red»
+                # de métricas son lentos): Instagram para aquí y Facebook ya se
+                # leyó. Las vueltas siguientes, lotes más pequeños
+                global _TOPE_LOTE_ACTUAL
+                _TOPE_LOTE_ACTUAL = max(TOPE_LOTE_MINIMO, len(validos) // 2)
                 self.sin_tiempo = True
                 raise ErrorMeta(str(fallo), "tiempo", detalle=fallo.detalle) from None
             if fallo.motivo in FATALES:
@@ -462,6 +472,9 @@ class ClienteMeta:
                     break
                 salida.update(self._instagram_uno(ident))
             return
+        # PRIMERO lo bueno de todo el lote (ya está pagado en el cupo); los
+        # rescates de uno en uno, después, y un fatal se lanza al final con lo leído
+        malos, fatal, por_metrica = [], None, []
         for ident, (codigo, cuerpo) in zip(validos, respuestas):
             if cuerpo is None:
                 self.sin_tiempo = True  # Meta no contestó a este: otra vuelta
@@ -469,9 +482,39 @@ class ClienteMeta:
             if 200 <= codigo < 300 and isinstance(cuerpo, dict) and not cuerpo.get("error"):
                 salida.update(self._instagram_nodos([ident], {ident: cuerpo}))
                 continue
+            if 200 <= codigo < 300 and not isinstance(cuerpo, dict):
+                # un 200 que no es JSON (una página de error): con su reloj
+                salida[ident] = {"error": texto_para_envio(ErrorMeta("", "otro")),
+                                 "detalle": "Meta contestó algo que no es JSON"}
+                continue
             fallo = self._error(cuerpo, codigo or 400)
             if fallo.motivo in FATALES:
-                raise fallo
+                fatal = fatal or fallo
+                continue
+            num = re.search(r"metric\[(\d+)\]", str(fallo))
+            if fallo.motivo == "metrica" and num and int(num.group(1)) < len(metricas):
+                fallo.metrica = metricas[int(num.group(1))]
+            # «…for this media product type»: es que NO es un Reel (una foto),
+            # no que Meta retire la métrica: eso lo mira `_instagram_solo`
+            de_tipo = re.search(r"media product type", str(fallo), re.IGNORECASE)
+            if fallo.motivo == "metrica" and fallo.metrica in metricas and len(metricas) > 1 \
+                    and not de_tipo:
+                if fallo.metrica not in self.retiradas:
+                    self.retiradas.append(fallo.metrica)
+                por_metrica.append(ident)
+                continue
+            malos.append((ident, fallo))
+        if fatal is not None:
+            raise fatal
+        if por_metrica and not self.cerca_del_cupo:
+            if _sin_reintento:
+                # ya era el lote sin la métrica: cada uno, por su lado
+                malos.extend((i, ErrorMeta("Meta no da alguna cifra", "metrica")) for i in por_metrica)
+            else:
+                # Meta ya no da una métrica: los afectados, en UN lote más sin
+                # ella (antes, dos llamadas por medio)
+                self._instagram_lote(por_metrica, salida, _sin_reintento=True)
+        for ident, fallo in malos:
             if self.cerca_del_cupo:
                 break
             salida.update(self._instagram_solo(ident, metricas, fallo))
@@ -514,7 +557,8 @@ class ClienteMeta:
         if fallo.motivo == "metrica" and num and int(num.group(1)) < len(metricas):
             fallo.metrica = metricas[int(num.group(1))]
         if fallo.motivo == "metrica" and fallo.metrica in metricas and len(metricas) > 1:
-            self.retiradas.append(fallo.metrica)
+            if fallo.metrica not in self.retiradas:
+                self.retiradas.append(fallo.metrica)
             resto = [m for m in metricas if m != fallo.metrica]
             campos = "id,media_product_type,permalink,insights.metric(%s)" % ",".join(resto)
             try:
@@ -571,7 +615,7 @@ class ClienteMeta:
                 datos = self._get(f"{ig_id}/media", params)
             except ErrorMeta as fallo:
                 # sin tiempo o sin cupo: lo leído hasta aquí, y dicho que a medias
-                if fallo.motivo in ("tiempo", "cupo"):
+                if fallo.motivo in ("tiempo", "cupo", "lento"):
                     if fallo.motivo == "cupo":
                         self.cerca_del_cupo = True
                     return salida, False

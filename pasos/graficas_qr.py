@@ -30,7 +30,8 @@ LADO = 1200
 def destino(tipo, valor, mensaje=""):
     """-> el texto que lleva el QR (una dirección https). Lanza ErrorGraficas
     con una frase clara si el número o la web no valen."""
-    valor = " ".join(str(valor or "").split())
+    # sin caracteres de control (un NUL no va en un QR)
+    valor = " ".join(re.sub(r"[\x00-\x1f\x7f]", " ", str(valor or "")).split())
     if tipo == "whatsapp":
         numero = re.sub(r"[\s+\-().]", "", valor)
         if not numero.isdigit():
@@ -40,7 +41,7 @@ def destino(tipo, valor, mensaje=""):
         if not 8 <= len(numero) <= 15:
             raise ErrorGraficas("ese número no parece un WhatsApp: pon el código del país y el número (51 999 999 999)")
         url = f"https://wa.me/{numero}"
-        mensaje = " ".join(str(mensaje or "").split())
+        mensaje = " ".join(re.sub(r"[\x00-\x1f\x7f]", " ", str(mensaje or "")).split())
         if len(mensaje) > MAX_MENSAJE:
             raise ErrorGraficas(f"el mensaje del QR es largo: con {MAX_MENSAJE} letras como mucho el código se lee bien en el móvil")
         if mensaje:
@@ -56,10 +57,13 @@ def destino(tipo, valor, mensaje=""):
             raise ErrorGraficas(f"esa dirección es larga para un QR (hasta {MAX_WEB} letras): usa la de tu página principal")
         if not re.match(r"^https?://", valor, re.I):
             valor = "https://" + valor
-        partes = urlsplit(valor)
+        try:
+            partes = urlsplit(valor)
+        except ValueError as fallo:                         # «http://[::1» y parecidos: nunca un 500
+            raise ErrorGraficas("esa dirección no parece una web (por ejemplo: crearia.tech)") from fallo
         if partes.scheme.lower() not in ("http", "https") or "." not in partes.netloc:
             raise ErrorGraficas("esa dirección no parece una web (por ejemplo: crearia.tech)")
-        if len(valor) > MAX_WEB + len("https://"):
+        if len(valor.encode("utf-8")) > MAX_WEB + len("https://"):
             raise ErrorGraficas(f"esa dirección es larga para un QR (hasta {MAX_WEB} letras): usa la de tu página principal")
         return valor
     raise ErrorGraficas("el QR puede llevar tu WhatsApp o tu web")

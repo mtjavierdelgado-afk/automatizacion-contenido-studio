@@ -26708,11 +26708,11 @@ def graficas_lote(cid: str, peticion: Request, cuerpo: dict = Body(default=None)
     trabajo con barra (se sigue en `.../capas/trabajo/{id}`, como un guardado)."""
     G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
     _G, _C, raiz, _kit, _logo, _oscuro = _contexto_capas(cid, peticion)
-    import graficas_lote as LOTE  # noqa: E402,PLC0415
+    import graficas_lote as LOTE_GRAF  # noqa: E402,PLC0415
     cuerpo = cuerpo or {}
     n = _entero(cuerpo.get("familia"), "esa familia")
     formato = str(cuerpo.get("formato") or G.FORMATO_DEFECTO)
-    entradas = _por_graficas(LOTE.leer, cuerpo.get("texto"))
+    entradas = _por_graficas(LOTE_GRAF.leer, cuerpo.get("texto"))
     _por_graficas(K.familia, n)
     _por_graficas(G.formato, formato)
     ahora = time.time()
@@ -26733,7 +26733,7 @@ def graficas_lote(cid: str, peticion: Request, cuerpo: dict = Body(default=None)
 
     def correr():
         try:
-            LOTE.hacer(raiz, cid, entradas, n, formato, G._con_turno, kit, logo, oscuro, marca, avisar, hechos)
+            LOTE_GRAF.hacer(raiz, cid, entradas, n, formato, G._con_turno, kit, logo, oscuro, marca, avisar, hechos)
             trabajo.update(estado="listo", resultado={"piezas": hechos})
         except Exception as fallo:                          # noqa: BLE001
             # lo hecho se queda guardado: se dice cuántos salieron
@@ -26765,8 +26765,8 @@ def graficas_nota_carrusel(cid: str, peticion: Request, cuerpo: dict = Body(defa
 def graficas_iconos():
     """Los iconos que se pueden poner en una lámina (graficas-3c-extras): id,
     nombre y sus trazos. Iconos de Lucide (ISC) y unos propios; sin marcas."""
-    import graficas_iconos as I  # noqa: E402,PLC0415
-    return {"iconos": I.catalogo()}
+    import graficas_iconos as ICONOS_GRAF  # noqa: E402,PLC0415
+    return {"iconos": ICONOS_GRAF.catalogo()}
 
 
 @app.post("/api/graficas/{cid}/qr", status_code=201)
@@ -26774,9 +26774,9 @@ def graficas_qr(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """Un QR con tu WhatsApp o tu web (graficas-3c-extras), hecho aquí con
     segno, sin salir a internet. Se guarda como una imagen más. Gratis."""
     _ficha_de_graficas(cid, peticion)
-    import graficas_qr as Q  # noqa: E402,PLC0415
+    import graficas_qr as QR_GRAF  # noqa: E402,PLC0415
     cuerpo = cuerpo or {}
-    return _por_graficas(Q.hacer, raiz_proyectos(), cid, str(cuerpo.get("tipo") or ""), cuerpo.get("valor"),
+    return _por_graficas(QR_GRAF.hacer, raiz_proyectos(), cid, str(cuerpo.get("tipo") or ""), cuerpo.get("valor"),
                          cuerpo.get("mensaje") or "")
 
 

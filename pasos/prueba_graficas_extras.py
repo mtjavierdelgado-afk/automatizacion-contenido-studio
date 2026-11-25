@@ -264,6 +264,10 @@ def qr(pincel):
     ok(falla("web", "javascript:alert(1)") and falla("web", "ftp://x.pe") and falla("web", "http://localhost")
        and falla("web", "mi web.com") and falla("web", "") and falla("web", "a." + "b" * 300), "una web rara se rechaza")
     ok(falla("correo", "x@y.pe"), "solo WhatsApp o web")
+    ok(falla("web", "http://[::1") and falla("web", ["crearia.tech"]), "una dirección rota (o que no es texto) da un error claro, no un 500 (CIS 1b)")
+    ok(Q.destino("whatsapp", "999888777", "Hola\x00 qué tal") == "https://wa.me/51999888777?text=Hola%20qu%C3%A9%20tal",
+       "los caracteres de control se quitan (CIS 1b)")
+    ok(falla("web", "crearia.tech/" + "ñ" * 80), "la web se mide en bytes (la ñ ocupa dos)")
     req = open(os.path.join(AQUI, "..", "requirements.txt"), encoding="utf-8").read()
     ok(re.search(r"^segno==\d", req, re.M) is not None, "segno va fijado en requirements.txt (lo instala asvs actualizar)")
     app = open(os.path.join(AQUI, "..", "app.py"), encoding="utf-8").read()
@@ -454,6 +458,8 @@ def lote(pincel):
     ok(Q_destino_largo_ok(), "una web de 143 letras escritas cabe (el https:// no cuenta)")
     e = LOTE.leer("Portada, lo que nadie te cuenta\n\nUna idea\nCon su frase.")
     ok(len(e) == 1 and e[0]["nombre"] == "Portada, lo que nadie te cuenta", "una lista que empieza por «Portada,» no es un CSV (árbitro)")
+    e = LOTE.leer("\ufefffamilia,titular,l1\nGamer,Hola,Uno\n")
+    ok(len(e) == 1 and e[0]["familia"] == 16, "un CSV con BOM (Excel) se lee como CSV (CIS 1b)")
     e = LOTE.leer("Familia;Titular;L1\nGamer;Hola;Uno | dos\n")
     ok(len(e) == 1 and e[0]["familia"] == 16, "con punto y coma (Excel en español)")
     e = LOTE.leer("titular\tl1\tl2\nHola\tUno\tDos\n")
@@ -489,6 +495,8 @@ def lote(pincel):
         shutil.rmtree(raiz, ignore_errors=True)
     app = open(os.path.join(AQUI, "..", "app.py"), encoding="utf-8").read()
     js = open(os.path.join(AQUI, "..", "web", "app.js"), encoding="utf-8").read()
+    ok("p.avisos.join" in js, "al acabar la tanda se dicen los avisos de cada carrusel (CIS 1b)")
+    ok("import graficas_iconos as I " not in app and "import graficas_qr as Q " not in app, "sin alias de una letra que pisen a otros en app.py (CIS 1b)")
     ok('@app.post("/api/graficas/{cid}/capas/lote"' in app and "'/capas/lote'" in js and "+ Carruseles en lote" in js,
        "la ruta y el botón «+ Carruseles en lote»")
 

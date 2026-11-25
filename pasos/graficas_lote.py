@@ -121,7 +121,7 @@ def _desde_lista(texto):
 def leer(texto):
     """-> [{familia (o None: la elegida), texto, nombre}]. Lanza ErrorGraficas
     con una frase clara si no hay ninguno, son demasiados o algo no vale."""
-    texto = str(texto or "").replace("\r\n", "\n")
+    texto = str(texto or "").replace("\r\n", "\n").lstrip("\ufeff")      # un CSV de Excel trae BOM
     if len(texto) > MAX_TEXTO:
         raise ErrorGraficas(f"es demasiado texto para una tanda (hasta {MAX_TEXTO // 1000} 000 letras): pártelo en dos")
     entradas = _desde_csv(texto) if _es_csv(texto) else _desde_lista(texto)

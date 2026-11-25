@@ -535,6 +535,33 @@ def prueba_publicar(base):
     ok(_envio(raiz, "v11", "i_up")["metricas"].get("tiempo_medio_s") == 4.2
        and not any("borradoUP77" in x["ruta"] for x in ESTADO["peticiones"][-6:]),
        "la vuelta siguiente usa el id de verdad (no vuelve al de Upload-Post)")
+    ok("búsqueda por enlace" in e_nada["metricas"].get("meta_detalle", "")
+       and "@casas_con_diseno" in e_nada["metricas"]["meta_detalle"],
+       "y dice dónde se buscó su enlace sin encontrarlo")
+    ok(e_nada["metricas"].get("meta_busqueda_al"), "con la hora de la búsqueda")
+    # (árbitro) la búsqueda va DESPUÉS de Facebook: no lo deja sin leer
+    ESTADO["peticiones"] = []
+    _video(raiz, "v12", [{"id": "i_x", "red": "instagram", "estado": "publicado", "post_id": "borradoUP90",
+                          "url": "https://www.instagram.com/reel/DCodigo_1/", "metricas": {}},
+                         {"id": "f_x", "red": "facebook", "estado": "publicado", "post_id": f"{PAGINA}_555",
+                          "duracion_s": 20, "metricas": {}}])
+    P.medir_meta(raiz, ["v12"], forzar=True)
+    rutas = [x["ruta"] for x in ESTADO["peticiones"]]
+    i_media = next((i for i, x in enumerate(rutas) if "/1784/media" in x), 99)
+    i_fb = next((i for i, x in enumerate(rutas) if "video_insights" in x), 99)
+    ok(i_fb < i_media < 99 and _envio(raiz, "v12", "f_x")["metricas"].get("curva"),
+       f"la búsqueda por enlace va después de leer Facebook ({i_fb} < {i_media})")
+    ok(sum("me/accounts" in x for x in rutas) == 1, "y la lista de páginas se pide una vez por vuelta")
+    # (árbitro) una búsqueda por envío y respiro, aunque se pulse seguido
+    ok("búsqueda por enlace" in _envio(raiz, "v11", "i_nada")["metricas"].get("meta_detalle", ""),
+       "lo que se vio al buscarlo sigue en el detalle mientras no se vuelve a buscar")
+    antes = sum("/media" in x["ruta"] for x in ESTADO["peticiones"])
+    P.medir_meta(raiz, ["v11"], forzar=True)
+    ok(sum("/media" in x["ruta"] for x in ESTADO["peticiones"]) == antes,
+       "el que no se encontró no se vuelve a buscar en cada «Actualizar»")
+    # (árbitro) un error nuevo sin detalle no deja el detalle viejo
+    P._apuntar_meta(raiz, {"i_nada": ("v11", {"error": "no es un Reel", "tipo": "FEED"}, {})})
+    ok("meta_detalle" not in _envio(raiz, "v11", "i_nada")["metricas"], "un error nuevo sin detalle borra el viejo")
     ok(MM.shortcode_ig("https://www.instagram.com/usuario/reel/DCodigo_1/") == "DCodigo_1"
        and MM.shortcode_ig("https://instagram.com/p/AbC-12_x/") == "AbC-12_x"
        and MM.shortcode_ig("17900000000000001") == "" and MM.shortcode_ig("") == "",

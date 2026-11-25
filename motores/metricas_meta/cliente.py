@@ -293,7 +293,7 @@ class ClienteMeta:
         err = (datos or {}).get("error") if isinstance(datos, dict) else None
         err = err if isinstance(err, dict) else {}
         fallo.detalle = tachar(f"HTTP {codigo} #{err.get('code', '')}/{err.get('error_subcode', '')} "
-                               f"{str(err.get('message') or '')[:240]}", self._claves).strip()
+                               f"{str(err.get('message') or '')}", self._claves).strip()[:240]
         return fallo
 
     def _clasificar(self, datos, codigo):
@@ -338,7 +338,10 @@ class ClienteMeta:
 
     def paginas(self):
         """Las páginas de Facebook que administra el token, con su token de
-        página (solo en memoria) y su Instagram."""
+        página (solo en memoria) y su Instagram. Una sola llamada por vuelta:
+        la lista se guarda en el cliente (que vive lo que dura la vuelta)."""
+        if getattr(self, "_paginas", None) is not None:
+            return self._paginas
         datos = self._get("me/accounts", {
             "fields": "id,name,access_token,instagram_business_account{id,username}",
             "limit": 100})
@@ -353,6 +356,7 @@ class ClienteMeta:
             salida.append({"id": str(p["id"]), "nombre": str(p.get("name") or ""),
                            "token": token, "ig_id": str(ig.get("id") or ""),
                            "ig_usuario": str(ig.get("username") or "")})
+        self._paginas = salida
         return salida
 
     # -------------------------------------------------------- instagram
@@ -474,7 +478,17 @@ class ClienteMeta:
             params = {"fields": "id,shortcode,permalink,media_product_type", "limit": 50}
             if despues:
                 params["after"] = despues
-            datos = self._get(f"{ig_id}/media", params)
+            if self.cerca_del_cupo:
+                break
+            try:
+                datos = self._get(f"{ig_id}/media", params)
+            except ErrorMeta as fallo:
+                # sin tiempo o sin cupo, vale lo leído hasta aquí
+                if fallo.motivo in ("tiempo", "cupo") and salida:
+                    if fallo.motivo == "cupo":
+                        self.cerca_del_cupo = True
+                    break
+                raise
             for m in datos.get("data") or []:
                 if isinstance(m, dict) and m.get("id"):
                     salida.append({"id": str(m["id"]), "shortcode": str(m.get("shortcode") or ""),
@@ -563,8 +577,12 @@ class ClienteMeta:
 
 def _detalle(*fallos):
     """Lo que dijo Meta en estos fallos (sin tokens), en una línea."""
-    return " | ".join(str(getattr(f, "detalle", "") or "") for f in fallos
-                      if getattr(f, "detalle", ""))[:300]
+    vistos = []
+    for f in fallos:
+        d = str(getattr(f, "detalle", "") or "")
+        if d and d not in vistos:
+            vistos.append(d)
+    return " | ".join(vistos)[:300]
 
 
 def shortcode_ig(texto):

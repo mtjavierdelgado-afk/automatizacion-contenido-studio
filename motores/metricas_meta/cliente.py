@@ -53,8 +53,10 @@ BASE = "https://graph.facebook.com"
 #: Plazo de cada llamada. Las llamadas van dentro de «Actualizar», que corre
 #: detrás del proxy (corta a los 60 s): quien llama reparte su franja.
 PLAZO_S = 6
-#: Cuántos ids caben en una llamada con `?ids=` (Meta los cuenta sueltos para
-#: el cupo, pero ahorra viajes).
+#: Cuántos medios van en una llamada por lotes (la Batch API de Graph: un
+#: POST con hasta 50 GET dentro). Meta los cuenta sueltos para el cupo, pero
+#: ahorra viajes: con una llamada por Reel, una cuenta con muchos Reels se
+#: comía la franja y Facebook no se leía nunca (árbitro, 25-11).
 TOPE_LOTE = 50
 
 METRICAS_IG = ("ig_reels_avg_watch_time", "ig_reels_video_view_total_time",
@@ -232,16 +234,46 @@ class ClienteMeta:
         return url
 
     def _get(self, ruta, params=None, token=None):
+        datos = self._pedir("GET", self._url(ruta, params), None, token)
+        if not isinstance(datos, dict) or datos.get("error"):
+            raise self._error(datos, 200)
+        return datos
+
+    def _lote(self, rutas, token=None):
+        """LA BATCH API: varios GET en UN POST (`batch=[{method, relative_url}]`).
+        -> [(código, datos|None)] en el mismo orden; None si Meta no contestó a
+        esa (p. ej. se le acabó el tiempo a ella sola)."""
+        cuerpo = urllib.parse.urlencode({
+            "batch": json.dumps([{"method": "GET", "relative_url": r} for r in rutas]),
+            "include_headers": "false"}).encode("utf-8")
+        datos = self._pedir("POST", f"{self.base}/{self.version}/", cuerpo, token)
+        if not isinstance(datos, list):
+            raise self._error(datos if isinstance(datos, dict) else None, 200)
+        salida = []
+        for i in range(len(rutas)):
+            item = datos[i] if i < len(datos) else None
+            if not isinstance(item, dict):
+                salida.append((0, None))
+                continue
+            try:
+                cuerpo_item = json.loads(item.get("body") or "null")
+            except (TypeError, ValueError):
+                cuerpo_item = None
+            salida.append((int(_numero(item.get("code")) or 0), cuerpo_item))
+        return salida
+
+    def _pedir(self, metodo, url, cuerpo, token):
         token = token or self.token
         if not token:
             raise ErrorMeta("falta el token de Meta: ponlo en Configuración", "sin_token")
         if self.hasta is not None and time.time() + self.plazo > self.hasta:
             self.sin_tiempo = True
             raise ErrorMeta("no da tiempo a otra consulta a Meta esta vez", "tiempo")
-        peticion = urllib.request.Request(
-            self._url(ruta, params), method="GET",
-            headers={"Accept": "application/json", "User-Agent": "CrearIAStudio/5.1",
-                     "Authorization": f"Bearer {token}"})
+        cabeceras_peticion = {"Accept": "application/json", "User-Agent": "CrearIAStudio/5.1",
+                              "Authorization": f"Bearer {token}"}
+        if cuerpo is not None:
+            cabeceras_peticion["Content-Type"] = "application/x-www-form-urlencoded"
+        peticion = urllib.request.Request(url, data=cuerpo, method=metodo, headers=cabeceras_peticion)
         try:
             with urllib.request.urlopen(peticion, timeout=self.plazo) as r:
                 crudo, codigo, cabeceras = r.read(), r.status, r.headers
@@ -256,7 +288,7 @@ class ClienteMeta:
             datos = json.loads(crudo.decode("utf-8") or "null")
         except ValueError:
             datos = None
-        if codigo >= 400 or not isinstance(datos, dict) or datos.get("error"):
+        if codigo >= 400 or (isinstance(datos, dict) and datos.get("error")):
             raise self._error(datos, codigo)
         return datos
 
@@ -362,27 +394,74 @@ class ClienteMeta:
     # -------------------------------------------------------- instagram
 
     def instagram(self, ids):
-        """Las cifras de retención de estos medios de Instagram, DE UNO EN UNO
-        (`GET /<id>?fields=…`): desde v26.0 Meta ya no acepta `?ids=` (HTTP 500
-        #100 «The ids query parameter is deprecated in v26.0+», servidor
-        25-11). Un medio que no es un Reel trae {"error": …}: Meta solo da
-        retención de Reels. Lo leído antes de quedarse sin tiempo o sin cupo
-        se devuelve."""
-        ids = [str(i) for i in ids if i]
+        """Las cifras de retención de estos medios de Instagram. Cada medio con
+        su `GET /<id>?fields=…` (desde v26.0 Meta ya no acepta `?ids=`: HTTP
+        500 #100, servidor 25-11), de 50 en 50 dentro de UNA llamada por lotes
+        (`_lote`). Si el lote entero falla sin ser fatal, de uno en uno. Un
+        medio que no es un Reel trae {"error": …}. Lo leído antes de un corte
+        (tiempo, cupo) se devuelve; ante un fallo fatal, va en `fallo.parcial`."""
+        ids = [i for i in dict.fromkeys(str(x) for x in ids if x)]
         salida = {}
-        for ident in dict.fromkeys(ids):
+        try:
+            for i in range(0, len(ids), TOPE_LOTE):
+                if self.cerca_del_cupo:
+                    break
+                try:
+                    self._instagram_lote(ids[i:i + TOPE_LOTE], salida)
+                except ErrorMeta as fallo:
+                    if fallo.motivo == "tiempo":
+                        break       # lo leído hasta aquí vale; el resto, otra vuelta
+                    if fallo.motivo == "cupo":
+                        self.cerca_del_cupo = True
+                        break
+                    raise
+        except ErrorMeta as fallo:
+            fallo.parcial = dict(salida)
+            raise
+        return salida
+
+    def _campos_ig(self):
+        metricas = [m for m in METRICAS_IG if m not in self.retiradas]
+        return metricas, "id,media_product_type,permalink,insights.metric(%s)" % ",".join(metricas)
+
+    def _instagram_lote(self, trozo, salida):
+        """Un lote por la Batch API; lo que Meta rechaza de UN medio se mira
+        de uno en uno (`_instagram_solo`). Va llenando `salida`."""
+        validos = []
+        for ident in trozo:
+            if re.fullmatch(r"[A-Za-z0-9_]{1,80}", ident):
+                validos.append(ident)
+            else:
+                # va en la RUTA de la llamada: nada que pueda apuntar a otra cosa
+                salida[ident] = {"error": "Meta no ha devuelto las cifras de este vídeo",
+                                 "detalle": "el id del envío no parece un id de Instagram"}
+        if not validos:
+            return
+        metricas, campos = self._campos_ig()
+        query = urllib.parse.urlencode({"fields": campos}, safe=",()")
+        try:
+            respuestas = self._lote([f"{ident}?{query}" for ident in validos])
+        except ErrorMeta as fallo:
+            if fallo.motivo in FATALES:
+                raise
+            # el lote entero no vale (Meta no lo acepta): de uno en uno
+            for ident in validos:
+                if self.cerca_del_cupo:
+                    break
+                salida.update(self._instagram_uno(ident))
+            return
+        for ident, (codigo, cuerpo) in zip(validos, respuestas):
+            if cuerpo is None:
+                continue                # Meta no contestó a este: otra vuelta
+            if 200 <= codigo < 300 and isinstance(cuerpo, dict) and not cuerpo.get("error"):
+                salida.update(self._instagram_nodos([ident], {ident: cuerpo}))
+                continue
+            fallo = self._error(cuerpo, codigo or 400)
+            if fallo.motivo in FATALES:
+                raise fallo
             if self.cerca_del_cupo:
                 break
-            try:
-                salida.update(self._instagram_uno(ident))
-            except ErrorMeta as fallo:
-                if fallo.motivo == "tiempo":
-                    break           # lo leído hasta aquí vale; el resto, otra vuelta
-                if fallo.motivo == "cupo":
-                    self.cerca_del_cupo = True
-                    break
-                raise
-        return salida
+            salida.update(self._instagram_solo(ident, metricas, fallo))
 
     def _instagram_uno(self, ident):
         """Un medio, con sus métricas en la misma llamada. Si Meta lo rechaza,
@@ -391,8 +470,7 @@ class ClienteMeta:
             # va en la RUTA de la llamada: nada que pueda apuntar a otra cosa
             return {ident: {"error": "Meta no ha devuelto las cifras de este vídeo",
                             "detalle": "el id del envío no parece un id de Instagram"}}
-        metricas = [m for m in METRICAS_IG if m not in self.retiradas]
-        campos = "id,media_product_type,permalink,insights.metric(%s)" % ",".join(metricas)
+        metricas, campos = self._campos_ig()
         try:
             nodo = self._get(ident, {"fields": campos})
         except ErrorMeta as fallo:

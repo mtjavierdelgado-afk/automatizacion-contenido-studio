@@ -4457,7 +4457,15 @@ def _leer_ig(cli, ig, hasta, resultados, sin_cifras=None):
             break
         trozo = ig[i:i + MM.TOPE_LOTE]
         ids = [str(e.get("meta_id") or e.get("post_id")) for _p, e in trozo]
-        cifras = cli.instagram(ids)
+        try:
+            cifras = cli.instagram(ids)
+        except MM.ErrorMeta as fallo:
+            # lo leído antes del fallo (ya contado en el cupo) no se tira
+            parcial = getattr(fallo, "parcial", None) or {}
+            for (pid, e), ident in zip(trozo, ids):
+                if ident in parcial:
+                    resultados[e["id"]] = (pid, parcial[ident], {"meta_id": ident})
+            raise
         for (pid, e), ident in zip(trozo, ids):
             if ident in cifras:
                 leidos += 1

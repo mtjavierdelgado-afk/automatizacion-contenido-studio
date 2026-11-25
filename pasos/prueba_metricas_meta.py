@@ -95,7 +95,12 @@ class Falso(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    _captura = None
+
     def _responder(self, codigo, cuerpo, cabeceras=None):
+        if self._captura is not None:       # una petición DENTRO de un lote
+            self._captura.append((codigo, cuerpo))
+            return
         crudo = json.dumps(cuerpo).encode("utf-8")
         self.send_response(codigo)
         self.send_header("Content-Type", "application/json")
@@ -110,13 +115,40 @@ class Falso(http.server.BaseHTTPRequestHandler):
             err["error_subcode"] = sub
         self._responder(codigo, {"error": err})
 
-    def do_GET(self):
+    def do_POST(self):
+        """La Batch API de Graph: `batch=[{method, relative_url}]`; cada GET de
+        dentro se contesta como si fuera suelto."""
         if ESTADO["retraso"]:
+            time.sleep(ESTADO["retraso"])
+        largo = int(self.headers.get("Content-Length") or 0)
+        form = dict(urllib.parse.parse_qsl(self.rfile.read(largo).decode("utf-8")))
+        auth = self.headers.get("Authorization") or ""
+        peticiones = json.loads(form.get("batch") or "[]")
+        ESTADO["peticiones"].append({"ruta": f"{self.path} (lote de {len(peticiones)})", "auth": auth,
+                                     "lote": [p.get("relative_url") for p in peticiones]})
+        salida, ruta_antes = [], self.path
+        for p in peticiones:
+            self._captura = []
+            self.path = f"/{MM.VERSION_METRICAS}/{p.get('relative_url', '')}"
+            try:
+                self.do_GET()
+            finally:
+                self.path = ruta_antes
+            codigo, cuerpo = self._captura[0] if self._captura else (500, {"error": {"message": "nada"}})
+            self._captura = None
+            salida.append({"code": codigo, "body": json.dumps(cuerpo)})
+        cab = {"X-App-Usage": json.dumps({"call_count": ESTADO["uso"], "total_time": 1})}
+        return self._responder(200, salida, cab)
+
+    def do_GET(self):
+        dentro = self._captura is not None
+        if ESTADO["retraso"] and not dentro:
             time.sleep(ESTADO["retraso"])
         url = urllib.parse.urlparse(self.path)
         q = dict(urllib.parse.parse_qsl(url.query))
         auth = self.headers.get("Authorization") or ""
-        ESTADO["peticiones"].append({"ruta": self.path, "auth": auth})
+        if not dentro:
+            ESTADO["peticiones"].append({"ruta": self.path, "auth": auth})
         cab = {"X-App-Usage": json.dumps({"call_count": ESTADO["uso"], "total_time": 1})}
         modo = ESTADO["modo"]
         if modo == "caducado":
@@ -234,8 +266,11 @@ def prueba_motor(base):
     ESTADO.update(modo="", retirada="", uso=0, peticiones=[])
     cli = MM.ClienteMeta(TOKEN, base=base)
     r = cli.instagram(["reel1", "reel2"])
-    igual(len(ESTADO["peticiones"]), 2, "dos Reels, una llamada cada uno (GET /<id>: Meta ya no acepta ?ids=)")
-    ok(not any("ids=" in p["ruta"] for p in ESTADO["peticiones"]), "y nunca con ?ids=")
+    igual(len(ESTADO["peticiones"]), 1, "dos Reels en UNA llamada (por lotes: Meta ya no acepta ?ids=)")
+    ok(not any("ids=" in p["ruta"] for p in ESTADO["peticiones"])
+       and ESTADO["peticiones"][0].get("lote") and all(r.startswith(("reel1?", "reel2?"))
+                                                        for r in ESTADO["peticiones"][0]["lote"]),
+       "y nunca con ?ids=: un GET /<id> por Reel dentro del lote")
     igual((r["reel1"]["tiempo_medio_s"], r["reel1"]["tiempo_total_s"], r["reel1"]["salto_3s"],
            r["reel1"]["reposts"]), (6.7, 1543.9, 0.513, 2),
           "milisegundos a segundos y el % de salto en fracción (las unidades del 12-11)")
@@ -250,7 +285,7 @@ def prueba_motor(base):
     ok(r["reel1"].get("tiempo_medio_s") == 6.7 and r["reel2"].get("tiempo_medio_s") == 3.0
        and "error" in r["bad9"], "un id malo no estropea a los demás: los buenos llegan")
     # el malo, solo, se pregunta además por su tipo (¿foto o métrica retirada?)
-    igual(len(ESTADO["peticiones"]), 4, "los tres de uno en uno y el tipo del malo")
+    igual(len(ESTADO["peticiones"]), 2, "el lote y el tipo del malo")
     ok(MM.ClienteMeta(TOKEN, base=base).instagram(["../me/accounts"])["../me/accounts"].get("error"),
        "un id con barras no llega a la ruta de la llamada")
 
@@ -278,7 +313,7 @@ def prueba_motor(base):
 
     def con_cupo(ruta, params=None, token=None):
         llamadas["n"] += 1
-        if llamadas["n"] == 4:       # lote, reel1, bad9, y aquí el tipo de bad9
+        if llamadas["n"] == 1:       # (el lote va aparte) aquí, el tipo de bad9
             raise MM.ErrorMeta("Meta pide esperar", "cupo")
         return original(ruta, params, token)
     cli5._get = con_cupo
@@ -603,6 +638,40 @@ def prueba_publicar(base):
        and MM.shortcode_ig("https://instagram.com/p/AbC-12_x/") == "AbC-12_x"
        and MM.shortcode_ig("17900000000000001") == "" and MM.shortcode_ig("") == "",
        "el código corto sale del enlace (reel, p) y un id de números no lo es")
+    # (árbitro, 25-11) MUCHOS Reels: de 50 en 50 por lotes, y a Facebook le
+    # queda franja (con una llamada por Reel no se leía nunca)
+    ESTADO["peticiones"] = []
+    muchos = [{"id": f"m{i}", "red": "instagram", "estado": "publicado", "post_id": f"reel{i + 100}",
+               "metricas": {}} for i in range(60)]
+    muchos.append({"id": "m_fb", "red": "facebook", "estado": "publicado", "post_id": f"{PAGINA}_555",
+                   "duracion_s": 20, "metricas": {}})
+    _video(raiz, "v15", muchos)
+    r15 = P.medir_meta(raiz, ["v15"], forzar=True, hasta=time.time() + P.TOPE_META_S)
+    lotes = [x for x in ESTADO["peticiones"] if x.get("lote") is not None]
+    ok(len(lotes) == 2 and sum(len(x["lote"]) for x in lotes) == 60,
+       f"60 Reels en 2 llamadas por lotes ({[len(x['lote']) for x in lotes]})")
+    ok(_envio(raiz, "v15", "m_fb")["metricas"].get("curva") and not r15.get("motivo"),
+       f"y Facebook se lee igual ({r15.get('motivo')!r})")
+    # (árbitro) un fallo de red en el 2.º lote no tira lo leído en el 1.º
+    original_lote = MM.ClienteMeta._lote
+    cuenta = {"n": 0}
+
+    def segundo_falla(self, rutas, token=None):
+        cuenta["n"] += 1
+        if cuenta["n"] == 2:
+            raise MM.ErrorMeta("no se ha podido hablar con Meta", "red")
+        return original_lote(self, rutas, token)
+    MM.ClienteMeta._lote = segundo_falla
+    try:
+        for e in muchos:
+            e["metricas"] = {}
+        _video(raiz, "v16", [dict(e, id=e["id"] + "b") for e in muchos[:60]])
+        P.medir_meta(raiz, ["v16"], forzar=True)
+    finally:
+        MM.ClienteMeta._lote = original_lote
+    leidos16 = [e for e in P._leer_video(raiz, "v16")["envios"] if (e.get("metricas") or {}).get("meta_al")
+                and not e["metricas"].get("meta_error")]
+    ok(len(leidos16) == 50, f"un fallo de red en el 2.º lote guarda los 50 del 1.º ({len(leidos16)})")
     # árbitro del tren, 25-11 (1): un post de página BORRADO no corta Facebook
     _video(raiz, "v9", [{"id": "f_borr", "red": "facebook", "estado": "a_mano",
                          "post_id": f"{PAGINA}_999", "metricas": {}},

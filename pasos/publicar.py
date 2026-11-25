@@ -4390,6 +4390,7 @@ def _medir_meta(raiz, pids, forzar, hasta, solo=None):
                        + "; esa cifra no se ha podido leer")
     if cli.cerca_del_cupo and not fatal:
         errores.append(AVISOS_META["cupo"])
+        fatal = "cupo"          # y sin segunda vuelta: no se vuelve a llamar a Meta
     if getattr(cli, "sin_tiempo", False) and fatal != "tiempo":
         errores.append(AVISOS_META["tiempo"])
     hechos = _apuntar_meta(raiz, resultados)

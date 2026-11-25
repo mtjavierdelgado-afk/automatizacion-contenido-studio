@@ -340,6 +340,10 @@ class ClienteMeta:
             except ErrorMeta as fallo:
                 if fallo.motivo == "tiempo":
                     break           # lo leído hasta aquí vale; el resto, otra vuelta
+                if fallo.motivo == "cupo":
+                    # lo leído en el lote antes del aviso se queda (árbitro, 24-11)
+                    self.cerca_del_cupo = True
+                    break
                 raise
         return salida
 

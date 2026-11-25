@@ -233,6 +233,20 @@ def prueba_motor(base):
     ok(all("#" not in (v.get("error") or "") and "Tried" not in (v.get("error") or "")
            for v in cli.instagram(["bad9"]).values()),
        "lo que se guarda de un error va en castellano, sin el mensaje crudo de Meta")
+    # árbitro, 24-11: si Meta pide esperar a mitad del «uno a uno», lo leído se queda
+    cli5 = MM.ClienteMeta(TOKEN, base=base)
+    llamadas = {"n": 0}
+    original = cli5._get
+
+    def con_cupo(ruta, params=None, token=None):
+        llamadas["n"] += 1
+        if llamadas["n"] == 4:       # lote, reel1, bad9, y aquí el tipo de bad9
+            raise MM.ErrorMeta("Meta pide esperar", "cupo")
+        return original(ruta, params, token)
+    cli5._get = con_cupo
+    r = cli5.instagram(["reel1", "bad9", "reel2"])
+    ok(r.get("reel1", {}).get("tiempo_medio_s") == 6.7 and cli5.cerca_del_cupo,
+       "si Meta pide esperar a mitad del lote, lo ya leído se queda y se dice")
     # árbitro, 24-11: el cliente no empieza una llamada que no quepa en la franja
     ESTADO["peticiones"] = []
     cli4 = MM.ClienteMeta(TOKEN, base=base, hasta=time.time() + 1)
@@ -240,7 +254,11 @@ def prueba_motor(base):
     ok(r == {} and cli4.sin_tiempo and not ESTADO["peticiones"],
        "sin tiempo para una llamada entera no se empieza ninguna, y queda dicho")
 
-    for modo, motivo in (("caducado", "caducado"), ("permiso", "sin_permiso"), ("cupo", "cupo")):
+    ESTADO["modo"] = "cupo"
+    cli6 = MM.ClienteMeta(TOKEN, base=base)
+    ok(cli6.instagram(["reel1"]) == {} and cli6.cerca_del_cupo,
+       "«cupo» en Instagram no lanza: corta con lo leído y queda dicho (cerca_del_cupo)")
+    for modo, motivo in (("caducado", "caducado"), ("permiso", "sin_permiso")):
         ESTADO["modo"] = modo
         try:
             MM.ClienteMeta(TOKEN, base=base).instagram(["reel1"])

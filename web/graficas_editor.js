@@ -863,7 +863,7 @@
       boton('＋ Icono', { title: 'Iconos sencillos con los colores de tu Kit' }, () => elegirIcono(null)),
       boton('＋ Pegatina', { title: '«Nuevo», «Guárdalo», un globo o una flecha' }, ev => abrirPegatinas(ev.currentTarget)),
       boton('＋ QR', { title: 'Tu WhatsApp o tu web en un código QR (gratis)' }, () => abrirQR()),
-      hayVideos() ? boton('＋ Foto de un vídeo', { title: 'Una imagen que ya pagaste en un vídeo de este proyecto (gratis)' }, () => elegirFotoDeVideo(null)) : null,
+      hayVideos() ? boton('＋ De un vídeo', { title: 'Foto de un vídeo: una imagen que ya pagaste en un vídeo de este proyecto (gratis)' }, () => elegirFotoDeVideo(null)) : null,
       boton('＋ Logo del Kit', { disabled: !(ED.logos.normal || ED.logos.oscuro), title: ED.logos.normal || ED.logos.oscuro ? '' : 'Este proyecto aún no tiene logo: súbelo en «Logo»' }, () => anadir('logo')),
       boton('＋ Rectángulo', {}, () => anadir('rect')),
       boton('＋ Círculo', {}, () => anadir('circulo')),
@@ -1926,9 +1926,11 @@
     pintarEstado();
     const nueva = comoNueva || !ED.piezaId;
     if (!String(ED.doc.nombre || '').trim()) {
-      // sin nombre, el del titular: así se encuentra en la lista
-      const t = capas().find(c => c.tipo === 'texto' && c.rol === 'titulo' && String(c.txt || '').trim())
-        || capas().find(c => c.tipo === 'texto' && String(c.txt || '').trim());
+      // sin nombre, el del titular de la PORTADA (antes, el de la lámina que
+      // estuviera abierta: un carrusel guardado en la 3 se llamaba como la 3)
+      const portada = ED.doc.laminas[0].capas;
+      const t = portada.find(c => c.tipo === 'texto' && c.rol === 'titulo' && String(c.txt || '').trim())
+        || portada.find(c => c.tipo === 'texto' && !c.enlace && String(c.txt || '').trim());
       ED.doc.nombre = t ? String(t.txt).trim().split('\n')[0].slice(0, 80) : 'Pieza en capas';
       commit();
     }

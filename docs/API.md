@@ -386,9 +386,12 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/dominios` | El negocio general y las fichas de los clientes (Etapa Foto C). |
 | `GET` | `/api/graficas/carrusel/catalogo` | Las familias (una por plantilla) y los tipos de lámina. |
 | `GET` | `/api/graficas/catalogo` | — |
+| `GET` | `/api/graficas/iconos` | Los iconos que se pueden poner en una lámina (graficas-3c-extras): id, |
 | `GET` | `/api/graficas/tipografia/{fichero}` | Una letra de la lista, para que el editor escriba con la misma que el PNG. |
 | `POST` | `/api/graficas/{cid}/capas` | Una pieza nueva que nace en capas (un carrusel, como trabajo: 202). |
+| `POST` | `/api/graficas/{cid}/capas/historias` | «Hacer también las historias»: el mismo carrusel en 9:16 (no se guarda: |
 | `POST` | `/api/graficas/{cid}/capas/lamina` | Una lámina de un carrusel: `donde` (posición) añade una nueva del `tipo` |
+| `POST` | `/api/graficas/{cid}/capas/lote` | Carruseles en lote (graficas-3c-extras): una lista (separada por ---) o |
 | `POST` | `/api/graficas/{cid}/capas/montar` | «Volver a montar» y «Empezar de»: la plantilla en el tamaño pedido, en |
 | `POST` | `/api/graficas/{cid}/capas/montar-todas` | «Volver a montar a todas» con una familia (las «En blanco» no se tocan). |
 | `POST` | `/api/graficas/{cid}/capas/nota` | La nota del carrusel (sin IA): portada, segunda portada, una idea por |
@@ -413,6 +416,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/laminas.pdf` | El carrusel en PDF para LinkedIn: los JPG tal cual, sin «Desliza →». |
 | `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/laminas.zip` | Todas las láminas en un ZIP (JPG o PNG), con sus textos alternativos. |
 | `POST` | `/api/graficas/{cid}/piezas/{pieza_id}/laminas/preparar` | «Preparar las láminas»: vuelve a guardar lo último guardado, como trabajo |
+| `POST` | `/api/graficas/{cid}/qr` | Un QR con tu WhatsApp o tu web (graficas-3c-extras), hecho aquí con |
 | `POST` | `/api/graficas/{cid}/vista` | Las miniaturas de los diseños con estos datos. No guarda nada. |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
@@ -601,4 +605,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**487 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**491 endpoints.** Escrito por `generar_api.py` desde `app.py`.

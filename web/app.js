@@ -2579,6 +2579,7 @@ function pintarConfigDentro() {
   caja.appendChild(seccionClavesAnalizarCuentas());  // analizar cuentas: YouTube, Meta y Apify (rediseno-publicar)
   caja.appendChild(seccionEnviarAlStudio());  // la extensión de Chrome (enviar-al-studio)
   caja.appendChild(seccionClaveVidiq(ficha));  // vidIQ por el Claude de la membresía (rama vidiq-1)
+  caja.appendChild(seccionTelegram());  // avisos al móvil del piloto automático (rama piloto-2)
   caja.appendChild(h('div', { clase: 'fila' },
     h('button', {
       clase: 'mini fantasma',
@@ -26216,6 +26217,14 @@ function montarEntrada() {
   const tipo = tipoDeCarga();
   let pedida = '';
   try { pedida = new URLSearchParams(location.search).get('entrada') || ''; } catch (e) { pedida = ''; }
+  /* UN ENLACE DIRECTO A PUBLICAR DE UN VÍDEO (piloto-2): «Abrir el editor
+     completo» de la página del móvil lleva a `#publicar/<id del vídeo>`. */
+  const directo = /^#publicar\/([A-Za-z0-9_.-]{1,120})$/.exec(location.hash || '');
+  if (directo) {
+    try { history.replaceState({ centinela: true }, '', location.pathname + location.search); } catch (e) { /* sin historial */ }
+    setTimeout(() => abrirPublicarVideo(decodeURIComponent(directo[1])), 0);
+    return;
+  }
   if (tipo === 'navigate') {
     try {
       history.replaceState({ centinela: true }, '');
@@ -27934,7 +27943,29 @@ async function guardarTextosPublicar() {
   const antes = PUB.guardadoEnCurso;
   const peticion = (async () => {
     if (antes) { try { await antes; } catch (e) { /* el suyo ya lo dijo */ } }
-    return pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}`), { method: 'PUT', cuerpo: { textos } });
+    /* «ESTO SE CAMBIÓ EN OTRO SITIO» (piloto-2): el mismo vídeo se puede
+       editar a la vez en la página del móvil. Se manda la huella de cada red
+       tal como la vio esta pantalla (cogida DESPUÉS de esperar al guardado
+       anterior, que ya trajo la suya) y el servidor dice 409 si no casa. */
+    const huellas = (PUB.ficha && PUB.ficha.pid === pid && PUB.ficha.huellas_textos) || null;
+    const cuerpo = { textos };
+    if (huellas) {
+      const antesDe = Object.keys(textos).filter(r => typeof huellas[r] === 'string');
+      if (antesDe.length) cuerpo.antes = Object.fromEntries(antesDe.map(r => [r, huellas[r]]));
+    }
+    try {
+      return await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}`), { method: 'PUT', cuerpo });
+    } catch (e) {
+      if (!cuerpo.antes || !/otro sitio/.test(e.message || '')) throw e;
+      if (!confirm('Esto se cambió en otro sitio hace un momento (por ejemplo, en el móvil).\n\n'
+        + 'Aceptar = guardar lo tuyo igualmente · Cancelar = ver lo nuevo')) {
+        if (PUB.borradorDe === pid || PUB.pid === pid) limpiarBorradorPublicar(textos);
+        toast('Descartado lo tuyo: ves lo que se guardó en el otro sitio');
+        return pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}`));
+      }
+      delete cuerpo.antes;
+      return pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}`), { method: 'PUT', cuerpo });
+    }
   })();
   PUB.guardadoEnCurso = peticion;
   try {
@@ -31892,11 +31923,75 @@ function tarjetaGuionParrilla(g, m, conMatriz) {
   h('span', { clase: 'fila cab-tarjeta-guion' },
     h('b', { clase: 'titulo-guion' }, [g.codigo, g.titulo].filter(Boolean).join(' — ') || 'Guion sin título'),
     g.avisos ? h('span', { clase: 'pastilla obsoleto', title: 'Avisos ⚠ del guion: míralos en la ficha' }, `⚠ ${g.avisos}`) : null,
-    enElPiloto ? h('span', { clase: 'pastilla ejecutando', title: 'Está en la lista del piloto automático' }, '🤖 en el piloto') : null),
+    enElPiloto && !g.auto ? h('span', { clase: 'pastilla ejecutando', title: 'Está en la lista del piloto automático' }, '🤖 en el piloto') : null,
+    pastillaAutoGuion(g)),
   h('span', { clase: 'meta datos-guion' }, datosGuionCorto(g)),
   conMatriz || g.video_nombre ? h('span', { clase: 'fila pie-tarjeta-guion' },
     conMatriz ? h('span', { clase: 'chip-enlace' }, m.nombre) : null,
     g.video_nombre ? h('span', { clase: 'meta video-guion', title: 'El vídeo que se hizo con este guion' }, `▸ ${g.video_nombre}`) : null) : null);
+}
+
+/* EL PILOTO AUTOMÁTICO EN LA PARRILLA (piloto-2): la etiqueta VIVA de cada
+   guion la calcula el servidor al listar (de la ficha del piloto y de los
+   envíos de Publicar): aquí no se guarda nada, así que un aviso desaparece
+   en cuanto deja de aplicar. */
+const CLASE_AUTO_GUION = { haciendo: 'ejecutando', esperando_turno: 'ejecutando', espera_ok: 'obsoleto',
+  detenido: 'error', programado: 'listo', publicando: 'ejecutando', cambiando: 'obsoleto',
+  retirando: 'obsoleto', publicado: 'listo', no_publicar: '', fallo: 'error', comprobar: 'error',
+  vuelve: 'ejecutando' };
+
+function pastillaAutoGuion(g) {
+  if (g.auto_frenado) {
+    return h('span', { clase: 'pastilla obsoleto', title: g.auto_frenado.razones.join(' · ') }, '⏸ el piloto espera');
+  }
+  if (!g.auto) return null;
+  return h('span', { clase: `pastilla ${CLASE_AUTO_GUION[g.auto.clave] || ''}`.trim(),
+    title: 'Piloto automático: lo que pasa ahora con este guion' }, g.auto.texto);
+}
+
+function resumenGuionParrilla(gid) {
+  return guionesParrillaPorId()[gid] || {};
+}
+
+/* En la ficha del guion: por qué lo frena el piloto automático (con «Hacer
+   igualmente» si se puede saltar), cómo va su vídeo y «Devolver a la lista». */
+function bloqueAutoGuionParrilla(g) {
+  const r = resumenGuionParrilla(g.id);
+  if (!r.auto && !r.auto_frenado) return null;
+  const caja = h('div', { clase: 'bloque-auto-guion' }, h('b', {}, '🤖 Piloto automático'));
+  if (r.auto_frenado) {
+    caja.appendChild(h('p', { clase: 'meta' }, 'No empiezo este vídeo (no se ha gastado nada):'));
+    caja.appendChild(h('ul', {}, r.auto_frenado.razones.map(t => h('li', {}, t))));
+    if (r.auto_frenado.hacer_igual) {
+      caja.appendChild(h('button', { clase: 'mini primario', onclick: () => accionAutoGuion('hacer-igualmente', g.id, r.auto_frenado.indice || 0,
+        'Lo hará en la próxima vuelta del piloto (en menos de un minuto).') }, 'Hacer igualmente'));
+    }
+  }
+  if (r.auto && r.auto.clave !== 'vuelve') {
+    caja.appendChild(h('p', {}, r.auto.texto));
+    const botones = h('div', { clase: 'fila' });
+    if (r.auto.id) botones.appendChild(h('a', { clase: 'boton mini', href: `${BASE}/aprobar.html?video=${encodeURIComponent(r.auto.id)}`,
+      target: '_blank', rel: 'noopener' }, 'Ver y aprobar ›'));
+    if (r.auto.clave === 'no_publicar') {
+      botones.appendChild(h('button', { clase: 'mini', title: 'El piloto lo volverá a hacer (y a pagar) más adelante',
+        onclick: () => accionAutoGuion('devolver', g.id, r.auto.indice || 0, 'Vuelve a la lista: el piloto lo hará cuando le toque.',
+          '¿Devolver este guion a la lista del piloto? Se volverá a hacer el vídeo (y a pagarlo).') }, 'Devolver a la lista'));
+    }
+    caja.appendChild(botones);
+  } else if (r.auto && r.auto.clave === 'vuelve') {
+    caja.appendChild(h('p', { clase: 'meta' }, 'Devuelto a la lista: el piloto lo hará cuando le toque.'));
+  }
+  return caja;
+}
+
+async function accionAutoGuion(que, gid, indice, hecho, pregunta) {
+  if (pregunta && !confirm(pregunta)) return;
+  try {
+    await pedir(`${BASE}/api/piloto/auto/${encodeURIComponent(PAR.cid || '_sin')}/${que}`,
+      { method: 'POST', cuerpo: { gid, indice } });
+    toast(hecho);
+    await cargarParrilla(true);
+  } catch (e) { toast(e.message, true); }
 }
 
 async function abrirGuionParrilla(gid) {
@@ -32273,6 +32368,8 @@ function cajonGuionParrilla() {
       onclick: () => { PAR.fichaPestana = id; PAR.fichaScroll = 0; pintarModulo(); },
     }, texto, id === 'guion' && avisos ? h('span', { clase: 'punto', title: 'Avisos del guion', 'aria-hidden': 'true' }) : null))));
   const cuerpo = h('div', { clase: 'cuerpo-cajon' });
+  const auto = bloqueAutoGuionParrilla(g);
+  if (auto) cuerpo.appendChild(auto);
   if (PAR.fichaPestana === 'encargo') cuerpo.appendChild(bloqueEncargoParrilla(g));
   else if (PAR.fichaPestana === 'estado') cuerpo.appendChild(bloqueEstadoGuionParrilla(g));
   else cuerpo.appendChild(bloqueTextoGuionParrilla(g));
@@ -35559,6 +35656,85 @@ function saldoVidiq() {
     `Te quedan ${e.saldo} créditos de vidIQ${e.saldo_al ? ` (a ${fechaCorta(e.saldo_al).slice(0, 16)})` : ''}.`);
 }
 
+/* -- Configuración: AVISOS AL MÓVIL POR TELEGRAM (rama piloto-2). El piloto
+   automático avisa con un bot de Telegram propio (gratis). El token es un
+   secreto: se manda una vez y nunca vuelve a la pantalla. */
+const TG_UI = { estado: null, pidiendo: false, chats: null, mensaje: '' };
+
+async function cargarTelegram() {
+  TG_UI.pidiendo = true;
+  try { TG_UI.estado = await pedir(`${BASE}/api/telegram`); } catch (e) { TG_UI.estado = { error: e.message }; }
+  TG_UI.pidiendo = false;
+}
+
+function seccionTelegram() {
+  if (TG_UI.estado === null && !TG_UI.pidiendo) cargarTelegram().then(() => repintarClaves());
+  const e = TG_UI.estado || {};
+  const caja = h('section', { clase: 'bloque-config tarjeta-telegram' },
+    h('h3', {}, '📲 Avisos al móvil (Telegram)'),
+    h('div', { clase: 'pista' }, 'Para el piloto automático: cuando un vídeo esté listo (o algo necesite tu OK) te llega un '
+      + 'mensaje a Telegram con un enlace para verlo y aprobarlo desde el móvil. Gratis.'),
+    h('div', { clase: 'fila' }, h('b', {}, 'Telegram'), h('span', { clase: 'crece' }),
+      pastillaEstado(e.conectado ? 'ok' : 'vacio', e.conectado ? `a ${e.chat_nombre || 'tu chat'}` : e.token_puesto ? 'falta tu chat' : 'sin conectar')));
+  const salida = h('div', { clase: 'meta' }, TG_UI.mensaje || '');
+  const hacer = async (fn) => {
+    try { TG_UI.mensaje = await fn() || ''; } catch (err) { TG_UI.mensaje = `⚠ ${err.message}`; }
+    await cargarTelegram();
+    repintarClaves();
+  };
+  if (!e.token_puesto) {
+    const campo = h('input', { type: 'password', 'aria-label': 'Token del bot de Telegram', placeholder: '123456789:AAH…' });
+    caja.appendChild(h('ol', {},
+      h('li', {}, 'En el móvil, abre Telegram y busca ', h('b', {}, '@BotFather'), ' (el que tiene la marca azul de verificado).'),
+      h('li', {}, 'Escríbele ', h('b', {}, '/newbot'), '. Te pide un nombre (por ejemplo «Mi Studio») y después un usuario que '
+        + 'termine en «bot» (por ejemplo «MiStudioAvisos_bot»).'),
+      h('li', {}, 'Te contesta con un mensaje que trae el ', h('b', {}, 'token'), ': una línea como 123456789:AAH…. Cópiala entera.'),
+      h('li', {}, 'Pégala aquí abajo y pulsa «Conectar».')));
+    caja.appendChild(h('div', { clase: 'fila-clave' }, campo,
+      h('button', { clase: 'mini primario', onclick: () => {
+        const valor = campo.value.trim();
+        if (!valor) { toast('pega el token del bot', true); return; }
+        campo.value = '';
+        hacer(async () => {
+          const r = await pedir(`${BASE}/api/telegram/token`, { method: 'POST', cuerpo: { token: valor } });
+          TG_UI.chats = null;
+          return `✓ Token bueno: tu bot es @${r.bot}.`;
+        });
+      } }, 'Conectar')));
+  } else if (!e.conectado) {
+    caja.appendChild(h('ol', {},
+      h('li', {}, 'En Telegram, busca tu bot ', h('b', {}, `@${e.bot || 'tu bot'}`), ' y pulsa «Iniciar» (o escríbele ', h('b', {}, '/start'), ').'),
+      h('li', {}, 'Vuelve aquí y pulsa «Buscar mi chat».'),
+      h('li', {}, 'Pulsa «Soy yo» en tu nombre.')));
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'mini primario', onclick: () => hacer(async () => {
+        TG_UI.chats = (await pedir(`${BASE}/api/telegram/chats`)).chats || [];
+        return TG_UI.chats.length ? 'Elige tu nombre:' : 'Todavía no le ha escrito nadie: escríbele /start y vuelve a pulsar.';
+      }) }, 'Buscar mi chat'),
+      h('button', { clase: 'mini fantasma peligro', onclick: () => hacer(async () => {
+        await pedir(`${BASE}/api/telegram`, { method: 'DELETE' }); return 'Quitado.';
+      }) }, 'Empezar de nuevo')));
+    (TG_UI.chats || []).forEach(c => caja.appendChild(h('div', { clase: 'fila' }, h('span', {}, c.nombre),
+      h('button', { clase: 'mini', onclick: () => hacer(async () => {
+        await pedir(`${BASE}/api/telegram/chat`, { method: 'POST',
+          cuerpo: { id: c.id, nombre: c.nombre, base_url: location.origin + BASE } });
+        return '✓ Conectado. Pulsa «Mandar prueba» para verlo en el móvil.';
+      }) }, 'Soy yo'))));
+  } else {
+    caja.appendChild(h('div', { clase: 'meta' }, `Bot @${e.bot || '?'} · los enlaces llevan a ${e.base_url || '—'}`));
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', onclick: () => hacer(async () => {
+        await pedir(`${BASE}/api/telegram/prueba`, { method: 'POST' }); return '✓ Mandado: míralo en Telegram.';
+      }) }, 'Mandar prueba'),
+      h('button', { clase: 'mini fantasma peligro', onclick: () => {
+        if (!confirm('¿Desconectar Telegram? Dejarán de llegarte los avisos al móvil.')) return;
+        hacer(async () => { await pedir(`${BASE}/api/telegram`, { method: 'DELETE' }); TG_UI.chats = null; return 'Desconectado.'; });
+      } }, 'Desconectar')));
+  }
+  caja.appendChild(salida);
+  return caja;
+}
+
 /* -- Configuración */
 function seccionClaveVidiq(ficha) {
   const v = (ficha && ficha.vidiq) || {};
@@ -35810,6 +35986,7 @@ async function cargarPiloto() {
   PIL.cargando = true;
   try {
     const datos = await pedir(rutaPiloto());
+    if (PAR.cid !== undefined) cargarAutoProyecto();
     const huella = JSON.stringify(datos, (k, v) => (k === 'segundos' ? undefined : v));
     PIL.datos = datos;
     PIL.error = '';
@@ -35882,6 +36059,8 @@ function panelPilotoParrilla() {
     h('span', { clase: 'crece' }),
     h('button', { clase: `mini fantasma${PIL.verAjustes ? ' activo' : ''}`, 'aria-expanded': PIL.verAjustes ? 'true' : 'false',
       onclick: () => { PIL.verAjustes = !PIL.verAjustes; PIL.borrador = null; pintarModulo(); } }, '⚙ Ajustes del piloto')));
+  const resumenAuto = resumenAutoProyecto();
+  if (resumenAuto) caja.appendChild(resumenAuto);
   caja.appendChild(h('p', { clase: 'meta' }, 'Abre un guion y pulsa «🤖 Hacer el vídeo completo»: el piloto crea el vídeo, '
     + 'escribe el guion, pone la voz, dibuja las imágenes (el revisor rehace lo que salga mal), lo monta y deja '
     + 'los textos de cada red y las portadas. No publica nada: eso lo haces tú en Publicar.'));
@@ -36005,28 +36184,45 @@ function tarjetaVideoPiloto(v) {
   if (typeof v.previsto_usd === 'number') dinero.push(`previsto ≈ ${usdCorto(v.previsto_usd)}`);
   if (typeof v.coste_usd === 'number') dinero.push(`gastado ${usdCorto(v.coste_usd)}`);
   if (dinero.length) lineas.appendChild(h('span', { clase: 'meta' }, dinero.join(' · ')));
+  // EL PILOTO AUTOMÁTICO (piloto-2): su hueco y su estado vivo (de los envíos)
+  if (v.auto && v.auto.vivo) {
+    lineas.appendChild(h('div', { clase: 'linea-auto-tarjeta' },
+      h('span', { clase: `pastilla ${CLASE_AUTO_GUION[v.auto.vivo.clave] || ''}`.trim() }, v.auto.vivo.texto),
+      v.auto.hueco && !/ el /.test(v.auto.vivo.texto) ? h('span', { clase: 'meta' }, ` · su hueco: ${v.auto.hueco_texto}`) : null));
+  }
   tarjeta.appendChild(lineas);
   if ((v.portadas || []).length) tarjeta.appendChild(portadasPiloto(v));
   const botones = h('div', { clase: 'fila botones-piloto' });
   if (v.pid) botones.appendChild(h('button', { clase: 'mini', onclick: () => abrirVideoDeLaCola(v.pid) }, 'Abrir el vídeo'));
-  if (v.pid && ['listo', 'revisar'].includes(v.estado)) {
+  if (v.auto) {
+    // el mismo sitio que el móvil: la página de aprobar (una sola fuente)
+    botones.appendChild(h('a', { clase: `boton mini${['espera_ok', 'fallo', 'comprobar'].includes((v.auto.vivo || {}).clave) ? ' primario' : ''}`,
+      href: enlaceMovilAuto(v.id), target: '_blank', rel: 'noopener' }, 'Ver y aprobar ›'));
+  } else if (v.pid && ['listo', 'revisar'].includes(v.estado)) {
     botones.appendChild(h('button', { clase: 'mini primario', onclick: () => abrirPublicarVideo(v.pid) }, 'Publicar ›'));
   }
   /* «Seguir igualmente» NO en una parada por «tiene algo en marcha»: el
      piloto nunca se salta eso, así que hacía lo mismo que «Reintentar». Esa
      parada se retoma sola cuando acaba lo que había en marcha (piloto-lista). */
-  if (v.estado === 'parado' && v.tipo_parada && v.tipo_parada !== 'ocupado') {
+  /* un vídeo del piloto automático que dijiste «No publicar» no se rehace
+     desde aquí (pagaría un vídeo que no sale): «Devolver a la lista» en la
+     Parrilla. Y uno vivo no se quita de la lista (se perdería su «No publicar»
+     y su hueco): primero «No publicar» en «Ver y aprobar ›». (piloto-2) */
+  const autoPaso = v.auto ? v.auto.paso : '';
+  const autoSinRehacer = ['no_publicar', 'retirando'].includes(autoPaso);
+  const autoVivo = !!v.auto && !['no_publicar', 'publicado'].includes(autoPaso);
+  if (!autoSinRehacer && v.estado === 'parado' && v.tipo_parada && v.tipo_parada !== 'ocupado') {
     botones.appendChild(h('button', { clase: 'mini primario', title: 'Ya lo has mirado: sigue desde donde se paró',
       onclick: () => seguirPiloto(v, true) }, 'Seguir igualmente'));
   }
-  if (['error', 'interrumpido', 'cancelado', 'parado'].includes(v.estado)) {
+  if (!autoSinRehacer && ['error', 'interrumpido', 'cancelado', 'parado'].includes(v.estado)) {
     botones.appendChild(h('button', { clase: 'mini', title: 'Vuelve a la cola y sigue donde iba (lo hecho no se paga otra vez)',
       onclick: () => seguirPiloto(v, false) }, 'Reintentar'));
   }
   if (['trabajando', 'en_cola'].includes(v.estado)) {
     botones.appendChild(h('button', { clase: 'mini fantasma peligro', disabled: v.vivo && v.vivo.cancelando ? true : null,
       onclick: () => pararPiloto(v) }, 'Parar'));
-  } else {
+  } else if (!autoVivo) {
     botones.appendChild(h('button', { clase: 'mini fantasma', title: 'Quitar de esta lista (el vídeo se queda en Tus proyectos)',
       onclick: () => quitarPiloto(v) }, 'Quitar de la lista'));
   }
@@ -36197,6 +36393,275 @@ function botonPilotoGuion(g, indice, sinGuardar) {
   }, '🤖 Hacer el vídeo completo');
   boton.className = 'boton-piloto-guion';
   return boton;
+}
+
+/* ====================================================== PILOTO AUTOMÁTICO
+ *
+ * NIVELES 2 Y 3 (rama piloto-2, 24-11-2026; plan aprobado por el árbitro:
+ * estado/plan_piloto_niveles_2_3_2026-11-24.md del Proyecto). Por proyecto, un
+ * calendario: antes de cada hueco el Studio hace el vídeo del siguiente guion
+ * pendiente de la Parrilla y avisa al móvil (Telegram) con la página
+ * aprobar.html. Nivel 2: espera tu OK. Nivel 3: lo programa solo salvo que
+ * haya algo que mirar. Aquí: el resumen arriba del panel del piloto y la ficha
+ * «🤖 Piloto automático». La ficha edita una COPIA y solo «Guardar» escribe
+ * (regla 1: abrir la pantalla no escribe nada).
+ */
+const DIAS_AUTO = [[1, 'L'], [2, 'M'], [3, 'X'], [4, 'J'], [5, 'V'], [6, 'S'], [7, 'D']];
+
+function rutaAuto(resto) {
+  return `${BASE}/api/piloto/auto/${encodeURIComponent(PAR.cid || '_sin')}${resto || ''}`;
+}
+
+async function cargarAutoProyecto() {
+  const cid = PAR.cid || '_sin';
+  if (PIL.autoCargando) return;
+  PIL.autoCargando = true;
+  try {
+    const datos = await pedir(rutaAuto());
+    const cambio = JSON.stringify(datos) !== JSON.stringify((PIL.auto || {}).datos || null);
+    PIL.auto = { cid, datos, error: '' };
+    if (cambio) repintarPanelPiloto();
+  } catch (e) {
+    PIL.auto = { cid, datos: null, error: e.message };
+  } finally {
+    PIL.autoCargando = false;
+  }
+}
+
+function enlaceMovilAuto(vid) { return `${BASE}/aprobar.html?video=${encodeURIComponent(vid)}`; }
+
+/* Arriba del panel del piloto: cómo está el automático de ESTE proyecto. */
+function resumenAutoProyecto() {
+  const a = PIL.auto;
+  if (!a || a.cid !== (PAR.cid || '_sin')) { cargarAutoProyecto(); return null; }
+  if (!a.datos) return a.error ? h('div', { clase: 'caja-error' }, `El piloto automático no contesta: ${a.error}`) : null;
+  const d = a.datos;
+  const f = d.ficha || {};
+  const caja = h('div', { clase: `resumen-auto${f.activo ? ' encendido' : ''}` });
+  if (!f.guardada || !f.activo) {
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('div', { clase: 'crece' }, h('b', {}, '⏸ Piloto automático apagado en este proyecto'),
+        h('div', { clase: 'meta' }, 'Enciéndelo y el Studio hará los vídeos solo, según un calendario, y te avisará al móvil.')),
+      h('button', { clase: 'mini primario', onclick: () => abrirFichaAuto() }, f.guardada ? 'Ajustar y encender' : 'Configurar')));
+  } else {
+    const prox = ((d.proximos || {}).huecos || [])[0];
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('div', { clase: 'crece' }, h('b', {}, `🤖 Encendido · ${f.modo === 3 ? 'nivel 3 (publica solo)' : 'nivel 2 (con tu OK)'}`),
+        h('div', { clase: 'meta' }, prox ? `Próximo: ${prox.texto}${prox.guion ? ` · ${prox.guion}` : ' · ⚠ sin guion'}`
+          : 'No hay ningún hueco en los próximos 7 días.')),
+      h('button', { clase: 'mini', onclick: () => abrirFichaAuto() }, 'Ajustar')));
+  }
+  if (d.bloqueo) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      h('b', {}, `No empiezo «${d.bloqueo.codigo || d.bloqueo.titulo || 'el siguiente guion'}» (no se ha gastado nada): `),
+      d.bloqueo.razones.map(r => r.texto).join('; '), '.',
+      d.bloqueo.hacer_igual ? h('button', { clase: 'mini', onclick: () => accionAutoGuion('hacer-igualmente', d.bloqueo.gid,
+        d.bloqueo.indice || 0, 'Lo hará en la próxima vuelta del piloto.') }, 'Hacer igualmente') : null));
+  }
+  if (f.activo && d.telegram && !d.telegram.conectado) {
+    caja.appendChild(h('div', { clase: 'meta' }, '📲 Telegram no está conectado: no te enterarás en el móvil. ',
+      h('button', { clase: 'mini fantasma', onclick: () => conmutarConfig(true) }, 'Conectarlo en Configuración')));
+  }
+  return caja;
+}
+
+/* ------------------------------------------------------------- la ficha */
+
+async function abrirFichaAuto() {
+  await cargarAutoProyecto();
+  const d = (PIL.auto || {}).datos;
+  if (!d) { toast('no se ha podido abrir la ficha del piloto automático', true); return; }
+  const f = JSON.parse(JSON.stringify(d.ficha || {}));
+  const aj = d.ajustes_piloto || {};
+  const av = Object.assign({ si_falla: aj.si_falla, umbral_pct: aj.umbral_pct, vueltas: aj.vueltas,
+    tope_usd: aj.tope_usd, portadas: aj.portadas }, f.avanzado || {});
+  PIL.fichaAuto = { f, av, d, error: '', proximos: d.proximos, guardando: false, verAvanzado: false };
+  pintarFichaAuto();
+  vistaFichaAuto();
+}
+
+function cerrarFichaAuto() {
+  if (PIL.capaAuto) PIL.capaAuto.remove();
+  PIL.capaAuto = null;
+  PIL.fichaAuto = null;
+  document.removeEventListener('keydown', teclaFichaAuto);
+}
+
+function teclaFichaAuto(ev) { if (ev.key === 'Escape' && PIL.fichaAuto && !PIL.fichaAuto.guardando) cerrarFichaAuto(); }
+
+function cuerpoFichaAuto() {
+  const { f, av } = PIL.fichaAuto;
+  const cuerpo = { activo: !!f.activo, modo: f.modo, huecos: f.huecos, estilo: f.estilo,
+    anticipacion_h: f.anticipacion_h, max_pendientes: f.max_pendientes, aviso_guiones_dias: f.aviso_guiones_dias,
+    duracion_s: f.duracion_s || null, formato: f.formato || null, avanzado: {} };
+  ['tope_usd', 'si_falla', 'umbral_pct', 'vueltas', 'portadas'].forEach(k => {
+    if (av[k] !== undefined && av[k] !== '') cuerpo.avanzado[k] = av[k];
+  });
+  return cuerpo;
+}
+
+let RELOJ_VISTA_AUTO = null;
+function vistaFichaAuto() {
+  clearTimeout(RELOJ_VISTA_AUTO);
+  RELOJ_VISTA_AUTO = setTimeout(async () => {
+    const fa = PIL.fichaAuto;
+    if (!fa) return;
+    try {
+      const r = await pedir(rutaAuto('/vista'), { method: 'POST', cuerpo: cuerpoFichaAuto() });
+      if (PIL.fichaAuto !== fa) return;
+      fa.proximos = r.proximos;
+      fa.repetidas = r.repetidas || [];
+      fa.errorVista = '';
+    } catch (e) {
+      fa.errorVista = e.message;
+    }
+    const viejo = document.querySelector('.proximos-auto');
+    if (viejo) viejo.replaceWith(proximosFichaAuto());
+  }, 400);
+}
+
+function cambiarFichaAuto(fn, repintar) {
+  fn();
+  if (repintar) pintarFichaAuto();
+  vistaFichaAuto();
+}
+
+function lineaCalendarioAuto(linea, i) {
+  const fa = PIL.fichaAuto;
+  const redes = fa.d.redes || [];
+  return h('div', { clase: 'linea-auto' },
+    h('div', { clase: 'dias-auto', role: 'group', 'aria-label': 'Días' }, DIAS_AUTO.map(([n, letra]) => {
+      const puesto = (linea.dias || []).includes(n);
+      return h('button', { type: 'button', clase: `dia-auto${puesto ? ' puesto' : ''}`, 'aria-pressed': puesto ? 'true' : 'false',
+        title: ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'][n],
+        onclick: () => cambiarFichaAuto(() => {
+          linea.dias = puesto ? linea.dias.filter(x => x !== n) : (linea.dias || []).concat(n).sort();
+        }, true) }, letra);
+    })),
+    h('input', { type: 'time', clase: 'hora-auto', value: linea.hora || '19:00', 'aria-label': 'Hora (Lima)',
+      onchange: ev => cambiarFichaAuto(() => { linea.hora = ev.target.value; }) }),
+    h('div', { clase: 'redes-auto' }, redes.map(r => h('label', { clase: 'casilla-auto' },
+      h('input', { type: 'checkbox', checked: (linea.redes || []).includes(r.id) ? true : null,
+        onchange: ev => cambiarFichaAuto(() => {
+          linea.redes = ev.target.checked ? (linea.redes || []).concat(r.id) : (linea.redes || []).filter(x => x !== r.id);
+        }) }), ` ${r.nombre}`))),
+    h('button', { type: 'button', clase: 'mini fantasma', 'aria-label': 'Quitar esta hora',
+      onclick: () => cambiarFichaAuto(() => { fa.f.huecos.splice(i, 1); }, true) }, '×'));
+}
+
+function proximosFichaAuto() {
+  const fa = PIL.fichaAuto;
+  const p = (fa && fa.proximos) || { huecos: [] };
+  const caja = h('div', { clase: 'proximos-auto' }, h('div', { clase: 'titulo-campo' }, 'Los próximos 7 días'));
+  if (fa && fa.errorVista) caja.appendChild(h('div', { clase: 'caja-error' }, fa.errorVista));
+  if (fa && (fa.repetidas || []).length) {
+    caja.appendChild(h('div', { clase: 'meta' }, `Se repite ${fa.repetidas.join(', ')}: a esa hora va UN vídeo, en todas esas redes.`));
+  }
+  if (!p.huecos.length) { caja.appendChild(h('div', { clase: 'meta' }, 'Ningún hueco: añade días y horas.')); return caja; }
+  caja.appendChild(h('ul', { clase: 'lista-proximos-auto' }, p.huecos.map(x => h('li', {},
+    h('b', {}, x.texto), ' · ',
+    x.guion ? x.guion : h('span', { clase: 'aviso-texto' }, '⚠ sin guion: añade guiones a la Parrilla'),
+    x.estado ? h('span', { clase: 'meta' }, ` · ${x.estado}`) : null,
+    typeof x.usd === 'number' ? h('span', { clase: 'meta' }, ` · ≈ ${usdCorto(x.usd)}`) : null))));
+  if (p.usd_total) caja.appendChild(h('div', { clase: 'meta' }, `Gasto aproximado de los vídeos nuevos: ≈ ${usdCorto(p.usd_total)}`
+    + ' (imágenes y voz; el tope de cada vídeo lo frena si se pasa).'));
+  return caja;
+}
+
+function pintarFichaAuto() {
+  const fa = PIL.fichaAuto;
+  if (!fa) return;
+  const { f, av, d } = fa;
+  const nombreProyecto = ((PAR.proyectos || []).find(p => p.id === PAR.cid) || {}).nombre || 'este proyecto';
+  const dlg = h('div', { clase: 'dialogo dialogo-piloto dialogo-auto', role: 'dialog', 'aria-modal': 'true',
+    'aria-label': 'Piloto automático' });
+  dlg.appendChild(h('div', { clase: 'fila cab-dialogo-piloto' }, h('h3', {}, `🤖 Piloto automático · ${nombreProyecto}`),
+    h('button', { type: 'button', clase: 'mini fantasma', 'aria-label': 'Cerrar', onclick: () => cerrarFichaAuto() }, '×')));
+  dlg.appendChild(h('label', { clase: 'casilla-piloto interruptor-auto' },
+    h('input', { type: 'checkbox', checked: f.activo ? true : null, onchange: ev => cambiarFichaAuto(() => { f.activo = ev.target.checked; }, true) }),
+    h('b', {}, f.activo ? ' Encendido' : ' Apagado'), h('span', { clase: 'meta' }, ' · se puede apagar cuando quieras')));
+  dlg.appendChild(h('div', { clase: 'titulo-campo' }, 'Cómo trabaja'));
+  dlg.appendChild(h('div', { clase: 'opciones-piloto', role: 'radiogroup', 'aria-label': 'Nivel' },
+    (d.modos || []).map(m => h('button', { type: 'button', role: 'radio', clase: `opcion-piloto${f.modo === m.id ? ' elegida' : ''}`,
+      'aria-checked': f.modo === m.id ? 'true' : 'false', onclick: () => cambiarFichaAuto(() => { f.modo = m.id; }, true) },
+    h('b', {}, m.nombre), h('span', { clase: 'meta' }, m.frase)))));
+  if (f.modo === 3) {
+    dlg.appendChild(h('div', { clase: 'pista' }, 'En nivel 3 NO publica solo (te avisa y espera tu OK) si: el revisor dejó imágenes '
+      + 'marcadas, se pasaría del tope de $, al guion le falta la llamada a la acción, falta portada o título, una red está '
+      + 'desconectada o falla, el vídeo se tocó a mano o el guion cambió, o su hora ya pasó (lo mueve al siguiente hueco).'));
+  }
+  dlg.appendChild(h('div', { clase: 'titulo-campo' }, 'Calendario (hora de Lima)'));
+  dlg.appendChild(h('div', { clase: 'meta' }, 'Pulsa los días; varios vídeos el mismo día = varias líneas con distinta hora.'));
+  (f.huecos || []).forEach((linea, i) => dlg.appendChild(lineaCalendarioAuto(linea, i)));
+  dlg.appendChild(h('button', { type: 'button', clase: 'mini', onclick: () => cambiarFichaAuto(() => {
+    f.huecos = (f.huecos || []).concat({ dias: [1, 3, 5], hora: (f.huecos || []).length ? '12:00' : '19:00', redes: ((d.redes || [])[0] ? [d.redes[0].id] : []) });
+  }, true) }, '+ Añadir hora'));
+  dlg.appendChild(h('div', { clase: 'fila campos-piloto' },
+    h('label', { clase: 'campo campo-piloto' }, h('span', {}, 'Estilo de los vídeos'),
+      h('select', { onchange: ev => cambiarFichaAuto(() => { f.estilo = ev.target.value; }) },
+        h('option', { value: '' }, '— elige —'),
+        (d.estilos || []).map(e => h('option', { value: e.id, selected: f.estilo === e.id ? true : null }, e.nombre))),
+      h('span', { clase: 'meta' }, 'si el guion trae el suyo (de este proyecto), va con el suyo')),
+    h('label', { clase: 'campo campo-piloto' }, h('span', {}, 'Empieza el vídeo (horas antes)'),
+      h('input', { type: 'number', min: 1, max: 72, clase: 'numero-corto', value: f.anticipacion_h,
+        oninput: ev => cambiarFichaAuto(() => { f.anticipacion_h = Number(ev.target.value) || 24; }) }),
+      h('span', { clase: 'meta' }, 'con tiempo para revisarlo')),
+    h('label', { clase: 'campo campo-piloto' }, h('span', {}, 'Como mucho sin publicar'),
+      h('input', { type: 'number', min: 1, max: 5, clase: 'numero-corto', value: f.max_pendientes,
+        oninput: ev => cambiarFichaAuto(() => { f.max_pendientes = Number(ev.target.value) || 2; }) }),
+      h('span', { clase: 'meta' }, 'no hace más vídeos hasta que salgan estos'))));
+  dlg.appendChild(h('ul', { clase: 'fijos-auto' },
+    h('li', {}, 'Guiones: el siguiente pendiente de la Parrilla, en su orden (nunca los que hiciste a mano).'),
+    h('li', {}, 'Portada: la que propone el guion; si no trae, la del piloto.'),
+    h('li', {}, 'Títulos y SEO: los escribe el Studio, sin vidIQ.'),
+    h('li', {}, `Aviso de que se acaban los guiones: ${f.aviso_guiones_dias || 3} días antes.`)));
+  dlg.appendChild(h('button', { type: 'button', clase: 'mini fantasma', 'aria-expanded': fa.verAvanzado ? 'true' : 'false',
+    onclick: () => { fa.verAvanzado = !fa.verAvanzado; pintarFichaAuto(); } }, fa.verAvanzado ? '▾ Avanzado' : '▸ Avanzado (tope, imágenes, portadas)'));
+  if (fa.verAvanzado) dlg.appendChild(camposInterruptorPiloto(av, () => pintarFichaAuto()));
+  dlg.appendChild(proximosFichaAuto());
+  const tg = d.telegram || {};
+  dlg.appendChild(h('div', { clase: 'meta' }, tg.conectado ? `📲 Los avisos llegan a Telegram (${tg.chat_nombre || 'conectado'}).`
+    : '📲 Telegram no está conectado: los avisos solo se verán aquí. Conéctalo en Configuración.'));
+  if (fa.error) dlg.appendChild(h('div', { clase: 'caja-error' }, fa.error));
+  dlg.appendChild(h('div', { clase: 'fila acciones-dialogo' },
+    h('button', { clase: 'fantasma', disabled: fa.guardando ? true : null, onclick: () => cerrarFichaAuto() }, 'Cancelar'),
+    h('button', { clase: 'primario', disabled: fa.guardando ? true : null, onclick: () => guardarFichaAuto() },
+      fa.guardando ? 'Guardando…' : 'Guardar')));
+  const capa = h('div', { clase: 'capa-dialogo capa-piloto', onclick: ev => { if (ev.target === capa && !fa.guardando) cerrarFichaAuto(); } }, dlg);
+  if (PIL.capaAuto) PIL.capaAuto.replaceWith(capa);
+  else {
+    document.body.appendChild(capa);
+    document.addEventListener('keydown', teclaFichaAuto);
+  }
+  PIL.capaAuto = capa;
+}
+
+async function guardarFichaAuto() {
+  const fa = PIL.fichaAuto;
+  if (!fa || fa.guardando) return;
+  const antes = fa.d.ficha || {};
+  fa.guardando = true;
+  fa.error = '';
+  pintarFichaAuto();
+  try {
+    const cuerpo = Object.assign(cuerpoFichaAuto(), { rev: antes.rev || 0 });
+    const r = await pedir(rutaAuto(), { method: 'PUT', cuerpo });
+    PIL.auto = { cid: PAR.cid || '_sin', datos: r, error: '' };
+    const apagado = antes.activo && !cuerpo.activo;
+    cerrarFichaAuto();
+    toast(cuerpo.activo ? 'Piloto automático guardado y encendido' : 'Piloto automático guardado (apagado)');
+    if (apagado && r.programados) {
+      if (confirm(`Los ${r.programados} vídeos ya programados siguen programados.\n\n¿Cancelarlos también? (No saldrán.)`)) {
+        const c = await pedir(rutaAuto('/cancelar-programados'), { method: 'POST' });
+        toast(`${c.retirando} vídeos se están quitando de Upload-Post`);
+      }
+    }
+    repintarPanelPiloto();
+  } catch (e) {
+    fa.guardando = false;
+    fa.error = /otro sitio/.test(e.message) ? 'Esto se cambió en otro sitio hace un momento: ciérrala y vuelve a abrirla.' : e.message;
+    pintarFichaAuto();
+  }
 }
 
 async function abrirDialogoPiloto(g, indice, estiloId) {

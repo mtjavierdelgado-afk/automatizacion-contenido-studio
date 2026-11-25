@@ -363,6 +363,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
+| `GET` | `/api/aprobar/{vid}` | La página del móvil de un vídeo del piloto automático (todo en vivo). |
+| `POST` | `/api/aprobar/{vid}/fecha` | «Cambiar fecha» + OK: {rev, cuando}. Si ya estaba programado, se cancela |
+| `POST` | `/api/aprobar/{vid}/no-publicar` | «No publicar»: {rev, devolver?}. Si ya estaba en Upload-Post, se cancela |
+| `POST` | `/api/aprobar/{vid}/publicar` | «✓ Publicar así»: {rev, cuando?, desde?: movil|studio}. Lo programa en |
+| `POST` | `/api/aprobar/{vid}/redes` | Cambia en qué redes sale este vídeo: {rev, redes}. Solo antes del OK. |
+| `POST` | `/api/aprobar/{vid}/reintentar-red` | «Reintentar esta red» (una red que falló): {rev, red, cuando?}. Es un |
+| `POST` | `/api/aprobar/{vid}/ya-lo-mire` | «Ya lo miré»: {rev}. El dueño miró en Upload-Post la subida cortada a |
 | `GET` | `/api/claude/consumo` | El medidor de Claude: cupo de cada cuenta, avisos y consumo (solo lee). |
 | `POST` | `/api/claude/consumo/medir` | «Medir ahora»: lee el cupo de cada cuenta con una llamada mínima. |
 | `GET` | `/api/clientes` | Los proyectos (clientes) y a cual pertenece cada estilo. |
@@ -475,6 +482,12 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
 | `GET` | `/api/piloto` | La cola del piloto, la bandeja «Necesita revisión», los ajustes y el cupo. |
 | `PUT` | `/api/piloto/ajustes` | {si_falla?, umbral_pct?, vueltas?, tope_usd?, a_la_vez?, portadas?, |
+| `GET` | `/api/piloto/auto/{cid}` | La ficha «🤖 Piloto automático» de un proyecto: la guardada o una |
+| `PUT` | `/api/piloto/auto/{cid}` | Guarda la ficha (lo ÚNICO que la escribe): {activo, modo, huecos, |
+| `POST` | `/api/piloto/auto/{cid}/cancelar-programados` | «Cancelarlos también» al apagar: los ya programados pasan a retirarse. |
+| `POST` | `/api/piloto/auto/{cid}/devolver` | «Devolver a la lista» ESE encargo del guion: {gid, indice}. Se volverá |
+| `POST` | `/api/piloto/auto/{cid}/hacer-igualmente` | «Hacer igualmente» un encargo frenado ANTES de gastar: {gid, indice}. |
+| `POST` | `/api/piloto/auto/{cid}/vista` | Los próximos 7 días con la ficha que se está editando, SIN guardarla |
 | `POST` | `/api/piloto/videos` | Manda un guion de la Parrilla al piloto: {cid, gid, indice?, estilo, |
 | `DELETE` | `/api/piloto/videos/{vid}` | Lo quita de la lista. El video, si se creo, se queda en Tus proyectos. |
 | `POST` | `/api/piloto/videos/{vid}/parar` | Para un video: si espera, sale de la cola; si trabaja, se cancela su |
@@ -574,6 +587,12 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/sistema/revisiones/{rid}` | — |
 | `GET` | `/api/sistema/terminos` | Los terminos de uso, tal cual estan en docs/TERMINOS.md (el pie). |
 | `POST` | `/api/sonido/subir` | Sube un audio tuyo (MP3, WAV, M4A, OGG) para la música o un efecto. |
+| `DELETE` | `/api/telegram` | — |
+| `GET` | `/api/telegram` | Si los avisos al móvil están conectados (nunca el token). |
+| `POST` | `/api/telegram/chat` | {id, nombre, base_url}: este es mi chat; los enlaces van a esa dirección. |
+| `GET` | `/api/telegram/chats` | Quién ha escrito «/start» al bot: el dueño elige su nombre. |
+| `POST` | `/api/telegram/prueba` | Manda un mensaje de prueba (gratis). |
+| `POST` | `/api/telegram/token` | {token}: el token del bot (de @BotFather). Se comprueba con Telegram. |
 | `GET` | `/api/vidiq/estado` | {puesta, simulado, saldo, saldo_al, creditos_aprox, trabajando}. Sin la clave. |
 | `POST` | `/api/vidiq/probar` | Prueba la clave contra vidIQ (`vidiq_balance`): {estado, mensaje, saldo}. |
 | `GET` | `/api/vidiq/videos/{pid}` | El último «Mejorar con vidIQ» de un vídeo y si sigue consultando. |
@@ -582,4 +601,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**468 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**487 endpoints.** Escrito por `generar_api.py` desde `app.py`.

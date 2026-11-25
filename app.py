@@ -20760,7 +20760,7 @@ def _huella_corta(valor):
     return hashlib.sha256(repr(valor).encode("utf-8")).hexdigest()[:10]
 
 
-def _portada_sellada():
+def _portada_sellada(pagina="index.html", assets=ASSETS_SELLADOS):
     """index.html con `?v=<sello>` en los dos assets que enlaza.
 
     El sello sale del propio fichero (mtime + tamano), asi que cambia SOLO
@@ -20772,9 +20772,9 @@ def _portada_sellada():
 
     La portada en si NO se cachea: es la que trae los sellos nuevos.
     """
-    with open(os.path.join(RAIZ_WEB, "index.html"), encoding="utf-8") as fh:
+    with open(os.path.join(RAIZ_WEB, pagina), encoding="utf-8") as fh:
         html = fh.read()
-    for nombre in ASSETS_SELLADOS:
+    for nombre in assets:
         sello = _sello_asset(nombre)
         # solo la referencia literal del enlace, y una vez: asi no se toca
         # ninguna otra aparicion del nombre dentro del documento
@@ -20797,6 +20797,9 @@ def fichero_web(fichero: str, peticion: Request):
         raise ErrorApi(404, f"no existe: {fichero}")
     if nombre == "index.html":
         return _portada_sellada()
+    if nombre == "aprobar.html":
+        # la página del móvil del piloto automático (piloto-2), con sus sellos
+        return _portada_sellada("aprobar.html", ("aprobar.css", "aprobar.js"))
     # UN ASSET PEDIDO CON SU SELLO ES INMUTABLE. La portada solo pone el `?v=`
     # que corresponde al fichero que hay ahora, asi que si el navegador pide ESE
     # sello, lo que reciba no va a cambiar nunca: se puede guardar un ano y no
@@ -20806,7 +20809,7 @@ def fichero_web(fichero: str, peticion: Request):
     # Se comprueba que el sello COINCIDA con el del fichero: un `?v=` viejo (una
     # pestana que lleva dias abierta, un enlace guardado) no puede llevarse la
     # cabecera de inmutable, o se quedaria con esa respuesta para siempre.
-    if nombre in ASSETS_SELLADOS:
+    if nombre in ASSETS_SELLADOS + ("aprobar.css", "aprobar.js"):
         pedido = peticion.query_params.get("v")
         if pedido and pedido == _sello_asset(nombre):
             return FileResponse(destino, media_type=_tipo_de(destino), headers={
@@ -21660,7 +21663,14 @@ def publicar_ficha(pid: str, peticion: Request):
     ctx = _ctx_publicable(pid, peticion)
     info = _info_para_publicar(ctx)
     ajustes = _publicar().ajustes_de(raiz_proyectos(), info["cliente"])
-    return _publicar().ficha(raiz_proyectos(), info, ajustes)
+    ficha = _publicar().ficha(raiz_proyectos(), info, ajustes)
+    # la huella de los textos de cada red tal como se ven ahora: la pantalla la
+    # devuelve como `antes` al guardar, para saber si otro sitio los cambió
+    # entre medias (piloto-2: el mismo vídeo se edita en el móvil y aquí)
+    if AUTO is not None:
+        ficha["huellas_textos"] = {r: AUTO.huella((ficha.get("textos") or {}).get(r) or {})
+                                   for r in _publicar().REDES}
+    return ficha
 
 
 @app.put("/api/publicar/videos/{pid}")
@@ -21668,7 +21678,22 @@ def publicar_guardar_ficha(pid: str, peticion: Request, cuerpo: dict = Body(defa
     """{redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?,
     youtube_formato?: auto|short|video, portada_guion?: {texto, imagen}}"""
     ctx = _ctx_publicable(pid, peticion)
-    _por_publicar(_publicar().guardar_ficha, raiz_proyectos(), ctx.id, _cuerpo(cuerpo))
+    datos = _cuerpo(cuerpo)
+    antes = datos.pop("antes", None)
+    PUB = _publicar()
+    # «ESTO SE CAMBIÓ EN OTRO SITIO» (piloto-2): con `antes` ({red: huella de
+    # sus textos tal como los vio la pantalla}), si otro sitio los cambió entre
+    # medias -> 409. Se mira y se guarda bajo el MISMO cerrojo del vídeo. Sin
+    # `antes`, igual que siempre.
+    with PUB._lock(ctx.id):
+        if isinstance(antes, dict) and AUTO is not None:
+            actuales = (PUB._leer_video(raiz_proyectos(), ctx.id) or {}).get("textos") or {}
+            for red, huella in antes.items():
+                if red in (datos.get("textos") or {}) and \
+                        AUTO.huella(actuales.get(red) or {}) != str(huella or ""):
+                    raise ErrorApi(409, "Esto se cambió en otro sitio hace un momento: mira lo "
+                                        "nuevo antes de guardar")
+        _por_publicar(PUB.guardar_ficha, raiz_proyectos(), ctx.id, datos)
     return publicar_ficha(pid, peticion)
 
 
@@ -22550,7 +22575,42 @@ def parrilla_listar(cid: str, peticion: Request):
         P.poner_al_dia(raiz_proyectos(), cid, _buscador_de_videos(peticion), _video_publicado)
     except Exception as fallo:                              # noqa: BLE001
         print(f"[parrilla] no se ha podido poner al día {cid}: {fallo}", flush=True)
-    return _por_parrilla(P.listar, raiz_proyectos(), cid)
+    salida = _por_parrilla(P.listar, raiz_proyectos(), cid)
+    _auto_en_parrilla(salida, cid)
+    return salida
+
+
+def _auto_en_parrilla(salida, cid):
+    """La etiqueta VIVA del piloto automático en cada guion (piloto-2): de la
+    ficha del piloto y de los envíos, nunca una copia. Un aviso desaparece en
+    cuanto deja de aplicar porque no se guarda en ningún sitio."""
+    if AUTO is None or PILOTO is None:
+        return
+    try:
+        cid = AUTO.clave_proyecto("" if cid == _parrilla().SIN_PROYECTO else cid)
+        hist = AUTO.historial(raiz_proyectos())
+        ultimo = {}
+        for f in PILOTO.listar(raiz_proyectos()):
+            if AUTO.es_automatico(f) and AUTO.clave_proyecto(f["auto"].get("cid")) == cid:
+                ultimo.setdefault(f["auto"].get("gid"), []).append(f)
+        bloqueo = _AUTO_BLOQUEOS.get(cid) or {}
+    except Exception:                                       # noqa: BLE001
+        return
+    for m in salida.get("matrices") or []:
+        for g in m.get("guiones") or []:
+            fichas = ultimo.get(g.get("id")) or []
+            if fichas:
+                f = fichas[-1]
+                vivo = AUTO.estado_vivo(f, _auto_envios(f.get("pid")))
+                g["auto"] = {"id": f["id"], "clave": vivo["clave"], "texto": vivo["texto"],
+                             "videos": len(fichas), "indice": int(f["auto"].get("indice") or 0)}
+            elif any(k.split("|")[1] == g.get("id") and (v or {}).get("devuelto")
+                     for k, v in hist.items() if k.startswith((cid or "_sin") + "|")):
+                g["auto"] = {"clave": "vuelve", "texto": "🤖 vuelve al piloto"}
+            if bloqueo.get("gid") == g.get("id"):
+                g["auto_frenado"] = {"razones": [r["texto"] for r in bloqueo.get("razones") or []],
+                                     "hacer_igual": bool(bloqueo.get("hacer_igual")),
+                                     "indice": bloqueo.get("indice", 0)}
 
 
 @app.get("/api/parrilla/plantilla")
@@ -23405,6 +23465,12 @@ def _piloto_una_vuelta():
     """Arranca los videos que tocan, si hay hueco y cupo."""
     P = _piloto()
     raiz = raiz_proyectos()
+    # EL PILOTO AUTOMÁTICO (rama piloto-2): sigue sus vídeos, publica los que
+    # tocan y encola como mucho uno por proyecto. Un fallo suyo no para al nivel 1.
+    try:
+        _auto_vuelta()
+    except Exception as fallo:                              # noqa: BLE001
+        anotar_global("piloto_auto_fallo", {"vuelta": str(fallo)[:300]})
     ajustes = P.ajustes(raiz)
     _piloto_retomar_ocupados(P, raiz)
     with _PILOTO_LOCK:
@@ -23594,10 +23660,16 @@ def _piloto_crear_video(raiz, vid):
     if not pid:
         raise RuntimeError("el servidor no ha devuelto ningún vídeo")
     P.cambiar(raiz, vid, pid=pid, nombre=(hecho.get("proyecto") or {}).get("nombre") or pid)
+    # EL PILOTO AUTOMÁTICO (piloto-2): sus envíos son TODOS los de este vídeo
+    # desde que nace (también uno publicado a mano desde Publicar), para que
+    # la reconciliación los vea y no lo publique dos veces
+    if AUTO is not None and AUTO.es_automatico(P.leer(raiz, vid)):
+        P.cambiar_auto(raiz, vid, {"envios_antes": [e.get("id") for e in _auto_envios(pid) if e.get("id")]},
+                       contar_rev=False)
     for aviso in (encargo.get("avisos") or [])[:6]:
-        P.apuntar_revision(raiz, vid, f"Del guion: {aviso}", "Parrilla")
+        P.apuntar_revision(raiz, vid, f"Del guion: {aviso}", "Parrilla", tipo="del_guion")
     for aviso in (hecho.get("avisos") or [])[:6]:
-        P.apuntar_revision(raiz, vid, str(aviso), "Encargo")
+        P.apuntar_revision(raiz, vid, str(aviso), "Encargo", tipo="del_encargo")
     try:
         ctx = contexto(pid)
         ctx.bitacora.anotar("piloto_video_creado", None, {"piloto": vid, "guion": ficha["gid"],
@@ -23721,7 +23793,7 @@ def _piloto_vistos_buenos(avisar, ctx, raiz, vid, modo):
                     ctx.estado.actualizar_params("assets", {"guion_visual": dict(guardado, aprobado=True)})
             ctx.bitacora.anotar("guion_visual_aprobado", "assets", {"aprobado": True, "piloto": vid})
             P.apuntar_revision(raiz, vid, "El guion visual lo aprobó el piloto: míralo si las "
-                                          "imágenes no cuentan lo que querías", "Guion visual")
+                                          "imágenes no cuentan lo que querías", "Guion visual", tipo="aprobado_por_piloto")
     # 2. LA IMAGEN BASE DEL TIPO DE RELATO y la de cada estado
     tr = _tipo_relato()
     params_a = ctx.estado.params("assets") or {}
@@ -23764,7 +23836,7 @@ def _piloto_vistos_buenos(avisar, ctx, raiz, vid, modo):
     ctx.bitacora.anotar("tipo_relato_base_aprobada", "assets", {"sitio": sitio, "piloto": vid})
     P.apuntar_revision(raiz, vid, "La imagen base (y sus estados) la aprobó el piloto: si el "
                                   "sitio no es como querías, cámbiala y rehaz las imágenes",
-                       "Imágenes → La imagen base")
+                       "Imágenes → La imagen base", tipo="aprobado_por_piloto")
 
 
 def _piloto_base_subida(ctx, sitio):
@@ -23849,10 +23921,10 @@ def _piloto_decidir(ctx, raiz, vid, aj, forzar):
         lista = ", ".join(marcadas[:12]) + (" y más" if len(marcadas) > 12 else "")
         P.apuntar_revision(raiz, vid, f"El revisor sigue marcando {len(marcadas)} "
                                       f"{'imagen' if len(marcadas) == 1 else 'imágenes'}: {lista}",
-                           "Imágenes")
+                           "Imágenes", tipo="imagen_marcada")
     if resumen.get("sin_revisar"):
         P.apuntar_revision(raiz, vid, f"{resumen['sin_revisar']} imágenes no se pudieron revisar "
-                                      "(Claude no contestó): míralas tú", "Imágenes")
+                                      "(Claude no contestó): míralas tú", "Imágenes", tipo="imagen_sin_revisar")
     if forzar and decision == "parar":
         return "seguir", "pulsaste «Seguir igualmente»: se monta igual y las marcadas quedan para revisar"
     return decision, porque
@@ -23864,15 +23936,21 @@ def _piloto_textos(avisar, ctx, raiz, vid):
     PUB = _publicar()
     info = _info_para_publicar(ctx)
     if not info.get("montado"):
-        P.apuntar_revision(raiz, vid, "El vídeo no quedó montado: no hay textos", "Vídeo")
+        P.apuntar_revision(raiz, vid, "El vídeo no quedó montado: no hay textos", "Vídeo", tipo="textos")
         return
+    # EL PILOTO AUTOMÁTICO (rama piloto-2): los textos son los de las redes de
+    # SU hueco, no las de Publicar del proyecto (si no, `enviar` fallaría por
+    # «falta el texto de…»)
+    propia = P.leer(raiz, vid)
+    if AUTO is not None and AUTO.es_automatico(propia) and propia["auto"].get("redes"):
+        PUB.guardar_ficha(raiz_proyectos(), ctx.id, {"redes": list(propia["auto"]["redes"])})
     ajustes = PUB.ajustes_de(raiz_proyectos(), info["cliente"])
     ficha = PUB.ficha(raiz_proyectos(), info, ajustes)
     redes = [r for r in ficha.get("redes") or [] if r in PUB.REDES]
     P.cambiar(raiz, vid, redes=redes)
     if not redes:
         P.apuntar_revision(raiz, vid, "El proyecto no tiene redes elegidas: elígelas en Publicar "
-                                      "y pulsa «Escribir los textos»", "Publicar")
+                                      "y pulsa «Escribir los textos»", "Publicar", tipo="textos")
         return
     textos = ficha.get("textos") or {}
     hechos = [r for r in redes if str((textos.get(r) or {}).get("descripcion") or "").strip()]
@@ -23888,11 +23966,11 @@ def _piloto_textos(avisar, ctx, raiz, vid):
                           recientes=PUB.hashtags_recientes(raiz_proyectos(),
                                                            [v["pid"] for v in del_proyecto], sin_pid=ctx.id))
     except PUB.ErrorPublicar as fallo:
-        P.apuntar_revision(raiz, vid, f"Los textos no salieron: {fallo}", "Publicar")
+        P.apuntar_revision(raiz, vid, f"Los textos no salieron: {fallo}", "Publicar", tipo="textos")
         return
     error = PUB.ficha(raiz_proyectos(), info, ajustes).get("error_textos")
     if error:
-        P.apuntar_revision(raiz, vid, f"Los textos: {str(error)[:240]}", "Publicar")
+        P.apuntar_revision(raiz, vid, f"Los textos: {str(error)[:240]}", "Publicar", tipo="textos")
 
 
 def _piloto_render_portada(diseno, rutas, destino):
@@ -23946,7 +24024,7 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj, tope_usd=None):
         except Exception as fallo:                          # noqa: BLE001
             propuestas = [{"diseno": base, "por_que": "la de partida"}]
             P.apuntar_revision(raiz, vid, f"Claude no propuso portada ({str(fallo)[:120]}): va "
-                                          "la de partida, retócala en Publicar", "Publicar → Portada")
+                                          "la de partida, retócala en Publicar", "Publicar → Portada", tipo="info")
         for i, prop in enumerate(propuestas[:1], 1):
             diseno = PO.normalizar(prop.get("diseno"))
             nombre = f"plano{i}.png"
@@ -23955,7 +24033,7 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj, tope_usd=None):
                                        os.path.join(carpeta_p, nombre))
             except Exception as fallo:                      # noqa: BLE001
                 P.apuntar_revision(raiz, vid, f"No se pudo pintar la portada: {str(fallo)[:160]}",
-                                   "Publicar → Portada")
+                                   "Publicar → Portada", tipo="info")
                 continue
             candidatos.append({"id": f"plano{i}", "tipo": "plano", "fichero": nombre,
                                "nombre": "Con un plano del vídeo", "coste_usd": 0.0,
@@ -23968,7 +24046,7 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj, tope_usd=None):
                                       f"{float(tope_usd):.2f} $"
                            + (" (el guion traía una portada propuesta: está en Publicar → Portada)"
                               if del_guion else "")
-                           + ". Hazla en Publicar → Portada si la quieres", "Publicar → Portada")
+                           + ". Hazla en Publicar → Portada si la quieres", "Publicar → Portada", tipo="portada_ia_tope")
     if "ia" in hechas:
         candidatos.append(hechas["ia"])
     elif aj.get("portadas") in ("ambas", "ia") and not sin_sitio:
@@ -24005,7 +24083,7 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj, tope_usd=None):
             raise
         except Exception as fallo:                          # noqa: BLE001
             P.apuntar_revision(raiz, vid, f"La portada con IA no salió: {str(fallo)[:160]}",
-                               "Publicar → Portada")
+                               "Publicar → Portada", tipo="info")
     puesta = ""
     # LAS CANDIDATAS SE APUNTAN ANTES DE PONER UNA: si poner falla, al retomar
     # ya estan y la de IA (pagada) no se vuelve a dibujar
@@ -24016,7 +24094,7 @@ def _piloto_portadas(avisar, ctx, raiz, vid, aj, tope_usd=None):
         _piloto_usar_portada(ctx, elegida["diseno"])
         puesta = elegida["id"]
     else:
-        P.apuntar_revision(raiz, vid, "No hay portada: hazla en Publicar", "Publicar → Portada")
+        P.apuntar_revision(raiz, vid, "No hay portada: hazla en Publicar", "Publicar → Portada", tipo="portada")
     P.cambiar(raiz, vid, portadas=candidatos, portada_puesta=puesta)
 
 
@@ -24101,7 +24179,7 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
         etapa(nombre, mensaje)
         hecho = _piloto_tanda(_piloto_tramo(avisar, nombre), ctx, que)
         for aviso in (hecho or {}).get("avisos") or []:
-            P.apuntar_revision(raiz, vid, str(aviso), "Vídeo")
+            P.apuntar_revision(raiz, vid, str(aviso), "Vídeo", tipo="info")
         return hecho
 
     try:
@@ -24127,7 +24205,7 @@ def _piloto_cadena(avisar, ctx, raiz, vid):
         hecho = _piloto_imagenes(_piloto_tramo(avisar, "imagenes"), ctx, aj, queda,
                                  None if saltar == "tope" else portada)
         for aviso in (hecho or {}).get("avisos") or []:
-            P.apuntar_revision(raiz, vid, str(aviso), "Imágenes")
+            P.apuntar_revision(raiz, vid, str(aviso), "Imágenes", tipo="info")
         # 5. EL INTERRUPTOR
         etapa("decidir", "mirando lo que dejó marcado el revisor")
         # «Seguir igualmente» desde el TOPE salta tambien el interruptor: un solo
@@ -24242,6 +24320,15 @@ def _piloto_para_pantalla(ficha):
             and not salida.get("espera_sola") and _piloto_render_al_dia(ficha["pid"])):
         salida["terminado_a_mano"] = True
         salida["salio"] = _video_salio(ficha["pid"])
+    # EL PILOTO AUTOMÁTICO (rama piloto-2): su estado vivo, de los envíos
+    if AUTO is not None and AUTO.es_automatico(ficha):
+        a = ficha["auto"]
+        salida["auto"] = {k: v for k, v in a.items() if k not in ("telegram", "avisado",
+                                                                  "envios_antes")}
+        salida["auto"]["vivo"] = AUTO.estado_vivo(ficha, _auto_envios(ficha.get("pid")))
+        salida["auto"]["hueco_texto"] = AUTO.bonito(a.get("hueco"))
+        # ya no es «para publicar a mano»: lo lleva el automático
+        salida["salio"] = a.get("paso") not in AUTO.SIN_PROGRAMAR or salida.get("salio", False)
     return salida
 
 
@@ -24256,8 +24343,14 @@ def piloto_estado(peticion: Request):
                          if _piloto_visible(v, cerrados)]
     # el aviso «N para revisar» sin lo que ya salio ni lo que espera solo
     resumen["a_revisar"] = sum(1 for v in resumen["videos"]
-                               if v.get("estado") in P.A_REVISAR and not v.get("salio")
-                               and not v.get("espera_sola") and not v.get("terminado_a_mano"))
+                               if (v.get("estado") in P.A_REVISAR
+                                   # el automático que espera tu OK también (piloto-2)
+                                   or ((v.get("auto") or {}).get("vivo") or {}).get("clave")
+                                   in ("espera_ok", "fallo", "comprobar"))
+                               and not v.get("espera_sola") and not v.get("terminado_a_mano")
+                               and (not v.get("salio") or ((v.get("auto") or {}).get("vivo")
+                                                           or {}).get("clave")
+                                    in ("fallo", "comprobar")))
     resumen["cupo"] = _piloto_cupo_lleno(resumen["ajustes"]["cupo_max_pct"])
     return resumen
 
@@ -24347,9 +24440,24 @@ def piloto_seguir(vid: str, peticion: Request, cuerpo: dict = Body(default=None)
     vez, porque ya lo has mirado) o «Reintentar» (sin forzar). Sigue donde iba:
     lo ya hecho no se vuelve a pagar."""
     P = _piloto()
-    _piloto_ficha_o_404(vid, peticion)
+    antes = _piloto_ficha_o_404(vid, peticion)
+    if AUTO is not None and AUTO.es_automatico(antes) and \
+            antes["auto"].get("paso") in ("no_publicar", "retirando"):
+        # rehacerlo pagaría un vídeo que no se va a publicar (piloto-2)
+        raise ErrorApi(409, "lo marcaste «No publicar»: si quieres que se haga, usa «Devolver a "
+                            "la lista» en la Parrilla")
     ficha = _por_piloto(P.preparar_reintento, raiz_proyectos(), vid,
                         bool(_cuerpo(cuerpo).get("forzar")))
+    # UN AUTOMÁTICO QUE SE PARÓ A MANO soltó su hueco: al reintentarlo toma el
+    # siguiente libre, no el suyo (que quizá ya tiene otro vídeo) (piloto-2)
+    if AUTO is not None and AUTO.es_automatico(ficha) and antes.get("estado") == "cancelado":
+        with _AUTO_LOCK:
+            try:
+                movida = _auto_mover(raiz_proyectos(), P.leer(raiz_proyectos(), vid),
+                                     _auto_ahora(), "lo paraste y lo has vuelto a lanzar")
+                ficha = movida or ficha
+            except Exception as fallo:                      # noqa: BLE001
+                anotar_global("piloto_auto_fallo", {"seguir": str(fallo)[:300]})
     _piloto_despertar()
     return _piloto_para_pantalla(ficha)
 
@@ -24387,6 +24495,1354 @@ def piloto_imagen_portada(vid: str, cual: str, peticion: Request):
     if not os.path.isfile(ruta):
         raise ErrorApi(404, "esa portada no está")
     return FileResponse(ruta, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
+
+# ======================================================== EL PILOTO AUTOMÁTICO
+# Niveles 2 y 3 (rama piloto-2, CIS 4c, 24-11-2026). Plan aprobado por el
+# árbitro: `estado/plan_piloto_niveles_2_3_2026-11-24.md` del Proyecto. Los
+# datos y las decisiones viven en `pasos/piloto_auto.py`; aquí solo se juntan
+# los hechos y se llama a quien hace cada cosa (el nivel 1, Upload-Post y
+# Telegram). TODO lo que cambia el paso de un vídeo automático pasa bajo
+# `_AUTO_LOCK`, y solo desde el vigía o desde una ruta: nunca dos a la vez.
+import datetime as dt  # noqa: E402
+
+try:
+    import piloto_auto as AUTO  # noqa: E402
+    import avisos_telegram as TELEGRAM  # noqa: E402
+    ERROR_AUTO = ""
+except Exception as _fallo_auto:                            # noqa: BLE001
+    AUTO = None
+    TELEGRAM = None
+    ERROR_AUTO = f"{type(_fallo_auto).__name__}: {_fallo_auto}"
+
+_AUTO_LOCK = threading.RLock()
+#: las unidades (cid, gid, indice) que `encolar` rechazó: se saltan (y se avisa
+#: una vez) hasta que el dueño las devuelva o reinicie el servicio
+_AUTO_SALTADAS = {}
+#: «Hacer igualmente» pulsado para una unidad (solo salta lo que `salta`)
+_AUTO_HACER_IGUAL = set()
+#: lo que frena ahora el siguiente vídeo de cada proyecto: {cid: {unidad, razones}}
+_AUTO_BLOQUEOS = {}
+#: el refresco de Upload-Post en su propio hilo (nunca en el del vigía)
+_AUTO_REFRESCO = {"hilo": None, "ultimo": 0.0, "lotes": set()}
+AUTO_REFRESCO_S = float(os.environ.get("ESTUDIO_AUTO_REFRESCO_S") or 120)
+
+
+def _auto():
+    if AUTO is None:
+        raise ErrorApi(503, f"el piloto automático no se ha podido cargar: {ERROR_AUTO}")
+    return AUTO
+
+
+def _por_auto(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except AUTO.ErrorAuto as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+    except PILOTO.RevVieja as fallo:
+        raise ErrorApi(409, str(fallo)) from None
+    except PILOTO.ErrorPiloto as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+def _auto_ahora():
+    return _publicar().ahora_lima()
+
+
+def _auto_envios(pid):
+    """Los envíos de Publicar de un vídeo (lista vacía si no hay)."""
+    if not pid or PUBLICAR is None:
+        return []
+    try:
+        return list((PUBLICAR._leer_video(raiz_proyectos(), pid) or {}).get("envios") or [])
+    except Exception:                                       # noqa: BLE001
+        return []
+
+
+def _auto_existe_video(pid):
+    """False SOLO si el vídeo ya no está (404). Un estado ilegible (503) o
+    cualquier otro fallo no es «borrado»."""
+    try:
+        contexto(pid)
+        return True
+    except ErrorApi as fallo:
+        return fallo.codigo != 404
+    except Exception:                                       # noqa: BLE001
+        return True                     # ante la duda, no se da por borrado
+
+
+def _auto_proyectos():
+    """{cid: nombre} de los proyectos que existen (con «» para «Sin proyecto»)."""
+    nombres = dict(_nombres_de_clientes())
+    nombres[""] = "Sin proyecto"
+    return nombres
+
+
+def _auto_estilos():
+    """{id_estilo: cid} de TODOS los estilos (el vigía no tiene petición)."""
+    try:
+        asignaciones = CLIENTES._leer(raiz_proyectos())
+        fichas = ((_presets().listar().get("presets") or {}).get("canal")) or []
+    except Exception:                                       # noqa: BLE001
+        return {}
+    return {f.get("id"): AUTO.clave_proyecto(
+                CLIENTES.cliente_de(raiz_proyectos(), f.get("id") or "", datos=asignaciones))
+            for f in fichas if f.get("id")}
+
+
+def _auto_enlace(vid):
+    base = TELEGRAM.base_url() if TELEGRAM is not None else ""
+    return f"{base}/aprobar.html?video={vid}" if base else ""
+
+
+def _auto_titulo(ficha):
+    return ficha.get("nombre") or ficha.get("titulo") or "Vídeo del piloto"
+
+
+# ------------------------------------------------------------------ avisos
+
+def _auto_avisar(raiz, ficha, tipo, extra="", silencioso=False, clave=""):
+    """Un aviso de un VÍDEO por Telegram. El mismo aviso (`clave`) no se repite
+    en 24 h: se edita el último mensaje. Los mensajes viejos de ese vídeo se
+    editan siempre para decir cómo está ahora (§7 del plan). Nunca lanza."""
+    if TELEGRAM is None or not TELEGRAM.conectado():
+        return
+    a = ficha.get("auto") or {}
+    nombre_cid = _auto_proyectos().get(AUTO.clave_proyecto(a.get("cid")), "")
+    texto = AUTO.texto_aviso(tipo, _auto_titulo(ficha), nombre_cid, _auto_enlace(ficha["id"]),
+                             extra)
+    clave = clave or tipo
+    avisado = dict(a.get("avisado") or {})
+    mensajes = list(a.get("telegram") or [])
+    reciente = avisado.get(clave)
+    try:
+        suyo = next((m for m in reversed(mensajes) if m.get("clave") == clave), None)
+        if reciente and time.time() - float(reciente) < 24 * 3600 and suyo:
+            # el mismo aviso: se edita SU último mensaje, y solo si dice otra
+            # cosa (editar en cada vuelta con Telegram caído frenaría al vigía)
+            if suyo.get("texto") != texto and TELEGRAM.editar(suyo.get("mensaje"), texto):
+                suyo["texto"] = texto
+                PILOTO.cambiar_auto(raiz, ficha["id"], {"telegram": mensajes[-10:]},
+                                    contar_rev=False)
+            return
+        for viejo in mensajes[-3:]:
+            if viejo.get("viejo"):
+                continue
+            if TELEGRAM.editar(viejo.get("mensaje"), "(ya no vale: mira el mensaje nuevo)\n"
+                               + AUTO.texto_aviso(tipo, _auto_titulo(ficha), nombre_cid,
+                                                  _auto_enlace(ficha["id"]))):
+                viejo["viejo"] = True
+        mid = TELEGRAM.enviar(texto, silencioso=silencioso)
+    except Exception as fallo:                              # noqa: BLE001
+        anotar_global("piloto_auto_telegram", {"piloto": ficha["id"], "fallo": str(fallo)[:200]})
+        return
+    avisado[clave] = time.time()
+    mensajes.append({"mensaje": mid, "tipo": tipo, "cuando": ahora(), "texto": texto, "clave": clave})
+    try:
+        # lo que se mandó no cuenta como cambio del vídeo: sin esto, la página
+        # abierta recibiría un «se cambió en otro sitio» falso
+        actual = PILOTO.leer(raiz, ficha["id"]).get("auto") or {}
+        avisado = dict(actual.get("avisado") or {}, **{clave: avisado[clave]})
+        PILOTO.cambiar_auto(raiz, ficha["id"], {"avisado": avisado, "telegram": mensajes[-10:]},
+                            contar_rev=False)
+    except PILOTO.ErrorPiloto:
+        pass
+
+
+def _auto_aviso_proyecto(raiz, cid, clave, tipo, texto, horas=24):
+    """Un aviso de PROYECTO (se acaban los guiones, el freno…): uno cada
+    `horas` como mucho. Nunca lanza."""
+    if TELEGRAM is None or not TELEGRAM.conectado():
+        return
+    try:
+        if AUTO.ya_avisado(raiz, clave, horas):
+            return
+        nombre = _auto_proyectos().get(AUTO.clave_proyecto(cid), "")
+        base = TELEGRAM.base_url()
+        TELEGRAM.enviar(AUTO.texto_aviso(tipo, nombre or "Sin proyecto", "", base and f"{base}/",
+                                         texto))
+        AUTO.apuntar_aviso(raiz, clave)
+    except Exception as fallo:                              # noqa: BLE001
+        anotar_global("piloto_auto_telegram", {"proyecto": cid, "fallo": str(fallo)[:200]})
+
+
+def _auto_olvidar(raiz, clave):
+    try:
+        AUTO.olvidar_aviso(raiz, clave)
+    except Exception:                                       # noqa: BLE001
+        pass
+
+
+# ------------------------------------------------------------------ los hechos
+
+def _auto_upload(ajustes, redes):
+    """(clave_puesta, perfil_puesto, [redes sin cuenta]) de un proyecto."""
+    PUB = _publicar()
+    clave_ok = bool(PUB.estado_clave().get("puesta"))
+    perfil_ok = bool(str(ajustes.get("perfil") or "").strip())
+    cuentas = ajustes.get("cuentas") or {}
+    sin = []
+    if ajustes.get("cuentas_vistas"):
+        sin = [PUB.NOMBRE_RED.get(r, r) for r in redes if r in cuentas and (
+            not cuentas.get(r) or (cuentas.get(r) or {}).get("reconectar"))]
+    return clave_ok, perfil_ok, sin
+
+
+def _auto_salio_texto(pid):
+    """La frase de §5.C.18 si el vídeo ya salió por Publicar, o ""."""
+    datos = {}
+    try:
+        datos = PUBLICAR._leer_video(raiz_proyectos(), pid) or {}
+    except Exception:                                       # noqa: BLE001
+        return ""
+    if any((e or {}).get("estado") in ENVIOS_QUE_SALEN for e in datos.get("envios") or []):
+        return "ya está publicado o programado desde Publicar"
+    if datos.get("copiado"):
+        return "sus textos se copiaron para publicarlo a mano"
+    return ""
+
+
+def _auto_guion_cambiado(ficha):
+    """¿El guion cambió (o se borró) en la Parrilla después de hacer el vídeo?"""
+    a = ficha.get("auto") or {}
+    PAR = _parrilla()
+    try:
+        g = PAR.leer(raiz_proyectos(), AUTO.clave_proyecto(a.get("cid")) or PAR.SIN_PROYECTO,
+                     a.get("gid"))
+    except PAR.ErrorParrilla:
+        return True
+    enc = (g.get("encargo") or [{}])
+    indice = int(a.get("indice") or 0)
+    enc = enc[indice] if 0 <= indice < len(enc) else {}
+    actual = PAR.huella_material((enc or {}).get("material"))
+    return bool(a.get("huella_guion") and actual and actual != a["huella_guion"])
+
+
+def _auto_hechos_publicar(raiz, ficha):
+    """Los hechos del grupo C (§5): se miran justo antes de `enviar`.
+    -> (hechos, info, ajustes)"""
+    PUB = _publicar()
+    a = ficha["auto"]
+    pid = ficha.get("pid")
+    ctx = contexto(pid)
+    info = _info_para_publicar(ctx)
+    ajustes = PUB.ajustes_de(raiz_proyectos(), info["cliente"])
+    fp = PUB.ficha(raiz_proyectos(), info, ajustes)
+    redes = list(a.get("redes") or [])
+    textos = fp.get("textos") or {}
+    nombre = PUB.NOMBRE_RED
+    portada = fp.get("portada") or {}
+    clave_ok, perfil_ok, sin = _auto_upload(ajustes, redes)
+    hechos = {
+        "portada": bool(portada.get("imagen")) or portada.get("ms") is not None,
+        "textos_faltan": [nombre.get(r, r) for r in redes
+                          if not str((textos.get(r) or {}).get("descripcion") or "").strip()
+                          or (r in PUB.CON_TITULO
+                              and not str((textos.get(r) or {}).get("titulo") or "").strip())],
+        "encaje_malo": [f"{nombre.get(r, r)}: {(fp.get('encaje') or {}).get(r, {}).get('texto')}"
+                        for r in redes
+                        if ((fp.get("encaje") or {}).get(r) or {}).get("nivel") == "error"],
+        "desactualizada": bool(fp.get("desactualizada")),
+        "mp4_cambiado": bool(a.get("huella_mp4_final") and info.get("mp4_huella")
+                             and a["huella_mp4_final"] != info["mp4_huella"]),
+        "guion_cambiado": _auto_guion_cambiado(ficha),
+        "salio": "" if AUTO.envios_del_intento(a, _auto_envios(pid)) else _auto_salio_texto(pid),
+        "cliente_ok": AUTO.clave_proyecto(info.get("cliente")) == AUTO.clave_proyecto(a.get("cid")),
+        "clave_upload": clave_ok, "perfil": perfil_ok, "redes_sin_cuenta": sin,
+    }
+    if not info.get("montado"):
+        hechos["textos_faltan"] = hechos["textos_faltan"] or ["el vídeo (no está montado)"]
+    return hechos, info, ajustes
+
+
+def _auto_razones(raiz, ficha):
+    """Las razones VIVAS para no publicar solo este vídeo (grupos B y C)."""
+    razones = AUTO.razones_durante(ficha)
+    if ficha.get("estado") in ("listo", "revisar") and ficha.get("pid"):
+        try:
+            hechos, _info, _aj = _auto_hechos_publicar(raiz, ficha)
+            razones += AUTO.razones_antes_de_publicar(hechos)
+        except Exception as fallo:                          # noqa: BLE001
+            razones.append({"clave": "error", "texto": f"no se pudo comprobar el vídeo: "
+                                                        f"{str(fallo)[:160]}",
+                            "que_hacer": "ábrelo en el Studio", "salta": False, "bloquea": True})
+    return razones
+
+
+# ------------------------------------------------------------------ publicar
+
+def _auto_mover(raiz, ficha, ahora_, motivo="ya pasó"):
+    """Lleva el vídeo al siguiente hueco libre y avisa. -> la ficha nueva o None
+    si no hay ninguno (entonces espera a que elijas la fecha)."""
+    a = ficha["auto"]
+    cfg = AUTO.leer_ficha(raiz, a.get("cid"))
+    nuevo = AUTO.hueco_libre(cfg or {}, PILOTO.listar(raiz), a.get("cid"), ahora_,
+                             quitar=a.get("hueco")) if cfg else None
+    viejo = a.get("hueco") or ""
+    if nuevo is None:
+        if not a.get("sin_hueco"):
+            f = PILOTO.cambiar_auto(raiz, ficha["id"], {"sin_hueco": True})
+            _auto_avisar(raiz, f, "movido", f"Iba el {AUTO.bonito(viejo)}; {motivo} y no queda "
+                                            "ningún hueco libre en el calendario: elige tú la fecha.",
+                         clave="sin_hueco")
+        return None
+    f = PILOTO.cambiar_auto(raiz, ficha["id"], {"hueco": nuevo["cuando"], "hueco_fijado": False,
+                                               "sin_hueco": False})
+    _auto_avisar(raiz, f, "movido", f"Iba el {AUTO.bonito(viejo)}; {motivo}. Ahora va el "
+                                    f"{AUTO.bonito(nuevo['cuando'])}.", clave="movido")
+    return f
+
+
+def _auto_enviar(raiz, ficha, quien, redes=None, cuando=None):
+    """Llama a `enviar` (programar) para este vídeo, con `publicando` guardado
+    ANTES. Con el cerrojo del piloto automático tomado. -> (ok, mensaje)"""
+    PUB = _publicar()
+    a = ficha["auto"]
+    pid = ficha["pid"]
+    hechos, info, ajustes = _auto_hechos_publicar(raiz, ficha)
+    # LA BARRERA, para TODOS los caminos que publican (vigía, reprogramar,
+    # reinicio, el OK y reintentar una red): nunca en las cuentas de otro
+    # cliente, ni un vídeo que ya salió por otro lado
+    propios = AUTO.envios_del_intento(a, _auto_envios(pid))
+    barrera = ("este vídeo ya no es de este proyecto: no lo publico en sus cuentas"
+               if not hechos["cliente_ok"] else
+               f"no lo publico: {hechos['salio']}" if hechos["salio"] and not propios else "")
+    if barrera:
+        f = PILOTO.cambiar_auto(raiz, ficha["id"], {"paso": "espera_ok"})
+        _auto_avisar(raiz, f, "razon", barrera, clave="barrera")
+        return False, barrera
+    if redes is None:
+        # solo las redes del vídeo que aún no tienen nada vivo (alguna pudo
+        # publicarse a mano desde Publicar mientras esperaba)
+        vivas = set(AUTO.resumen_envios(a, _auto_envios(pid))["vivas"])
+        redes = [r for r in (a.get("redes") or []) if r not in vivas]
+        if not redes:
+            PILOTO.cambiar_auto(raiz, ficha["id"], {"paso": "programado"})
+            return True, "ya estaba programado"
+    redes = list(redes)
+    cuando = cuando or a.get("hueco")
+    cambios = {"paso": "publicando", "intento_el": ahora()}
+    if "envios_antes" not in a:
+        # sin apuntar al nacer: TODOS sus envíos son suyos (también uno a mano)
+        cambios["envios_antes"] = []
+    if quien != "piloto":
+        cambios.update(aprobado_por=quien, aprobado_el=ahora())
+    ficha = PILOTO.cambiar_auto(raiz, ficha["id"], cambios)
+    try:
+        PUB.enviar(raiz_proyectos(), info, ajustes,
+                   {"redes": redes, "modo": "programar", "cuando": cuando, "confirmado": True})
+    except PUB.ErrorPublicar as fallo:
+        texto = str(fallo)
+        if "ya está publicado o programado" in texto:
+            # ya estaba (todo o en parte): programado, y la reconciliación avisa
+            # de la red que falte («falta publicar en X», con su botón)
+            PILOTO.cambiar_auto(raiz, ficha["id"], {"paso": "programado"})
+            return True, "ya estaba programado"
+        f = PILOTO.cambiar_auto(raiz, ficha["id"], {"paso": "espera_ok"})
+        _auto_avisar(raiz, f, "razon", f"No se pudo programar: {texto}", clave="enviar")
+        return False, texto
+    f = PILOTO.cambiar_auto(raiz, ficha["id"], {"paso": "programado", "sin_hueco": False})
+    anotar_global("piloto_auto_programado", {"piloto": ficha["id"], "pid": pid,
+                                              "cuando": cuando, "redes": redes, "quien": quien})
+    _auto_avisar(raiz, f, "programado", f"Sale el {AUTO.bonito(cuando)} en "
+                 + ", ".join(PUB.NOMBRE_RED.get(r, r) for r in redes) + ".",
+                 silencioso=True, clave="programado")
+    return True, ""
+
+
+def _auto_al_terminar(raiz, ficha, ahora_):
+    """El nivel 1 terminó el vídeo: nivel 3 lo programa si no hay razones; si
+    no (o es nivel 2), espera tu OK."""
+    a = ficha["auto"]
+    if AUTO.vencido(a.get("hueco"), ahora_):
+        ficha = _auto_mover(raiz, ficha, ahora_) or ficha
+        a = ficha["auto"]
+    if not ficha.get("auto", {}).get("huella_mp4_final") and ficha.get("pid"):
+        try:
+            huella = _info_para_publicar(contexto(ficha["pid"])).get("mp4_huella") or ""
+            ficha = PILOTO.cambiar_auto(raiz, ficha["id"], {"huella_mp4_final": huella})
+            a = ficha["auto"]
+        except Exception:                                   # noqa: BLE001
+            pass
+    cfg = AUTO.leer_ficha(raiz, a.get("cid"))
+    solo = (int(a.get("modo") or 2) == 3 and cfg is not None and cfg.get("activo")
+            and int(cfg.get("modo") or 2) == 3)
+    razones = _auto_razones(raiz, ficha) if solo else []
+    if solo and not razones and not a.get("sin_hueco") and not AUTO.vencido(a.get("hueco"), ahora_):
+        _auto_enviar(raiz, ficha, "piloto", redes=None)
+        return
+    f = PILOTO.cambiar_auto(raiz, ficha["id"], {"paso": "espera_ok"}, si_paso=("preparando",))
+    if f is None:
+        return
+    if razones:
+        _auto_avisar(raiz, f, "razon", "\n".join("· " + r["texto"] for r in razones[:4]),
+                     clave="razon")
+    else:
+        _auto_avisar(raiz, f, "espera_ok", f"Iría el {AUTO.bonito(a.get('hueco'))}.",
+                     clave="espera_ok")
+
+
+def _auto_cancelar_envios(raiz, ficha, envios):
+    """Cancela en Upload-Post los envíos «programado»/«espera_ok» (uno por
+    lote: Upload-Post cancela el lote entero). Un 409 «espera un momento» se
+    reintenta en la siguiente vuelta."""
+    PUB = _publicar()
+    hechos = set()
+    for e in envios:
+        if e.get("lote") in hechos:
+            continue
+        try:
+            PUB.cancelar(raiz_proyectos(), ficha["pid"], e["id"])
+            hechos.add(e.get("lote"))
+        except PUB.ErrorPublicar as fallo:
+            anotar_global("piloto_auto_cancelar", {"piloto": ficha["id"], "envio": e.get("id"),
+                                                   "fallo": str(fallo)[:200]})
+
+
+def _auto_refrescar(lotes=()):
+    """Pregunta a Upload-Post, en SU hilo (nunca en el del vigía)."""
+    estado_ = _AUTO_REFRESCO
+    estado_["lotes"].update(lotes or ())
+    hilo = estado_["hilo"]
+    if hilo is not None and hilo.is_alive():
+        return
+    if not estado_["lotes"] and time.time() - estado_["ultimo"] < AUTO_REFRESCO_S:
+        return
+    estado_["ultimo"] = time.time()
+    pendientes = list(estado_["lotes"])
+    estado_["lotes"].clear()
+
+    def correr():
+        try:
+            PUBLICAR.refrescar(raiz_proyectos(), limite=8)
+            for lote in pendientes:
+                PUBLICAR.refrescar(raiz_proyectos(), lote=lote)
+        except Exception as fallo:                          # noqa: BLE001
+            anotar_global("piloto_auto_refresco", {"fallo": str(fallo)[:200]})
+
+    hilo = threading.Thread(target=correr, daemon=True, name="piloto-auto-refresco")
+    estado_["hilo"] = hilo
+    hilo.start()
+
+
+def _auto_seguir(raiz, ficha, ahora_):
+    """Los pasos 1-5 del vigía para UN vídeo automático (aunque la ficha del
+    proyecto esté apagada). -> True si hay que preguntar a Upload-Post."""
+    a = ficha["auto"]
+    paso = a.get("paso") or "preparando"
+    if paso in AUTO.PASOS_FINALES:
+        return False
+    pid = ficha.get("pid")
+    # 1. LIMPIEZA: vídeo o proyecto borrados
+    if pid and not _auto_existe_video(pid):
+        # lo que ya está en Upload-Post se retira (si no, saldría igual)
+        nuevo = "retirando" if paso in AUTO.EN_UPLOAD else "no_publicar"
+        f = PILOTO.cambiar_auto(raiz, ficha["id"], {"paso": nuevo})
+        _auto_avisar(raiz, f, "no_publicar", "El vídeo se borró del Studio.", clave="borrado")
+        return nuevo == "retirando"
+    cid = AUTO.clave_proyecto(a.get("cid"))
+    if cid and cid not in _auto_proyectos():
+        AUTO.apagar(raiz, cid, "el proyecto se borró")
+        if paso in AUTO.SIN_PROGRAMAR:
+            PILOTO.cambiar_auto(raiz, ficha["id"], {"paso": "no_publicar"})
+            return False
+    estado = ficha.get("estado")
+    if paso == "preparando":
+        if estado == "cancelado":
+            return False
+        if estado in ("listo", "revisar"):
+            _auto_al_terminar(raiz, ficha, ahora_)
+            return False
+        if estado in ("parado", "error", "interrumpido"):
+            razon = (AUTO.razones_durante(ficha) or [{"texto": "se detuvo"}])[0]
+            _auto_avisar(raiz, ficha, "detenido", f"{razon['texto']}. {razon.get('que_hacer') or ''}",
+                         clave=f"detenido|{estado}|{ficha.get('tipo_parada') or ''}")
+        if estado == "en_cola" and str(ficha.get("mensaje") or "").startswith("esperando cupo"):
+            # `creado` va en la hora del servidor: se compara con la del servidor
+            empezo = AUTO.de_texto(str(ficha.get("creado") or "")[:16])
+            cerca = not AUTO.vencido(a.get("hueco"), ahora_) and AUTO.de_texto(a.get("hueco")) \
+                and AUTO.de_texto(a["hueco"]) - AUTO._sin_zona(ahora_) < dt.timedelta(hours=2)
+            if cerca or (empezo and dt.datetime.now() - empezo > dt.timedelta(minutes=60)):
+                _auto_avisar(raiz, ficha, "cupo", str(ficha.get("mensaje")), clave="cupo")
+        if AUTO.vencido(a.get("hueco"), ahora_) and not a.get("sin_hueco"):
+            _auto_mover(raiz, ficha, ahora_)
+        return False
+    envios = _auto_envios(pid)
+    if paso == "espera_ok":
+        dec = AUTO.reconciliar(a, envios)
+        if dec["paso"]:
+            cambios = dict(AUTO.sincronizar(a, envios, ahora_, _publicar().REDES), paso=dec["paso"])
+            f = PILOTO.cambiar_auto(raiz, ficha["id"], cambios, si_paso=(paso,))
+            if f is not None and dec["paso"] == "publicado":
+                _auto_avisar(raiz, f, "publicado", clave="publicado")
+            return dec["paso"] != "publicado"
+        if AUTO.vencido(a.get("hueco"), ahora_) and not a.get("sin_hueco"):
+            _auto_mover(raiz, ficha, ahora_, "pasó sin tu OK")
+        return False
+    # en Upload-Post: publicando, programado, reprogramando, retirando, fallo
+    if paso in ("programado", "fallo"):
+        # programado o cambiado A MANO desde Publicar (otras redes, otra hora):
+        # el piloto, la página del móvil y la Parrilla dicen lo de verdad
+        cambios = AUTO.sincronizar(a, envios, ahora_, _publicar().REDES)
+        if cambios:
+            # solo la hora (va cambiando mientras salen las redes): sin subir el
+            # rev, para no dar «se cambió en otro sitio» de más en el móvil
+            solo_hora = set(cambios) <= {"hueco", "hueco_fijado", "hueco_calendario"}
+            ficha = PILOTO.cambiar_auto(raiz, ficha["id"], cambios, si_paso=(paso,),
+                                        contar_rev=not solo_hora) or ficha
+            a = ficha["auto"]
+    dec = AUTO.reconciliar(a, envios)
+    accion = dec["accion"]
+    resumen = AUTO.resumen_envios(a, envios)
+    lotes = set()
+    if accion == "sin_envios":
+        # el reinicio llegó antes de que `enviar` apuntara nada: es seguro reintentar
+        if AUTO.vencido(a.get("hueco"), ahora_):
+            f = PILOTO.cambiar_auto(raiz, ficha["id"], {"paso": "espera_ok"}, si_paso=(paso,))
+            if f is not None:
+                _auto_avisar(raiz, f, "razon", "Se cortó mientras lo programaba y su hora ya "
+                                               "pasó: elige otra y apruébalo.", clave="corte")
+        else:
+            _auto_enviar(raiz, ficha, a.get("aprobado_por") or "piloto")
+        return True
+    if accion == "cancelar":
+        _auto_cancelar_envios(raiz, ficha, resumen["cancelables"])
+        return True
+    if accion in ("esperar", "refrescar"):
+        lotes = {e.get("lote") for e in resumen["envios_comprobar"] if e.get("lote")}
+    if accion == "programar":
+        if AUTO.vencido(a.get("hueco"), ahora_):
+            ficha = _auto_mover(raiz, ficha, ahora_, "la nueva hora pasó mientras se cancelaba")
+            if ficha is None:
+                return True
+        _auto_enviar(raiz, ficha, a.get("aprobado_por") or "piloto")
+        return True
+    if dec["paso"]:
+        f = PILOTO.cambiar_auto(raiz, ficha["id"], {"paso": dec["paso"]}, si_paso=(paso,))
+        ficha = f or ficha
+    aviso = dec["aviso"]
+    nombre = _publicar().NOMBRE_RED
+    if aviso == "fallido":
+        redes = ", ".join(nombre.get(r, r) for r in resumen["alguna_fallida"])
+        _auto_avisar(raiz, ficha, "fallo", f"La subida a {redes} falló. Las demás redes siguen "
+                                           "como estaban. Ábrelo para reintentar esa red.",
+                     clave=f"fallo|{redes}")
+    elif aviso == "comprobar":
+        partes = [f"{nombre.get(e.get('red'), e.get('red'))} ({AUTO.bonito(str(e.get('cuando'))[:16])})"
+                  for e in resumen["envios_comprobar"]]
+        _auto_avisar(raiz, ficha, "comprobar", "La subida se cortó a medias: " + ", ".join(partes)
+                     + ". Míralo en Upload-Post; si está, cancélalo allí y pulsa «Ya lo miré».",
+                     clave="comprobar")
+    elif aviso == "cancelado_en_publicar":
+        _auto_avisar(raiz, ficha, "razon", "Lo cancelaste en Publicar: no sale hasta que lo "
+                                           "vuelvas a aprobar.", clave="cancelado")
+    elif aviso == "ya_salio":
+        _auto_avisar(raiz, ficha, "publicado", "Ya había salido antes de poder cancelarlo.",
+                     clave="ya_salio")
+    elif aviso == "faltan_redes":
+        faltan = ", ".join(nombre.get(r, r) for r in resumen["sin_envio"])
+        _auto_avisar(raiz, ficha, "razon", f"Falta publicar en {faltan}: ábrelo para mandarlo.",
+                     clave=f"faltan|{faltan}")
+    if dec["paso"] == "publicado" and aviso != "ya_salio":
+        _auto_avisar(raiz, PILOTO.leer(raiz, ficha["id"]), "publicado", clave="publicado")
+    elif dec["paso"] == "no_publicar":
+        ficha = PILOTO.leer(raiz, ficha["id"])
+        if ficha["auto"].get("devolver_al_retirar"):
+            # «No publicar + devolver» de un vídeo que estaba en Upload-Post:
+            # el encargo vuelve a la lista solo cuando ya no puede salir
+            fa = ficha["auto"]
+            AUTO.devolver_unidad(raiz, fa.get("cid"), fa.get("gid"), fa.get("indice"))
+        _auto_avisar(raiz, ficha, "no_publicar", clave="no_publicar")
+    if lotes:
+        _auto_refrescar(lotes)
+    return (dec["paso"] or paso) not in AUTO.PASOS_FINALES
+
+
+# ------------------------------------------------------------------ encolar
+
+def _auto_programar(raiz, cid, cfg, ahora_):
+    """Paso 6: como mucho UN vídeo nuevo por vuelta para este proyecto."""
+    PAR = _parrilla()
+    fichas = PILOTO.listar(raiz)
+    hueco = AUTO.hueco_libre(cfg, fichas, cid, ahora_)
+    try:
+        parrilla = PAR.listar(raiz, cid or PAR.SIN_PROYECTO)
+    except PAR.ErrorParrilla:
+        return
+    candidatas = AUTO.unidades_candidatas(parrilla, cid, AUTO.historial(raiz))
+    falta = AUTO.faltan_guiones(cfg, candidatas, fichas, cid, ahora_)
+    if falta:
+        texto = ("Ya no queda ningún guion pendiente en la Parrilla." if falta["ninguno"] else
+                 f"En los próximos {falta['dias']} días hay {falta['huecos']} huecos y solo "
+                 f"{falta['guiones']} guiones pendientes.") + " Escribe o pide más en la Parrilla."
+        _auto_aviso_proyecto(raiz, cid, f"guiones|{cid}", "guiones", texto)
+    else:
+        _auto_olvidar(raiz, f"guiones|{cid}")
+    if not hueco or not AUTO.toca_preparar(hueco["cuando"], ahora_, cfg.get("anticipacion_h")):
+        _AUTO_BLOQUEOS.pop(cid, None)
+        return
+    # un encargo que ya tiene un vídeo del piloto (de CUALQUIER nivel) que no
+    # se paró a mano no se vuelve a hacer
+    # (uno automático que dijiste «No publicar» no cuenta: si lo devolviste a
+    # la lista, se tiene que poder volver a hacer)
+    en_piloto = {(AUTO.clave_proyecto(f.get("cid")), f.get("gid"), int(f.get("indice") or 0))
+                 for f in fichas if f.get("estado") != "cancelado"
+                 and not (AUTO.es_automatico(f) and f["auto"].get("paso") == "no_publicar")}
+    candidatas = [c for c in candidatas if (cid, c["gid"], c["indice"]) not in _AUTO_SALTADAS
+                  and (cid, c["gid"], c["indice"]) not in en_piloto]
+    if not candidatas:
+        _AUTO_BLOQUEOS.pop(cid, None)
+        return
+    pendientes = [f for f in fichas if AUTO.es_automatico(f)
+                  and AUTO.clave_proyecto(f["auto"].get("cid")) == cid
+                  and f["auto"].get("paso") in AUTO.SIN_PROGRAMAR
+                  and f.get("estado") != "cancelado"]
+    u = candidatas[0]
+    clave_u = (cid, u["gid"], u["indice"])
+    hechos = {"freno": {"pendientes": len(pendientes), "max": cfg.get("max_pendientes") or 2}}
+    try:
+        guion = PAR.leer(raiz, cid or PAR.SIN_PROYECTO, u["gid"])
+    except PAR.ErrorParrilla:
+        return
+    encs = guion.get("encargo") or [{}]
+    enc = encs[u["indice"]] if 0 <= u["indice"] < len(encs) else encs[0]
+    estilos = _auto_estilos()
+    estilo = ""
+    propio = str(guion.get("estilo") or "")
+    if propio and propio in estilos:
+        estilo = propio
+    elif cfg.get("estilo"):
+        estilo = cfg["estilo"]
+    hechos.update({
+        "avisos_encargo": enc.get("avisos") or [],
+        "sin_material": not (enc or {}).get("material"),
+        "falta_duracion": not (enc.get("duracion_objetivo_s") or cfg.get("duracion_s")),
+        "falta_formato": (enc.get("formato") not in ("vertical", "horizontal")
+                          and not cfg.get("formato")),
+        "estilo_existe": bool(estilo) and estilo in estilos,
+        "estilo_del_proyecto": estilos.get(estilo) == cid,
+    })
+    ajustes = _publicar().ajustes_de(raiz_proyectos(), cid or PUBLICAR.SIN_PROYECTO)
+    clave_ok, perfil_ok, sin = _auto_upload(ajustes, hueco["redes"])
+    hechos.update(clave_upload=clave_ok, perfil=perfil_ok, redes_sin_cuenta=sin)
+    razones = AUTO.razones_antes_de_gastar(hechos)
+    if clave_u in _AUTO_HACER_IGUAL:
+        razones = [r for r in razones if not r["salta"]]
+    if razones:
+        _AUTO_BLOQUEOS[cid] = {"gid": u["gid"], "indice": u["indice"], "codigo": u["codigo"],
+                               "titulo": u["titulo"], "razones": razones,
+                               "hacer_igual": all(r["salta"] for r in razones)}
+        firma = "|".join(sorted(r["clave"] for r in razones))
+        tipo = "freno" if firma == "freno" else "antes"
+        _auto_aviso_proyecto(raiz, cid, f"antes|{cid}|{u['gid']}|{u['indice']}|{firma}", tipo,
+                             f"{u['codigo'] or u['titulo']}: "
+                             + "; ".join(r["texto"] for r in razones[:3]) + ".")
+        return
+    _AUTO_BLOQUEOS.pop(cid, None)
+    leido = guion.get("leido") or {}
+    titulo = " — ".join(x for x in (leido.get("codigo"), leido.get("titulo")) if x)
+    pedido = {"cid": cid, "gid": u["gid"], "indice": u["indice"], "estilo": estilo,
+              "titulo": titulo or (enc or {}).get("nombre") or "",
+              "duracion_s": None if enc.get("duracion_objetivo_s") else cfg.get("duracion_s"),
+              "formato": None if enc.get("formato") in ("vertical", "horizontal") else cfg.get("formato"),
+              "ajustes": dict(cfg.get("avanzado") or {}),
+              "auto": {"cid": cid, "gid": u["gid"], "indice": u["indice"],
+                       "hueco": hueco["cuando"], "hueco_fijado": False,
+                       "redes": list(hueco["redes"]), "modo": int(cfg.get("modo") or 2),
+                       "paso": "preparando", "rev": 0, "avisado": {}, "telegram": [],
+                       "huella_guion": PAR.huella_material((enc or {}).get("material"))}}
+    # EL HISTORIAL PRIMERO: un reinicio entre encolar y apuntar rehacería
+    # (y pagaría) el encargo. Si encolar falla, se deshace.
+    anterior = AUTO.historial(raiz).get(AUTO.clave_unidad(cid, u["gid"], u["indice"]))
+    AUTO.apuntar_unidad(raiz, cid, u["gid"], u["indice"], "pendiente")
+    try:
+        ficha = PILOTO.encolar(raiz, pedido)
+    except PILOTO.ErrorPiloto as fallo:
+        AUTO.quitar_unidad(raiz, cid, u["gid"], u["indice"], "pendiente", anterior=anterior)
+        _AUTO_SALTADAS[clave_u] = str(fallo)
+        _auto_aviso_proyecto(raiz, cid, f"saltada|{cid}|{u['gid']}|{u['indice']}", "antes",
+                             f"{u['codigo'] or u['titulo']}: {fallo}. Paso al siguiente guion.",
+                             horas=24 * 30)
+        return False
+    AUTO.apuntar_unidad(raiz, cid, u["gid"], u["indice"], ficha["id"])
+    _AUTO_HACER_IGUAL.discard(clave_u)
+    anotar_global("piloto_auto_encolado", {"piloto": ficha["id"], "proyecto": cid,
+                                            "guion": u["gid"], "hueco": hueco["cuando"]})
+    return True
+
+
+def _auto_vuelta():
+    """Lo que hace el piloto automático en cada latido del vigía."""
+    if AUTO is None or PUBLICAR is None or PILOTO is None:
+        return
+    raiz = raiz_proyectos()
+    with _AUTO_LOCK:
+        ahora_ = _auto_ahora()
+        # un reinicio entre apuntar el encargo y encolarlo lo dejaría fuera
+        # para siempre: el que sigue «pendiente» sin ficha vuelve a la lista
+        try:
+            AUTO.limpiar_pendientes(raiz, PILOTO.listar(raiz))
+        except Exception:                                   # noqa: BLE001
+            pass
+        preguntar = False
+        for ficha in PILOTO.listar(raiz):
+            if not AUTO.es_automatico(ficha):
+                continue
+            try:
+                preguntar = _auto_seguir(raiz, ficha, ahora_) or preguntar
+            except Exception as fallo:                      # noqa: BLE001
+                anotar_global("piloto_auto_fallo", {"piloto": ficha.get("id"),
+                                                    "fallo": f"{type(fallo).__name__}: {fallo}"[:300]})
+        if preguntar:
+            _auto_refrescar()
+        activos = AUTO.proyectos_activos(raiz)
+        # lo que frenaba a un proyecto apagado ya no aplica: fuera (sin aviso viejo)
+        for cid in [c for c in list(_AUTO_BLOQUEOS) if c not in {AUTO.clave_proyecto(x) for x in activos}]:
+            _AUTO_BLOQUEOS.pop(cid, None)
+        for cid, cfg in activos.items():
+            try:
+                # como mucho UN vídeo nuevo por vuelta, en todo el Studio
+                if _auto_programar(raiz, AUTO.clave_proyecto(cid), cfg, ahora_):
+                    break
+            except Exception as fallo:                      # noqa: BLE001
+                anotar_global("piloto_auto_fallo", {"proyecto": cid,
+                                                    "fallo": f"{type(fallo).__name__}: {fallo}"[:300]})
+
+
+# ------------------------------------------------------------------ las rutas
+
+def _auto_ficha_o_404(vid, peticion):
+    ficha = _piloto_ficha_o_404(vid, peticion)
+    if not AUTO.es_automatico(ficha):
+        raise ErrorApi(404, "este vídeo no es del piloto automático")
+    return ficha
+
+
+def _auto_huecos_libres(raiz, ficha, ahora_, cuantos=6):
+    a = ficha["auto"]
+    cfg = AUTO.leer_ficha(raiz, a.get("cid"))
+    if not cfg:
+        return []
+    fichas = PILOTO.listar(raiz)
+    salida, despues = [], None
+    for _ in range(cuantos):
+        h = AUTO.hueco_libre(cfg, fichas, a.get("cid"), ahora_, despues=despues,
+                             quitar=a.get("hueco"))
+        if h is None:
+            break
+        salida.append({"cuando": h["cuando"], "texto": AUTO.bonito(h["cuando"]),
+                       "redes": h["redes"]})
+        despues = h["cuando"]
+    return salida
+
+
+def _auto_para_pagina(ficha, peticion):
+    """Todo lo que enseña la página del móvil (y la tarjeta del Studio)."""
+    raiz = raiz_proyectos()
+    a = ficha["auto"]
+    pid = ficha.get("pid") or ""
+    envios = _auto_envios(pid)
+    vivo = AUTO.estado_vivo(ficha, envios)
+    resumen = AUTO.resumen_envios(a, envios)
+    paso = a.get("paso") or "preparando"
+    terminado = ficha.get("estado") in ("listo", "revisar")
+    editable = paso in AUTO.SIN_PROGRAMAR and terminado
+    salida = {
+        "id": ficha["id"], "pid": pid, "titulo": _auto_titulo(ficha),
+        "proyecto": _auto_proyectos().get(AUTO.clave_proyecto(a.get("cid")), ""),
+        "cid": AUTO.clave_proyecto(a.get("cid")), "gid": a.get("gid"),
+        "indice": int(a.get("indice") or 0),
+        "paso": paso, "rev": int(a.get("rev") or 0), "modo": int(a.get("modo") or 2),
+        "estado_piloto": ficha.get("estado"), "mensaje": ficha.get("mensaje") or "",
+        "vivo": vivo, "hueco": a.get("hueco") or "", "hueco_texto": AUTO.bonito(a.get("hueco")),
+        "hueco_fijado": bool(a.get("hueco_fijado")), "sin_hueco": bool(a.get("sin_hueco")),
+        "redes": list(a.get("redes") or []), "editable": editable, "terminado": terminado,
+        "por_red": resumen["por_red"], "fallidas": resumen["alguna_fallida"],
+        "comprobar": [{"red": e.get("red"), "cuando": str(e.get("cuando") or "")[:16],
+                       "texto": AUTO.bonito(str(e.get("cuando") or "")[:16])}
+                      for e in resumen["envios_comprobar"]],
+        "razones": [], "huecos_libres": [], "publicar": None, "video": "",
+        "portadas": _piloto_para_pantalla(ficha).get("portadas") or [],
+        "portada_puesta": ficha.get("portada_puesta") or "",
+        "aprobado_por": a.get("aprobado_por") or "", "aprobado_el": a.get("aprobado_el") or "",
+        "telegram": bool(TELEGRAM and TELEGRAM.conectado()),
+        "nombres_red": dict(_publicar().NOMBRE_RED),
+    }
+    ahora_ = _auto_ahora()
+    if paso in AUTO.SIN_PROGRAMAR or paso in ("programado", "reprogramando"):
+        salida["huecos_libres"] = _auto_huecos_libres(raiz, ficha, ahora_)
+    if terminado and paso in AUTO.SIN_PROGRAMAR:
+        salida["razones"] = _auto_razones(raiz, ficha)
+    elif ficha.get("estado") in ("parado", "error", "interrumpido"):
+        salida["razones"] = AUTO.razones_durante(ficha)
+    if pid and terminado:
+        try:
+            fp = publicar_ficha(pid, peticion)
+        except ErrorApi:
+            fp = None
+        if fp:
+            textos = fp.get("textos") or {}
+            salida["publicar"] = {
+                "textos": {r: textos.get(r) or {} for r in salida["redes"]},
+                "antes": {r: AUTO.huella(textos.get(r) or {}) for r in salida["redes"]},
+                "formato_redes": {r: (fp.get("formato_redes") or {}).get(r) or {}
+                                  for r in salida["redes"]},
+                "encaje": {r: (fp.get("encaje") or {}).get(r) or {} for r in salida["redes"]},
+                "portada": fp.get("portada") or {},
+                "titulos": ((fp.get("seo") or {}).get("titulos")) or {},
+                # las redes que se pueden elegir (las del proyecto en Publicar) y
+                # los ganchos de primera línea (TikTok, Instagram…: sin título)
+                "redes_posibles": [r for r in (fp.get("redes_visibles") or []) if r in _publicar().REDES]
+                or list(salida["redes"]),
+                "ganchos": ((fp.get("seo") or {}).get("ganchos")) or {},
+                "con_titulo_gancho": list(_publicar().REDES_TITULO_GANCHO),
+                "trabajando": ((fp.get("seo") or {}).get("trabajando")) or {},
+                "escribiendo": bool(fp.get("escribiendo")),
+                "error_textos": fp.get("error_textos") or "",
+            }
+            if fp.get("mp4"):
+                salida["video"] = f"a/{pid}/{fp['mp4']}"
+    return salida
+
+
+
+def _auto_cambiar(vid, rev, cambios, si_paso=None):
+    try:
+        f = PILOTO.cambiar_auto(raiz_proyectos(), vid, cambios, rev=rev, si_paso=si_paso)
+    except PILOTO.RevVieja:
+        raise ErrorApi(409, "Esto se cambió en otro sitio hace un momento: mira lo nuevo") from None
+    except PILOTO.ErrorPiloto as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+    if f is None:
+        raise ErrorApi(409, "Esto se cambió en otro sitio hace un momento: mira lo nuevo")
+    return f
+
+
+def _auto_rev(datos):
+    try:
+        return int(datos.get("rev"))
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "falta «rev»: vuelve a cargar la página") from None
+
+
+def _auto_validar_fecha(raiz, ficha, cuando, ahora_):
+    m = AUTO.de_texto(cuando)
+    if m is None:
+        raise ErrorApi(400, "la fecha va como 2026-11-26T19:00 (hora de Lima)")
+    cuando = AUTO.a_texto(m)
+    if AUTO.vencido(cuando, ahora_):
+        raise ErrorApi(400, f"esa hora ya pasó o está a menos de {AUTO.MARGEN_MIN} min: "
+                            "elige una más tarde")
+    if m > AUTO._sin_zona(ahora_) + dt.timedelta(days=364):
+        raise ErrorApi(400, "como mucho con un año de antelación")
+    otros = AUTO.ocupados([f for f in PILOTO.listar(raiz) if f["id"] != ficha["id"]],
+                          ficha["auto"].get("cid"))
+    if cuando in otros:
+        raise ErrorApi(409, "a esa hora ya va otro vídeo de este proyecto: elige otra")
+    return cuando
+
+
+@app.get("/api/aprobar/{vid}")
+def aprobar_ver(vid: str, peticion: Request):
+    """La página del móvil de un vídeo del piloto automático (todo en vivo).
+    Un vídeo de un proyecto con clave que este móvil no ha abierto: 423 con el
+    proyecto, para que la página pida su clave (como «Abrir» en el Studio)."""
+    _auto()
+    ficha = _por_piloto(PILOTO.leer, raiz_proyectos(), vid)
+    if not _piloto_visible(ficha, _cerrados(peticion)):
+        raise ErrorApi(423, "este vídeo es de un proyecto con clave",
+                       {"cid": ficha.get("cid"),
+                        "proyecto": _auto_proyectos().get(AUTO.clave_proyecto(ficha.get("cid")), "")})
+    return _auto_para_pagina(_auto_ficha_o_404(vid, peticion), peticion)
+
+
+@app.post("/api/aprobar/{vid}/publicar")
+def aprobar_publicar(vid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«✓ Publicar así»: {rev, cuando?, desde?: movil|studio}. Lo programa en
+    Upload-Post a su hora. Dos OK a la vez: el segundo recibe «ya está aprobado»."""
+    _auto()
+    datos = _cuerpo(cuerpo)
+    rev = _auto_rev(datos)
+    raiz = raiz_proyectos()
+    with _AUTO_LOCK:
+        ficha = _auto_ficha_o_404(vid, peticion)
+        a = ficha["auto"]
+        if a.get("paso") not in AUTO.SIN_PROGRAMAR:
+            raise ErrorApi(409, f"Ya está aprobado: {AUTO.estado_vivo(ficha, _auto_envios(ficha.get('pid')))['texto']}")
+        if ficha.get("estado") not in ("listo", "revisar") or not ficha.get("pid"):
+            raise ErrorApi(409, "el vídeo todavía no está terminado")
+        if int(a.get("rev") or 0) != rev:
+            raise ErrorApi(409, "Esto se cambió en otro sitio hace un momento: mira lo nuevo")
+        ahora_ = _auto_ahora()
+        hechos, _info, _aj = _auto_hechos_publicar(raiz, ficha)
+        if not hechos["cliente_ok"]:
+            raise ErrorApi(409, "este vídeo ya no es de este proyecto: no lo publico en sus cuentas")
+        if hechos["salio"]:
+            raise ErrorApi(409, f"no lo publico otra vez: {hechos['salio']}")
+        cambios = {}
+        if datos.get("cuando"):
+            cambios.update(hueco=_auto_validar_fecha(raiz, ficha, datos["cuando"], ahora_),
+                           hueco_fijado=True, sin_hueco=False)
+        elif a.get("sin_hueco") or AUTO.vencido(a.get("hueco"), ahora_):
+            propuesta = (_auto_huecos_libres(raiz, ficha, ahora_, 1) or [None])[0]
+            raise ErrorApi(409, "esa hora ya pasó" + (
+                f": te propongo el {propuesta['texto']}. Elígela y pulsa OK" if propuesta
+                else ": elige otra fecha"))
+        ficha = _auto_cambiar(vid, rev, cambios, si_paso=AUTO.SIN_PROGRAMAR)
+        desde = "movil" if datos.get("desde") == "movil" else "studio"
+        bien, texto = _auto_enviar(raiz, ficha, desde)
+        if not bien:
+            raise ErrorApi(409, f"No se pudo programar: {texto}")
+    return _auto_para_pagina(PILOTO.leer(raiz, vid), peticion)
+
+
+@app.post("/api/aprobar/{vid}/redes")
+def aprobar_redes(vid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Cambia en qué redes sale este vídeo: {rev, redes}. Solo antes del OK.
+    Las redes nuevas sin texto se las escribe Claude (con la membresía, sin
+    coste en dólares); la página lo enseña mientras escribe."""
+    _auto()
+    datos = _cuerpo(cuerpo)
+    rev = _auto_rev(datos)
+    PUB = _publicar()
+    redes = datos.get("redes")
+    if not isinstance(redes, list) or not redes or any(x not in PUB.REDES for x in redes):
+        raise ErrorApi(400, "elige al menos una red")
+    redes = [x for x in PUB.REDES if x in redes]
+    raiz = raiz_proyectos()
+    with _AUTO_LOCK:
+        ficha = _auto_ficha_o_404(vid, peticion)
+        if ficha.get("estado") not in ("listo", "revisar") or not ficha.get("pid"):
+            raise ErrorApi(409, "el vídeo todavía no está terminado")
+        pid = ficha["pid"]
+        fp = publicar_ficha(pid, peticion)
+        posibles = [x for x in (fp.get("redes_visibles") or []) if x in PUB.REDES] or \
+            list(ficha["auto"].get("redes") or [])
+        if any(x not in posibles for x in redes):
+            raise ErrorApi(400, "esa red no está en las de este proyecto (Publicar → Ajustes)")
+        if fp.get("escribiendo"):
+            # con Claude escribiendo, una red más se quedaría guardada y sin texto
+            raise ErrorApi(409, "Claude está escribiendo los textos: espera un minuto y vuelve a intentarlo")
+        if int(ficha["auto"].get("rev") or 0) != rev or ficha["auto"].get("paso") not in AUTO.SIN_PROGRAMAR:
+            raise ErrorApi(409, "Esto se cambió en otro sitio hace un momento: mira lo nuevo")
+        # PUBLICAR PRIMERO: si falla, el piloto no queda con otras redes
+        _por_publicar(PUB.guardar_ficha, raiz, pid, {"redes": redes})
+        _auto_cambiar(vid, rev, {"redes": redes}, si_paso=AUTO.SIN_PROGRAMAR)
+    textos = (publicar_ficha(pid, peticion).get("textos") or {})
+    faltan = [x for x in redes if not str((textos.get(x) or {}).get("descripcion") or "").strip()
+              or (x in PUB.CON_TITULO and not str((textos.get(x) or {}).get("titulo") or "").strip())]
+    if faltan:
+        publicar_escribir_textos(pid, peticion, {"redes": faltan})
+    salida = _auto_para_pagina(PILOTO.leer(raiz, vid), peticion)
+    salida["escribiendo_redes"] = faltan
+    return salida
+
+
+@app.post("/api/aprobar/{vid}/fecha")
+def aprobar_fecha(vid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Cambiar fecha» + OK: {rev, cuando}. Si ya estaba programado, se cancela
+    en Upload-Post y se vuelve a programar (lo hace el vigía, con cuidado)."""
+    _auto()
+    datos = _cuerpo(cuerpo)
+    rev = _auto_rev(datos)
+    raiz = raiz_proyectos()
+    with _AUTO_LOCK:
+        ficha = _auto_ficha_o_404(vid, peticion)
+        paso = ficha["auto"].get("paso")
+        cuando = _auto_validar_fecha(raiz, ficha, datos.get("cuando"), _auto_ahora())
+        if paso in AUTO.SIN_PROGRAMAR:
+            ficha = _auto_cambiar(vid, rev, {"hueco": cuando, "hueco_fijado": True,
+                                             "sin_hueco": False}, si_paso=AUTO.SIN_PROGRAMAR)
+        elif paso in ("programado", "reprogramando"):
+            ficha = _auto_cambiar(vid, rev, {"hueco": cuando, "hueco_fijado": True,
+                                             "sin_hueco": False, "paso": "reprogramando"},
+                                  si_paso=("programado", "reprogramando"))
+        else:
+            raise ErrorApi(409, "ahora no se le puede cambiar la fecha: "
+                                + AUTO.estado_vivo(ficha, _auto_envios(ficha.get("pid")))["texto"])
+    _piloto_despertar()
+    return _auto_para_pagina(ficha, peticion)
+
+
+@app.post("/api/aprobar/{vid}/no-publicar")
+def aprobar_no_publicar(vid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«No publicar»: {rev, devolver?}. Si ya estaba en Upload-Post, se cancela
+    (el vigía insiste hasta que esté cancelado). `devolver` deja ESE encargo
+    del guion otra vez en la lista (se volvería a hacer y a pagar)."""
+    _auto()
+    datos = _cuerpo(cuerpo)
+    rev = _auto_rev(datos)
+    raiz = raiz_proyectos()
+    with _AUTO_LOCK:
+        ficha = _auto_ficha_o_404(vid, peticion)
+        a = ficha["auto"]
+        paso = a.get("paso")
+        vivos = AUTO.resumen_envios(a, _auto_envios(ficha.get("pid")))["vivas"]
+        if paso in AUTO.SIN_PROGRAMAR and vivos:
+            # algo se publicó a mano desde Publicar mientras esperaba: se retira
+            ficha = _auto_cambiar(vid, rev, {"paso": "retirando",
+                                             "devolver_al_retirar": bool(datos.get("devolver"))},
+                                  si_paso=AUTO.SIN_PROGRAMAR)
+        elif paso in AUTO.SIN_PROGRAMAR:
+            if ficha.get("estado") == "trabajando":
+                raise ErrorApi(409, "se está haciendo ahora mismo: páralo antes con «Parar»")
+            ficha = _auto_cambiar(vid, rev, {"paso": "no_publicar"}, si_paso=AUTO.SIN_PROGRAMAR)
+            if ficha.get("estado") == "en_cola":
+                PILOTO.cambiar(raiz, vid, estado="cancelado", terminado=ahora(),
+                               mensaje="no se publica: lo dijiste tú")
+        elif paso in ("programado", "reprogramando", "publicando", "fallo"):
+            ficha = _auto_cambiar(vid, rev, {"paso": "retirando",
+                                             "devolver_al_retirar": bool(datos.get("devolver"))},
+                                  si_paso=("programado", "reprogramando", "publicando", "fallo"))
+        elif paso == "retirando":
+            pass
+        else:
+            raise ErrorApi(409, "ya no se puede: " + AUTO.estado_vivo(
+                ficha, _auto_envios(ficha.get("pid")))["texto"])
+        devuelto = False
+        if datos.get("devolver") and ficha["auto"].get("paso") == "no_publicar":
+            devuelto = AUTO.devolver_unidad(raiz, a.get("cid"), a.get("gid"), a.get("indice"))
+            _AUTO_SALTADAS.pop((AUTO.clave_proyecto(a.get("cid")), a.get("gid"),
+                                int(a.get("indice") or 0)), None)
+            if ficha.get("estado") in PILOTO.RETOMABLES:
+                try:
+                    PILOTO.quitar(raiz, vid)
+                except PILOTO.ErrorPiloto:
+                    pass
+        try:
+            ficha = PILOTO.leer(raiz, vid)
+        except PILOTO.ErrorPiloto:
+            return {"quitado": vid, "devuelto": devuelto}
+        if ficha["auto"].get("paso") == "no_publicar":
+            _auto_avisar(raiz, ficha, "no_publicar", clave="no_publicar")
+    _piloto_despertar()
+    salida = _auto_para_pagina(ficha, peticion)
+    salida["devuelto"] = devuelto
+    # con algo en Upload-Post, el encargo vuelve a la lista cuando se haya retirado
+    salida["devolver_luego"] = bool(datos.get("devolver") and not devuelto
+                                    and ficha["auto"].get("paso") == "retirando")
+    return salida
+
+
+@app.post("/api/aprobar/{vid}/ya-lo-mire")
+def aprobar_ya_lo_mire(vid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Ya lo miré»: {rev}. El dueño miró en Upload-Post la subida cortada a
+    medias (y la canceló allí si estaba): se quita de la lista. Es lo ÚNICO que
+    da por cancelado un envío en «comprobar»."""
+    _auto()
+    datos = _cuerpo(cuerpo)
+    rev = _auto_rev(datos)
+    PUB = _publicar()
+    with _AUTO_LOCK:
+        ficha = _auto_ficha_o_404(vid, peticion)
+        if int(ficha["auto"].get("rev") or 0) != rev or ficha["auto"].get("paso") not in AUTO.EN_UPLOAD:
+            raise ErrorApi(409, "Esto se cambió en otro sitio hace un momento: mira lo nuevo")
+        resumen = AUTO.resumen_envios(ficha["auto"], _auto_envios(ficha.get("pid")))
+        for e in resumen["envios_comprobar"]:
+            try:
+                PUB.cancelar(raiz_proyectos(), ficha["pid"], e["id"])
+            except PUB.ErrorPublicar as fallo:
+                raise ErrorApi(fallo.codigo, str(fallo)) from None
+    _piloto_despertar()
+    return _auto_para_pagina(PILOTO.leer(raiz_proyectos(), vid), peticion)
+
+
+@app.post("/api/aprobar/{vid}/reintentar-red")
+def aprobar_reintentar_red(vid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Reintentar esta red» (una red que falló): {rev, red, cuando?}. Es un
+    envío NUEVO solo de esa red; no ocupa hueco del calendario."""
+    _auto()
+    datos = _cuerpo(cuerpo)
+    rev = _auto_rev(datos)
+    raiz = raiz_proyectos()
+    with _AUTO_LOCK:
+        ficha = _auto_ficha_o_404(vid, peticion)
+        resumen = AUTO.resumen_envios(ficha["auto"], _auto_envios(ficha.get("pid")))
+        red = str(datos.get("red") or "")
+        if red not in resumen["alguna_fallida"]:
+            raise ErrorApi(409, "esa red no ha fallado")
+        ahora_ = _auto_ahora()
+        if datos.get("cuando"):
+            m = AUTO.de_texto(datos["cuando"])
+            if m is None or AUTO.vencido(AUTO.a_texto(m), ahora_):
+                raise ErrorApi(400, f"elige una hora a más de {AUTO.MARGEN_MIN} min de ahora")
+            cuando = AUTO.a_texto(m)
+        else:
+            cuando = AUTO.a_texto(AUTO._sin_zona(ahora_) + dt.timedelta(minutes=15))
+        ficha = _auto_cambiar(vid, rev, {}, si_paso=("fallo", "programado"))
+        bien, texto = _auto_enviar(raiz, ficha, "movil" if datos.get("desde") == "movil"
+                                   else "studio", redes=[red], cuando=cuando)
+        if not bien:
+            raise ErrorApi(409, f"No se pudo programar: {texto}")
+    return _auto_para_pagina(PILOTO.leer(raiz, vid), peticion)
+
+
+# ------------------------------------------------- la ficha de cada proyecto
+
+def _auto_estilos_de(cid, peticion):
+    cid = AUTO.clave_proyecto(cid)
+    return [e for e in _estilos_para_parrilla(peticion)
+            if AUTO.clave_proyecto(e.get("cliente")) == cid]
+
+
+def _auto_coste_aprox(duracion):
+    try:
+        d = int(duracion or 0)
+        if d <= 0:
+            return None
+        c = estimar_video({"duracion_objetivo_s": d, "ritmo_corto": d <= 90})
+        return round(float((c.get("coste") or {}).get("usd_total") or 0), 2)
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
+def _auto_proximos(raiz, cid, cfg, dias=7):
+    """Qué guion iría en cada hueco de los próximos días, y cuánto costaría
+    (aproximado). Calculado: no guarda nada."""
+    PAR = _parrilla()
+    ahora_ = _auto_ahora()
+    fichas = PILOTO.listar(raiz)
+    tomados = {f["auto"]["hueco"]: f for f in fichas
+               if AUTO.ocupa_hueco(f) and AUTO.clave_proyecto(f["auto"].get("cid")) == cid}
+    try:
+        parrilla = PAR.listar(raiz, cid or PAR.SIN_PROYECTO)
+    except PAR.ErrorParrilla:
+        parrilla = {}
+    libres = AUTO.unidades_candidatas(parrilla, cid, AUTO.historial(raiz))
+    resumenes = {g["id"]: g for m in parrilla.get("matrices") or [] for g in m.get("guiones") or []}
+    salida, total = [], 0.0
+    for h in AUTO.huecos_de(cfg, AUTO._sin_zona(ahora_), dias):
+        if AUTO.vencido(h["cuando"], ahora_):
+            continue
+        fila = {"cuando": h["cuando"], "texto": AUTO.bonito(h["cuando"]), "redes": h["redes"]}
+        if h["cuando"] in tomados:
+            f = tomados[h["cuando"]]
+            fila.update(guion=_auto_titulo(f), video=f["id"],
+                        estado=AUTO.estado_vivo(f, _auto_envios(f.get("pid")))["texto"])
+        elif libres:
+            u = libres.pop(0)
+            g = resumenes.get(u["gid"]) or {}
+            usd = _auto_coste_aprox(g.get("duracion_s") or cfg.get("duracion_s"))
+            if usd is not None:
+                total += usd
+            fila.update(guion=" — ".join(x for x in (u["codigo"], u["titulo"]) if x) or u["gid"],
+                        usd=usd)
+        else:
+            fila.update(guion="", falta=True)
+        salida.append(fila)
+    return {"huecos": salida, "usd_total": round(total, 2)}
+
+
+@app.get("/api/piloto/auto/{cid}")
+def piloto_auto_ver(cid: str, peticion: Request):
+    """La ficha «🤖 Piloto automático» de un proyecto: la guardada o una
+    propuesta SIN guardar, los próximos 7 días y sus vídeos."""
+    _auto()
+    PAR = _parrilla()
+    cid_par = _proyecto_parrilla(cid, peticion)
+    cid = AUTO.clave_proyecto("" if cid_par == PAR.SIN_PROYECTO else cid_par)
+    raiz = raiz_proyectos()
+    aj = _publicar().ajustes_de(raiz, cid or PUBLICAR.SIN_PROYECTO)
+    ficha = _por_auto(AUTO.ficha_para_pantalla, raiz, cid, aj.get("hora"), aj.get("redes"))
+    videos = [f for f in PILOTO.listar(raiz) if AUTO.es_automatico(f)
+              and AUTO.clave_proyecto(f["auto"].get("cid")) == cid]
+    vivos = [dict(id=f["id"], titulo=_auto_titulo(f), hueco=f["auto"].get("hueco"),
+                  hueco_texto=AUTO.bonito(f["auto"].get("hueco")), paso=f["auto"].get("paso"),
+                  vivo=AUTO.estado_vivo(f, _auto_envios(f.get("pid"))))
+             for f in reversed(videos)][:30]
+    programados = sum(1 for f in videos if f["auto"].get("paso") in ("programado", "reprogramando"))
+    PUB = _publicar()
+    return {"ficha": ficha, "estilos": _auto_estilos_de(cid, peticion),
+            "redes": [{"id": r, "nombre": PUB.NOMBRE_RED.get(r, r)}
+                      for r in (aj.get("redes_visibles") or PUB.REDES_CLASICAS)],
+            "modos": [{"id": m, "nombre": AUTO.NOMBRE_MODO[m], "frase": AUTO.FRASE_MODO[m]}
+                      for m in AUTO.MODOS],
+            "proximos": _auto_proximos(raiz, cid, ficha),
+            "repetidas": AUTO.horas_repetidas(ficha),
+            "videos": vivos, "programados": programados,
+            "bloqueo": _AUTO_BLOQUEOS.get(cid),
+            "saltadas": [{"gid": g, "indice": i, "porque": p}
+                         for (c, g, i), p in list(_AUTO_SALTADAS.items()) if c == cid],
+            "telegram": TELEGRAM.estado() if TELEGRAM else {},
+            "ajustes_piloto": PILOTO.ajustes(raiz),
+            "limites": {k: list(v) for k, v in AUTO.LIMITES.items()}}
+
+
+@app.put("/api/piloto/auto/{cid}")
+def piloto_auto_guardar(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Guarda la ficha (lo ÚNICO que la escribe): {activo, modo, huecos,
+    estilo, duracion_s, formato, anticipacion_h, max_pendientes,
+    aviso_guiones_dias, avanzado, rev}."""
+    _auto()
+    PAR = _parrilla()
+    cid_par = _proyecto_parrilla(cid, peticion)
+    cid = AUTO.clave_proyecto("" if cid_par == PAR.SIN_PROYECTO else cid_par)
+    datos = _cuerpo(cuerpo)
+    if datos.get("estilo") and datos["estilo"] not in {e["id"] for e in _auto_estilos_de(cid, peticion)}:
+        raise ErrorApi(400, "ese estilo no es de este proyecto: elige uno suyo")
+    avanzado = datos.get("avanzado")
+    if isinstance(avanzado, dict):
+        for clave, valor in avanzado.items():
+            if valor in (None, ""):
+                continue
+            try:
+                PILOTO._limpio(clave, valor)
+            except PILOTO.ErrorPiloto as fallo:
+                raise ErrorApi(400, str(fallo)) from None
+    rev = datos.get("rev")
+    with _AUTO_LOCK:
+        ficha = _por_auto(AUTO.guardar_ficha, raiz_proyectos(), cid, datos,
+                          tuple(_publicar().REDES), None if rev is None else int(rev))
+    anotar_global("piloto_auto_ficha", {"proyecto": cid, "activo": ficha.get("activo"),
+                                         "modo": ficha.get("modo")})
+    _piloto_despertar()
+    return piloto_auto_ver(cid or PAR.SIN_PROYECTO, peticion)
+
+
+@app.post("/api/piloto/auto/{cid}/vista")
+def piloto_auto_vista(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Los próximos 7 días con la ficha que se está editando, SIN guardarla
+    (para verlo antes de pulsar «Guardar»)."""
+    _auto()
+    PAR = _parrilla()
+    cid_par = _proyecto_parrilla(cid, peticion)
+    cid = AUTO.clave_proyecto("" if cid_par == PAR.SIN_PROYECTO else cid_par)
+    borrador = _por_auto(AUTO.limpiar_ficha, _cuerpo(cuerpo), tuple(_publicar().REDES))
+    ficha = dict(AUTO.FICHA_DEFECTO, **borrador)
+    return {"proximos": _auto_proximos(raiz_proyectos(), cid, ficha),
+            "repetidas": AUTO.horas_repetidas(ficha)}
+
+
+@app.post("/api/piloto/auto/{cid}/cancelar-programados")
+def piloto_auto_cancelar_programados(cid: str, peticion: Request):
+    """«Cancelarlos también» al apagar: los ya programados pasan a retirarse."""
+    _auto()
+    PAR = _parrilla()
+    cid_par = _proyecto_parrilla(cid, peticion)
+    cid = AUTO.clave_proyecto("" if cid_par == PAR.SIN_PROYECTO else cid_par)
+    cuantos = 0
+    with _AUTO_LOCK:
+        for f in PILOTO.listar(raiz_proyectos()):
+            if (AUTO.es_automatico(f) and AUTO.clave_proyecto(f["auto"].get("cid")) == cid
+                    and f["auto"].get("paso") in ("programado", "reprogramando", "publicando", "fallo")):
+                if PILOTO.cambiar_auto(raiz_proyectos(), f["id"], {"paso": "retirando"},
+                                       si_paso=("programado", "reprogramando", "publicando", "fallo")):
+                    cuantos += 1
+    _piloto_despertar()
+    return {"retirando": cuantos}
+
+
+def _auto_unidad(cid, peticion, cuerpo):
+    PAR = _parrilla()
+    cid_par = _proyecto_parrilla(cid, peticion)
+    cid = AUTO.clave_proyecto("" if cid_par == PAR.SIN_PROYECTO else cid_par)
+    datos = _cuerpo(cuerpo)
+    gid = str(datos.get("gid") or "")
+    try:
+        indice = int(datos.get("indice") or 0)
+    except (TypeError, ValueError):
+        indice = 0
+    if not gid:
+        raise ErrorApi(400, "falta el guion")
+    return cid, gid, indice
+
+
+@app.post("/api/piloto/auto/{cid}/hacer-igualmente")
+def piloto_auto_hacer_igual(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Hacer igualmente» un encargo frenado ANTES de gastar: {gid, indice}.
+    Solo salta lo que se puede saltar (el CTA, los avisos del guion); nunca el
+    freno de gasto, el estilo, las cuentas ni el proyecto."""
+    _auto()
+    unidad = _auto_unidad(cid, peticion, cuerpo)
+    _AUTO_HACER_IGUAL.add(unidad)
+    _piloto_despertar()
+    return {"ok": True}
+
+
+@app.post("/api/piloto/auto/{cid}/devolver")
+def piloto_auto_devolver(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Devolver a la lista» ESE encargo del guion: {gid, indice}. Se volverá
+    a hacer (y a pagar). Una ficha parada de ese encargo se quita de la lista
+    del piloto (si no, `encolar` la rechazaría)."""
+    _auto()
+    cid, gid, indice = _auto_unidad(cid, peticion, cuerpo)
+    raiz = raiz_proyectos()
+    with _AUTO_LOCK:
+        for f in PILOTO.listar(raiz):
+            if (AUTO.es_automatico(f) and AUTO.clave_proyecto(f["auto"].get("cid")) == cid
+                    and f["auto"].get("gid") == gid and int(f["auto"].get("indice") or 0) == indice):
+                if f["auto"].get("paso") not in ("no_publicar",) and f.get("estado") != "cancelado":
+                    raise ErrorApi(409, "ese vídeo sigue vivo en el piloto: dile «No publicar» antes")
+                if f.get("estado") in PILOTO.RETOMABLES:
+                    try:
+                        PILOTO.quitar(raiz, f["id"])
+                    except PILOTO.ErrorPiloto:
+                        pass
+        devuelto = AUTO.devolver_unidad(raiz, cid, gid, indice)
+        _AUTO_SALTADAS.pop((cid, gid, indice), None)
+    _piloto_despertar()
+    return {"devuelto": devuelto}
+
+
+# ------------------------------------------------------------------ Telegram
+
+def _telegram():
+    if TELEGRAM is None:
+        raise ErrorApi(503, f"los avisos por Telegram no se han podido cargar: {ERROR_AUTO}")
+    return TELEGRAM
+
+
+def _por_telegram(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except TELEGRAM.ErrorTelegram as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+@app.get("/api/telegram")
+def telegram_estado():
+    """Si los avisos al móvil están conectados (nunca el token)."""
+    return _telegram().estado()
+
+
+@app.post("/api/telegram/token")
+def telegram_token(cuerpo: dict = Body(default=None)):
+    """{token}: el token del bot (de @BotFather). Se comprueba con Telegram."""
+    T = _telegram()
+    return _por_telegram(T.poner_token, _cuerpo(cuerpo).get("token"))
+
+
+@app.get("/api/telegram/chats")
+def telegram_chats():
+    """Quién ha escrito «/start» al bot: el dueño elige su nombre."""
+    T = _telegram()
+    return {"chats": _por_telegram(T.buscar_chats)}
+
+
+@app.post("/api/telegram/chat")
+def telegram_chat(cuerpo: dict = Body(default=None)):
+    """{id, nombre, base_url}: este es mi chat; los enlaces van a esa dirección."""
+    T = _telegram()
+    datos = _cuerpo(cuerpo)
+    return _por_telegram(T.confirmar_chat, datos.get("id"), datos.get("nombre"),
+                         datos.get("base_url"))
+
+
+@app.post("/api/telegram/prueba")
+def telegram_prueba():
+    """Manda un mensaje de prueba (gratis)."""
+    T = _telegram()
+    base = T.base_url()
+    _por_telegram(T.enviar, AUTO.texto_aviso(
+        "prueba", "Los avisos del piloto automático llegan aquí", "",
+        base and f"{base}/", "Si ves esto, está bien conectado."), respetar_pausa=False)
+    return T.estado()
+
+
+@app.delete("/api/telegram")
+def telegram_desconectar():
+    return _telegram().desconectar()
 
 
 # ============================================================ ENVIAR AL STUDIO

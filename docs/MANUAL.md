@@ -969,6 +969,50 @@ en uno) y el **cupo de Claude** por encima del cual no arranca un vídeo nuevo
 (90 %: espera solo a que se libere). Con el servidor reiniciado a mitad, el
 vídeo queda **interrumpido** y no sigue hasta que pulses «Reintentar».
 
+### Piloto automático por calendario (niveles 2 y 3)
+
+Arriba del panel del piloto, cada proyecto tiene su **🤖 Piloto automático**.
+**Configurar** (o **Ajustar**) abre su ficha; nada se guarda hasta pulsar
+**Guardar**:
+
+- **Encendido / Apagado.** Apagado no hace nada (y los vídeos que ya estaban
+  programados siguen programados; al apagar te pregunta si cancelarlos).
+- **Nivel 2 · con tu OK** o **Nivel 3 · publica solo**.
+- **Calendario** (hora de Lima): cada línea son unos días (L M X J V S D), una
+  hora y sus redes. Varios vídeos el mismo día = varias líneas.
+- **Estilo** de los vídeos (solo los de ese proyecto), **cuántas horas antes**
+  empieza cada vídeo (24) y **cuántos sin publicar** como mucho (2).
+- **Avanzado**: lo mismo que «Hacer el vídeo completo» (imágenes, rondas, tope
+  de $, portadas).
+- **Los próximos 7 días**: qué guion iría en cada hueco y lo que costaría.
+
+Antes de cada hueco el Studio hace el vídeo del **siguiente guion pendiente**
+de la Parrilla. En **nivel 2** te avisa por Telegram y espera. En **nivel 3**
+lo programa solo, salvo que haya algo que mirar (imágenes marcadas, el tope, la
+llamada a la acción, falta portada o título, una red desconectada o que falla,
+el vídeo tocado a mano, el guion cambiado, otro proyecto o la hora ya pasada).
+
+**La página del móvil** (el enlace del aviso, o **Ver y aprobar ›** en el
+Studio): el vídeo, **«Sale en:»** (marcar o quitar redes y **Guardar redes**; el
+texto de una red nueva lo escribe Claude), los textos de cada red (con **🎯 Dame 4
+títulos** en YouTube y Facebook, **🎯 Dame 3 ganchos** en las demás, y
+**Mejorar con vidIQ**), las portadas (**Elegir**, **Cambiar su texto**, **✦
+Hacer otra portada** y **Abrir el editor completo**), la fecha con **OK** y
+**✓ Publicar así**, **Cambiar fecha** y **No publicar**. Con el vídeo ya
+programado solo deja cambiar la fecha o no publicarlo. Una red que falló:
+**Reintentar** (solo esa red). Una subida cortada a medias: míralo en
+Upload-Post y pulsa **Ya lo miré**.
+
+En la Parrilla, cada guion del piloto automático lleva su etiqueta al día. Uno
+que el piloto no empieza (por ejemplo, sin llamada a la acción) dice por qué en
+su ficha, con **Hacer igualmente** cuando se puede; uno que no se publicó tiene
+**Devolver a la lista**.
+
+**Telegram** (Configuración → 📲 Avisos al móvil): crea tu bot con
+**@BotFather** (`/newbot`), pega su token y pulsa **Conectar**; escríbele
+**/start** a tu bot, pulsa **Buscar mi chat** y **Soy yo**. **Mandar prueba**
+comprueba que llega.
+
 ### Añadir guiones
 
 Primero eliges **de dónde salen**, con una tarjeta por camino y **lo que

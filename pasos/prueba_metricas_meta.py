@@ -120,6 +120,9 @@ class Falso(http.server.BaseHTTPRequestHandler):
             return self._error(200, "(#200) Requires read_insights permission")
         if modo == "cupo":
             return self._error(4, "(#4) Application request limit reached")
+        if modo == "permiso100":
+            return self._error(100, "(#100) Tried accessing nonexisting field (insights) on node type "
+                                    "(IGMedia): requires the instagram_manage_insights permission")
         partes = [p for p in url.path.split("/") if p]
         if not partes or partes[0] != MM.VERSION_METRICAS:
             return self._error(2500, "version desconocida")
@@ -451,6 +454,22 @@ def prueba_publicar(base):
     P.medir_meta(raiz, ["v2"])
     m = _envio(raiz, "v2", "e_foto")["metricas"]
     ok("Reel" in m.get("meta_error", "") and m.get("meta_al"), "una foto: «no es un Reel», con su reloj")
+    # prueba del servidor, 25-11: un token sin instagram_manage_insights. La
+    # tarjeta del Reel tiene que decir lo del permiso, no «no ha devuelto»,
+    # aunque ya trajera ese texto de antes, y sin reloj (se reintenta en cuanto
+    # haya un token bueno)
+    _video(raiz, "v6", [{"id": "e_perm", "red": "instagram", "estado": "a_mano", "post_id": "reel2",
+                         "metricas": {"meta_error": "Meta no ha devuelto las cifras de este vídeo"}}])
+    for modo in ("permiso100", "permiso"):
+        ESTADO["modo"] = modo
+        try:
+            r6 = P.medir_meta(raiz, ["v6"], forzar=True)
+        finally:
+            ESTADO["modo"] = ""
+        m = _envio(raiz, "v6", "e_perm")["metricas"]
+        ok(r6.get("motivo") == "sin_permiso" and "instagram_manage_insights" in m.get("meta_error", "")
+           and not m.get("meta_al"),
+           f"sin permiso ({modo}): la tarjeta lo dice, sin reloj ({m.get('meta_error')!r})")
     # un id que Meta no contesta tampoco va el primero de la cola en cada vuelta
     _video(raiz, "v4", [{"id": "e_malo", "red": "instagram", "estado": "a_mano", "post_id": "bad7",
                          "metricas": {}},

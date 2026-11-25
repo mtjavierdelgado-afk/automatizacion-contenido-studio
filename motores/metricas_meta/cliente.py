@@ -291,7 +291,11 @@ class ClienteMeta:
                              f"pégalo en Configuración ({mensaje})", "caducado")
         if num in CODIGOS_CUPO or codigo == 429:
             return ErrorMeta(f"Meta pide esperar un rato (demasiadas consultas): {mensaje}", "cupo")
-        if num in (10, 200) or 200 <= num < 300:
+        # sin el permiso de métricas, Meta no siempre da #10/#200: a veces un
+        # #100 que nombra el permiso (prueba del servidor, 25-11)
+        falta = re.search(r"permission|instagram_manage_insights|read_insights|pages_read_engagement",
+                          mensaje, re.IGNORECASE)
+        if num in (10, 200) or 200 <= num < 300 or (num == 100 and falta):
             return ErrorMeta("al token de Meta le falta un permiso (read_insights o "
                              f"instagram_manage_insights): {mensaje}", "sin_permiso")
         if num == 100:

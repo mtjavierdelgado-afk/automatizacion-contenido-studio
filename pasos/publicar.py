@@ -4241,6 +4241,27 @@ AVISOS_META = {
     "red": "Instagram y Facebook: no se ha podido hablar con Meta esta vez",
     "tiempo": "Instagram y Facebook: no dio tiempo a todo esta vez; vuelve a pulsar «Actualizar»",
 }
+#: Lo que dice la tarjeta de cada envío cuando el problema es del TOKEN, no del
+#: vídeo (prueba del servidor, 25-11: sin instagram_manage_insights la tarjeta
+#: decía «Meta no ha devuelto las cifras de este vídeo»). Sin reloj: en cuanto
+#: se pone un token bueno, se vuelve a pedir.
+TARJETA_META = {
+    "sin_token": "falta el token de Meta en Configuración → Cuentas que te gustan",
+    "sin_permiso": "al token de Meta le falta un permiso (instagram_manage_insights para "
+                   "Instagram, read_insights para Facebook)",
+    "caducado": "el token de Meta ha caducado; genera uno nuevo",
+}
+
+
+def _marcar_token(resultados, envios, motivo):
+    """Los envíos que se quedaron sin leer por un problema del token llevan
+    en su tarjeta ese problema (y no el de una lectura anterior)."""
+    texto = TARJETA_META.get(motivo)
+    if not texto:
+        return
+    for pid, e in envios:
+        if e["id"] not in resultados:
+            resultados[e["id"]] = (pid, {"error": texto, "sin_reloj": True}, {})
 
 
 def _token_meta():
@@ -4336,6 +4357,9 @@ def _medir_meta(raiz, pids, forzar, hasta, solo=None):
     # el propio cliente no empieza una llamada que no quepa entera en la franja
     cli.hasta = hasta
     if not getattr(cli, "simulado", False) and not cli.token:
+        sin = {}
+        _marcar_token(sin, envios, "sin_token")
+        _apuntar_meta(raiz, sin)
         return dict(vacio, errores=[AVISOS_META["sin_token"]], motivo="sin_token")
     leidos, hechos, errores = 0, 0, []
     resultados = {}                 # id del envio -> (pid, cifras|{"error"}, extra)
@@ -4385,6 +4409,7 @@ def _medir_meta(raiz, pids, forzar, hasta, solo=None):
     except MM.ErrorMeta as fallo:
         fatal = fallo.motivo
         errores.append(AVISOS_META.get(fallo.motivo) or f"Instagram y Facebook: {fallo}"[:200])
+        _marcar_token(resultados, envios, fallo.motivo)
     if getattr(cli, "retiradas", None):
         errores.append("Instagram y Facebook: Meta ya no da " + ", ".join(sorted(set(cli.retiradas)))
                        + "; esa cifra no se ha podido leer")
@@ -4424,7 +4449,8 @@ def _apuntar_meta(raiz, resultados):
                     # con su reloj: un envío que Meta no contesta no se vuelve a
                     # preguntar hasta pasado el respiro (antes iba el primero de
                     # la cola en cada «Actualizar» y rompía el lote entero)
-                    m["meta_al"] = al
+                    if not cifras.get("sin_reloj"):
+                        m["meta_al"] = al
                     e["metricas"] = m
                     cambio = True
                     continue

@@ -1938,8 +1938,8 @@
   function avisoFondoATodas(r) {
     const llenas = `ya ${r.llenas.length === 1 ? 'está llena' : 'están llenas'} (${LIMITES.capas} capas, ${LIMITES.fotos} fotos o ${LIMITES.logos} logos)`;
     const tapadas = r.tapadas.length === 1 && r.tapadas[0] === 1
-      ? 'la portada conserva el fondo de su plantilla, que lo lleva encima'
-      : `en ${nombrarLaminas(r.tapadas)} no se vería: su diseño lleva encima su propio fondo`;
+      ? 'la portada conserva el fondo de su plantilla, que va por encima'
+      : `en ${nombrarLaminas(r.tapadas)} no se vería, porque su diseño lleva encima su propio fondo`;
     const partes = [];
     const se_ve = r.puestas.length + (r.propiaTapada ? 0 : 1);
     if (!r.puestas.length) {
@@ -1947,7 +1947,7 @@
       const porque = [];
       if (r.tapadas.length) porque.push(tapadas);
       if (r.llenas.length) porque.push(`${nombrarLaminas(r.llenas)} ${llenas}`);
-      partes.push(`${porque.join('; ')}.`);
+      partes.push(porque.length ? `${porque.join('; ')}.` : 'no hay otras láminas.');
     } else {
       partes.push(se_ve === 1
         ? 'Este fondo se ve ahora en 1 lámina.'

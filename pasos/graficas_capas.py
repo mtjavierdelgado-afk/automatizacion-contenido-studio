@@ -75,7 +75,8 @@ _DE_TESTIGO = {v: k for k, v in TESTIGOS.items()}
 TIPOS = ("texto", "imagen", "logo", "forma")
 #: Los tipos de lámina de un carrusel (graficas-3-carrusel). «blanco» es la que
 #: no sale de ninguna familia: «Volver a montar a todas» la deja como está.
-TIPOS_LAMINA = ("portada", "punto", "lista", "dato", "antes_despues", "pasos", "cita", "cierre", "blanco")
+TIPOS_LAMINA = ("portada", "punto", "lista", "dato", "antes_despues", "pasos", "cita", "mito", "pregunta", "ranking",
+                "checklist", "comparativa", "precio", "cierre", "blanco")
 #: Dónde NO sale una capa «en todas» (se calcula al pintar, por la posición).
 SALVO = ("primera", "ultima", "pdf")
 _RE_ID = re.compile(r"^[a-z0-9]{1,12}$")
@@ -230,6 +231,10 @@ def _limpiar_capa(capa, vistos):
             "sombra": _sombras(capa.get("sombra")), "sombra_texto": _sombras(capa.get("sombra_texto")),
             "ajusta": _bool(capa.get("ajusta")),
         })
+        if _bool(capa.get("tachado")):
+            # graficas-3c-extras (el precio de antes): solo se guarda si está, así
+            # una pieza de antes sale byte a byte igual (y su huella no cambia)
+            limpia["tachado"] = True
     elif tipo == "imagen":
         src = str(capa.get("src") or "")
         if src and not G._RE_IMAGEN.fullmatch(src):
@@ -566,7 +571,11 @@ def _html_capa(capa, doc, kit, colores, f, imagen_de, logos, usadas, memo):
     estilo += "text-align:" + {"izq": "left", "centro": "center", "der": "right"}[capa["alin"]] + ";"
     estilo += f"font-family:{familia};font-size:calc({_f(capa['tam'])}cqmin * var(--e, 1));font-weight:{capa['peso']};"
     estilo += f"font-style:{'italic' if capa['cursiva'] else 'normal'};"
-    estilo += f"text-decoration:{'underline' if capa['subrayado'] else 'none'};"
+    if capa.get("tachado"):
+        # la raya por el medio del número, gruesa para que se vea en el móvil
+        estilo += f"text-decoration:{'underline ' if capa['subrayado'] else ''}line-through;text-decoration-thickness:0.09em;"
+    else:
+        estilo += f"text-decoration:{'underline' if capa['subrayado'] else 'none'};"
     if capa["mayus"]:
         estilo += "text-transform:uppercase;"
     if capa["espaciado"]:

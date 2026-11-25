@@ -487,7 +487,9 @@
         const familia = ED.cat.familias[fid];
         s += `font-family:'ce-${familia}', '${familia}', ${c.fuente && c.fuente.serif ? 'serif' : 'sans-serif'};`;
         s += `font-size:calc(${f6(c.tam)}cqmin * var(--e, 1));font-weight:${c.peso};`;
-        s += `font-style:${c.cursiva ? 'italic' : 'normal'};text-decoration:${c.subrayado ? 'underline' : 'none'};`;
+        s += `font-style:${c.cursiva ? 'italic' : 'normal'};`;
+        s += c.tachado ? `text-decoration:${c.subrayado ? 'underline ' : ''}line-through;text-decoration-thickness:0.09em;`
+          : `text-decoration:${c.subrayado ? 'underline' : 'none'};`;
         if (c.mayus) s += 'text-transform:uppercase;';
         if (c.espaciado) s += `letter-spacing:${f6(c.espaciado)}em;`;
         s += `line-height:${c.interlineado ? f6(c.interlineado) : 'normal'};`;
@@ -1160,6 +1162,7 @@
       el('div', { clase: 'ce-botonera', role: 'group', 'aria-label': 'Estilo de letra' },
         el('button', { type: 'button', clase: 'ce-mini', 'aria-pressed': String(!!c.cursiva), title: 'Cursiva', onclick: () => { c.cursiva = !c.cursiva; refrescarElegidas(); commit(); pintarDerecha(); } }, el('i', {}, 'I')),
         el('button', { type: 'button', clase: 'ce-mini', 'aria-pressed': String(!!c.subrayado), title: 'Subrayado', onclick: () => { c.subrayado = !c.subrayado; refrescarElegidas(); commit(); pintarDerecha(); } }, el('u', {}, 'S')),
+        el('button', { type: 'button', clase: 'ce-mini', 'aria-pressed': String(!!c.tachado), title: 'Tachado', onclick: () => { if (c.tachado) delete c.tachado; else c.tachado = true; refrescarElegidas(); commit(); pintarDerecha(); } }, el('s', {}, 'T')),
         el('button', { type: 'button', clase: 'ce-mini', 'aria-pressed': String(!!c.mayus), title: 'Todo en mayúsculas', onclick: () => { c.mayus = !c.mayus; refrescarElegidas(); commit(); pintarDerecha(); } }, 'AA')),
       botonera('Alineación', c.alin, [['izq', '⇤', 'A la izquierda'], ['centro', '↔', 'Centrado'], ['der', '⇥', 'A la derecha']], v => { c.alin = v; }),
       botonera('En vertical', c.valign, [['arriba', '⤒', 'Arriba'], ['centro', '↕', 'En medio'], ['abajo', '⤓', 'Abajo']], v => { c.valign = v; }),
@@ -1861,7 +1864,8 @@
 
   const MAX_LAMINAS = 20;
   const NOMBRE_TIPO = { portada: 'Portada', punto: 'Punto', lista: 'Lista', dato: 'Dato', antes_despues: 'Antes / después',
-    pasos: 'Pasos', cita: 'Cita', cierre: 'Cierre', blanco: 'En blanco' };
+    pasos: 'Pasos', cita: 'Cita', mito: 'Mito / Realidad', pregunta: 'Pregunta', ranking: 'Ranking',
+    checklist: 'Checklist', comparativa: 'Comparativa', precio: 'Precio / oferta', cierre: 'Cierre', blanco: 'En blanco' };
   const nuevoIdCorto = pre => pre + Math.random().toString(16).slice(2, 10).padEnd(8, '0');
 
   function asegurarIdsLaminas(doc) {

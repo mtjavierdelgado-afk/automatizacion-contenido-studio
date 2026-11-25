@@ -67,7 +67,7 @@ def seccion(t):
 
 # ------------------------------------------------------------- Meta falso
 
-ESTADO = {"modo": "", "retirada": "", "uso": 0, "retraso": 0.0, "peticiones": []}
+ESTADO = {"modo": "", "retirada": "", "uso": 0, "retraso": 0.0, "retraso_lote": 0.0, "peticiones": []}
 
 
 def _insights(pares):
@@ -118,8 +118,8 @@ class Falso(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         """La Batch API de Graph: `batch=[{method, relative_url}]`; cada GET de
         dentro se contesta como si fuera suelto."""
-        if ESTADO["retraso"]:
-            time.sleep(ESTADO["retraso"])
+        if ESTADO["retraso"] or ESTADO["retraso_lote"]:
+            time.sleep(ESTADO["retraso"] or ESTADO["retraso_lote"])
         largo = int(self.headers.get("Content-Length") or 0)
         form = dict(urllib.parse.parse_qsl(self.rfile.read(largo).decode("utf-8")))
         auth = self.headers.get("Authorization") or ""
@@ -692,6 +692,19 @@ def prueba_publicar(base):
         MM.ClienteMeta._lote = original_lote
     ok(_envio(raiz, "v17", "m_fbc")["metricas"].get("curva") and r17.get("motivo") != "red",
        f"y Facebook se lee igual ({r17.get('motivo')!r})")
+    # (árbitro, 3.ª vuelta) con TIEMPO DE VERDAD: un lote de Instagram que se
+    # pasa de plazo no deja sin leer Facebook (va antes)
+    original_cm = P.cliente_meta
+    P.cliente_meta = lambda: MM.ClienteMeta(TOKEN, base=base, plazo=1)
+    ESTADO["retraso_lote"] = 2.5
+    try:
+        _video(raiz, "v18", [dict(e, id=e["id"] + "d", metricas={}) for e in muchos])
+        r18 = P.medir_meta(raiz, ["v18"], forzar=True, hasta=time.time() + 6.5)
+    finally:
+        P.cliente_meta = original_cm
+        ESTADO["retraso_lote"] = 0.0
+    ok(_envio(raiz, "v18", "m_fbd")["metricas"].get("curva") and r18.get("motivo") != "red",
+       f"con un lote lento de verdad, Facebook se lee igual ({r18.get('motivo')!r}, {r18.get('errores')})")
     # árbitro del tren, 25-11 (1): un post de página BORRADO no corta Facebook
     _video(raiz, "v9", [{"id": "f_borr", "red": "facebook", "estado": "a_mano",
                          "post_id": f"{PAGINA}_999", "metricas": {}},

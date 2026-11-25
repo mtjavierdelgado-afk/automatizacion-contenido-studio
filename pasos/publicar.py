@@ -4380,24 +4380,30 @@ def _medir_meta(raiz, pids, forzar, hasta, solo=None):
     fb = [(pid, e) for pid, e in envios if e["red"] == "facebook"]
     leidos = 0
     sin_cifras = []
-    if ig:
-        try:
-            leidos += _leer_ig(cli, ig, hasta, resultados, sin_cifras)
-        except MM.ErrorMeta as fallo:
-            motivos["instagram"] = fallo.motivo
-            _avisar_meta(errores, "instagram", fallo)
-            _marcar_token(resultados, ig, fallo.motivo, "instagram")
-    global_ig = motivos.get("instagram") in MOTIVOS_DE_LAS_DOS
-    if motivos.get("instagram") == "caducado":
-        # el token entero: las tarjetas de Facebook también lo dicen
-        _marcar_token(resultados, fb, "caducado", "facebook")
-    if fb and not global_ig and _cabe(hasta) and not cli.cerca_del_cupo:
+    # FACEBOOK PRIMERO (árbitro, 25-11): son pocas llamadas, y un lote de
+    # Instagram lento (Meta tarda con 25 Reels de métricas) se comía la franja
+    # entera y Facebook no se leía nunca. Lo que vale para las dos (caducado,
+    # cupo, red, tiempo) para también Instagram.
+    if fb:
         try:
             leidos += _leer_fb(raiz, cli, fb, hasta, resultados)
         except MM.ErrorMeta as fallo:
             motivos["facebook"] = fallo.motivo
             _avisar_meta(errores, "facebook", fallo)
             _marcar_token(resultados, fb, fallo.motivo, "facebook")
+    global_fb = motivos.get("facebook") in MOTIVOS_DE_LAS_DOS
+    if motivos.get("facebook") == "caducado":
+        # el token entero: las tarjetas de Instagram también lo dicen
+        _marcar_token(resultados, ig, "caducado", "instagram")
+    if ig and not global_fb and _cabe(hasta) and not cli.cerca_del_cupo:
+        try:
+            leidos += _leer_ig(cli, ig, hasta, resultados, sin_cifras)
+        except MM.ErrorMeta as fallo:
+            motivos["instagram"] = fallo.motivo
+            _avisar_meta(errores, "instagram", fallo)
+            _marcar_token(resultados, ig, fallo.motivo, "instagram")
+            if fallo.motivo == "caducado":
+                _marcar_token(resultados, fb, "caducado", "facebook")
     # los Reels que Meta no reconoce, por su enlace: DESPUÉS de Facebook, con
     # lo que quede de franja (no puede dejar a Facebook sin leer)
     if sin_cifras and not motivos.get("instagram") \

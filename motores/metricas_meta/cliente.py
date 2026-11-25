@@ -54,8 +54,8 @@ BASE = "https://graph.facebook.com"
 #: detrás del proxy (corta a los 60 s): quien llama reparte su franja.
 PLAZO_S = 6
 #: Cuántos medios van en una llamada por lotes (la Batch API de Graph: un
-#: POST con hasta 50 GET dentro; 25 para que un lote quepa en su plazo). Meta los cuenta sueltos para el cupo, pero
-#: ahorra viajes: con una llamada por Reel, una cuenta con muchos Reels se
+#: POST con hasta 50 GET dentro; 25 para que un lote quepa en su plazo).
+#: Meta los cuenta sueltos para el cupo, pero ahorra viajes: con una llamada por Reel, una cuenta con muchos Reels se
 #: comía la franja y Facebook no se leía nunca (árbitro, 25-11).
 TOPE_LOTE = 25
 
@@ -449,7 +449,7 @@ class ClienteMeta:
             respuestas = self._lote([f"{ident}?{query}" for ident in validos])
         except ErrorMeta as fallo:
             if fallo.motivo == "red" and getattr(fallo, "plazo_vencido", False):
-                # un lote que tarda más que su plazo es cosa de ESTE lote (50 GET
+                # un lote que tarda más que su plazo es cosa de ESTE lote (25 GET
                 # de métricas son lentos): Instagram para aquí y Facebook se lee
                 # igual. Sin red de verdad, sigue siendo «red»
                 self.sin_tiempo = True

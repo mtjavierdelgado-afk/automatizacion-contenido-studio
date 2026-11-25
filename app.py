@@ -26701,6 +26701,14 @@ def graficas_partir_texto(cid: str, peticion: Request, cuerpo: dict = Body(defau
     return {"doc": doc, "avisos": avisos}
 
 
+@app.post("/api/graficas/{cid}/capas/historias")
+def graficas_historias(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Hacer también las historias»: el mismo carrusel en 9:16 (no se guarda:
+    la pantalla lo abre como pieza nueva). Gratis, sin IA."""
+    G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
+    return {"doc": _por_capas(G._con_turno, lambda p: K.historias(p, (cuerpo or {}).get("doc"), kit, logo, oscuro, marca))}
+
+
 @app.post("/api/graficas/{cid}/capas/nota")
 def graficas_nota_carrusel(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """La nota del carrusel (sin IA): portada, segunda portada, una idea por

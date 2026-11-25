@@ -204,7 +204,11 @@
    * él y no en `ED`, que puede ser ya otro (doble clic al abrir). */
   async function prepararDoc(E) {
     const o = E.opc;
-    if (E.piezaId) {
+    if (o.docInicial) {
+      // «Hacer también las historias»: un documento ya montado por el servidor, sin guardar
+      E.doc = JSON.parse(JSON.stringify(o.docInicial));
+      E.convertida = false;
+    } else if (E.piezaId) {
       const r = await o.pedir(o.api(E.cid, `/piezas/${E.piezaId}/capas`));
       E.doc = r.doc;
       E.convertida = r.origen === 'convertida';
@@ -219,6 +223,11 @@
     }
     E.origen = Object.assign({}, E.doc.origen || {});
     E.nacida = !!E.origen.nacida;
+    if (o.docInicial) {
+      E.piezaId = '';
+      E.origen = { plantilla: (E.doc.laminas.find(l => l.familia) || {}).familia || 1, sello: '', guardado: '', nacida: true };
+      E.nacida = true;
+    }
     if (o.duplicar) {
       // «Duplicar»: el mismo diseño, que se guarda como una pieza nueva
       E.piezaId = '';
@@ -2414,12 +2423,38 @@
       ['Pinterest', 'de 2 a 5', L.length >= 2 && L.length <= 5],
       ['X', '4', L.length <= 4],
     ];
+    const hacerHistorias = !vertical && L.some(l => l.familia)
+      ? boton('Hacer también las historias (9:16)', { clase: 'ce-btn ce-ancho', title: 'El mismo carrusel en 9:16, como pieza aparte (gratis)' }, () => historias())
+      : null;
     P.appendChild(grupo(L.length > 1 ? `Lámina ${ED.lamina + 1} de ${L.length}` : 'Carrusel',
       L.length > 1 ? el('label', { clase: 'ce-campo' }, el('span', {}, 'Texto alternativo de esta lámina'), alt) : null,
       L.length > 1 ? null : el('small', { clase: 'ce-pista' }, 'Para hacer un carrusel, añade láminas con «＋ Lámina», debajo del lienzo.'),
       L.length > 1 ? el('div', { clase: 'ce-campo' }, el('span', {}, `¿Dónde caben ${L.length} láminas?`),
         el('ul', { clase: 'ce-donde-cabe' }, ...filas.map(([red, cuantas, cabe]) =>
-          el('li', { clase: cabe ? 'si' : 'no' }, el('b', {}, `${cabe ? '✓' : '✗'} ${red}`), ` · ${cuantas}`)))) : null));
+          el('li', { clase: cabe ? 'si' : 'no' }, el('b', {}, `${cabe ? '✓' : '✗'} ${red}`), ` · ${cuantas}`)))) : null,
+      hacerHistorias));
+  }
+
+  /**
+   * «Hacer también las historias» (graficas-3c-extras, B3): el servidor monta
+   * el mismo carrusel en 9:16 y se abre como una pieza NUEVA sin guardar
+   * (la de ahora no se toca). Antes hay que guardar: abrir otra cierra esta.
+   */
+  async function historias() {
+    const yo = ED;
+    if (!yo.piezaId || firmaDoc() !== yo.guardado) {
+      avisoPantalla('Guarda primero este carrusel: las historias salen de lo guardado y se abren aparte.', true);
+      return;
+    }
+    avisoPantalla('Montando las historias en 9:16…');
+    try {
+      const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/capas/historias'), { method: 'POST', cuerpo: { doc: docParaEnviar() } });
+      if (ED !== yo) return;
+      await abrir(Object.assign({}, yo.opc, { pieza: null, duplicar: false, docInicial: r.doc }));
+      if (ED && ED !== yo) avisoPantalla('Estas son las historias (9:16), aún sin guardar: revísalas y pulsa «Guardar». El carrusel de antes sigue igual.');
+    } catch (e) {
+      if (ED === yo) avisoPantalla(`No se han podido hacer las historias: ${e.message}`, true);
+    }
   }
 
 

@@ -807,6 +807,43 @@ def montar_todas(pincel, doc, n, kit=None, logo=None, logo_oscuro=None, marca=""
     return doc
 
 
+#: El tamaño de las historias («Hacer también las historias»).
+FORMATO_HISTORIAS = "h916"
+
+
+def historias(pincel, doc, kit=None, logo=None, logo_oscuro=None, marca=""):
+    """«Hacer también las historias» (graficas-3c-extras, B3): el mismo
+    carrusel en 9:16, como pieza aparte (la pantalla la abre sin guardar).
+    Cada lámina con familia se vuelve a montar con su familia y su tipo, así
+    cada texto va a su sitio y lo que tapa la red de las historias queda
+    libre; lo añadido a mano conserva su sitio en %, y lo redondo, los logos
+    y los QR conservan su forma (un QR estirado no se lee). -> el documento."""
+    doc = C.limpiar_doc(doc)
+    viejo, nuevo = G.formato(doc["formato"]), G.formato(FORMATO_HISTORIAS)
+    if viejo["H"] / viejo["W"] > 1.7:
+        raise ErrorGraficas("este carrusel ya es vertical 9:16: ya vale para historias")
+    for lam in doc["laminas"]:
+        for c in lam["capas"]:
+            forma_fija = (c["tipo"] == "logo" or (c["tipo"] == "forma" and c.get("figura") == "elipse")
+                          or (c["tipo"] == "imagen" and (c.get("radio") == "elipse" or c.get("nombre") == "QR")))
+            if not forma_fija or not c["w"]:
+                continue
+            proporcion = (c["h"] / 100 * viejo["H"]) / (c["w"] / 100 * viejo["W"])
+            centro = c["y"] + c["h"] / 2
+            c["h"] = round(proporcion * c["w"] / 100 * nuevo["W"] / nuevo["H"] * 100, 6)
+            c["y"] = round(centro - c["h"] / 2, 6)
+    doc["formato"] = FORMATO_HISTORIAS
+    for i, lam in enumerate(doc["laminas"]):
+        n, tipo = lam.get("familia"), lam.get("tipo")
+        if tipo in TIPOS and n in FAMILIAS:
+            # lo que estaba vacío sigue vacío: sin esto, volvía el texto de muestra
+            vacios = {c["rol"]: "" for c in lam["capas"]
+                      if c["tipo"] == "texto" and c.get("rol") in ROLES and not c["txt"].strip()}
+            doc = montar_lamina(pincel, doc, i, n, tipo, kit, logo, logo_oscuro, vacios if tipo != "portada" else None, marca)
+    doc["nombre"] = f"{doc.get('nombre') or 'Carrusel'} (historias)"[:80]
+    return C.limpiar_doc(doc)
+
+
 def _ids_unicos(doc, indice):
     otras = {c["id"] for i, lam in enumerate(doc["laminas"]) if i != indice for c in lam["capas"]}
     for c in doc["laminas"][indice]["capas"]:

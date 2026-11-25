@@ -281,6 +281,39 @@ def qr(pincel):
         shutil.rmtree(raiz, ignore_errors=True)
 
 
+def historias(pincel):
+    print("«Hacer también las historias»: el mismo carrusel en 9:16")
+    for n in (3, 10, 15, 16):
+        doc = {"version": 2, "formato": "v45", "nombre": "Errores", "laminas": [{"capas": []}]}
+        doc, _av = K.carrusel_desde_texto(pincel, doc, n, TEXTO, "sustituir", None, None, None, "EstadoPlay")
+        doc["laminas"].insert(2, K.lamina(n, "precio", "v45", G.COLORES_DEFECTO, None, "EstadoPlay"))
+        f = G.formato("v45")
+        doc["laminas"][-1]["capas"].append({"tipo": "imagen", "id": "qr1", "nombre": "QR", "src": "", "x": 70, "y": 40,
+                                            "w": 22, "h": 22 * f["W"] / f["H"], "encuadre": {"x": 50, "y": 50, "zoom": 1}})
+        doc = C.limpiar_doc(doc)
+        h = K.historias(pincel, doc, None, None, None, "EstadoPlay")
+        fh = G.formato("h916")
+        ok(h["formato"] == "h916" and h["nombre"] == "Errores (historias)", f"familia {n}: en 9:16 y con su nombre")
+        ok(len(h["laminas"]) == len(doc["laminas"]) and [l.get("tipo") for l in h["laminas"]] == [l.get("tipo") for l in doc["laminas"]],
+           f"familia {n}: las mismas láminas, del mismo tipo")
+        ok(all(l.get("familia") == n for l in h["laminas"]), f"familia {n}: con su familia")
+        textos = lambda d: sorted(c["txt"] for l in d["laminas"] for c in l["capas"] if c["tipo"] == "texto" and c.get("rol") in K.ROLES)
+        ok(textos(h) == textos(doc), f"familia {n}: ni un texto se pierde")
+        qr_ = next(c for c in h["laminas"][-1]["capas"] if c.get("nombre") == "QR")
+        ok(abs(qr_["w"] / 100 * fh["W"] - qr_["h"] / 100 * fh["H"]) < 1, f"familia {n}: el QR sigue cuadrado")
+        for i in range(len(h["laminas"])):
+            _png, _a, medida = C.pintar(pincel, h, None, lambda _n: None, None, None, i)
+            ok(not medida["fuera"] and not medida["choca"], f"familia {n}, historia {i + 1}: nada en lo que tapa la red ni encimado {medida}")
+        ok(doc["formato"] == "v45", f"familia {n}: el carrusel de antes no se toca")
+    try:
+        K.historias(pincel, dict(doc, formato="h916"))
+        ok(False, "uno que ya es 9:16 se rechaza")
+    except G.ErrorGraficas:
+        ok(True, "uno que ya es 9:16 se rechaza")
+    js = open(os.path.join(AQUI, "..", "web", "graficas_editor.js"), encoding="utf-8").read()
+    ok("'/capas/historias'" in js and "Guarda primero este carrusel" in js, "el editor pide guardar antes y abre las historias aparte")
+
+
 def main():
     familias_nuevas()
     tarjeta_no_tapa_la_marca()
@@ -290,6 +323,7 @@ def main():
         pintadas(pincel)
         tipos_nuevos_pintados(pincel)
         qr(pincel)
+        historias(pincel)
     finally:
         pincel.cerrar()
     print(f"\n{CUENTA['ok']} comprobaciones bien, {CUENTA['mal']} mal")

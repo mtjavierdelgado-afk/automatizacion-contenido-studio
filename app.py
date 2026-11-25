@@ -24971,7 +24971,8 @@ def _auto_seguir(raiz, ficha, ahora_):
     if paso == "espera_ok":
         dec = AUTO.reconciliar(a, envios)
         if dec["paso"]:
-            f = PILOTO.cambiar_auto(raiz, ficha["id"], {"paso": dec["paso"]}, si_paso=(paso,))
+            cambios = dict(AUTO.sincronizar(a, envios), paso=dec["paso"])
+            f = PILOTO.cambiar_auto(raiz, ficha["id"], cambios, si_paso=(paso,))
             if f is not None and dec["paso"] == "publicado":
                 _auto_avisar(raiz, f, "publicado", clave="publicado")
             return dec["paso"] != "publicado"
@@ -24979,6 +24980,13 @@ def _auto_seguir(raiz, ficha, ahora_):
             _auto_mover(raiz, ficha, ahora_, "pasó sin tu OK")
         return False
     # en Upload-Post: publicando, programado, reprogramando, retirando, fallo
+    if paso in ("programado", "fallo"):
+        # programado o cambiado A MANO desde Publicar (otras redes, otra hora):
+        # el piloto, la página del móvil y la Parrilla dicen lo de verdad
+        cambios = AUTO.sincronizar(a, envios)
+        if cambios:
+            ficha = PILOTO.cambiar_auto(raiz, ficha["id"], cambios, si_paso=(paso,)) or ficha
+            a = ficha["auto"]
     dec = AUTO.reconciliar(a, envios)
     accion = dec["accion"]
     resumen = AUTO.resumen_envios(a, envios)

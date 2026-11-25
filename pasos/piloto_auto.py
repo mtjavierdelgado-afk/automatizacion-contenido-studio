@@ -821,6 +821,33 @@ def reconciliar(auto, envios):
     return {"paso": None, "aviso": "", "accion": ""}
 
 
+def sincronizar(auto, envios):
+    """UN VÍDEO, TRES SITIOS (pedido del dueño): si se programó o cambió desde
+    Publicar a mano (otras redes, otra hora), el piloto se pone al día con lo
+    que de verdad tiene Upload-Post. -> {redes?, hueco?} o {} si ya casa.
+
+    Las redes: las del vídeo más las que tienen un envío vivo suyo. La hora: la
+    del primer envío programado que aún no ha salido."""
+    propios = envios_del_intento(auto, envios)
+    vivos = [e for e in propios if e.get("estado") in ("programado", "enviando", "publicando",
+                                                       "publicado", "comprobar")]
+    if not vivos:
+        return {}
+    cambios = {}
+    redes = list((auto or {}).get("redes") or [])
+    for e in vivos:
+        if e.get("red") and e["red"] not in redes:
+            redes.append(e["red"])
+    if redes != list((auto or {}).get("redes") or []):
+        cambios["redes"] = redes
+    horas = sorted(str(e.get("cuando") or "")[:16] for e in vivos
+                   if e.get("estado") == "programado" and de_texto(str(e.get("cuando") or "")[:16]))
+    if horas and horas[0] != (auto or {}).get("hueco"):
+        cambios["hueco"] = horas[0]
+        cambios["hueco_fijado"] = True
+    return cambios
+
+
 # ================================================================ LO QUE SE ENSEÑA
 
 ETIQUETAS = {

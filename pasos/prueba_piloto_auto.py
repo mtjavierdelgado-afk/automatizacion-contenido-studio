@@ -301,6 +301,18 @@ def probar_envios():
     igual(A.reconciliar(rep, [envio("tiktok", "comprobar")])["accion"], "refrescar",
           "y con un «comprobar», nunca programa otra vez (saldría dos veces)")
 
+    print("\n  PROGRAMADO A MANO DESDE PUBLICAR (el piloto se pone al día)")
+    a = {"paso": "programado", "redes": ["tiktok"], "hueco": "2026-11-24T21:00", "envios_antes": []}
+    mano = [envio(r, "programado", f"m{r}") for r in ("tiktok", "instagram", "youtube")]
+    for e in mano:
+        e["cuando"] = "2026-11-25T16:00:00"
+    c = A.sincronizar(a, mano)
+    igual(c.get("redes"), ["tiktok", "instagram", "youtube"], "toma las redes que de verdad tiene Upload-Post")
+    igual(c.get("hueco"), "2026-11-25T16:00", "y la hora de verdad")
+    igual(A.sincronizar(dict(a, redes=["tiktok", "instagram", "youtube"], hueco="2026-11-25T16:00"), mano), {},
+          "si ya casa, no toca nada")
+    igual(A.sincronizar(a, []), {}, "sin envíos, nada")
+
     print("\n  LO QUE SE ENSEÑA")
     v = video_auto("2026-11-26T19:00", paso="programado", estado="listo",
                    redes=("tiktok", "youtube"))

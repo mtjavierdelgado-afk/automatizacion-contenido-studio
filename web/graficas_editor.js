@@ -1908,7 +1908,7 @@
     if (c.oculto || (c.opac != null && c.opac < 0.99) || c.recorte) return false;
     if (c.giro) {
       // girada: tapa si las cuatro esquinas de la lámina caen dentro de la caja
-      // girada (con 1 px de margen por el suavizado del borde). En píxeles,
+      // girada (con medio píxel de margen por el suavizado del borde). En píxeles,
       // porque x va en % del ancho e y en % del alto (árbitro del 25-11)
       if (!f) return false;
       const X = c.x * f.W / 100, Y = c.y * f.H / 100, W = c.w * f.W / 100, H = c.h * f.H / 100;
@@ -1918,7 +1918,7 @@
       const dentro = ([qx, qy]) => {
         const dx = qx - px, dy = qy - py;
         const rx = px + dx * cos - dy * sin, ry = py + dx * sin + dy * cos;
-        return rx >= X + 1 && rx <= X + W - 1 && ry >= Y + 1 && ry <= Y + H - 1;
+        return rx >= X + 0.5 && rx <= X + W - 0.5 && ry >= Y + 0.5 && ry <= Y + H - 0.5;
       };
       if (![[0, 0], [f.W, 0], [0, f.H], [f.W, f.H]].every(dentro)) return false;
     } else if (!(c.x <= 0.5 && c.y <= 0.5 && c.x + c.w >= 99.5 && c.y + c.h >= 99.5)) {

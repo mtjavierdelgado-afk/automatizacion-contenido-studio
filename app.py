@@ -24971,7 +24971,7 @@ def _auto_seguir(raiz, ficha, ahora_):
     if paso == "espera_ok":
         dec = AUTO.reconciliar(a, envios)
         if dec["paso"]:
-            cambios = dict(AUTO.sincronizar(a, envios), paso=dec["paso"])
+            cambios = dict(AUTO.sincronizar(a, envios, ahora_, _publicar().REDES), paso=dec["paso"])
             f = PILOTO.cambiar_auto(raiz, ficha["id"], cambios, si_paso=(paso,))
             if f is not None and dec["paso"] == "publicado":
                 _auto_avisar(raiz, f, "publicado", clave="publicado")
@@ -24983,9 +24983,13 @@ def _auto_seguir(raiz, ficha, ahora_):
     if paso in ("programado", "fallo"):
         # programado o cambiado A MANO desde Publicar (otras redes, otra hora):
         # el piloto, la página del móvil y la Parrilla dicen lo de verdad
-        cambios = AUTO.sincronizar(a, envios)
+        cambios = AUTO.sincronizar(a, envios, ahora_, _publicar().REDES)
         if cambios:
-            ficha = PILOTO.cambiar_auto(raiz, ficha["id"], cambios, si_paso=(paso,)) or ficha
+            # solo la hora (va cambiando mientras salen las redes): sin subir el
+            # rev, para no dar «se cambió en otro sitio» de más en el móvil
+            solo_hora = set(cambios) <= {"hueco", "hueco_fijado", "hueco_calendario"}
+            ficha = PILOTO.cambiar_auto(raiz, ficha["id"], cambios, si_paso=(paso,),
+                                        contar_rev=not solo_hora) or ficha
             a = ficha["auto"]
     dec = AUTO.reconciliar(a, envios)
     accion = dec["accion"]

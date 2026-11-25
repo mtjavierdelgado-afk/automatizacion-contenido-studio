@@ -312,6 +312,15 @@ def probar_envios():
     igual(A.sincronizar(dict(a, redes=["tiktok", "instagram", "youtube"], hueco="2026-11-25T16:00"), mano), {},
           "si ya casa, no toca nada")
     igual(A.sincronizar(a, []), {}, "sin envíos, nada")
+    viejo = envio("facebook", "programado", "mviejo")
+    viejo["cuando"] = "2026-11-20T10:00:00"
+    c = A.sincronizar(a, mano + [viejo], LUNES, REDES)
+    igual(c.get("hueco"), "2026-11-25T16:00", "un envío viejo sin refrescar no pone una hora pasada")
+    igual(c.get("redes"), ["tiktok", "instagram", "youtube", "facebook"], "las redes en el orden de siempre")
+    igual(c.get("hueco_calendario"), "2026-11-24T21:00", "y recuerda el hueco del calendario que tenía")
+    f = {"id": "x" * 12, "estado": "listo", "auto": dict(a, **c, cid="c1")}
+    ok("2026-11-24T21:00" in A.ocupados([f], "c1"),
+       "ese hueco sigue tomado: cambiar la hora en Publicar no hace (ni paga) otro vídeo")
 
     print("\n  LO QUE SE ENSEÑA")
     v = video_auto("2026-11-26T19:00", paso="programado", estado="listo",

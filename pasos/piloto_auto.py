@@ -395,8 +395,13 @@ def ocupa_hueco(ficha):
 
 def ocupados(fichas_piloto, cid):
     cid = clave_proyecto(cid)
-    return {f["auto"]["hueco"] for f in fichas_piloto
-            if ocupa_hueco(f) and clave_proyecto(f["auto"].get("cid")) == cid}
+    salida = set()
+    for f in fichas_piloto:
+        if ocupa_hueco(f) and clave_proyecto(f["auto"].get("cid")) == cid:
+            salida.add(f["auto"]["hueco"])
+            if f["auto"].get("hueco_calendario"):
+                salida.add(f["auto"]["hueco_calendario"])
+    return salida
 
 
 def hueco_libre(ficha, fichas_piloto, cid, ahora_, despues=None, quitar=None):
@@ -821,7 +826,7 @@ def reconciliar(auto, envios):
     return {"paso": None, "aviso": "", "accion": ""}
 
 
-def sincronizar(auto, envios):
+def sincronizar(auto, envios, ahora_=None, orden=None):
     """UN VÍDEO, TRES SITIOS (pedido del dueño): si se programó o cambió desde
     Publicar a mano (otras redes, otra hora), el piloto se pone al día con lo
     que de verdad tiene Upload-Post. -> {redes?, hueco?} o {} si ya casa.
@@ -838,13 +843,22 @@ def sincronizar(auto, envios):
     for e in vivos:
         if e.get("red") and e["red"] not in redes:
             redes.append(e["red"])
+    if orden:
+        redes = [x for x in orden if x in redes] + [x for x in redes if x not in orden]
     if redes != list((auto or {}).get("redes") or []):
         cambios["redes"] = redes
+    # solo horas FUTURAS: un envío viejo sin refrescar no cuenta
+    limite = _sin_zona(ahora_) if ahora_ is not None else None
     horas = sorted(str(e.get("cuando") or "")[:16] for e in vivos
-                   if e.get("estado") == "programado" and de_texto(str(e.get("cuando") or "")[:16]))
+                   if e.get("estado") == "programado" and de_texto(str(e.get("cuando") or "")[:16])
+                   and (limite is None or de_texto(str(e.get("cuando"))[:16]) > limite))
     if horas and horas[0] != (auto or {}).get("hueco"):
         cambios["hueco"] = horas[0]
         cambios["hueco_fijado"] = True
+        # el hueco del calendario que tenía SIGUE TOMADO: cambiar la hora en
+        # Publicar no tiene que hacer (y pagar) otro vídeo para ese hueco
+        if not (auto or {}).get("hueco_calendario") and (auto or {}).get("hueco"):
+            cambios["hueco_calendario"] = auto["hueco"]
     return cambios
 
 

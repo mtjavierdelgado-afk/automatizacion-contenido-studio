@@ -64,7 +64,7 @@ def destino(tipo, valor, mensaje=""):
         if partes.scheme.lower() not in ("http", "https") or "." not in partes.netloc:
             raise ErrorGraficas("esa dirección no parece una web (por ejemplo: crearia.tech)")
         if len(valor.encode("utf-8")) > MAX_WEB + len("https://"):
-            raise ErrorGraficas(f"esa dirección es larga para un QR (hasta {MAX_WEB} letras): usa la de tu página principal")
+            raise ErrorGraficas("esa dirección es demasiado larga para un QR (las tildes y la ñ ocupan más): usa la de tu página principal")
         return valor
     raise ErrorGraficas("el QR puede llevar tu WhatsApp o tu web")
 

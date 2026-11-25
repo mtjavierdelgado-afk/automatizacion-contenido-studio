@@ -37045,7 +37045,7 @@ async function carruselesEnLoteGraficas(cid) {
         // lo que avisó cada uno (p. ej. láminas que no cabían): que no se pierda sin decirlo
         const avisos = piezas.filter(p => (p.avisos || []).length).map(p => `«${p.nombre}»: ${p.avisos.join(' ')}`);
         toast(`${plural(piezas.length, 'carrusel hecho', 'carruseles hechos')}: ábrelos para revisar los textos de muestra antes de publicar.`
-          + (avisos.length ? ` Ojo: ${avisos.join(' · ')}` : ''), avisos.length > 0);
+          + (avisos.length ? ` Ojo: ${avisos.slice(0, 3).join(' · ')}${avisos.length > 3 ? ` y ${avisos.length - 3} más` : ''}` : ''), avisos.length > 0);
         break;
       }
       if (t.estado === 'error') { toast(t.error, true); break; }

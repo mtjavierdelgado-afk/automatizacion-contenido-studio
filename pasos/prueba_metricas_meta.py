@@ -143,6 +143,11 @@ class Falso(http.server.BaseHTTPRequestHandler):
             if auth != f"Bearer {TOKEN}":
                 return self._error(190, "token raro")
             ids = q["ids"].split(",")
+            if any(i.startswith("borrado") for i in ids):
+                # lo que da Meta de un id borrado (#100, subcódigo 33)
+                return self._error(100, "Unsupported get request. Object with ID 'borrado1' does not "
+                                        "exist, cannot be loaded due to missing permissions, or does "
+                                        "not support this operation")
             if any(i.startswith("bad") for i in ids):
                 return self._error(100, f"(#100) Tried accessing nonexisting field (bad id {ids})")
             # como Meta: las métricas de Reel pedidas para una foto o un
@@ -470,6 +475,25 @@ def prueba_publicar(base):
         ok(r6.get("motivo") == "sin_permiso" and "instagram_manage_insights" in m.get("meta_error", "")
            and not m.get("meta_al"),
            f"sin permiso ({modo}): la tarjeta lo dice, sin reloj ({m.get('meta_error')!r})")
+    # árbitro: un Reel BORRADO («missing permissions» en su mensaje) es cosa de
+    # ese vídeo, no del token: los demás se leen y nadie recibe el aviso de permiso
+    _video(raiz, "v7", [{"id": "e_borr", "red": "instagram", "estado": "a_mano", "post_id": "borrado1",
+                         "metricas": {}},
+                        {"id": "e_bien", "red": "instagram", "estado": "a_mano", "post_id": "reel1",
+                         "metricas": {}}])
+    r7 = P.medir_meta(raiz, ["v7"], forzar=True)
+    mb, mo = _envio(raiz, "v7", "e_borr")["metricas"], _envio(raiz, "v7", "e_bien")["metricas"]
+    ok(not r7.get("motivo") and mo.get("tiempo_medio_s") is not None
+       and "permiso" not in mb.get("meta_error", "") and mb.get("meta_al"),
+       f"un Reel borrado no corta la vuelta ni dice «falta un permiso» ({mb.get('meta_error')!r})")
+    # sin token a secas, ninguna tarjeta se toca (basta el aviso general)
+    _poner_token("")
+    _video(raiz, "v8", [{"id": "e_st", "red": "instagram", "estado": "a_mano", "post_id": "reel1",
+                         "metricas": {}}])
+    r8 = P.medir_meta(raiz, ["v8"], forzar=True)
+    _poner_token(TOKEN)
+    ok(r8.get("motivo") == "sin_token" and not _envio(raiz, "v8", "e_st")["metricas"],
+       "sin token: el aviso general, y las tarjetas sin tocar")
     # un id que Meta no contesta tampoco va el primero de la cola en cada vuelta
     _video(raiz, "v4", [{"id": "e_malo", "red": "instagram", "estado": "a_mano", "post_id": "bad7",
                          "metricas": {}},

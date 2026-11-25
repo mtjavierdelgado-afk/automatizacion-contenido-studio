@@ -4246,7 +4246,8 @@ AVISOS_META = {
 #: decía «Meta no ha devuelto las cifras de este vídeo»). Sin reloj: en cuanto
 #: se pone un token bueno, se vuelve a pedir.
 TARJETA_META = {
-    "sin_token": "falta el token de Meta en Configuración → Cuentas que te gustan",
+    # sin token a secas no se marca ninguna tarjeta: quien no usa Meta vería el
+    # aviso en todas; basta el aviso general de «Actualizar»
     "sin_permiso": "al token de Meta le falta un permiso (instagram_manage_insights para "
                    "Instagram, read_insights para Facebook)",
     "caducado": "el token de Meta ha caducado; genera uno nuevo",
@@ -4357,9 +4358,6 @@ def _medir_meta(raiz, pids, forzar, hasta, solo=None):
     # el propio cliente no empieza una llamada que no quepa entera en la franja
     cli.hasta = hasta
     if not getattr(cli, "simulado", False) and not cli.token:
-        sin = {}
-        _marcar_token(sin, envios, "sin_token")
-        _apuntar_meta(raiz, sin)
         return dict(vacio, errores=[AVISOS_META["sin_token"]], motivo="sin_token")
     leidos, hechos, errores = 0, 0, []
     resultados = {}                 # id del envio -> (pid, cifras|{"error"}, extra)
@@ -4445,6 +4443,8 @@ def _apuntar_meta(raiz, resultados):
                 cifras, extra = suyos[e["id"]]
                 m = dict(e.get("metricas") or {})
                 if cifras.get("error"):
+                    if cifras.get("sin_reloj") and m.get("meta_error") == str(cifras["error"])[:200]:
+                        continue    # ya lo dice: no se reescribe el fichero cada vez
                     m["meta_error"] = str(cifras["error"])[:200]
                     # con su reloj: un envío que Meta no contesta no se vuelve a
                     # preguntar hasta pasado el respiro (antes iba el primero de

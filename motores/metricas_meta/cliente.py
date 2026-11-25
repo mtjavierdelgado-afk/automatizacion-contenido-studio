@@ -293,8 +293,12 @@ class ClienteMeta:
             return ErrorMeta(f"Meta pide esperar un rato (demasiadas consultas): {mensaje}", "cupo")
         # sin el permiso de métricas, Meta no siempre da #10/#200: a veces un
         # #100 que nombra el permiso (prueba del servidor, 25-11)
-        falta = re.search(r"permission|instagram_manage_insights|read_insights|pages_read_engagement",
-                          mensaje, re.IGNORECASE)
+        # SOLO por el nombre del permiso: «missing permissions» a secas sale
+        # también en un id borrado (#100, subcódigo 33: «does not exist, cannot be
+        # loaded due to missing permissions…»), y eso es cosa del vídeo (árbitro)
+        falta = re.search(r"instagram_manage_insights|read_insights|pages_read_engagement",
+                          mensaje, re.IGNORECASE) and not re.search(r"does not exist", mensaje,
+                                                                    re.IGNORECASE)
         if num in (10, 200) or 200 <= num < 300 or (num == 100 and falta):
             return ErrorMeta("al token de Meta le falta un permiso (read_insights o "
                              f"instagram_manage_insights): {mensaje}", "sin_permiso")

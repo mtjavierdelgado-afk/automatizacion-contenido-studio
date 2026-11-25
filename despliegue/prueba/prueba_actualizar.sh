@@ -157,7 +157,10 @@ montar() {
   echo "# snippet viejo" > "$T/etc/nginx/snippets/asvs-proxy-largo.conf"
   cp "$T/etc/nginx/snippets/asvs-proxy-largo.conf" "$T/viejo/largo.conf"
   # el sitio, como lo deja certbot --nginx despues del instalador
-  plantilla_sitio "$DESPL/nginx-sitio.conf" ejemplo.test 8110 3000 > "$T/etc/nginx/sites-available/as-video-studio"
+  # (de ANTES de la pagina del cliente: sin su zona ni su location)
+  awk '/location \^~ \/cliente\//{salta=1} salta{ if ($0 ~ /^    }/) salta=0; next } /asvs_cliente/{next} {print}' \
+    "$DESPL/nginx-sitio.conf" > "$T/viejo/plantilla_sitio"
+  plantilla_sitio "$T/viejo/plantilla_sitio" ejemplo.test 8111 3000 > "$T/etc/nginx/sites-available/as-video-studio"
   cat >> "$T/etc/nginx/sites-available/as-video-studio" <<'EOF'
     listen 443 ssl http2; # managed by Certbot
     ssl_certificate /etc/letsencrypt/live/ejemplo.test/fullchain.pem; # managed by Certbot
@@ -251,8 +254,16 @@ ok '[ "$(date -r "$T/etc/systemd/system/as-video-login.service" +%Y)" = 2001 ]' 
 ok 'cmp -s "$T/etc/nginx/snippets/asvs-proxy-largo.conf" "$DESPL/asvs-proxy-largo.conf" && [ "$(date -r "$T/etc/nginx/snippets/asvs-proxy.conf" +%Y)" = 2001 ]' \
    "el snippet que cambio entra; el otro, ni se toca"
 ok 'grep -q "nginx -t" "$T/llamadas" && grep -q "systemctl reload nginx" "$T/llamadas"' "nginx -t y reload"
-ok 'cmp -s "$T/etc/nginx/sites-available/as-video-studio" "$T/viejo/sitio"' \
-   "el sitio que edito certbot queda tal cual (443, certificado, redireccion)"
+ok '! diff "$T/viejo/sitio" "$T/etc/nginx/sites-available/as-video-studio" | grep -q "^<"' "ni una sola linea quitada"
+ok '[ "$(grep -c "location ^~ /cliente/" "$T/etc/nginx/sites-available/as-video-studio")" = 1 ] && [ "$(grep -c "zone=asvs_cliente:" "$T/etc/nginx/sites-available/as-video-studio")" = 1 ]' \
+   "se le añade la pagina del cliente: su location y su zona, una vez"
+ok '[ "$(grep -n "location ^~ /cliente/" "$T/etc/nginx/sites-available/as-video-studio" | cut -d: -f1)" -lt "$(grep -n "location / {" "$T/etc/nginx/sites-available/as-video-studio" | cut -d: -f1)" ] && [ "$(grep -n "zone=asvs_cliente:" "$T/etc/nginx/sites-available/as-video-studio" | cut -d: -f1)" -lt "$(grep -n "^server {" "$T/etc/nginx/sites-available/as-video-studio" | head -1 | cut -d: -f1)" ]' \
+   "la location antes de «location / {» y la zona fuera de server"
+ok 'awk "/location \\^~ \\/cliente\\//,/}/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q "proxy_pass http://127.0.0.1:8111;"' \
+   "con el MISMO puerto que usa el estudio en ese sitio (8111)"
+ok 'awk "/location \\^~ \\/cliente\\//,/}/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q "limit_req zone=asvs_cliente" && ! awk "/location \\^~ \\/cliente\\//,/}/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q auth_request' \
+   "con su limite y SIN pasar por el login"
+ok 'grep -q "pagina del cliente" "$T/salida"' "y lo dice"
 ok 'grep -q "^exec /usr/bin/navegador-falso --no-sandbox --disable-dev-shm-usage" "$T/binarios/estudio-edge"' \
    "el lanzador del navegador, al dia y con el MISMO navegador"
 ok 'grep -qx "ESTUDIO_LOTES=3" "$T/raiz/datos/entorno" && grep -qx "PROPIA=la_mia" "$T/raiz/datos/entorno" && [ "$(grep -c "^PUERTO=" "$T/raiz/datos/entorno")" = 1 ] && [ "$(grep -c "^ESTUDIO_LOTES=" "$T/raiz/datos/entorno")" = 1 ]' \
@@ -261,6 +272,9 @@ ok 'grep -qx "ESTUDIO_EDGE=/usr/local/bin/estudio-edge" "$T/raiz/datos/entorno" 
    "y se le anaden las variables que faltaban"
 ok '[ -f "$T/raiz/anterior/config/lista" ] && [ "$(wc -l < "$T/raiz/anterior/config/lista")" -ge 4 ]' \
    "con copia de cada fichero cambiado en anterior/config"
+cp "$T/etc/nginx/sites-available/as-video-studio" "$T/sitio_tras_d"
+correr
+ok 'cmp -s "$T/etc/nginx/sites-available/as-video-studio" "$T/sitio_tras_d"' "actualizar otra vez no la vuelve a añadir"
 
 echo "[E] nginx -t falla: los snippets vuelven y nginx sigue como estaba"
 montar; touch "$T/nginx_roto"; correr; codigo=$?
@@ -269,6 +283,12 @@ ok 'cmp -s "$T/etc/nginx/snippets/asvs-proxy-largo.conf" "$T/viejo/largo.conf"' 
 ok '! grep -q "systemctl reload nginx" "$T/llamadas"' "y nginx no se recarga"
 ok 'grep -q "nginx NO acepta" "$T/salida"' "y se dice claramente"
 ok 'cmp -s "$T/etc/nginx/sites-available/as-video-studio" "$T/viejo/sitio"' "el sitio, intacto"
+ok 'grep -q "NO acepta la pagina del cliente" "$T/salida"' "y lo de la pagina del cliente tambien se dice"
+
+echo "[E2] un sitio sin «location / {»: no se toca y se avisa"
+montar; sed -i 's|location / {|location /otra {|' "$T/etc/nginx/sites-available/as-video-studio"; cp "$T/etc/nginx/sites-available/as-video-studio" "$T/viejo/raro"; correr; codigo=$?
+ok '[ $codigo -eq 0 ] && cmp -s "$T/etc/nginx/sites-available/as-video-studio" "$T/viejo/raro"' "sale bien y el sitio queda igual"
+ok 'grep -q "añadela a mano" "$T/salida"' "y dice que se añada a mano"
 
 echo "[F] falla algo al poner la configuracion (daemon-reload): se deshace y el estudio vuelve"
 montar; touch "$T/daemon_roto"; correr; codigo=$?

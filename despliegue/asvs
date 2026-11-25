@@ -225,6 +225,52 @@ _devolver() {
   done < <(tac "$copias/lista")
 }
 
+# _sitio_cliente <copias> <tmp>: la `location ^~ /cliente/` en el sitio de
+# nginx de un servidor ya instalado (ver _configurar). Idempotente: si ya esta
+# (`zone=asvs_cliente`), no toca nada.
+_sitio_cliente() {
+  local copias="$1" tmp="$2" sitio puerto
+  sitio="$NGINX/sites-available/as-video-studio"
+  [ -f "$sitio" ] || return 0
+  grep -q 'zone=asvs_cliente' "$sitio" && return 0
+  # el mismo destino que ya usa `location / {` (el puerto del estudio)
+  puerto="$(awk '/^[[:space:]]*location \/ \{/ {d=1} d && /proxy_pass http:\/\/127\.0\.0\.1:[0-9]+/ {
+              match($0, /127\.0\.0\.1:[0-9]+/); print substr($0, RSTART + 10, RLENGTH - 10); exit }' "$sitio")"
+  if [ -z "$puerto" ]; then
+    no "no encuentro «location / {» con su proxy_pass en el sitio de nginx: la pagina del cliente (/cliente/) no se abre"
+    echo "    (añadela a mano: ver despliegue/nginx-sitio.conf)"
+    return 0
+  fi
+  awk -v puerto="$puerto" '
+    !zona && /^[[:space:]]*server[[:space:]]*\{/ {
+      print "# La pagina del CLIENTE (publicar-redes-3): sin login, la protege el token del enlace."
+      print "limit_req_zone $binary_remote_addr zone=asvs_cliente:10m rate=60r/m;"
+      print ""; zona = 1
+    }
+    !loc && /^[[:space:]]*location \/ \{/ {
+      print "    # ---- La pagina del cliente: sin login, solo /cliente/ (asvs actualizar) ----"
+      print "    location ^~ /cliente/ {"
+      print "        limit_req zone=asvs_cliente burst=40 nodelay;"
+      print "        limit_req_status 429;"
+      print "        client_max_body_size 16k;"
+      print "        proxy_pass http://127.0.0.1:" puerto ";"
+      print "        include /etc/nginx/snippets/asvs-proxy-largo.conf;"
+      print "    }"
+      print ""; loc = 1
+    }
+    { print }' "$sitio" > "$tmp"
+  _poner "$tmp" "$sitio" 644 "$copias" || return 0
+  if nginx -t >/dev/null 2>&1; then
+    si "nginx: la pagina del cliente (/cliente/) abierta sin login"
+    systemctl reload nginx || no "nginx no se ha podido recargar: mira  systemctl status nginx"
+  else
+    _devolver "$copias" "$sitio"
+    no "nginx NO acepta la pagina del cliente: he dejado el sitio como estaba (sin /cliente/)"
+    echo "    (para ver por que:  nginx -t)"
+  fi
+  return 0
+}
+
 # LA CONFIGURACION DEL SERVIDOR, AL DIA (revision 16-10-2026). Antes
 # `actualizar` solo traia el codigo: una unidad de systemd, un snippet de
 # nginx o el lanzador del navegador nuevos no llegaban nunca a un servidor ya
@@ -271,6 +317,14 @@ _configurar() {
       echo "    (sin recargar; para ver por que:  nginx -t)"
     fi
   fi
+
+  # LA PAGINA DEL CLIENTE (publicar-redes-3, 25-11-2026): `/cliente/` es lo
+  # unico del estudio que se abre SIN login (el cliente aprueba un video con
+  # un enlace privado). El sitio no se regenera (lo edito certbot): solo se le
+  # AÑADEN dos piezas, una vez, y con copia: la zona del limite de peticiones
+  # arriba del todo y la `location` justo antes de `location / {`. Si nginx no
+  # las acepta, el sitio vuelve a como estaba y el resto sigue.
+  _sitio_cliente "$copias" "$tmp"
 
   # El lanzador del navegador, con el MISMO navegador que ya tiene puesto.
   binario="$(sed -n 's/^exec \([^ ]*\) .*/\1/p' "$BIN/estudio-edge" 2>/dev/null | head -1 || true)"

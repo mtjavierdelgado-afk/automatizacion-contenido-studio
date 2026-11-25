@@ -3049,6 +3049,17 @@ def proxima_hora(hora):
 
 # ---------------------------------------------------------------- enviar
 
+def _espera_al_cliente(raiz, pid, huella=""):
+    """«pendiente» o «cambios» si el vídeo espera al cliente (pasos/aprobacion.py);
+    "" si no. Si el módulo falla, no se bloquea nada que antes salía."""
+    try:
+        from pasos import aprobacion
+    except ImportError:                                     # pragma: no cover
+        import aprobacion
+    return aprobacion.espera_al_cliente(raiz, pid, huella)
+
+
+
 def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
     """Prepara un envío por red y, si está confirmado, lo sube.
 
@@ -3068,6 +3079,18 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
         raise ErrorPublicar("este vídeo todavía no está montado: móntalo antes de publicarlo", 409)
     if modo != "pendiente" and cuerpo.get("confirmado") is not True:
         raise ErrorPublicar("falta confirmar el envío: nada sale sin tu OK", 400)
+    # LA APROBACIÓN DEL CLIENTE (publicar-redes-3): con un enlace vigente que el
+    # cliente no ha aprobado, el vídeo no sale (quedar en «espera tu OK», sí)
+    espera = (_espera_al_cliente(raiz, pid, info.get("mp4_huella") or "")
+              if modo != "pendiente" else "")
+    if espera:
+        raise ErrorPublicar(
+            ("el cliente ha pedido cambios en este vídeo" if espera == "cambios" else
+             "el vídeo se ha vuelto a montar después de que el cliente lo aprobara"
+             if espera == "cambiado" else
+             "el cliente todavía no ha aprobado este vídeo")
+            + ": no sale hasta que lo apruebe. Si quieres publicarlo igualmente, anula "
+              "su enlace en «Aprobación del cliente».", 409)
     cuando = None
     if modo in ("programar", "pendiente") and cuerpo.get("cuando"):
         momento = _leer_momento(cuerpo.get("cuando"))

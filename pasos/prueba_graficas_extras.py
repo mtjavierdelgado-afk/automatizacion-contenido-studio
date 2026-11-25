@@ -315,6 +315,42 @@ def historias(pincel):
             _png, _a, medida = C.pintar(pincel, h, None, lambda _n: None, None, None, i)
             ok(not medida["fuera"] and not medida["choca"], f"familia {n}, historia {i + 1}: nada en lo que tapa la red ni encimado {medida}")
         ok(doc["formato"] == "v45", f"familia {n}: el carrusel de antes no se toca")
+    # lo que vio el dueño (25-11): un QR en la PORTADA pasaba a ser la foto de fondo de la plantilla
+    for rol in ("qr", ""):                                  # el de ahora y uno guardado antes (solo por su nombre)
+        base = {"version": 2, "formato": "v45", "nombre": "Prueba", "laminas": [{"capas": []}]}
+        base, _av = K.carrusel_desde_texto(pincel, base, 10, TEXTO, "sustituir", None, None, None, "Estado Play")
+        f = G.formato("v45")
+        base["laminas"][0]["capas"].append({"tipo": "imagen", "id": "qrp", "nombre": "QR", "rol": rol, "src": "img_0123456789abcdef.jpg",
+                                            "x": 60, "y": 10, "w": 26, "h": 26 * f["W"] / f["H"], "encuadre": {"x": 50, "y": 50, "zoom": 1}})
+        h = K.historias(pincel, C.limpiar_doc(base), None, None, None, "Estado Play")
+        portada = h["laminas"][0]["capas"]
+        qr_ = [c for c in portada if c["tipo"] == "imagen" and c["src"] == "img_0123456789abcdef.jpg"]
+        ok(len(qr_) == 1 and qr_[0]["id"] == "qrp" and not qr_[0].get("oculto"),
+           f"QR en la portada ({rol or 'de antes'}): sigue siendo su capa en las historias, no el fondo")
+        ok(abs(qr_[0]["w"] / 100 * 1080 - qr_[0]["h"] / 100 * 1920) < 1, f"QR en la portada ({rol or 'de antes'}): y cuadrado")
+        m = C.montar(pincel, 10, "v45", C.limpiar_doc(base), None, None, None, None, 0)
+        ok(any(c.get("id") == "qrp" for c in m["laminas"][0]["capas"]) and
+           not any(c["tipo"] == "imagen" and c.get("rol") == "foto" and c["src"] == "img_0123456789abcdef.jpg" for c in m["laminas"][0]["capas"]),
+           f"«Volver a montar» la portada tampoco usa el QR como foto ({rol or 'de antes'})")
+    # y cualquier foto puesta a mano en la portada (árbitro, 4.ª vuelta): se queda donde está
+    for n in (1, 2, 10, 16):
+        base = {"version": 2, "formato": "v45", "nombre": "Prueba", "laminas": [{"capas": []}]}
+        base, _av = K.carrusel_desde_texto(pincel, base, n, TEXTO, "sustituir", None, None, None, "Estado Play")
+        base["laminas"][0]["capas"].append({"tipo": "imagen", "id": "mia1", "nombre": "Foto", "rol": "", "src": "img_00000000000000aa.jpg",
+                                            "x": 62, "y": 8, "w": 30, "h": 20, "encuadre": {"x": 50, "y": 50, "zoom": 1}})
+        base = C.limpiar_doc(base)
+        for que, d in (("historias", K.historias(pincel, base, None, None, None, "Estado Play")),
+                       ("otra familia", K.montar_todas(pincel, base, 3 if n != 3 else 4, None, None, None, "Estado Play")),
+                       ("volver a montar la portada", C.montar(pincel, 5, "v45", base, None, None, None, None, 0))):
+            mias = [c for c in d["laminas"][0]["capas"] if c["tipo"] == "imagen" and c["src"] == "img_00000000000000aa.jpg"]
+            ok(len(mias) == 1 and mias[0]["id"] == "mia1" and mias[0]["w"] == 30 and not mias[0].get("oculto"),
+               f"familia {n}, {que}: la foto puesta a mano en la portada sigue siendo su capa, del mismo ancho")
+    # una pieza suelta (una lámina) sigue como siempre: su primera foto pasa a la foto de la plantilla
+    suelta = C.limpiar_doc({"version": 2, "formato": "v45", "laminas": [{"capas": [
+        {"tipo": "imagen", "id": "sola", "src": "img_00000000000000bb.jpg", "x": 10, "y": 10, "w": 30, "h": 20}]}]})
+    m = C.montar(pincel, 2, "v45", suelta, None, None, None, None, 0)
+    ok(any(c["tipo"] == "imagen" and c.get("rol") == "foto" and c["src"] == "img_00000000000000bb.jpg" for c in m["laminas"][0]["capas"]),
+       "una pieza suelta sigue como siempre: su foto pasa a la de la plantilla")
     try:
         K.historias(pincel, dict(doc, formato="h916"))
         ok(False, "uno que ya es 9:16 se rechaza")

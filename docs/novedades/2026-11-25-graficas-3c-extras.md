@@ -23,6 +23,10 @@
   Sheets (columnas familia, titular y una por lámina).
 - El botón **Tachado** en los textos, y la nota del carrusel te recuerda que
   un precio tachado tiene que ser el que cobrabas de verdad.
+- En la **portada de un carrusel**, las fotos y los QR que pones tú se quedan
+  donde los pusiste al hacer las historias, cambiar de familia o «Volver a
+  montar» (antes la primera pasaba a ser el fondo y desaparecía). Para cambiar
+  la foto de fondo, usa «Poner una foto» en la foto de la plantilla.
 - Arreglos: en historias, la tarjeta de «Tarjeta flotante» ya no tapa la
   marca de arriba, y un carrusel sin nombre se llama como su portada (antes,
   como la lámina que tuvieras abierta al guardar).

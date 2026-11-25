@@ -1667,7 +1667,7 @@
       const ancho = o.ancho || 60;
       let w = ancho, h = ancho * f.W / f.H * ratio;
       if (h > 80) { w = w * 80 / h; h = 80; }
-      const c = capaNueva('imagen', { nombre: o.nombre || 'Foto', src: nombre, encuadre: { x: 50, y: 50, zoom: 1 }, radio: 0, borde: null, sombra: [], w, h, x: cx - w / 2, y: cy - h / 2 });
+      const c = capaNueva('imagen', { nombre: o.nombre || 'Foto', rol: o.rol || '', src: nombre, encuadre: { x: 50, y: 50, zoom: 1 }, radio: 0, borde: null, sombra: [], w, h, x: cx - w / 2, y: cy - h / 2 });
       lam.capas.push(c);
       ED.sel = [c.id];
     }
@@ -1723,7 +1723,7 @@
       if (ED !== yo || !capaVista.isConnected) return;
       cerrarModal();
       try {
-        await ponerFoto(r.nombre, null, { ancho: 26, nombre: 'QR', lamina: laminaDeAntes, aviso: `QR listo: lleva a ${r.destino}. Pruébalo con tu móvil antes de publicar.` });
+        await ponerFoto(r.nombre, null, { ancho: 26, nombre: 'QR', rol: 'qr', lamina: laminaDeAntes, aviso: `QR listo: lleva a ${r.destino}. Pruébalo con tu móvil antes de publicar.` });
       } catch (e) {
         if (ED === yo) avisoPantalla(`No se ha podido poner el QR: ${e.message}`, true);
       }
@@ -1857,7 +1857,7 @@
     const f = ED.cat.formatos.find(x => x.id === nuevo);
     if (!f || f.id === viejo.id) return;
     for (const c of ED.doc.laminas.flatMap(l => l.capas)) {
-      const redonda = (c.tipo === 'forma' && c.figura === 'elipse') || (c.tipo === 'imagen' && (c.radio === 'elipse' || c.nombre === 'QR')) || c.tipo === 'logo' || c.tipo === 'icono';
+      const redonda = (c.tipo === 'forma' && c.figura === 'elipse') || (c.tipo === 'imagen' && (c.radio === 'elipse' || c.rol === 'qr' || c.nombre === 'QR')) || c.tipo === 'logo' || c.tipo === 'icono';
       if (!redonda) continue;
       const wpx = c.w / 100 * viejo.W, hpx = c.h / 100 * viejo.H;
       // lo que era redondo (o un logo) conserva su forma: el alto se ajusta al ancho

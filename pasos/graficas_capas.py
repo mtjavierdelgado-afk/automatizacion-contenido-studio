@@ -1255,8 +1255,13 @@ def contar_lineas(pincel):
 _ROLES_DE_PLANTILLA = frozenset(G.CAMPOS) | {"deco", "fondo", "foto", "logo"}
 
 
+def es_qr(capa):
+    """¿Es el QR de «＋ QR»? (rol «qr»; los de antes del 25-11, por su nombre)."""
+    return capa.get("tipo") == "imagen" and (capa.get("rol") == "qr" or capa.get("nombre") == "QR")
+
+
 def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=None, logo_oscuro=None, lamina=0,
-           ocultar_sin_sitio=False):
+           ocultar_sin_sitio=False, solo_foto_de_plantilla=None):
     """«Volver a montar» y «Empezar de»: la plantilla `plantilla` en el tamaño
     `formato`, convertida en capas, con los textos y colores de `doc`.
 
@@ -1274,6 +1279,12 @@ def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=Non
       plantilla nueva no usa se quedan, pero ocultos; encima, donde estaban,
       pisaban a los de la plantilla (el texto de apoyo sobre el botón de la
       plantilla 10, prueba del 24-11). El ojo de la lista los enseña.
+    - `solo_foto_de_plantilla` (por defecto, en la portada de un carrusel con
+      familia; graficas-3c-extras):
+      solo la foto de la propia plantilla va de fondo; las fotos y los QR que
+      añadiste tú se quedan donde los pusiste (antes la primera pasaba a ser el
+      fondo y desaparecía como capa: visto por el dueño el 25-11 al hacer las
+      historias).
     Solo cambia la lámina `lamina`. No escribe nada."""
     if type(plantilla) is not int or plantilla not in G._PL.PLANTILLAS:
         raise ErrorGraficas("esa plantilla no existe")
@@ -1283,14 +1294,21 @@ def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=Non
     if type(lamina) is not int or not 0 <= lamina < len(doc["laminas"]):
         raise ErrorGraficas("esa lámina no está")
     textos = textos if isinstance(textos, dict) else {}
+    if solo_foto_de_plantilla is None:
+        # la portada de un carrusel con familia (la que se vuelve a montar sola
+        # al hacer las historias o cambiar de familia); una pieza de siempre, como antes
+        lam = doc["laminas"][lamina]
+        solo_foto_de_plantilla = lam.get("tipo") == "portada" and bool(lam.get("familia"))
     capas = doc["laminas"][lamina]["capas"]
     de_la_pieza = {}
     for capa in capas:
         if capa["tipo"] == "texto" and capa["rol"] in G.CAMPOS and capa["txt"].strip():
             de_la_pieza.setdefault(capa["rol"], capa)
     # la foto de la plantilla; si no hay, la primera que añadiste tú
+    # (nunca un QR: estirado como fondo no se lee y se pierde como capa; visto por el dueño el 25-11)
     foto = (next((c for c in capas if c["tipo"] == "imagen" and c["src"] and c["rol"] == "foto"), None)
-            or next((c for c in capas if c["tipo"] == "imagen" and c["src"]), None))
+            or (None if solo_foto_de_plantilla else
+                next((c for c in capas if c["tipo"] == "imagen" and c["src"] and not es_qr(c)), None)))
     pieza_textos = {}
     for campo, (_, largo) in G.CAMPOS.items():
         crudo = de_la_pieza[campo]["txt"] if campo in de_la_pieza else str(textos.get(campo) or "")

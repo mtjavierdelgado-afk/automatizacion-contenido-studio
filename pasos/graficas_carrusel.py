@@ -837,7 +837,7 @@ def historias(pincel, doc, kit=None, logo=None, logo_oscuro=None, marca=""):
     for lam in doc["laminas"]:
         for c in lam["capas"]:
             forma_fija = (c["tipo"] in ("logo", "icono") or (c["tipo"] == "forma" and c.get("figura") == "elipse")
-                          or (c["tipo"] == "imagen" and (c.get("radio") == "elipse" or c.get("nombre") == "QR")))
+                          or (c["tipo"] == "imagen" and (c.get("radio") == "elipse" or C.es_qr(c))))
             if not forma_fija or not c["w"]:
                 continue
             proporcion = (c["h"] / 100 * viejo["H"]) / (c["w"] / 100 * viejo["W"])

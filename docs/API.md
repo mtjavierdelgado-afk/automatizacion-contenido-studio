@@ -384,10 +384,16 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/clientes/{cid}/negocio` | Crea o cambia la ficha del negocio de un proyecto: {nombre, reglas?, |
 | `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee; sin nombres de proyectos con clave). |
 | `GET` | `/api/dominios` | El negocio general y las fichas de los clientes (Etapa Foto C). |
+| `GET` | `/api/graficas/carrusel/catalogo` | Las familias (una por plantilla) y los tipos de lámina. |
 | `GET` | `/api/graficas/catalogo` | — |
 | `GET` | `/api/graficas/tipografia/{fichero}` | Una letra de la lista, para que el editor escriba con la misma que el PNG. |
-| `POST` | `/api/graficas/{cid}/capas` | Una pieza nueva que nace en capas. |
+| `POST` | `/api/graficas/{cid}/capas` | Una pieza nueva que nace en capas (un carrusel, como trabajo: 202). |
+| `POST` | `/api/graficas/{cid}/capas/lamina` | Una lámina de un carrusel: `donde` (posición) añade una nueva del `tipo` |
 | `POST` | `/api/graficas/{cid}/capas/montar` | «Volver a montar» y «Empezar de»: la plantilla en el tamaño pedido, en |
+| `POST` | `/api/graficas/{cid}/capas/montar-todas` | «Volver a montar a todas» con una familia (las «En blanco» no se tocan). |
+| `POST` | `/api/graficas/{cid}/capas/nota` | La nota del carrusel (sin IA): portada, segunda portada, una idea por |
+| `POST` | `/api/graficas/{cid}/capas/partir` | «Partir un texto en láminas», sin IA: cada párrafo, una lámina. |
+| `GET` | `/api/graficas/{cid}/capas/trabajo/{tid}` | Cómo va el guardado de un carrusel: láminas hechas, y al acabar lo que |
 | `POST` | `/api/graficas/{cid}/capas/vista` | La vista de una pieza en capas tal como saldría. No guarda nada. |
 | `POST` | `/api/graficas/{cid}/imagen` | — |
 | `POST` | `/api/graficas/{cid}/imagen/de-plano` | Copia la imagen ya hecha de un plano de un vídeo DE ESTE proyecto. Gratis. |
@@ -400,9 +406,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/graficas/{cid}/piezas/{pieza_id}` | — |
 | `PUT` | `/api/graficas/{cid}/piezas/{pieza_id}` | — |
 | `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/capas` | La pieza en capas: la guardada si sigue valiendo, o la pieza de siempre |
-| `PUT` | `/api/graficas/{cid}/piezas/{pieza_id}/capas` | Guarda la versión en capas de una pieza, al lado de la de siempre. |
+| `PUT` | `/api/graficas/{cid}/piezas/{pieza_id}/capas` | Guarda la versión en capas de una pieza, al lado de la de siempre. Un |
 | `POST` | `/api/graficas/{cid}/piezas/{pieza_id}/comparar` | Pinta la pieza como siempre y convertida en capas, y dice si salen |
 | `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/fichero.{extension}` | El PNG o JPG de la pieza. Con `?antes=1`, la de siempre aunque haya una |
+| `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/lamina/{n}.{extension}` | Una lámina sola (desde 1), en PNG o JPG. |
+| `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/laminas.pdf` | El carrusel en PDF para LinkedIn: los JPG tal cual, sin «Desliza →». |
+| `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/laminas.zip` | Todas las láminas en un ZIP (JPG o PNG), con sus textos alternativos. |
+| `POST` | `/api/graficas/{cid}/piezas/{pieza_id}/laminas/preparar` | «Preparar las láminas»: vuelve a guardar lo último guardado, como trabajo |
 | `POST` | `/api/graficas/{cid}/vista` | Las miniaturas de los diseños con estos datos. No guarda nada. |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
@@ -592,3 +602,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 ---
 
 **477 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**468 endpoints.** Escrito por `generar_api.py` desde `app.py`.

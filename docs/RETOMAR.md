@@ -643,3 +643,64 @@ cachean como `app.js` (están en `ASSETS_SELLADOS`).
   Escape al renombrar no guarda; Supr no borra lo bloqueado; cerrar quita todos
   los oyentes; las letras se registran una vez por página.
 
+
+## 13. Gráficas: carruseles e historias (19-11-2026, rama `graficas-3-carrusel`)
+
+Una pieza en capas puede tener de 1 a 20 láminas. Lo que no se ve leyendo el
+código:
+
+- **Una pieza de UNA lámina sale igual que antes**: el PNG y el JPG, byte a
+  byte (comprobado por el árbitro guardando con `main` y con la rama). Su
+  `capas.json` puede llevar además `origen.envio` y el `id` de la lámina, que
+  `main` no mira. Todo lo nuevo
+  del documento es opcional y solo se escribe si está: en la lámina `id`,
+  `tipo`, `familia` y `alt`; en la capa `enlace`, `salvo` (primera, ultima,
+  pdf) y `solo_horizontal`. `{n}/{total}` solo se sustituye con más de una
+  lámina. Los ids de lámina son `l1..ln` y deterministas (con ids al azar, «las
+  otras láminas no se tocan» fallaba al comparar).
+- **«En todas» son copias enlazadas**, no una capa compartida: cada lámina
+  lleva su copia con el mismo `enlace`, y el editor (`sincronizarEnlaces`, en
+  cada `commit`) copia a las demás lo que cambió salvo `id`, `oculto` y
+  `enlace`. Volver a una versión de `main` sin esta rama pierde los enlaces
+  (quedan como capas sueltas) y enseña `{n}/{total}` tal cual: no rompe nada.
+- **Guardar más de una lámina es un trabajo** (202 con `{trabajo, total}` y
+  `GET /capas/trabajo/{tid}`): se pinta por láminas, cede el turno cada 5 y
+  reutiliza las que no cambiaron por su huella (sha de `PINTOR` + lo que falta
+  + el HTML). Medido en 2 núcleos (19-11): 20
+  láminas nuevas con 4 fotos cada una, unos 17-18 s; volver a guardar con una
+  cambiada, menos de 2 s. **Si cambias cómo se pinta, sube `PINTOR`** o se servirán
+  láminas viejas. Ficheros: `capas_<guardado>/NN.png|jpg|pdf.jpg` y
+  `huellas.json`; `capas.png` es la lámina 1. Solo se guardan las huellas: el
+  HTML de cada lámina (con sus fotos en base64) se arma justo antes de
+  pintarla; tenerlos todos a la vez eran 600 MB–1,7 GB con 20 láminas de 8
+  fotos (árbitro del 24-11). Si el editor se cierra, el trabajo sigue en el
+  servidor; si se reabre antes de que acabe, abre lo de antes y «Guardar» da
+  el 409 «ya se está guardando». Con la red cortada, tras 8 fallos el editor
+  mira si lo suyo se guardó por `origen.envio`; en una pieza NUEVA no puede, y
+  avisa de mirar la lista antes de volver a guardar (si no, nacería dos veces).
+- **Descargas** (ZIP, PDF de LinkedIn y una lámina, `/lamina/{n}.{ext}`,
+  que hoy no usa ninguna pantalla) se leen bajo `cerrojo_pieza`. El número de
+  láminas sale de la ficha pequeña o, si no lo trae (la escribió `main`, o se
+  cortó un guardado), de `capas.json` (`graficas._con_laminas`). Si falta la
+  carpeta de láminas de ese guardado (un carrusel guardado otra vez con
+  `main`), dan 409 y la tarjeta ofrece «Preparar las láminas», que vuelve a
+  guardar como trabajo. El texto alternativo vacío sale de los textos de la
+  lámina (`alt_de_textos`). El PDF mete los JPG tal cual (DCTDecode, sin
+  recomprimir) y el título en UTF-16.
+- **Las familias** (`pasos/graficas_carrusel.py`): cada plantilla es una
+  familia; su portada es la plantilla (`C.montar` con `textos_de_portada`) y
+  las láminas de dentro salen de `_componer` (7 tipos, vertical y horizontal;
+  en horizontal solo `TIPOS_HORIZONTAL`). Los textos decorativos (comillas,
+  números grandes) llevan rol `deco` para que «Montar esta lámina» no los
+  duplique. Los colores salen del Kit por contraste (`_acento_sobre`); lo «en
+  todas» busca un color que se lea en el fondo Y en el alterno
+  (`_legible_en_todos`); si no hay, no sale en el cierre (`salvo` += ultima).
+- **La calidad de las familias está medida**, no mirada:
+  `prueba_graficas_carrusel` pinta más de 500 láminas (14 familias × 8 tipos ×
+  formatos × 3 Kits, uno oscuro y uno de poco contraste) y mide en Chromium que
+  ningún texto se salga (tolerancia 0,12 del tamaño de letra: la tinta de Anton
+  sobresale de su caja), que nada pise a otro texto ni cruce un adorno, el
+  contraste y la letra mínima. Si añades un adorno o un tipo, entra solo ahí.
+- **Partir un texto** es determinista (sin IA): primer párrafo, portada;
+  viñetas, lista (más de 5, en varias); una cifra corta, dato; lo demás,
+  puntos 01, 02…; el último, cierre. En horizontal las listas van como punto.

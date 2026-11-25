@@ -84,6 +84,7 @@ QUE_PRUEBA = {
     "pasos/prueba_choques_reglas.py": "las reglas que se contradicen",
     "pasos/prueba_graficas_capas.py": "Gráficas en capas: las 14 plantillas salen iguales",
     "pasos/prueba_graficas_editor.py": "Gráficas: el editor con capas (montar, letras, logo, la pantalla igual que el PNG)",
+    "pasos/prueba_graficas_carrusel.py": "Gráficas: los carruseles (láminas, «en todas», {n}/{total} y una lámina igual que antes)",
     "pasos/prueba_ramas_sin_choques.py": "las novedades y el recorrido de cada rama",
     "herramientas/prueba_herramientas_prueba.py": "estas mismas herramientas de prueba",
     "prueba_recorrido.py": "la pantalla entera, botón por botón",

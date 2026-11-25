@@ -354,7 +354,7 @@ def cuentas():
         malos = [i for i, (a, b) in enumerate(zip(datos["salida"], esperado)) if a[clave] != b[clave]]
         ok(not malos, f"{que}: igual en la pantalla y en el PNG"
            + (f" (caso {malos[0]}: {datos['salida'][malos[0]][clave]!r} != {esperado[malos[0]][clave]!r})" if malos else ""))
-    ok(datos["limites"] == {"capas": C.MAX_CAPAS, "fotos": C.MAX_FOTOS, "texto": C.MAX_TEXTO},
+    ok(datos["limites"] == {"capas": C.MAX_CAPAS, "fotos": C.MAX_FOTOS, "logos": C.MAX_LOGOS, "texto": C.MAX_TEXTO},
        "los topes de la pantalla son los del servidor")
     ok(set(datos["muestra"]) == set(G.CAMPOS), "los textos de muestra cubren todos los campos de las plantillas")
 

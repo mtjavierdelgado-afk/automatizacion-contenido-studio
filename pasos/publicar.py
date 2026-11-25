@@ -4174,6 +4174,8 @@ def _segunda_pasada_meta(raiz, pids, arranque, r):
     publicado llega a Meta sin numero y se quedaria sin retencion hasta el
     siguiente «Actualizar». Si queda tiempo en la peticion, una segunda vuelta
     SOLO para los que nunca leyo Meta y ya tienen numero."""
+    if (r.get("meta") or {}).get("motivo") or (r.get("meta") or {}).get("a_medias"):
+        return              # la primera vuelta ya dijo que no (caducado, cupo, red…)
     if meta_sin_leer := _envios_meta(raiz, pids, False, solo_nunca=True):
         hasta = min(time.time() + TOPE_META_S, arranque + TOPE_VUELTA_S - 1)
         if not _cabe(hasta):
@@ -4181,8 +4183,12 @@ def _segunda_pasada_meta(raiz, pids, arranque, r):
         m = medir_meta(raiz, pids, hasta=hasta, solo={e["id"] for _p, e in meta_sin_leer})
         if m.get("ocupado"):
             return
-        previo = r.get("meta") or {}
-        r["meta"] = {k: (previo.get(k) or 0) + (m.get(k) or 0) for k in ("leidos", "actualizados")}
+        previo = dict(r.get("meta") or {})
+        for k in ("leidos", "actualizados"):
+            previo[k] = (previo.get(k) or 0) + (m.get(k) or 0)
+        if m.get("motivo"):
+            previo["motivo"] = m["motivo"]
+        r["meta"] = previo
         if m.get("errores"):
             vistos = set(r.get("errores") or [])
             r["errores"] = (r.get("errores") or []) + [x for x in m["errores"] if x not in vistos]
@@ -4233,6 +4239,7 @@ AVISOS_META = {
     "cupo": "Instagram y Facebook: Meta pide esperar un rato; vuelve a pulsar «Actualizar» "
             "más tarde",
     "red": "Instagram y Facebook: no se ha podido hablar con Meta esta vez",
+    "tiempo": "Instagram y Facebook: no dio tiempo a todo esta vez; vuelve a pulsar «Actualizar»",
 }
 
 
@@ -4262,6 +4269,11 @@ def _envios_meta(raiz, pids, forzar, solo_nunca=False, solo=None):
             if not (e.get("meta_id") or e.get("post_id")):
                 continue
             if solo is not None and e.get("id") not in solo:
+                continue
+            # Meta solo da la retención de los Reels: lo que salió como otra
+            # cosa (un carrusel, una foto) no se le pregunta
+            if e["red"] == "instagram" and e.get("tipo") \
+                    and str(e["tipo"]).strip().lower() != "reel":
                 continue
             m_e = e.get("metricas") or {}
             if solo_nunca and (m_e.get("meta_al") or m_e.get("meta_error")):
@@ -4321,6 +4333,8 @@ def _medir_meta(raiz, pids, forzar, hasta, solo=None):
     if not envios:
         return vacio
     cli = cliente_meta()
+    # el propio cliente no empieza una llamada que no quepa entera en la franja
+    cli.hasta = hasta
     if not getattr(cli, "simulado", False) and not cli.token:
         return dict(vacio, errores=[AVISOS_META["sin_token"]], motivo="sin_token")
     leidos, hechos, errores = 0, 0, []
@@ -4376,6 +4390,8 @@ def _medir_meta(raiz, pids, forzar, hasta, solo=None):
                        + "; esa cifra no se ha podido leer")
     if cli.cerca_del_cupo and not fatal:
         errores.append(AVISOS_META["cupo"])
+    if getattr(cli, "sin_tiempo", False) and fatal != "tiempo":
+        errores.append(AVISOS_META["tiempo"])
     hechos = _apuntar_meta(raiz, resultados)
     r = {"leidos": leidos, "actualizados": hechos,
          "pendientes": max(0, len(envios) - len(resultados)), "errores": errores[:5]}
@@ -4404,9 +4420,10 @@ def _apuntar_meta(raiz, resultados):
                 m = dict(e.get("metricas") or {})
                 if cifras.get("error"):
                     m["meta_error"] = str(cifras["error"])[:200]
-                    # «no es un Reel» no cambia: no se vuelve a preguntar enseguida
-                    if cifras.get("tipo"):
-                        m["meta_al"] = al
+                    # con su reloj: un envío que Meta no contesta no se vuelve a
+                    # preguntar hasta pasado el respiro (antes iba el primero de
+                    # la cola en cada «Actualizar» y rompía el lote entero)
+                    m["meta_al"] = al
                     e["metricas"] = m
                     cambio = True
                     continue
@@ -4529,6 +4546,10 @@ def _suma(destino, metricas):
     peso = float(vistas) if isinstance(vistas, (int, float)) and vistas > 0 else 0.0
     for k in RETENCION:
         v = (metricas or {}).get(k)
+        # el salto de los 3 primeros segundos de un Reel con pocas vistas no dice
+        # nada, y en un total juntado con TikTok no se notaría (árbitro, 24-11)
+        if k == "salto_3s" and not (isinstance(vistas, (int, float)) and vistas >= MIN_VISTAS_PROPORCION):
+            continue
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             destino[f"_n_{k}"] = (destino.get(f"_n_{k}") or 0) + 1
             destino[f"_s_{k}"] = (destino.get(f"_s_{k}") or 0) + float(v)

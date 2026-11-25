@@ -142,12 +142,17 @@ class Falso(http.server.BaseHTTPRequestHandler):
             ids = q["ids"].split(",")
             if any(i.startswith("bad") for i in ids):
                 return self._error(100, f"(#100) Tried accessing nonexisting field (bad id {ids})")
+            # como Meta: las métricas de Reel pedidas para una foto o un
+            # carrusel tumban la llamada entera con un #100 que NOMBRA la métrica
+            if "insights" in campos and any(IG.get(i, ("REELS", {}))[0] != "REELS" for i in ids):
+                return self._error(100, "(#100) The Media Insights API does not support the "
+                                        "reels_skip_rate metric for this media product type")
             salida = {}
             for i in ids:
                 tipo, m = IG.get(i, ("REELS", {}))
                 nodo = {"id": i, "media_product_type": tipo,
                         "permalink": f"https://www.instagram.com/reel/{i}/"}
-                if tipo == "REELS":
+                if tipo == "REELS" and "metric(" in campos:
                     pedidas = campos.split("metric(")[1].split(")")[0].split(",")
                     nodo["insights"] = _insights([(n, m[n]) for n in pedidas if n in m])
                 salida[i] = nodo
@@ -208,7 +213,8 @@ def prueba_motor(base):
     r = cli.instagram(["reel1", "bad9", "reel2"])
     ok(r["reel1"].get("tiempo_medio_s") == 6.7 and r["reel2"].get("tiempo_medio_s") == 3.0
        and "error" in r["bad9"], "un id malo tumba el lote: se repite de uno en uno y los buenos llegan")
-    igual(len(ESTADO["peticiones"]), 4, "el lote y después los tres de uno en uno")
+    # el malo, solo, se pregunta además por su tipo (¿foto o métrica retirada?)
+    igual(len(ESTADO["peticiones"]), 5, "el lote, los tres de uno en uno y el tipo del malo")
 
     ESTADO["retirada"] = "reels_skip_rate"
     cli2 = MM.ClienteMeta(TOKEN, base=base)
@@ -217,6 +223,22 @@ def prueba_motor(base):
     ok(r["reel1"].get("tiempo_medio_s") == 6.7 and r["reel1"].get("salto_3s") is None
        and cli2.retiradas == ["reels_skip_rate"],
        "si Meta retira una métrica se pide sin ella UNA vez y queda dicho")
+
+    # árbitro, 24-11: una foto en un lote de Reels NO es «métrica retirada»
+    cli3 = MM.ClienteMeta(TOKEN, base=base)
+    r = cli3.instagram(["reel1", "foto1", "reel2"])
+    ok(r["reel1"].get("salto_3s") is not None and r["reel2"].get("tiempo_medio_s") is not None
+       and "Reel" in r["foto1"].get("error", "") and cli3.retiradas == [],
+       f"una foto en el lote no retira ninguna métrica a los Reels ({cli3.retiradas})")
+    ok(all("#" not in (v.get("error") or "") and "Tried" not in (v.get("error") or "")
+           for v in cli.instagram(["bad9"]).values()),
+       "lo que se guarda de un error va en castellano, sin el mensaje crudo de Meta")
+    # árbitro, 24-11: el cliente no empieza una llamada que no quepa en la franja
+    ESTADO["peticiones"] = []
+    cli4 = MM.ClienteMeta(TOKEN, base=base, hasta=time.time() + 1)
+    r = cli4.instagram(["reel1", "reel2"])
+    ok(r == {} and cli4.sin_tiempo and not ESTADO["peticiones"],
+       "sin tiempo para una llamada entera no se empieza ninguna, y queda dicho")
 
     for modo, motivo in (("caducado", "caducado"), ("permiso", "sin_permiso"), ("cupo", "cupo")):
         ESTADO["modo"] = modo
@@ -411,6 +433,17 @@ def prueba_publicar(base):
     P.medir_meta(raiz, ["v2"])
     m = _envio(raiz, "v2", "e_foto")["metricas"]
     ok("Reel" in m.get("meta_error", "") and m.get("meta_al"), "una foto: «no es un Reel», con su reloj")
+    # un id que Meta no contesta tampoco va el primero de la cola en cada vuelta
+    _video(raiz, "v4", [{"id": "e_malo", "red": "instagram", "estado": "a_mano", "post_id": "bad7",
+                         "metricas": {}},
+                        {"id": "e_carrusel", "red": "instagram", "estado": "a_mano", "post_id": "reel1",
+                         "tipo": "Carrusel", "metricas": {}}])
+    P.medir_meta(raiz, ["v4"])
+    m = _envio(raiz, "v4", "e_malo")["metricas"]
+    ok(m.get("meta_error") and m.get("meta_al"), "un id que Meta no contesta guarda su reloj (respiro)")
+    igual([e for _p, e in P._envios_meta(raiz, ["v4"], False)], [],
+          "y no se vuelve a pedir enseguida; un carrusel no se le pregunta a Meta")
+    ok(not _envio(raiz, "v4", "e_carrusel")["metricas"], "el carrusel queda sin tocar")
 
     seccion("3] dentro de «Actualizar» (`medir`)")
     # Upload-Post aquí no existe: su parte contesta vacía (la suya se prueba en prueba_publicar)
@@ -453,6 +486,24 @@ def prueba_publicar(base):
     P.actualizar_metricas = up_trae_el_numero
     r = P.medir(raiz, ["v3"])
     P.actualizar_metricas = lambda *a, **k: dict(vacia)
+    # si la primera vuelta ya dijo que no (caducado, cupo…), no hay segunda
+    llamadas = []
+    antes_meta2 = P.medir_meta
+    P.medir_meta = lambda *a, **k: (llamadas.append(1), {"leidos": 0, "actualizados": 0, "pendientes": 0,
+                                                           "errores": ["cupo"], "motivo": "cupo"})[1]
+    _video(raiz, "v5", [{"id": "e_n5", "red": "instagram", "estado": "publicado", "post_id": "reel2",
+                         "metricas": {}}])
+    try:
+        r5 = P.medir(raiz, ["v5"])
+    finally:
+        P.medir_meta = antes_meta2
+    ok(len(llamadas) == 1 and r5.get("meta", {}).get("motivo") == "cupo",
+       f"con «cupo» en la primera vuelta no se vuelve a llamar a Meta ({len(llamadas)} llamadas)")
+    total = {"posts": 0}
+    P._suma(total, {"vistas": 1000, "media_vista": 0.5})
+    P._suma(total, {"vistas": 10, "salto_3s": 0.9})
+    P._medias(total)
+    igual(total.get("salto_3s"), None, "en un total, el salto de un Reel de 10 vistas no cuenta")
     m = _envio(raiz, "v3", "e_nuevo")["metricas"]
     ok(m.get("meta_al") and m.get("salto_3s") is not None,
        f"recién publicado: el número llega de Upload-Post y Meta lo lee en la misma «Actualizar» ({r.get('meta')})")

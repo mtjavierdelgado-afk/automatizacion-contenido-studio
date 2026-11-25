@@ -64,6 +64,10 @@ def publicar_retencion_meta(navegador, datos):
         ok(not pg.visible(".mas-cifras-envio[open]", "lo último que da TikTok")
            or pg.visible(".mas-cifras-envio[open]", "La mitad deja"),
            "la frase de la curva no le atribuye a TikTok la de Facebook")
+        frase = pg.p.evaluate("""() => { const d = detalleMetricasEnvio({red: 'facebook', metricas: {
+            curva: [[0, 1], [10, 0.8], [20, 0.6]]}}); return d ? d.textContent : ''; }""")
+        ok("lo último que da Facebook" in frase and "TikTok" not in frase,
+           f"una curva de Facebook que no baja de la mitad dice «lo último que da Facebook» ({frase[-80:]!r})")
         pg.captura("publicar_retencion_meta")
         pg.sin_errores("la retención de Instagram y Facebook")
     finally:

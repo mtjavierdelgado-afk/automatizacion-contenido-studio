@@ -29,6 +29,8 @@ class SimuladoMeta:
         self.retiradas = []
         self.cerca_del_cupo = False
         self.llamadas = 0
+        self.hasta = None
+        self.sin_tiempo = False
 
     def _fallo(self):
         self.llamadas += 1

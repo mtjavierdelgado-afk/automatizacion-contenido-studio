@@ -43,6 +43,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import http.client
+import time
 
 #: La versión de la API con la que se comprobaron las métricas (12-11). NO es
 #: `lectura_redes.lectores.VERSION_META` (la de leer cuentas ajenas): cambiar
@@ -84,8 +85,24 @@ class ErrorMeta(RuntimeError):
         self.metrica = metrica
 
 
-#: Los motivos con los que no tiene sentido seguir pidiendo nada esta vuelta
-FATALES = ("sin_token", "sin_permiso", "caducado", "cupo", "red")
+#: Los motivos con los que no tiene sentido seguir pidiendo nada esta vuelta.
+#: «tiempo»: no cabe otra llamada en la franja de quien llama (`hasta`).
+FATALES = ("sin_token", "sin_permiso", "caducado", "cupo", "red", "tiempo")
+
+#: Lo que se guarda en el envío cuando Meta no da sus cifras: en castellano y
+#: sin el mensaje crudo de Meta (en inglés y con detalles que no ayudan).
+TEXTO_DE_MOTIVO = {
+    "metrica": "Meta no da una de las cifras de este vídeo",
+    "otro": "Meta no ha devuelto las cifras de este vídeo",
+    "vacio": "Meta todavía no tiene las cifras de este vídeo (tarda hasta dos días)",
+}
+
+
+def texto_para_envio(fallo):
+    """El texto corto, en castellano, que se guarda en un envío."""
+    if getattr(fallo, "motivo", "") == "vacio":
+        return TEXTO_DE_MOTIVO["vacio"]
+    return TEXTO_DE_MOTIVO.get(getattr(fallo, "motivo", ""), TEXTO_DE_MOTIVO["otro"])
 
 
 def tachar(texto, claves):
@@ -183,8 +200,13 @@ def curva_de(grafico, duracion_s):
 class ClienteMeta:
     simulado = False
 
-    def __init__(self, token, base=None, plazo=PLAZO_S, version=VERSION_METRICAS):
+    def __init__(self, token, base=None, plazo=PLAZO_S, version=VERSION_METRICAS, hasta=None):
         self.token = str(token or "").strip()
+        #: momento (time.time()) a partir del cual no se empieza ninguna llamada
+        #: que no quepa entera: quien llama tiene su franja (el proxy corta a 60 s)
+        self.hasta = hasta
+        #: si alguna llamada se dejó sin hacer por falta de tiempo
+        self.sin_tiempo = False
         self.base = (base or BASE).rstrip("/")
         self.plazo = plazo
         self.version = version
@@ -207,6 +229,9 @@ class ClienteMeta:
         token = token or self.token
         if not token:
             raise ErrorMeta("falta el token de Meta: ponlo en Configuración", "sin_token")
+        if self.hasta is not None and time.time() + self.plazo > self.hasta:
+            self.sin_tiempo = True
+            raise ErrorMeta("no da tiempo a otra consulta a Meta esta vez", "tiempo")
         peticion = urllib.request.Request(
             self._url(ruta, params), method="GET",
             headers={"Accept": "application/json", "User-Agent": "CrearIAStudio/5.1",
@@ -310,30 +335,68 @@ class ClienteMeta:
             if self.cerca_del_cupo:
                 break
             trozo = ids[i:i + TOPE_LOTE]
-            salida.update(self._instagram_lote(trozo, metricas))
+            try:
+                salida.update(self._instagram_lote(trozo, metricas, salida))
+            except ErrorMeta as fallo:
+                if fallo.motivo == "tiempo":
+                    break           # lo leído hasta aquí vale; el resto, otra vuelta
+                raise
         return salida
 
-    def _instagram_lote(self, trozo, metricas, reintento=True):
+    def _instagram_lote(self, trozo, metricas, hechos=None):
+        """Un lote; si Meta lo rechaza, de uno en uno. `hechos` (lo ya
+        contestado en esta vuelta) se va llenando para no perderlo si se
+        acaba el tiempo a medias."""
+        metricas = [m for m in metricas if m not in self.retiradas]
         campos = "id,media_product_type,permalink,insights.metric(%s)" % ",".join(metricas)
         try:
             datos = self._get("", {"ids": ",".join(trozo), "fields": campos})
         except ErrorMeta as fallo:
-            if fallo.motivo == "metrica" and reintento and fallo.metrica in metricas \
-                    and len(metricas) > 1:
-                self.retiradas.append(fallo.metrica)
-                return self._instagram_lote(trozo, [m for m in metricas if m != fallo.metrica],
-                                            reintento=False)
-            if fallo.motivo in FATALES or len(trozo) == 1:
-                if len(trozo) == 1 and fallo.motivo not in FATALES:
-                    return {trozo[0]: {"error": str(fallo)[:200]}}
+            if fallo.motivo in FATALES:
                 raise
-            # un id malo tumba el lote entero: de uno en uno
-            salida = {}
+            if len(trozo) == 1:
+                return self._instagram_solo(trozo[0], metricas, fallo)
+            # un id malo (o una foto, a la que Meta no le acepta las métricas de
+            # Reel) tumba el lote entero: de uno en uno, sin retirar nada
+            salida = hechos if hechos is not None else {}
             for uno in trozo:
                 if self.cerca_del_cupo:
                     break
-                salida.update(self._instagram_lote([uno], metricas, reintento))
-            return salida
+                if uno not in salida:
+                    salida.update(self._instagram_lote([uno], metricas))
+            return {k: salida[k] for k in trozo if k in salida}
+        return self._instagram_nodos(trozo, datos)
+
+    def _instagram_solo(self, ident, metricas, fallo):
+        """Un medio que Meta rechaza: ¿es que no es un Reel, o que Meta ya no
+        da una métrica? Se pregunta solo su tipo (sin métricas): si no es un
+        Reel, se dice; si lo es y el fallo nombraba una métrica, esa métrica se
+        retira (para todos) y se pide otra vez sin ella, una sola vez."""
+        try:
+            nodo = self._get("", {"ids": ident, "fields": "id,media_product_type,permalink"})
+        except ErrorMeta as otro:
+            if otro.motivo in FATALES:
+                raise
+            return {ident: {"error": texto_para_envio(fallo)}}
+        nodo = nodo.get(ident) if isinstance(nodo.get(ident), dict) else {}
+        tipo = str(nodo.get("media_product_type") or "")
+        if tipo and tipo != "REELS":
+            return {ident: {"error": "no es un Reel: Meta solo da la retención de los Reels",
+                            "tipo": tipo}}
+        if fallo.motivo == "metrica" and fallo.metrica in metricas and len(metricas) > 1:
+            self.retiradas.append(fallo.metrica)
+            resto = [m for m in metricas if m != fallo.metrica]
+            campos = "id,media_product_type,permalink,insights.metric(%s)" % ",".join(resto)
+            try:
+                datos = self._get("", {"ids": ident, "fields": campos})
+            except ErrorMeta as otra_vez:
+                if otra_vez.motivo in FATALES:
+                    raise
+                return {ident: {"error": texto_para_envio(otra_vez)}}
+            return self._instagram_nodos([ident], datos)
+        return {ident: {"error": texto_para_envio(fallo)}}
+
+    def _instagram_nodos(self, trozo, datos):
         salida = {}
         for ident in trozo:
             nodo = datos.get(ident)
@@ -389,13 +452,15 @@ class ClienteMeta:
             try:
                 salida[ident] = self._facebook_uno(token_pagina, ident, duracion)
             except ErrorMeta as fallo:
+                if fallo.motivo == "tiempo":
+                    break           # lo leído hasta aquí vale
                 if fallo.motivo in FATALES:
                     raise
-                salida[ident] = {"error": str(fallo)[:200]}
+                salida[ident] = {"error": texto_para_envio(fallo)}
         return salida
 
     def _facebook_uno(self, token_pagina, ident, duracion):
-        ultimo = None
+        ultimo = vacio = None
         for tipo, metricas in (("reel", METRICAS_FB_REEL), ("video", METRICAS_FB_VIDEO)):
             metricas = [m for m in metricas if m not in self.retiradas]
             campos = "id,length,video_insights.metric(%s){name,values}" % ",".join(metricas)
@@ -408,7 +473,7 @@ class ClienteMeta:
                 continue          # con las de vídeo, por si no era un Reel
             m = _metricas(datos, "video_insights")
             if not any(v is not None for v in m.values()):
-                ultimo = ErrorMeta("Meta todavía no tiene las cifras de este vídeo", "otro")
+                vacio = ErrorMeta("Meta todavía no tiene las cifras de este vídeo", "vacio")
                 continue
             largo = _numero(datos.get("length"))
             dur = _numero(duracion) or (largo if largo and largo > 0 else None)
@@ -430,7 +495,8 @@ class ClienteMeta:
                 and 0 <= tiempo_medio / dur <= 10 else None,
                 "curva": curva, "mitad_s": mitad if curva else None,
             }
-        raise ultimo or ErrorMeta("Meta no ha devuelto las cifras de este vídeo", "otro")
+        # «todavía no tiene las cifras» dice más que el rechazo de la otra forma
+        raise vacio or ultimo or ErrorMeta("Meta no ha devuelto las cifras de este vídeo", "otro")
 
 
 def es_pagina_post(ident):

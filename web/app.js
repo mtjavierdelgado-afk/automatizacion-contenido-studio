@@ -29432,7 +29432,7 @@ function detalleMetricasEnvio(e) {
     ? h('div', {}, publicoSeguidores, publicoNuevos) : null;
   // retencion-meta: lo que no se pudo leer de Meta, en una línea sin rojo
   const avisoMeta = (e.red === 'instagram' || e.red === 'facebook') && m.meta_error
-    ? h('div', { clase: 'meta aviso-meta-envio' }, `Lo visto de media no se ha podido leer: ${m.meta_error}.`) : null;
+    ? h('div', { clase: 'meta aviso-meta-envio' }, `Lo visto de media no se ha podido leer: ${String(m.meta_error).replace(/[.\s]+$/, '')}.`) : null;
   if (!aparte && !curva && !fuentes && !publico && !avisoMeta) return null;
   // el segundo en que se va la mitad viene calculado con la curva ENTERA
   // (la guardada puede ir aligerada); en los envíos de antes, de la curva

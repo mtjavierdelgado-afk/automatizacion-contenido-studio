@@ -36,16 +36,33 @@ def publicar_retencion_meta(navegador, datos):
                 break
     ok(_publicados(ficha, "instagram") and _publicados(ficha, "facebook"),
        "se parte de un Reel y un vídeo de Facebook publicados (simulados)")
-    _r, r = api.post(f"/api/publicar/videos/{pid}/metricas", {"forzar": True})
-    envios = (r.get("ficha") or {}).get("envios", [])
-    ig = next((e.get("metricas") or {} for e in envios if e.get("red") == "instagram"
-               and (e.get("metricas") or {}).get("meta_al")), {})
-    fb = next((e.get("metricas") or {} for e in envios if e.get("red") == "facebook"
-               and (e.get("metricas") or {}).get("meta_al")), {})
+    # EN LA PASADA COMPLETA (servidor, 25-11) el vídeo trae envíos de los
+    # escenarios de antes (uno que no es Reel, otro con su error) y la lectura
+    # puede coincidir con otra en marcha («ocupado»): se repite hasta que
+    # Meta haya leído, y se miran los envíos que leyó BIEN, no el primero
+    ig, fb, ig_todos = {}, {}, []
+    for _ in range(8):
+        _r, r = api.post(f"/api/publicar/videos/{pid}/metricas", {"forzar": True})
+        envios = (r.get("ficha") or {}).get("envios", [])
+
+        def leidos(red):
+            return [e.get("metricas") or {} for e in envios if e.get("red") == red
+                    and e.get("estado") == "publicado"
+                    and (e.get("metricas") or {}).get("meta_al")
+                    and not (e.get("metricas") or {}).get("meta_error")]
+        ig_todos = [m for m in leidos("instagram") if isinstance(m.get("tiempo_medio_s"), (int, float))
+                    and isinstance(m.get("salto_3s"), (int, float))]
+        ig = ig_todos[0] if ig_todos else {}
+        fb = next((m for m in leidos("facebook") if m.get("curva")), {})
+        if ig and fb:
+            break
+        time.sleep(5)
     ok(isinstance(ig.get("tiempo_medio_s"), (int, float)) and isinstance(ig.get("salto_3s"), (int, float)),
        f"Instagram trae de Meta el tiempo medio y el salto de 3 s ({ {k: ig.get(k) for k in ('tiempo_medio_s', 'salto_3s', 'reposts')} })")
     ok(bool(fb.get("curva")) and isinstance(fb.get("tiempo_medio_s"), (int, float)),
        "Facebook trae de Meta su curva y el tiempo medio")
+    # el salto solo se enseña con 50 vistas o más (MIN_VISTAS_SALTO)
+    con_salto = any(isinstance(m.get("vistas"), (int, float)) and m["vistas"] >= 50 for m in ig_todos)
 
     pg = Pagina(navegador, datos, nombre="retencion meta")
     try:
@@ -54,7 +71,8 @@ def publicar_retencion_meta(navegador, datos):
         ok(_paso_ficha(pg, "envios"), "la ficha, en su paso «Envíos»")
         ok(pg.esperar(".ficha-publicar .fila-envio", segundos=15), "con los envíos")
         texto = pg.p.locator(".ficha-publicar").first.inner_text()
-        ok("lo saltó en los 3 primeros segundos" in texto, "el Reel dice cuántos lo saltaron en los 3 primeros segundos")
+        ok(("lo saltó en los 3 primeros segundos" in texto) == con_salto,
+           f"el Reel dice cuántos lo saltaron en los 3 primeros segundos (con 50 vistas o más: {con_salto})")
         ok("s de media" in texto, "y cuánto se vio de media")
         for det in pg.p.locator(".mas-cifras-envio > summary").all():
             det.click()

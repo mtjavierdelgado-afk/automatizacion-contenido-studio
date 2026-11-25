@@ -79,10 +79,13 @@ class ErrorMeta(RuntimeError):
     """`motivo`: sin_token · sin_permiso · caducado · cupo · red · metrica ·
     otro. `metrica`: la métrica que Meta no acepta (con motivo «metrica»)."""
 
-    def __init__(self, mensaje, motivo="otro", metrica=""):
+    def __init__(self, mensaje, motivo="otro", metrica="", detalle=""):
         super().__init__(mensaje)
         self.motivo = motivo
         self.metrica = metrica
+        # lo que dijo Meta, tal cual y SIN tokens (para diagnosticar en el
+        # servidor: se guarda aparte del texto en castellano del envío)
+        self.detalle = detalle
 
 
 #: Los motivos con los que no tiene sentido seguir pidiendo nada esta vuelta.
@@ -284,6 +287,16 @@ class ClienteMeta:
                         self.cerca_del_cupo = True
 
     def _error(self, datos, codigo):
+        """El ErrorMeta de una respuesta de Meta, con lo que dijo en `detalle`
+        («#código/subcódigo mensaje», sin tokens)."""
+        fallo = self._clasificar(datos, codigo)
+        err = (datos or {}).get("error") if isinstance(datos, dict) else None
+        err = err if isinstance(err, dict) else {}
+        fallo.detalle = tachar(f"HTTP {codigo} #{err.get('code', '')}/{err.get('error_subcode', '')} "
+                               f"{str(err.get('message') or '')[:240]}", self._claves).strip()
+        return fallo
+
+    def _clasificar(self, datos, codigo):
         err = (datos or {}).get("error") if isinstance(datos, dict) else None
         err = err if isinstance(err, dict) else {}
         mensaje = tachar(str(err.get("message") or f"Meta ha contestado {codigo}")[:300],
@@ -400,12 +413,17 @@ class ClienteMeta:
         except ErrorMeta as otro:
             if otro.motivo in FATALES:
                 raise
-            return {ident: {"error": texto_para_envio(fallo)}}
+            return {ident: {"error": texto_para_envio(fallo), "detalle": _detalle(fallo, otro)}}
         nodo = nodo.get(ident) if isinstance(nodo.get(ident), dict) else {}
         tipo = str(nodo.get("media_product_type") or "")
         if tipo and tipo != "REELS":
             return {ident: {"error": "no es un Reel (Meta solo da la retención de los Reels)",
                             "tipo": tipo}}
+        # «metric[2] must be one of…» trae la lista de las VÁLIDAS: la métrica
+        # mala es la del número que dice, no la primera nuestra que salga
+        num = re.search(r"metric\[(\d+)\]", str(fallo))
+        if fallo.motivo == "metrica" and num and int(num.group(1)) < len(metricas):
+            fallo.metrica = metricas[int(num.group(1))]
         if fallo.motivo == "metrica" and fallo.metrica in metricas and len(metricas) > 1:
             self.retiradas.append(fallo.metrica)
             resto = [m for m in metricas if m != fallo.metrica]
@@ -415,9 +433,9 @@ class ClienteMeta:
             except ErrorMeta as otra_vez:
                 if otra_vez.motivo in FATALES:
                     raise
-                return {ident: {"error": texto_para_envio(otra_vez)}}
+                return {ident: {"error": texto_para_envio(otra_vez), "detalle": _detalle(otra_vez)}}
             return self._instagram_nodos([ident], datos)
-        return {ident: {"error": texto_para_envio(fallo)}}
+        return {ident: {"error": texto_para_envio(fallo), "detalle": _detalle(fallo)}}
 
     def _instagram_nodos(self, trozo, datos):
         salida = {}
@@ -444,6 +462,27 @@ class ClienteMeta:
                 "salto_3s": round(salto / 100, 4) if salto is not None and 0 <= salto <= 100 else None,
                 "reposts": int(reposts) if reposts is not None and reposts >= 0 else None,
             }
+        return salida
+
+    def medios_ig(self, ig_id, paginas_max=4):
+        """Los medios de una cuenta de Instagram (id, shortcode, permalink),
+        los más nuevos primero, hasta `paginas_max` páginas de 50. Para dar con
+        el id de un Reel cuando el que trae el envío no es el de Meta (prueba
+        del servidor, 25-11: Instagram no contestaba ningún Reel)."""
+        salida, despues = [], ""
+        for _ in range(max(1, int(paginas_max))):
+            params = {"fields": "id,shortcode,permalink,media_product_type", "limit": 50}
+            if despues:
+                params["after"] = despues
+            datos = self._get(f"{ig_id}/media", params)
+            for m in datos.get("data") or []:
+                if isinstance(m, dict) and m.get("id"):
+                    salida.append({"id": str(m["id"]), "shortcode": str(m.get("shortcode") or ""),
+                                   "permalink": str(m.get("permalink") or ""),
+                                   "tipo": str(m.get("media_product_type") or "")})
+            despues = (((datos.get("paging") or {}).get("cursors") or {}).get("after") or "")
+            if not despues or not (datos.get("paging") or {}).get("next"):
+                break
         return salida
 
     # --------------------------------------------------------- facebook
@@ -520,6 +559,25 @@ class ClienteMeta:
             }
         # «todavía no tiene las cifras» dice más que el rechazo de la otra forma
         raise vacio or ultimo or ErrorMeta("Meta no ha devuelto las cifras de este vídeo", "otro")
+
+
+def _detalle(*fallos):
+    """Lo que dijo Meta en estos fallos (sin tokens), en una línea."""
+    return " | ".join(str(getattr(f, "detalle", "") or "") for f in fallos
+                      if getattr(f, "detalle", ""))[:300]
+
+
+def shortcode_ig(texto):
+    """El código corto de un Reel («DAbc_12-x») de su enlace
+    (instagram.com/reel/<código>/, /p/, /tv/) o del propio id si no es un número.
+    "" si no se puede saber."""
+    texto = str(texto or "").strip()
+    m = re.search(r"instagram\.com/(?:[^/?#]+/)?(?:reels?|p|tv)/([A-Za-z0-9_-]{5,40})", texto)
+    if m:
+        return m.group(1)
+    if re.fullmatch(r"[A-Za-z0-9_-]{5,40}", texto) and not texto.isdigit():
+        return texto
+    return ""
 
 
 def es_pagina_post(ident):

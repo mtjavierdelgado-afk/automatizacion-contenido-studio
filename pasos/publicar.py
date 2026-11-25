@@ -3790,7 +3790,7 @@ META_POR_RED = {
 }
 #: Lo que Meta deja en `metricas` ademas de sus cifras: cuando se leyo y por
 #: que no se pudo. Upload-Post no lo borra al apuntar lo suyo.
-META_RELOJ = ("meta_al", "meta_error")
+META_RELOJ = ("meta_al", "meta_error", "meta_detalle")
 
 
 def _claves_de_upload_post(red):
@@ -4441,8 +4441,11 @@ def _avisar_meta(errores, red, fallo):
 
 
 def _leer_ig(cli, ig, hasta, resultados):
-    """Instagram: resolver y pedir las cifras en la misma llamada, en lotes."""
+    """Instagram: resolver y pedir las cifras en la misma llamada, en lotes.
+    Lo que Meta no contesta con el id del envío se busca por su enlace en los
+    medios de la cuenta (`_ig_por_enlace`) y se pide otra vez con ese id."""
     leidos = 0
+    sin_cifras = []
     for i in range(0, len(ig), MM.TOPE_LOTE):
         if not _cabe(hasta) or cli.cerca_del_cupo:
             break
@@ -4453,7 +4456,53 @@ def _leer_ig(cli, ig, hasta, resultados):
             if ident in cifras:
                 leidos += 1
                 resultados[e["id"]] = (pid, cifras[ident], {"meta_id": ident})
+                if cifras[ident].get("error") and not cifras[ident].get("tipo"):
+                    sin_cifras.append((pid, e, ident))
+    if sin_cifras and _cabe(hasta) and not cli.cerca_del_cupo:
+        _ig_por_enlace(cli, sin_cifras, hasta, resultados)
     return leidos
+
+
+def _ig_por_enlace(cli, sin_cifras, hasta, resultados):
+    """EL ID DE VERDAD DE UN REEL (prueba del servidor, 25-11: Meta no daba
+    las cifras de ningún Reel con el id que trae Upload-Post). Con el código
+    corto de su enlace (instagram.com/reel/<código>/) se busca en los medios
+    de las cuentas de Instagram del token y, si sale otro id, se pide con ese
+    y se guarda como `meta_id`. Si no aparece, se queda el error de antes."""
+    buscados = {}
+    for pid, e, ident in sin_cifras:
+        codigo = MM.shortcode_ig(e.get("url")) or MM.shortcode_ig(e.get("post_id"))
+        if codigo:
+            buscados[codigo] = (pid, e, ident)
+    if not buscados:
+        return
+    try:
+        cuentas = [p["ig_id"] for p in cli.paginas() if p.get("ig_id")]
+    except MM.ErrorMeta as fallo:
+        if fallo.motivo in MM.FATALES:
+            raise
+        return
+    hallados = {}
+    for ig_id in dict.fromkeys(cuentas):
+        if not _cabe(hasta) or cli.cerca_del_cupo or len(hallados) == len(buscados):
+            break
+        try:
+            medios = cli.medios_ig(ig_id)
+        except MM.ErrorMeta as fallo:
+            if fallo.motivo in MM.FATALES:
+                raise
+            continue
+        for m in medios:
+            codigo = m.get("shortcode") or MM.shortcode_ig(m.get("permalink"))
+            if codigo in buscados and m.get("id") and m["id"] != buscados[codigo][2]:
+                hallados[codigo] = m["id"]
+    if not hallados or not _cabe(hasta):
+        return
+    cifras = cli.instagram(list(hallados.values()))
+    for codigo, nuevo in hallados.items():
+        pid, e, _viejo = buscados[codigo]
+        if nuevo in cifras:
+            resultados[e["id"]] = (pid, cifras[nuevo], {"meta_id": nuevo})
 
 
 def _leer_fb(raiz, cli, fb, hasta, resultados):
@@ -4525,6 +4574,9 @@ def _apuntar_meta(raiz, resultados):
                     if cifras.get("sin_reloj") and m.get("meta_error") == str(cifras["error"])[:200]:
                         continue    # ya lo dice: no se reescribe el fichero cada vez
                     m["meta_error"] = str(cifras["error"])[:200]
+                    # lo que dijo Meta, sin tokens, para el diagnóstico del servidor
+                    if cifras.get("detalle"):
+                        m["meta_detalle"] = str(cifras["detalle"])[:300]
                     # con su reloj: un envío que Meta no contesta no se vuelve a
                     # preguntar hasta pasado el respiro (antes iba el primero de
                     # la cola en cada «Actualizar» y rompía el lote entero)
@@ -4550,6 +4602,7 @@ def _apuntar_meta(raiz, resultados):
                         if 0 <= parte <= 10:
                             m["media_vista"] = round(parte, 4)
                 m["meta_al"], m["meta_error"] = al, ""
+                m.pop("meta_detalle", None)
                 e["metricas"] = sin_ceros_imposibles(m)
                 for k, v in extra.items():
                     if v and e.get(k) != v:

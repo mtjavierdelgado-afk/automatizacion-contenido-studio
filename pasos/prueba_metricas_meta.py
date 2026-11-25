@@ -80,6 +80,9 @@ IG = {
     "reel2": ("REELS", {"ig_reels_avg_watch_time": 3000, "ig_reels_video_view_total_time": 90000,
                         "reels_skip_rate": 20, "reposts": 0}),
     "foto1": ("FEED", {}),
+    # el id de verdad de un Reel cuyo envío trae otro (el de Upload-Post)
+    "17900000000000001": ("REELS", {"ig_reels_avg_watch_time": 4200, "ig_reels_video_view_total_time": 50000,
+                                    "reels_skip_rate": 33.3, "reposts": 1}),
 }
 FB_REEL = {"post_video_avg_time_watched": 4500, "post_video_view_time": 120000,
            "post_video_followers": 3,
@@ -172,6 +175,16 @@ class Falso(http.server.BaseHTTPRequestHandler):
                     nodo["insights"] = _insights([(n, m[n]) for n in pedidas if n in m])
                 salida[i] = nodo
             return self._responder(200, salida, cab)
+        if len(ruta) == 2 and ruta[1] == "media":
+            # los medios de la cuenta de Instagram (para dar con el id de un Reel)
+            if auth != f"Bearer {TOKEN}":
+                return self._error(190, "token raro")
+            ESTADO.setdefault("medios_pedidos", []).append(ruta[0])
+            return self._responder(200, {"data": [
+                {"id": "17900000000000001", "shortcode": "DCodigo_1", "media_product_type": "REELS",
+                 "permalink": "https://www.instagram.com/reel/DCodigo_1/"},
+                {"id": "17900000000000002", "shortcode": "OtroReel", "media_product_type": "REELS",
+                 "permalink": "https://www.instagram.com/reel/OtroReel/"}], "paging": {}}, cab)
         if len(ruta) == 1:
             ident = ruta[0]
             if auth != f"Bearer {TOKEN_PAGINA}":
@@ -498,6 +511,34 @@ def prueba_publicar(base):
     ok(not r7.get("motivo") and mo.get("tiempo_medio_s") is not None
        and "permiso" not in mb.get("meta_error", "") and mb.get("meta_al"),
        f"un Reel borrado no corta la vuelta ni dice «falta un permiso» ({mb.get('meta_error')!r})")
+    # prueba del servidor (CIS 1b, 25-11): Instagram no contestaba NINGÚN Reel
+    # con el id del envío. Se busca su enlace en los medios de la cuenta y se
+    # pide con el id de verdad; lo que dijo Meta se guarda, sin tokens
+    _video(raiz, "v11", [{"id": "i_up", "red": "instagram", "estado": "publicado", "post_id": "borradoUP77",
+                          "url": "https://www.instagram.com/reel/DCodigo_1/?igsh=xyz", "metricas": {}},
+                         {"id": "i_nada", "red": "instagram", "estado": "publicado", "post_id": "borradoUP78",
+                          "url": "https://www.instagram.com/reel/NoEstaEnLaCuenta/", "metricas": {}}])
+    r11 = P.medir_meta(raiz, ["v11"], forzar=True)
+    e_up, e_nada = _envio(raiz, "v11", "i_up"), _envio(raiz, "v11", "i_nada")
+    ok(e_up.get("meta_id") == "17900000000000001" and e_up["metricas"].get("tiempo_medio_s") == 4.2
+       and e_up["metricas"].get("salto_3s") == 0.333 and not e_up["metricas"].get("meta_error"),
+       f"un Reel con otro id se encuentra por su enlace y trae sus cifras ({e_up.get('meta_id')}, "
+       f"{e_up['metricas'].get('meta_error')!r})")
+    ok(e_nada["metricas"].get("meta_error") and "Unsupported" in e_nada["metricas"].get("meta_detalle", "")
+       and "#100" in e_nada["metricas"]["meta_detalle"],
+       f"el que no aparece se queda con su error y con lo que dijo Meta aparte ({e_nada['metricas'].get('meta_detalle')!r})")
+    with open(P._ruta_video(raiz, "v11")) as f:
+        nada_de_tokens(f.read(), "el detalle guardado")
+    ok(set(ESTADO.get("medios_pedidos") or []) == {"1784"},
+       "la lista de medios solo se pide a la cuenta de Instagram que hay")
+    r11b = P.medir_meta(raiz, ["v11"], forzar=True)
+    ok(_envio(raiz, "v11", "i_up")["metricas"].get("tiempo_medio_s") == 4.2
+       and not any("borradoUP77" in x["ruta"] for x in ESTADO["peticiones"][-6:]),
+       "la vuelta siguiente usa el id de verdad (no vuelve al de Upload-Post)")
+    ok(MM.shortcode_ig("https://www.instagram.com/usuario/reel/DCodigo_1/") == "DCodigo_1"
+       and MM.shortcode_ig("https://instagram.com/p/AbC-12_x/") == "AbC-12_x"
+       and MM.shortcode_ig("17900000000000001") == "" and MM.shortcode_ig("") == "",
+       "el código corto sale del enlace (reel, p) y un id de números no lo es")
     # árbitro del tren, 25-11 (1): un post de página BORRADO no corta Facebook
     _video(raiz, "v9", [{"id": "f_borr", "red": "facebook", "estado": "a_mano",
                          "post_id": f"{PAGINA}_999", "metricas": {}},

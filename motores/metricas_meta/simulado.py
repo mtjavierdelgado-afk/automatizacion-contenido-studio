@@ -58,6 +58,10 @@ class SimuladoMeta:
             }
         return salida
 
+    def medios_ig(self, ig_id, paginas_max=4):
+        self._fallo()
+        return []
+
     def resolver_fb(self, token_pagina, pagina_post):
         self._fallo()
         return str(pagina_post).split("_")[-1]

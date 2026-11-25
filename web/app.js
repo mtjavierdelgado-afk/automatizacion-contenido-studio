@@ -36982,6 +36982,10 @@ async function abrirEditorCapasYa(cid, pieza, extra) {
   editor.abrir(Object.assign({
     cid, pieza, catalogo: cat, kit: GRAF.kits[cid] || {}, nombreCliente: ficha ? ficha.nombre : '',
     base: BASE, api: apiGraficas, pedir, toast,
+    // «Foto de un vídeo» (graficas-3c-extras): las imágenes ya pagadas de los vídeos del proyecto
+    videos: () => videosDeCliente(cid).map(v => ({ id: v.id, nombre: v.nombre || v.id })),
+    planos: async pid => ((await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/diseno`))).planos || []),
+    miniatura: (img, pid, sid) => ponerImagenPublicar(img, rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/planos/${encodeURIComponent(sid)}.jpg`)),
     pases: () => (typeof cabeceraDePases === 'function' ? cabeceraDePases() : ''),
     alCerrar: cambio => { if (cambio) { GRAF.piezas[cid] = undefined; pintarLight(); } },
   }, extra || {}));

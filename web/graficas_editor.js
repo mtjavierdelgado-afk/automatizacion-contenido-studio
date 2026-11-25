@@ -828,6 +828,7 @@
       boton('＋ Botón', {}, () => anadir('boton')),
       sube, el('label', { clase: 'ce-btn', for: 'ce-subir-foto', tabindex: '0',
         onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sube.click(); } } }, '＋ Foto'),
+      hayVideos() ? boton('＋ Foto de un vídeo', { title: 'Una imagen que ya pagaste en un vídeo de este proyecto (gratis)' }, () => elegirFotoDeVideo(null)) : null,
       boton('＋ Logo del Kit', { disabled: !(ED.logos.normal || ED.logos.oscuro), title: ED.logos.normal || ED.logos.oscuro ? '' : 'Este proyecto aún no tiene logo: súbelo en «Logo»' }, () => anadir('logo')),
       boton('＋ Rectángulo', {}, () => anadir('rect')),
       boton('＋ Círculo', {}, () => anadir('circulo')),
@@ -1224,6 +1225,7 @@
     P.appendChild(grupo('Foto',
       sube, el('label', { clase: 'ce-btn ce-ancho', for: 'ce-cambiar-foto', tabindex: '0',
         onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sube.click(); } } }, c.src ? 'Cambiar la foto' : 'Poner una foto'),
+      hayVideos() ? boton('Usar una foto de un vídeo', { clase: 'ce-btn ce-ancho', title: 'Una imagen que ya pagaste en un vídeo de este proyecto (gratis)' }, () => elegirFotoDeVideo(c.id)) : null,
       foto && foto.falta ? el('small', { clase: 'ce-pista malo' }, 'Esa foto ya no está en el proyecto: pon otra.') : null,
       campoDeslizador('Encuadre horizontal', enc.x, v => { enc.x = v; }, 0, 100, 1, v => `${v} %`),
       campoDeslizador('Encuadre vertical', enc.y, v => { enc.y = v; }, 0, 100, 1, v => `${v} %`),
@@ -1404,30 +1406,99 @@
       const cuerpo = new FormData();
       cuerpo.append('imagen', fichero);
       const r = await ED.opc.pedir(ED.opc.api(ED.cid, '/imagen'), { method: 'POST', cuerpo });
-      const foto = await comoDataUrl(ED.opc.api(ED.cid, `/imagen/${encodeURIComponent(r.nombre)}`));
-      ED.fotos[r.nombre] = foto;
-      const f = formato();
-      const existente = paraId && capa(paraId);
-      if (existente) {
-        existente.src = r.nombre;
-        existente.encuadre = { x: 50, y: 50, zoom: 1 };
-        ED.sel = [existente.id];
-      } else {
-        const ratio = foto.iw && foto.ih ? foto.ih / foto.iw : 1;
-        const [cx, cy] = centroVisible();
-        let w = 60, h = 60 * f.W / f.H * ratio;
-        if (h > 80) { w = w * 80 / h; h = 80; }
-        const c = capaNueva('imagen', { nombre: 'Foto', src: r.nombre, encuadre: { x: 50, y: 50, zoom: 1 }, radio: 0, borde: null, sombra: [], w, h, x: cx - w / 2, y: cy - h / 2 });
-        capas().push(c);
-        ED.sel = [c.id];
-      }
-      pintarTodo();
-      commit();
-      pintarPaneles();
-      avisoPantalla('Foto lista.');
+      await ponerFoto(r.nombre, paraId);
     } catch (e) {
       avisoPantalla(`No se ha podido subir la foto: ${e.message}`, true);
     }
+  }
+
+  /** ¿Hay vídeos de este proyecto de los que sacar una foto ya pagada? */
+  function hayVideos() {
+    return typeof ED.opc.videos === 'function' && ED.opc.videos().length > 0;
+  }
+
+  /**
+   * «Foto de un vídeo» (graficas-3c-extras, B2): la imagen YA HECHA de un plano
+   * de un vídeo de este proyecto, copiada a Gráficas por
+   * POST /imagen/de-plano. Gratis: no se genera nada. `paraId`: la capa de foto
+   * que se cambia, o null para añadir una nueva a esta lámina.
+   */
+  function elegirFotoDeVideo(paraId) {
+    if (!hayVideos()) return;
+    if (!paraId && capas().filter(c => c.tipo === 'imagen' && c.src).length >= LIMITES.fotos) { avisoPantalla(`Una pieza admite hasta ${LIMITES.fotos} fotos.`, true); return; }
+    const yo = ED;
+    const videos = yo.opc.videos();
+    const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Foto de un vídeo' });
+    const cerrarModal = () => capaVista.remove();
+    const rejilla = el('div', { clase: 'ce-planos', 'aria-live': 'polite' });
+    const abrirVideo = async pid => {
+      rejilla.textContent = '';
+      if (!pid) return;
+      rejilla.appendChild(el('div', { clase: 'ce-pista' }, 'Buscando sus imágenes…'));
+      try {
+        const planos = await yo.opc.planos(pid);
+        if (ED !== yo || !capaVista.isConnected) return;
+        rejilla.textContent = '';
+        if (!planos.length) { rejilla.appendChild(el('div', { clase: 'ce-pista' }, 'Este vídeo aún no tiene imágenes.')); return; }
+        for (const pl of planos) {
+          const img = el('img', { alt: pl.texto || 'Plano' });
+          yo.opc.miniatura(img, pid, pl.sid);
+          rejilla.appendChild(el('button', { clase: 'ce-plano', type: 'button', title: pl.texto || '', onclick: async () => {
+            cerrarModal();
+            avisoPantalla('Copiando la imagen del vídeo…');
+            try {
+              const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/imagen/de-plano'), { method: 'POST', cuerpo: { pid, sid: pl.sid } });
+              if (ED !== yo) return;
+              await ponerFoto(r.nombre, paraId);
+            } catch (e) {
+              if (ED === yo) avisoPantalla(`No se ha podido usar esa imagen: ${e.message}`, true);
+            }
+          } }, img));
+        }
+      } catch (e) {
+        if (!capaVista.isConnected) return;
+        rejilla.textContent = '';
+        rejilla.appendChild(el('div', { clase: 'ce-pista malo' }, `No se han podido leer sus imágenes: ${e.message}`));
+      }
+    };
+    const selector = el('select', { 'aria-label': 'Vídeo', onchange: ev => abrirVideo(ev.target.value) },
+      el('option', { value: '' }, 'Elige un vídeo…'), ...videos.map(v => el('option', { value: v.id }, v.nombre || v.id)));
+    capaVista.appendChild(el('div', { clase: 'ce-modal-cuerpo ce-modal-planos' },
+      el('h2', {}, paraId ? 'Cambiar por una foto de un vídeo' : 'Foto de un vídeo'),
+      el('p', { clase: 'ce-pista' }, 'Las imágenes que ya pagaste en tus vídeos de este proyecto. Usarlas es gratis: no se genera nada.'),
+      selector, rejilla,
+      el('div', { clase: 'ce-botonera' }, boton('Cancelar', {}, cerrarModal))));
+    capaVista.addEventListener('pointerdown', ev => { if (ev.target === capaVista) cerrarModal(); });
+    ED.raiz.appendChild(capaVista);
+    if (videos.length === 1) { selector.value = videos[0].id; abrirVideo(videos[0].id); }
+    selector.focus();
+  }
+
+  /** Pone en la lámina una foto ya guardada en Gráficas (subida o sacada de un vídeo). */
+  async function ponerFoto(nombre, paraId) {
+    const yo = ED;
+    const foto = await comoDataUrl(yo.opc.api(yo.cid, `/imagen/${encodeURIComponent(nombre)}`));
+    if (ED !== yo) return;
+    ED.fotos[nombre] = foto;
+    const f = formato();
+    const existente = paraId && capa(paraId);
+    if (existente) {
+      existente.src = nombre;
+      existente.encuadre = { x: 50, y: 50, zoom: 1 };
+      ED.sel = [existente.id];
+    } else {
+      const ratio = foto.iw && foto.ih ? foto.ih / foto.iw : 1;
+      const [cx, cy] = centroVisible();
+      let w = 60, h = 60 * f.W / f.H * ratio;
+      if (h > 80) { w = w * 80 / h; h = 80; }
+      const c = capaNueva('imagen', { nombre: 'Foto', src: nombre, encuadre: { x: 50, y: 50, zoom: 1 }, radio: 0, borde: null, sombra: [], w, h, x: cx - w / 2, y: cy - h / 2 });
+      capas().push(c);
+      ED.sel = [c.id];
+    }
+    pintarTodo();
+    commit();
+    pintarPaneles();
+    avisoPantalla('Foto lista.');
   }
 
   function elegir(id, sumar) {

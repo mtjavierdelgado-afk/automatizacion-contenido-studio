@@ -310,3 +310,10 @@ body.ce-abierto { overflow: hidden; }
 /* con la tira, el aviso sale por encima de ella (no tapa sus botones) */
 .ce:has(.ce-tira) .ce-aviso { bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
 @media (max-width: 820px) { .ce:has(.ce-tira) .ce-aviso { bottom: calc(18px + env(safe-area-inset-bottom, 0px)); } }
+
+/* «Foto de un vídeo» (graficas-3c-extras): la rejilla de planos ya pagados */
+.ce-modal-planos { width: min(720px, 100%); max-height: 88vh; overflow: auto; }
+.ce-planos { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.ce-plano { padding: 0; border: 2px solid transparent; border-radius: 8px; background: var(--panel); cursor: pointer; overflow: hidden; aspect-ratio: 16 / 9; }
+.ce-plano:hover, .ce-plano:focus-visible { border-color: var(--acento); }
+.ce-plano img { display: block; width: 100%; height: 100%; object-fit: cover; }

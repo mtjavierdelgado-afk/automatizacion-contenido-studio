@@ -380,6 +380,11 @@ def iconos(pincel):
         ok(C._RE_REF.fullmatch(ref) is not None, f"las pegatinas usan colores que se guardan ({ref})")
 
 
+def Q_destino_largo_ok():
+    import graficas_qr as Q                                 # noqa: PLC0415
+    return Q.destino("web", "crearia.tech/" + "a" * 130) == "https://crearia.tech/" + "a" * 130
+
+
 def lote(pincel):
     print("carruseles en lote: una lista o un CSV")
     import tempfile, shutil                                 # noqa: E401,PLC0415
@@ -408,6 +413,9 @@ def lote(pincel):
        "pegado de Sheets con comas en los textos: el separador sale de la fila de títulos (árbitro)")
     e = LOTE.leer('Familia;Titular;L1\nGamer;"Hola, qué tal";Uno, dos y tres\nGamer;Otro, más;Cuatro, cinco\n')
     ok(len(e) == 2 and e[0]["nombre"] == "Hola, qué tal", "con punto y coma y comas dentro de las celdas")
+    e = LOTE.leer("familia\ttitular\ttexto de la lámina 2\n" + "Gamer\tHola\tUna, dos\n" * 3)
+    ok(len(e) == 3, "pegado de Sheets con títulos largos: sigue siendo un CSV (árbitro, 2.ª vuelta)")
+    ok(Q_destino_largo_ok(), "una web de 143 letras escritas cabe (el https:// no cuenta)")
     e = LOTE.leer("Portada, lo que nadie te cuenta\n\nUna idea\nCon su frase.")
     ok(len(e) == 1 and e[0]["nombre"] == "Portada, lo que nadie te cuenta", "una lista que empieza por «Portada,» no es un CSV (árbitro)")
     e = LOTE.leer("Familia;Titular;L1\nGamer;Hola;Uno | dos\n")
@@ -416,7 +424,9 @@ def lote(pincel):
     ok(len(e) == 1 and e[0]["familia"] is None and e[0]["texto"] == "Hola\n\nUno\n\nDos", "con tabuladores (pegado de Excel o Sheets)")
     ok("Galaxia" in falla("Familia: Galaxia\nHola"), "una familia que no existe se dice con su nombre")
     ok("fila 2" in falla("familia,titular\n99,Hola\n"), "en el CSV se dice la fila")
-    ok("titular" in falla("familia,otra\n1,x\n"), "un CSV sin «titular» se rechaza")
+    ok("titular" in falla("familia\totra\n1\tx\n"), "un CSV sin «titular» se rechaza")
+    e = LOTE.leer("Familia, amigos y fiestas\n\nUna idea\nCon su frase.")
+    ok(len(e) == 1 and e[0]["nombre"] == "Familia, amigos y fiestas", "una lista que empieza por «Familia, …» es una lista (árbitro, 2.ª vuelta)")
     ok("ningún" in falla("   \n---\n  "), "sin ningún carrusel se dice")
     ok("caben 20" in falla("\n---\n".join(f"Carrusel {i}" for i in range(21))), "más de 20 por tanda se rechaza")
     ok("demasiado" in falla("x" * 60001), "un texto enorme se rechaza")

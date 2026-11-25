@@ -1592,7 +1592,7 @@
     if (!hayVideos()) return;
     if (!paraId && capas().filter(c => c.tipo === 'imagen' && c.src).length >= LIMITES.fotos) { avisoPantalla(`Una pieza admite hasta ${LIMITES.fotos} fotos.`, true); return; }
     const yo = ED;
-    const laminaDeAntes = yo.lamina;
+    const laminaDeAntes = yo.doc.laminas[yo.lamina].id;
     const videos = yo.opc.videos();
     const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Foto de un vídeo' });
     const cerrarModal = () => capaVista.remove();
@@ -1648,8 +1648,10 @@
     if (ED !== yo) return;
     ED.fotos[nombre] = foto;
     const f = formato();
-    // la lámina en la que se pidió (si mientras tanto se pasó a otra, va a la suya)
-    const lam = (o.lamina !== undefined && ED.doc.laminas[o.lamina]) || ED.doc.laminas[ED.lamina];
+    // la lámina en la que se pidió, por su id (si mientras tanto se pasó a otra
+    // o se reordenaron, va a la suya; si se borró, a la que está abierta)
+    const lam = (o.lamina && ED.doc.laminas.find(l => l.id === o.lamina)) || ED.doc.laminas[ED.lamina];
+    const otra = lam !== ED.doc.laminas[ED.lamina];
     const existente = paraId && lam.capas.find(c => c.id === paraId);
     if (!existente && lam.capas.filter(c => c.tipo === 'imagen' && c.src).length >= LIMITES.fotos) {
       avisoPantalla(`Una lámina admite hasta ${LIMITES.fotos} fotos.`, true);
@@ -1672,7 +1674,8 @@
     pintarTodo();
     commit();
     pintarPaneles();
-    avisoPantalla(o.aviso || 'Foto lista.');
+    if (otra) pintarTira();
+    avisoPantalla(otra ? `${o.aviso || 'Foto lista.'} Va en la lámina ${ED.doc.laminas.indexOf(lam) + 1}.` : (o.aviso || 'Foto lista.'));
   }
 
   /**
@@ -1716,7 +1719,8 @@
         botonHacer.disabled = false;
         return;
       }
-      if (ED !== yo) return;
+      // cancelado mientras se hacía, o el editor ya es otro: no se pone
+      if (ED !== yo || !capaVista.isConnected) return;
       cerrarModal();
       try {
         await ponerFoto(r.nombre, null, { ancho: 26, nombre: 'QR', lamina: laminaDeAntes, aviso: `QR listo: lleva a ${r.destino}. Pruébalo con tu móvil antes de publicar.` });
@@ -1724,7 +1728,7 @@
         if (ED === yo) avisoPantalla(`No se ha podido poner el QR: ${e.message}`, true);
       }
     };
-    const laminaDeAntes = yo.lamina;
+    const laminaDeAntes = yo.doc.laminas[yo.lamina].id;
     const botonHacer = boton('Hacer el QR', { clase: 'ce-btn ce-primario' }, () => hacer());
     valor.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); hacer(); } });
     capaVista.appendChild(el('div', { clase: 'ce-modal-cuerpo ce-modal-qr' },

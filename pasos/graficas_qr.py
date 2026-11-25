@@ -51,12 +51,15 @@ def destino(tipo, valor, mensaje=""):
     if tipo == "web":
         if not valor or " " in valor:
             raise ErrorGraficas("escribe la dirección de tu web, sin espacios (crearia.tech)")
+        if len(valor) > MAX_WEB:
+            # se mide lo que escribiste (sin el https:// que se añade)
+            raise ErrorGraficas(f"esa dirección es larga para un QR (hasta {MAX_WEB} letras): usa la de tu página principal")
         if not re.match(r"^https?://", valor, re.I):
             valor = "https://" + valor
         partes = urlsplit(valor)
         if partes.scheme.lower() not in ("http", "https") or "." not in partes.netloc:
             raise ErrorGraficas("esa dirección no parece una web (por ejemplo: crearia.tech)")
-        if len(valor) > MAX_WEB:
+        if len(valor) > MAX_WEB + len("https://"):
             raise ErrorGraficas(f"esa dirección es larga para un QR (hasta {MAX_WEB} letras): usa la de tu página principal")
         return valor
     raise ErrorGraficas("el QR puede llevar tu WhatsApp o tu web")

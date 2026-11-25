@@ -68,7 +68,14 @@ def _es_csv(texto):
     if not re.search(r"[,;\t]", primera):
         return False
     celdas = [_sin_tildes(c).strip().strip('"') for c in primera.split(_separador(primera))]
-    return (len(celdas) >= 2 and any(c in ("titular", "portada", "familia") for c in celdas)
+    if len(celdas) < 2:
+        return False
+    if "\t" in primera and any(c in ("titular", "portada", "familia") for c in celdas):
+        # pegado de Excel o Sheets con su fila de títulos: aunque los títulos sean largos
+        return True
+    # con comas o punto y coma, solo con la columna «titular» y títulos cortos:
+    # «Familia, amigos y fiestas» es el titular de una lista
+    return (any(c in ("titular", "portada") for c in celdas)
             and all(len(c) <= 25 and len(c.split()) <= 3 for c in celdas))
 
 

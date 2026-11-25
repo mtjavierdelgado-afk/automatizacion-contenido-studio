@@ -145,7 +145,7 @@
   const CAMPOS_DE_MUESTRA = {
     marca: '', tipo: 'Tu negocio', kicker: 'Novedad', titulo: 'Tu titular aquí', apoyo: 'Un texto corto que lo explica',
     cta: 'Reserva ya', oferta: '-20%', oferta_txt: 'Solo esta semana', dia: '15', mes: 'Diciembre',
-    lugar: 'Lugar del evento', i1: 'Elige', i2: 'Reserva', i3: 'Disfruta', cita: '«Volveremos seguro»', autor: 'Ana, clienta',
+    lugar: 'Lugar del evento', i1: 'Elige', i2: 'Reserva', i3: 'Disfruta', cita: '«Volveremos seguro»', autor: 'Ana, clienta', usuario: '@tumarca',
   };
   const PESOS = [300, 400, 500, 600, 700, 800, 900];
   /** Los topes de `graficas_capas.py` (MAX_CAPAS, MAX_FOTOS, MAX_LOGOS, MAX_TEXTO): lo comprueba la suite. */

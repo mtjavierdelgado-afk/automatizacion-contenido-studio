@@ -86,11 +86,11 @@ def la_pagina():
     ok(falla(G.limpiar_pieza, {"colores": ["x"]}), "unos colores sin forma se rechazan")
     ok(falla(G.limpiar_pieza, {"plantilla": True}), "la plantilla tiene que ser un número")
     ok(set(p[0] for p in G.CATALOGO) == set(G._PL.PLANTILLAS), "el catálogo y las plantillas coinciden")
-    ok(len(G.CATALOGO) == 14, "son las 14 de la maqueta")
+    ok(len(G.CATALOGO) == 16, "son las 14 de la maqueta y Publicación y Gamer")
 
 
 def en_el_navegador(imagen):
-    print("las 14 plantillas en los 8 tamaños")
+    print("las 16 plantillas en los 8 tamaños")
     from PIL import Image
     pincel = G.Pincel()
     try:

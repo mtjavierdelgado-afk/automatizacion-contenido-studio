@@ -243,10 +243,10 @@ def colores_del_kit():
 # ====================================================================== con navegador
 
 def plantillas_iguales(pincel, foto, completo):
-    print("las 14 plantillas, convertidas en capas, salen iguales en los 8 tamaños")
+    print("las 16 plantillas, convertidas en capas, salen iguales en los 8 tamaños")
     peor = (0, "")
     for fid in FORMATOS:
-        for n in range(1, 15):
+        for n in range(1, 17):
             pieza = {"plantilla": n, "formato": fid, "textos": TEXTOS, "imagen": os.path.basename(foto)}
             r = C.comparar(pincel, pieza, None, foto)
             ok(r["igual"], f"plantilla {n} en {fid}: dif {r['diferencia']*100:.3f} %, visible "
@@ -267,7 +267,7 @@ def plantillas_iguales(pincel, foto, completo):
     for i, (nombre, extra, kit, con_logo) in enumerate(variantes):
         formatos = FORMATOS if completo else [FORMATOS[(i * 3) % len(FORMATOS)], FORMATOS[(i * 3 + 6) % len(FORMATOS)]]
         for fid in formatos:
-            for n in range(1, 15):
+            for n in range(1, 17):
                 pieza = dict({"plantilla": n, "formato": fid, "textos": TEXTOS, "imagen": os.path.basename(foto)}, **extra)
                 r = C.comparar(pincel, pieza, kit, (vertical if "fedcba" in pieza["imagen"] else foto) if pieza["imagen"] else None,
                                logo if con_logo else None, logo_oscuro if con_logo else None)

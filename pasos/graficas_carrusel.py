@@ -80,6 +80,11 @@ FAMILIAS = {
              acento="secundario", deco="banda", radio=1.5, boton="relleno"),
     14: dict(ft="playfair", fb="montserrat", mayus=False, fondo="claro", alterno="claro", acento="principal",
              deco="marco", radio=0, boton="linea", marca_espaciada=True),
+    # graficas-3c-extras: Publicación (como un post, sin nada de ninguna red) y Gamer (esquinas de pantalla de juego)
+    15: dict(ft="inter", fb="inter", peso_t=800, mayus=False, fondo="principal", alterno="principal", tarjeta="claro",
+             acento="principal", deco="tarjeta", radio=3, boton="relleno"),
+    16: dict(ft="oswald", fb="inter", peso_t=700, mayus=True, fondo="oscuro", alterno="oscuro", acento="secundario",
+             deco="hud", radio=0, boton="relleno"),
 }
 
 
@@ -257,9 +262,22 @@ def _fondo_y_adorno(L, tipo):
         lado = 26 if not L.horiz else 18
         capas.append(L.forma(-lado * 0.3, 100 - L.alto_de(lado) * 0.62, lado, L.alto_de(lado),
                              f"kit:{_rol_visible(fam, base, L.colores)}", "elipse", nombre="Sello"))
+    elif d == "hud":
+        # cuatro esquinas en L, como el marco de una pantalla de juego (familia Gamer)
+        lado, grosor = (11 if not L.horiz else 7), 1.1
+        lado_y = L.alto_de(lado)
+        color = f"kit:{_rol_visible(fam, base, L.colores)}"
+        k, ky = 2.6, L.alto_de(2.6)
+        for nombre, x, y, anchos in (("arriba izquierda", k, ky, [grosor, 0, 0, grosor]),
+                                     ("arriba derecha", 100 - k - lado, ky, [grosor, grosor, 0, 0]),
+                                     ("abajo izquierda", k, 100 - ky - lado_y, [0, 0, grosor, grosor]),
+                                     ("abajo derecha", 100 - k - lado, 100 - ky - lado_y, [0, grosor, grosor, 0])):
+            capas.append(L.forma(x, y, lado, lado_y, None, nombre=f"Esquina {nombre}",
+                                 borde={"anchos": anchos, "color": color, "alfa": 1}))
     elif d == "tarjeta" and tipo not in ("portada",):
         x0, y0, w, h = _caja_util(L)
-        capas.append(L.forma(x0 - 2.5, y0 - L.alto_de(2.5), w + 5, h + L.alto_de(5), f"kit:{fam['tarjeta']}",
+        # arriba, solo un poco de aire: más alto tapaba la marca «en todas» (visto en 9:16, 25-11)
+        capas.append(L.forma(x0 - 2.5, y0 - L.alto_de(1.2), w + 5, h + L.alto_de(3.7), f"kit:{fam['tarjeta']}",
                              radio=fam["radio"], nombre="Tarjeta"))
         sobre = fam["tarjeta"]
     elif d == "caja" and tipo not in ("portada", "cierre"):
@@ -730,7 +748,11 @@ def textos_de_portada(n, t, piezas=(), marca=""):
     titulo, apoyo = t.get("titulo", ""), t.get("apoyo", "")
     textos = {"titulo": titulo, "apoyo": apoyo, "marca": marca or "Tu marca", "cta": "Desliza →", "kicker": "",
               "tipo": "", "oferta": "", "oferta_txt": "", "dia": "", "mes": "", "lugar": "", "i1": "", "i2": "", "i3": "",
-              "cita": "", "autor": ""}
+              "cita": "", "autor": "", "usuario": ""}
+    if n == 15:
+        # la tarjeta de «Publicación»: el @usuario sale del nombre de la marca
+        nombre = re.sub(r"[^a-z0-9_.]", "", (marca or "").lower().replace(" ", ""))
+        textos["usuario"] = f"@{nombre}"[:30] if nombre else "@tumarca"
     if n == 9:
         textos.update(cita=titulo, autor=apoyo or marca or "")
     if n == 12:

@@ -203,7 +203,7 @@ const ctx = { window: {}, document: {}, console };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(process.argv[process.argv.length - 1], 'utf8'), ctx);
 const K = ctx.window.EditorCapas._cuentas;
-process.stdout.write(JSON.stringify(JSON.parse(fs.readFileSync(0, 'utf8')).map(l => K.fondoTapado(l))));
+process.stdout.write(JSON.stringify(JSON.parse(fs.readFileSync(0, 'utf8')).map(c => K.fondoTapado(c.lam, c.i, c.total, c.f))));
 """
 
 
@@ -228,8 +228,24 @@ def fondo_tapado(pincel):
             otro = json.loads(json.dumps(d))
             otro["laminas"][i]["capas"][0]["relleno"] = {"color": "#00FF00", "alfa": 1}
             despues = C.pintar(pincel, otro, None, lambda _n: None, lamina=i)[0]
-            laminas.append(d["laminas"][i])
+            laminas.append({"lam": d["laminas"][i], "i": i, "total": len(d["laminas"]), "f": {"W": 1080, "H": 1350}})
             verdad.append(antes == despues)
+    # una capa a sangre «en todas» que no sale en el cierre («Menos en la
+    # última») no tapa su fondo; en las demás, sí
+    d, _ = K.carrusel_desde_texto(pincel, {"version": 2, "formato": "v45", "nombre": "x", "laminas": [{"capas": []}]},
+                                  1, texto, "sustituir", None, None, None, "Alba")
+    tapa = {"tipo": "forma", "id": "tapa", "rol": "", "x": 0, "y": 0, "w": 100, "h": 100, "enlace": "tp",
+            "salvo": ["ultima"], "relleno": {"color": "#123456", "alfa": 1}}
+    for lam in d["laminas"]:
+        lam["capas"].insert(1, dict(tapa, id=f"tapa{len(lam['capas'])}"))
+    d = C.limpiar_doc(d)
+    for i in (len(d["laminas"]) - 1, 1):
+        antes = C.pintar(pincel, d, None, lambda _n: None, lamina=i)[0]
+        otro = json.loads(json.dumps(d))
+        otro["laminas"][i]["capas"][0]["relleno"] = {"color": "#00FF00", "alfa": 1}
+        laminas.append({"lam": d["laminas"][i], "i": i, "total": len(d["laminas"]), "f": {"W": 1080, "H": 1350}})
+        verdad.append(antes == C.pintar(pincel, otro, None, lambda _n: None, lamina=i)[0])
+    ok(verdad[-2:] == [False, True], f"(la capa «Menos en la última» tapa la 2 y no el cierre: {verdad[-2:]})")
     r = subprocess.run([node, "-e", _NODE_TAPADO, EDITOR_JS], input=json.dumps(laminas), capture_output=True,
                        text=True, timeout=120)
     if r.returncode:
@@ -237,6 +253,7 @@ def fondo_tapado(pincel):
         return
     dice = json.loads(r.stdout)
     malos = [(i // 2 + 1, "portada" if i % 2 == 0 else "dentro") for i, (a, b) in enumerate(zip(dice, verdad)) if a != b]
+    dice = dice[:28]
     ok(not malos, f"el editor sabe qué fondos tapa el diseño, igual que el PNG ({len(dice)} láminas; distintas: {malos})")
     ok(not any(dice[1::2]), "en las láminas de dentro de las 14 familias el fondo nunca está tapado")
 

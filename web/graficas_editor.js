@@ -1918,8 +1918,10 @@
   /** El fondo de la lámina no se ve si otra capa lo tapa entero: las portadas
    * de plantilla llevan encima su propio fondo (el degradado de Neón nocturno,
    * la foto a sangre…), prueba del 24-11. */
-  function fondoTapado(lam) {
-    return lam.capas.slice(1).some(tapaTodo);
+  function fondoTapado(lam, i, total, f) {
+    // lo que no sale en esta lámina («Menos en la primera», «Solo en el
+    // carrusel» en historias) no tapa nada (árbitro del 25-11)
+    return lam.capas.slice(1).some(c => tapaTodo(c) && !(f && fueraDeLamina(c, i, total, f)));
   }
 
   function fondoATodas(c) {
@@ -1929,7 +1931,7 @@
     ED.doc.laminas.forEach((lam, i) => {
       if (i === ED.lamina) return;
       // su diseño lo taparía: no se cambia lo que no se iba a ver
-      if (fondoTapado(lam)) { tapadas.push(i + 1); return; }
+      if (fondoTapado(lam, i, ED.doc.laminas.length, formato())) { tapadas.push(i + 1); return; }
       const nuevo = Object.assign(copia(c), { id: nuevoId(), oculto: false });
       delete nuevo.enlace;
       const viejo = lam.capas[0] && esFondo(lam.capas[0], lam) ? lam.capas[0] : null;

@@ -62,8 +62,8 @@ def _orden_ok(doc, i):
     fotos = [j for j, c in enumerate(capas) if c.get("rol") == K.FOTO_FONDO]
     if not fotos:
         return True
-    fondo = [j for j, c in enumerate(capas) if c.get("rol") == "fondo"]
-    return len(fotos) == 1 and (fotos[0] == (fondo[0] + 1 if fondo else 0))
+    sin = [c for c in capas if c.get("rol") != K.FOTO_FONDO]
+    return len(fotos) == 1 and fotos[0] == K._indice_tras_fondo(sin)
 
 
 def _imagen(ruta, tono):
@@ -97,7 +97,8 @@ def parte_1(pincel):
         ok(all(_orden_ok(d, i) for i in range(len(d["laminas"]))), f"familia {n}: la foto sigue justo encima del Fondo")
         quitadas = [i for i in con if not any(c.get("rol") == K.FOTO_FONDO for c in d["laminas"][i]["capas"])
                     and i > 0]
-        ok(len(quitadas) == sum("se ha quitado" in a for a in avisos), f"familia {n}: cada foto quitada se dice")
+        dentro = [a for a in avisos if "se ha quitado" in a and not a.startswith("En la imagen 1,")]
+        ok(len(quitadas) == len(dentro), f"familia {n}: cada foto quitada se dice ({quitadas}, {avisos})")
         portada = d["laminas"][0]["capas"]
         visibles = [c for c in portada if c["tipo"] == "imagen" and not c.get("oculto") and c.get("src") == FOTO]
         ocultas = [c for c in portada if c["tipo"] == "imagen" and c.get("oculto") and c.get("src")]
@@ -174,6 +175,15 @@ def parte_1(pincel):
     d_sin, _ = K.poner_foto_fondo(base, 0, "img_1111111111111111.jpg", None, None)
     op = [next((c["opac"] for c in d["laminas"][0]["capas"] if c.get("rol") == K.FOTO_FONDO), 0) for d in (d_gris, d_sin)]
     ok(op[0] >= op[1], f"con la foto real se mide esa foto (gris {op[0]}), sin ella el peor caso ({op[1]})")
+    # se VE: con la foto, la imagen pintada cambia (no queda tapada por un fondo de la plantilla)
+    gris_de = {"img_1111111111111111.jpg": gris}.get
+    for n in (1, 8, 9, 14, 15):
+        d_con, _ = CR.crear(pincel, "publicacion", n, None, [("portada", {"titulo": "Hola"})], "img_1111111111111111.jpg",
+                            None, None, None, "EP", "", gris_de)
+        d_sin, _ = CR.crear(pincel, "publicacion", n, None, [("portada", {"titulo": "Hola"})], "", None, None, None, "EP")
+        png_con = C.pintar(pincel, d_con, None, gris_de, None, None, 0)[0]
+        png_sin = C.pintar(pincel, d_sin, None, gris_de, None, None, 0)[0]
+        ok(C.diferencia(png_con, png_sin) > 0.2, f"estilo {n}: la foto de fondo de la portada se ve")
     # pinta sin choques
     _png, _av, medida = C.pintar(pincel, d1, None, imagen_de, None, None, 1)
     ok(not medida["fuera"] and not medida["choca"], f"la imagen con foto de fondo pinta sin choques {medida}")
@@ -248,11 +258,73 @@ def parte_2(pincel):
     ok(json.loads(D.simulado(texto_pedido))["laminas"][0]["plano"] == "p0", "simulado legible")
 
 
+def parte_3():
+    print("cerrar «+ Crear» cancela «Escríbelo por mí» y libera el proyecto; la foto de fondo por la API")
+    import shutil                                           # noqa: PLC0415
+    import requests                                         # noqa: PLC0415
+    import prueba_graficas_carrusel as P                    # noqa: PLC0415
+    carpeta = tempfile.mkdtemp(prefix="desde_video_3_")
+    os.makedirs(os.path.join(carpeta, "proyectos"), exist_ok=True)
+    os.environ["ESTUDIO_SIMULAR_ESPERA"] = "4"
+    try:
+        proceso, base = P._arrancar(carpeta)
+    finally:
+        os.environ.pop("ESTUDIO_SIMULAR_ESPERA", None)
+    try:
+        d = requests.post(base + "/api/clientes", json={"nombre": "Desde vídeo"}, timeout=30).json()
+        cid = d.get("id") or (d.get("cliente") or {}).get("id")
+        cuerpo = {"que": "carrusel", "tema": "Cómo elegir una consola"}
+        r = requests.post(base + f"/api/graficas/{cid}/escribir", json=cuerpo, timeout=30)
+        tid = r.json().get("trabajo")
+        ok(r.status_code == 202 and tid, "«Escríbelo por mí» arranca")
+        ok(requests.post(base + f"/api/graficas/{cid}/escribir", json=cuerpo, timeout=30).status_code == 409, "un segundo a la vez: 409")
+        ok(requests.delete(base + f"/api/graficas/{cid}/escribir/{tid}", timeout=30).status_code == 200, "cerrar lo cancela")
+        t = requests.get(base + f"/api/graficas/{cid}/capas/trabajo/{tid}", timeout=30).json()
+        ok(t.get("estado") == "error" and t.get("error") == "cancelado", "y queda cancelado")
+        r = requests.post(base + f"/api/graficas/{cid}/escribir", json=cuerpo, timeout=30)
+        ok(r.status_code == 202, "el proyecto queda libre para otro «Escríbelo por mí» al momento")
+        import time                                         # noqa: PLC0415
+        time.sleep(5)
+        t = requests.get(base + f"/api/graficas/{cid}/capas/trabajo/{tid}", timeout=30).json()
+        ok(t.get("error") == "cancelado", "lo cancelado no se pisa cuando el hilo termina")
+        ok(requests.delete(base + f"/api/graficas/otro/escribir/{tid}", timeout=30).status_code in (403, 404),
+           "no se cancela el trabajo de otro proyecto")
+        ok(requests.get(base + f"/api/graficas/{cid}/videos/no_existe/planos", timeout=30).status_code in (403, 404),
+           "un vídeo que no existe: no se lee")
+        # la foto de fondo por la API (POST /capas/foto-fondo)
+        from PIL import Image                               # noqa: PLC0415
+        import io                                           # noqa: PLC0415
+        b = io.BytesIO()
+        Image.new("RGB", (300, 400), (120, 110, 100)).save(b, "PNG")
+        nombre = requests.post(base + f"/api/graficas/{cid}/imagen", files={"imagen": ("f.png", b.getvalue(), "image/png")}, timeout=30).json()["nombre"]
+        doc = requests.post(base + f"/api/graficas/{cid}/capas/crear", json={"que": "carrusel", "familia": 2,
+                            "texto": "Titular\n\nUno\nDos\n\nTres\nCuatro"}, timeout=60).json()["doc"]
+        r = requests.post(base + f"/api/graficas/{cid}/capas/foto-fondo", json={"doc": doc, "lamina": 1, "src": nombre}, timeout=60)
+        doc2 = r.json().get("doc") or {}
+        ok(r.status_code == 200 and any(c.get("rol") == "foto_fondo" for c in doc2["laminas"][1]["capas"]), "la foto de fondo se pone por la API")
+        r = requests.post(base + f"/api/graficas/{cid}/capas/foto-fondo", json={"doc": doc2, "lamina": 1}, timeout=60)
+        ok(not any(c.get("rol") == "foto_fondo" for c in r.json()["doc"]["laminas"][1]["capas"]), "y se quita")
+        ok(requests.post(base + f"/api/graficas/{cid}/capas/foto-fondo", json={"doc": doc, "lamina": 1, "src": "img_ffffffffffffffff.jpg"},
+                         timeout=30).status_code == 404, "una foto que no es de este proyecto: 404")
+        r = requests.post(base + f"/api/graficas/{cid}/capas/crear", json={"que": "carrusel", "familia": 2,
+                          "piezas": [["portada", {"titulo": "Hola", "plano": "x1"}], ["punto", {"titulo": "A", "plano": "x2"}], ["cierre", {}]]}, timeout=60)
+        ok(r.status_code == 200 and not any(c.get("rol") == "foto_fondo" for lam in r.json()["doc"]["laminas"] for c in lam["capas"]),
+           "sin vídeo, un «plano» mandado a mano no pone nada")
+    finally:
+        proceso.terminate()
+        try:
+            proceso.wait(timeout=15)
+        except Exception:                                   # noqa: BLE001
+            proceso.kill()
+        shutil.rmtree(carpeta, ignore_errors=True)
+
+
 def main():
     pincel = G.Pincel()
     try:
         parte_1(pincel)
         parte_2(pincel)
+        parte_3()
     finally:
         pincel.cerrar()
     print(f"\n{len(BIEN)} comprobaciones bien, {len(MAL)} mal")

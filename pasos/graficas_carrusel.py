@@ -1301,8 +1301,11 @@ def _fondos_bajo(capas, hasta, x, y, colores, foto, extremo, p):
 
 
 def _textos_que_cuentan(capas):
+    """Los textos que tienen que leerse (los adornos de letra, como las comillas
+    gigantes de la Testimonio, son decoración: no cuentan, como en WCAG)."""
     return [i for i, c in enumerate(capas)
-            if c["tipo"] == "texto" and not c.get("oculto") and c.get("txt", "").strip() and c.get("opac", 1) > 0]
+            if c["tipo"] == "texto" and c.get("rol") != "deco" and not c.get("oculto") and c.get("txt", "").strip()
+            and c.get("opac", 1) > 0]
 
 
 _MEMO_EXTREMOS = {}
@@ -1398,12 +1401,31 @@ def opacidad_foto(lamina, colores, f, imagen_de=None):
     return mejor if mejor >= OPAC_FOTO_MIN - 1e-9 else None
 
 
+def _tapa_la_lamina(c):
+    """Una forma opaca a sangre (el «Fondo», o el rectángulo de color que
+    pintan encima algunas plantillas): lo que hay debajo no se ve."""
+    if c["tipo"] != "forma" or c.get("oculto") or c.get("giro") or c.get("figura") != "rect":
+        return False
+    if c["x"] > 0.5 or c["y"] > 0.5 or c["x"] + c["w"] < 99.5 or c["y"] + c["h"] < 99.5:
+        return False
+    colores = c.get("relleno")
+    if not colores:
+        return False
+    alfas = [p["alfa"] for p in colores["degradado"]["paradas"]] if "degradado" in colores else [colores["alfa"]]
+    return all(a * c.get("opac", 1) >= 0.99 for a in alfas)
+
+
 def _indice_tras_fondo(capas):
-    """Justo encima de la capa «Fondo» de la lámina (o abajo del todo si no hay)."""
+    """Justo encima del último fondo opaco a sangre de la lámina (el «Fondo», o
+    el rectángulo de color que algunas portadas ponen encima: debajo de él la
+    foto no se vería), y antes de cualquier texto; abajo del todo si no hay."""
+    donde = 0
     for i, c in enumerate(capas):
-        if c.get("rol") == "fondo":
-            return i + 1
-    return 0
+        if c["tipo"] == "texto":
+            break
+        if c.get("rol") == "fondo" or _tapa_la_lamina(c):
+            donde = i + 1
+    return donde
 
 
 def capa_foto_fondo(src, ident=None):

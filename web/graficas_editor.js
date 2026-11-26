@@ -3472,7 +3472,7 @@
   }
 
   function grupoFotoSencillo(elegida) {
-    // la foto del hueco de la plantilla (la portada de un estilo «📷 con foto»)
+    // la foto del hueco de la plantilla (la portada de un estilo «📷 foto grande»)
     const hueco = (elegida && elegida.rol !== FONDO_ROL ? elegida : null)
       || capas().find(c => c.tipo === 'imagen' && c.rol === 'foto' && !c.oculto) || null;
     if (hueco) {
@@ -3619,7 +3619,7 @@
 
   /** Los estilos que llevan foto en la portada (lo dice el servidor con las miniaturas). */
   const conFotoConocidos = [];
-  const marcaFoto = n => (conFotoConocidos.includes(n) ? el('span', { clase: 'gc-con-foto' }, '📷 con foto') : null);
+  const marcaFoto = n => (conFotoConocidos.includes(n) ? el('span', { clase: 'gc-con-foto' }, '📷 foto grande') : null);
 
   /** Pinta las miniaturas en una rejilla: `turno()` dice si siguen valiendo. */
   async function pedirMiniaturas(opc, cid, cuerpo, todas, alLlegar, sigue, senal) {
@@ -3757,6 +3757,10 @@
     };
     ASISTENTE = S;
     S.cerrar = () => {
+      // cerrar mientras Claude escribe lo cancela (el proyecto queda libre)
+      if (S.escribiendo && S.trabajo) {
+        S.opc.pedir(S.opc.api(S.cid, `/escribir/${S.trabajo}`), { method: 'DELETE' }).catch(() => {});
+      }
       S.cerrado = true;
       if (S.parar) S.parar.abort();
       clearTimeout(S.espera);
@@ -3853,6 +3857,9 @@
     tam.value = S.formato;
     tam.addEventListener('change', () => { S.formato = tam.value; pedirEstilos(S, true); });
     izq.appendChild(el('h3', { clase: 'gc-pregunta' }, `${q.nombre}: ¿de qué trata?`));
+    const videos = typeof S.opc.videos === 'function' ? S.opc.videos() : [];
+    S.cajaVideo = videos.length ? el('section', { clase: 'gc-desde-video' }) : null;
+    if (S.cajaVideo) { izq.appendChild(S.cajaVideo); pintarVideo(S); }
     S.cajaTextos = el('div', { clase: 'gc-textos' });
     izq.appendChild(S.cajaTextos);
     pintarTextos(S);
@@ -3901,13 +3908,16 @@
 
   /** El titular con el que se pintan las miniaturas. */
   function tituloDeMuestra(S) {
+    if (S.pid && !S.piezas) return S.videoTitulo || '';
     if (S.que !== 'carrusel') return S.titulo;
+    if (S.pid) return String((S.piezas[0][1] || {}).titulo || '');
     if (S.modo === 'tema') return S.piezas ? String((S.piezas[0][1] || {}).titulo || '') : S.tema;
     return (S.texto.trim().split('\n')[0] || '').slice(0, 90);
   }
 
   function apoyoDeMuestra(S) {
     if (S.que !== 'carrusel') return S.apoyo;
+    if (S.pid) return S.piezas ? String((S.piezas[0][1] || {}).apoyo || '') : '';
     return S.modo === 'tema' && S.piezas ? String((S.piezas[0][1] || {}).apoyo || '') : '';
   }
 
@@ -3923,6 +3933,7 @@
     const C = S.cajaTextos;
     C.textContent = '';
     const cambioTitular = () => { S.mensaje = ''; revisarCrear(S); programarEstilos(S); };
+    if (S.pid) { textosDesdeVideo(S, C, cambioTitular); return; }
     if (S.que !== 'carrusel') {
       C.appendChild(campoTexto('El titular', S.titulo, { attrs: { maxlength: '90', placeholder: EJEMPLO_TEMA, clase: 'gc-titular' } },
         v => { S.titulo = v; cambioTitular(); }));
@@ -3964,9 +3975,9 @@
   }
 
   function botonEscribir(S, pista) {
-    const b = el('button', { type: 'button', clase: 'ce-btn gc-escribir', disabled: S.escribiendo,
+    const b = el('button', { type: 'button', clase: 'ce-btn gc-escribir', disabled: S.escribiendo || (S.pid && !S.videoVale),
       title: 'Claude escribe los textos con la ficha de tu negocio (usa el cupo de tu membresía, no cuesta dinero)',
-      onclick: () => escribirPorMi(S) }, S.escribiendo ? 'Escribiendo…' : '✍️ Escríbelo por mí');
+      onclick: () => escribirPorMi(S) }, S.escribiendo ? 'Escribiendo…' : (S.pid ? '✍️ Escríbelo por mí desde el vídeo' : '✍️ Escríbelo por mí'));
     const avisos = S.avisosIA.length ? el('ul', { clase: 'gc-avisos' }, ...S.avisosIA.map(a => el('li', {}, a))) : null;
     return el('div', { clase: 'gc-escribir-fila' }, b,
       el('small', { clase: 'ce-pista' }, S.escribiendo ? 'Tarda entre 20 segundos y un minuto. Puedes ir eligiendo la foto.' : (pista || 'Sin dinero: usa el cupo de Claude de tu membresía.')),
@@ -3974,14 +3985,14 @@
   }
 
   async function escribirPorMi(S) {
-    const tema = (S.que === 'carrusel' ? S.tema : S.titulo).trim();
-    if (tema.length < 3) {
+    const tema = S.pid ? (S.videoTitulo || 'el vídeo') : (S.que === 'carrusel' ? S.tema : S.titulo).trim();
+    if (!S.pid && tema.length < 3) {
       const campo = S.cajaTextos.querySelector(S.que === 'carrusel' ? '.gc-tema' : '.gc-titular');
       decir(S, 'Escribe de qué trata (una frase basta) y vuelve a pulsar.');
       if (campo) campo.focus();
       return;
     }
-    if (S.que !== 'carrusel' && (S.apoyo.trim()) && !window.confirm('La IA va a cambiar el titular y la frase que has escrito. ¿Seguir?')) return;
+    if (S.que !== 'carrusel' && (S.apoyo.trim() || (S.pid && S.titulo.trim())) && !window.confirm('La IA va a cambiar el titular y la frase que has escrito. ¿Seguir?')) return;
     const pedido = S.que;
     S.escribiendo = true;
     S.avisosIA = [];
@@ -3989,7 +4000,11 @@
     revisarCrear(S);
     const o = S.opc;
     try {
-      const inicio = await o.pedir(o.api(S.cid, '/escribir'), { method: 'POST', cuerpo: { que: S.que, tema, cuantas: S.cuantas, formato: S.formato, sobre: S.sobre || '' } });
+      const cuerpo = { que: S.que, tema, cuantas: S.cuantas, formato: S.formato, sobre: S.sobre || '' };
+      if (S.pid) cuerpo.pid = S.pid;
+      const pidPedido = S.pid;
+      const inicio = await o.pedir(o.api(S.cid, '/escribir'), { method: 'POST', cuerpo });
+      S.trabajo = inicio.trabajo;
       let r = null;
       // el servidor da hasta 2 intentos de 4 minutos: se espera un poco más
       for (let i = 0; i < 450 && !S.cerrado; i++) {
@@ -4006,7 +4021,7 @@
       }
       if (S.cerrado) return;
       if (!r) throw new Error('tarda demasiado. Vuelve a probar en un rato o escríbelo tú');
-      if (S.que !== pedido) throw new Error('cambiaste lo que vas a crear mientras escribía. Vuelve a pulsar «Escríbelo por mí»');
+      if (S.que !== pedido || S.pid !== pidPedido) throw new Error('cambiaste lo que vas a crear (o el vídeo) mientras escribía. Vuelve a pulsar «Escríbelo por mí»');
       const piezas = (r.piezas || []).filter(p => Array.isArray(p) && p.length === 2);
       if (!piezas.length) throw new Error('no ha devuelto textos');
       S.avisosIA = r.avisos || [];
@@ -4016,14 +4031,133 @@
       } else {
         S.titulo = String(piezas[0][1].titulo || S.titulo).slice(0, 90);
         S.apoyo = String(piezas[0][1].apoyo || '').slice(0, 140);
+        if (S.pid) { S.piezas = piezas.slice(0, 1); S.piezasDe = tema; }
       }
+      // desde un vídeo: la foto de la portada (y de las miniaturas) es la de su plano
+      if (S.pid && S.piezas && S.piezas[0][1].plano) fotoDePlano(S, S.piezas[0][1].plano);
       decir(S, 'Textos escritos: revísalos antes de publicar.');
     } catch (e) {
       if (!S.cerrado) decir(S, `No se ha podido escribir: ${e.message}. Lo que escribiste sigue aquí.`);
     } finally {
       S.escribiendo = false;
+      S.trabajo = '';
       if (!S.cerrado) { pintarTextos(S); revisarCrear(S); programarEstilos(S, true); }
     }
+  }
+
+  /* ---------------------------------------------------------------- «Crear desde un vídeo» (graficas-desde-video) */
+
+  function pintarVideo(S) {
+    const C = S.cajaVideo;
+    if (!C) return;
+    C.textContent = '';
+    const videos = S.opc.videos();
+    const sel = el('select', { 'aria-label': 'Desde un vídeo', clase: 'gc-video-base' },
+      el('option', { value: '' }, '— No: lo escribo yo (o la IA desde un tema) —'),
+      ...videos.map(v => el('option', { value: v.id }, v.nombre || v.id)));
+    sel.value = S.pid || '';
+    sel.addEventListener('change', () => elegirVideo(S, sel.value));
+    let estado = null;
+    if (S.pid) {
+      if (!S.planosVideo) estado = el('small', { clase: 'ce-pista' }, 'Mirando sus imágenes…');
+      else if (!S.videoVale) estado = el('small', { clase: 'ce-pista malo' }, 'Este vídeo no tiene imágenes con narración suficientes: elige otro.');
+      else estado = el('small', { clase: 'ce-pista' }, `${S.planosVideo.length} imágenes con voz. Claude lee lo que dice el vídeo y elige una imagen para cada parte. `,
+        'La narración se manda a Claude con tu cupo (sin dinero). Los textos van siempre en español.');
+    }
+    C.append(el('label', { clase: 'ce-campo gc-campo' }, el('span', {}, 'O créalo desde uno de tus vídeos'), sel), estado);
+  }
+
+  async function elegirVideo(S, pid) {
+    if (S.escribiendo) return;
+    S.pid = pid || '';
+    S.piezas = null;
+    S.piezasDe = '';
+    S.avisosIA = [];
+    S.planosVideo = null;
+    S.videoVale = false;
+    S.videoTitulo = '';
+    if (S.pid) { S.foto = ''; S.fotoUrl = ''; }
+    pintarVideo(S); pintarTextos(S); pintarFoto(S); revisarCrear(S);
+    if (!S.pid) { pedirEstilos(S, true); return; }
+    try {
+      const r = await S.opc.pedir(S.opc.api(S.cid, `/videos/${encodeURIComponent(pid)}/planos`));
+      if (S.cerrado || S.pid !== pid) return;
+      S.planosVideo = r.planos || [];
+      S.videoVale = !!r.vale;
+      S.videoTitulo = r.titulo || '';
+    } catch (e) {
+      if (S.cerrado || S.pid !== pid) return;
+      S.planosVideo = [];
+      S.videoVale = false;
+      decir(S, `No se ha podido leer ese vídeo: ${e.message}`);
+    }
+    pintarVideo(S); pintarTextos(S); revisarCrear(S); pedirEstilos(S, true);
+  }
+
+  /** La miniatura de un plano del vídeo elegido (o «sin foto»). */
+  function miniPlano(S, sid) {
+    if (!sid) return el('span', { clase: 'gc-plano-vacio' }, 'sin foto');
+    const img = el('img', { alt: `Imagen del vídeo (${sid})` });
+    S.opc.miniatura(img, S.pid, sid);
+    return img;
+  }
+
+  async function fotoDePlano(S, sid) {
+    const pid = S.pid;
+    try {
+      const r = await S.opc.pedir(S.opc.api(S.cid, '/imagen/de-plano'), { method: 'POST', cuerpo: { pid, sid } });
+      if (S.cerrado || S.pid !== pid) return;
+      await ponerFotoAsistente(S, r.nombre);
+    } catch (_) { /* la miniatura sale sin foto; al crear, el servidor la pone igual */ }
+  }
+
+  function textosDesdeVideo(S, C, cambioTitular) {
+    if (S.que === 'carrusel') {
+      const cuantas = el('select', { 'aria-label': '¿Cuántas imágenes?', clase: 'gc-cuantas' },
+        ...[3, 4, 5, 6, 7, 8, 9, 10].map(n => el('option', { value: String(n) }, `${n} imágenes`)));
+      cuantas.value = String(S.cuantas);
+      cuantas.addEventListener('change', () => { S.cuantas = parseInt(cuantas.value, 10); });
+      C.appendChild(el('label', { clase: 'ce-campo gc-campo' }, el('span', {}, '¿Cuántas imágenes?'), cuantas));
+    } else if (S.piezas) {
+      C.appendChild(campoTexto('El titular', S.titulo, { attrs: { maxlength: '90', clase: 'gc-titular' } }, v => { S.titulo = v; cambioTitular(); }));
+      C.appendChild(campoTexto('Una frase de apoyo (si quieres)', S.apoyo, { attrs: { maxlength: '140', clase: 'gc-apoyo' } }, v => { S.apoyo = v; cambioTitular(); }));
+    }
+    C.appendChild(botonEscribir(S, ''));
+    if (!S.piezas) return;
+    const nombres = {};
+    for (const t of S.tipos || []) nombres[t.id] = t.nombre;
+    C.appendChild(el('div', { clase: 'gc-propuesta gc-propuesta-video' },
+      el('b', {}, S.que === 'carrusel' ? `Textos listos: ${S.piezas.length} imágenes, cada una con su imagen del vídeo` : 'La imagen del vídeo para tu portada'),
+      el('ol', { clase: 'gc-lista-video' }, ...S.piezas.map(([tipo, t], i) => el('li', {},
+        el('button', { type: 'button', clase: 'gc-cambiar-plano', 'data-i': String(i), title: 'Elegir otra imagen del vídeo (o ninguna)',
+          onclick: () => elegirPlano(S, i) }, miniPlano(S, t.plano)),
+        el('span', {}, el('i', {}, nombres[tipo] || tipo), ' · ', String(t.titulo || t.pregunta || t.mito || t.cifra || '').slice(0, 70))))),
+      el('small', { clase: 'ce-pista' }, 'Toca una imagen para elegir otra del vídeo. Los textos los cambias en el paso siguiente, tocándolos.')));
+  }
+
+  function elegirPlano(S, i) {
+    const capa = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Otra imagen del vídeo' });
+    const cerrarla = () => capa.remove();
+    const elegir = sid => {
+      cerrarla();
+      S.piezas[i][1].plano = sid;
+      if (i === 0) {
+        if (sid) fotoDePlano(S, sid);
+        else { S.foto = ''; S.fotoUrl = ''; pintarFoto(S); pedirEstilos(S, true); }
+      }
+      pintarTextos(S);
+    };
+    const usados = new Set(S.piezas.map(([, t], j) => (j !== i ? t.plano : '')).filter(Boolean));
+    capa.appendChild(el('div', { clase: 'ce-modal-cuerpo ce-modal-planos' },
+      el('h2', {}, 'Otra imagen del vídeo'),
+      el('p', { clase: 'ce-pista' }, 'Las de este vídeo que llevan voz (sin las que tienen letras). Gratis.'),
+      el('div', { clase: 'ce-planos gc-planos-video' },
+        el('button', { type: 'button', clase: 'ce-plano gc-sin-foto', onclick: () => elegir('') }, 'Sin foto'),
+        ...(S.planosVideo || []).map(p => el('button', { type: 'button', clase: 'ce-plano gc-plano-video', 'data-sid': p.sid,
+          title: p.texto, disabled: usados.has(p.sid), onclick: () => elegir(p.sid) }, miniPlano(S, p.sid)))),
+      el('div', { clase: 'ce-botonera' }, el('button', { type: 'button', clase: 'ce-btn', onclick: cerrarla }, 'Cancelar'))));
+    capa.addEventListener('pointerdown', ev => { if (ev.target === capa) cerrarla(); });
+    S.raiz.appendChild(capa);
   }
 
   /* la foto: subir o una de mis vídeos */
@@ -4050,6 +4184,12 @@
     const C = S.cajaFoto;
     if (!C) return;
     C.textContent = '';
+    if (S.pid) {
+      C.appendChild(el('h3', {}, 'Las imágenes'));
+      C.appendChild(el('p', { clase: 'ce-pista gc-fotos-video' }, 'Salen de tu vídeo: cada imagen lleva la de su parte (en la portada, grande o de fondo según el estilo; en las demás, tenue detrás de los textos). Tócalas en la lista para cambiarlas.'));
+      if (S.fotoUrl) C.appendChild(el('div', { clase: 'gc-foto-elegida' }, el('img', { src: S.fotoUrl, alt: 'La foto de la portada' })));
+      return;
+    }
     const o = S.opc;
     C.appendChild(el('h3', {}, 'La imagen (si quieres)'));
     if (S.foto) {
@@ -4150,7 +4290,7 @@
       el('span', { clase: 'gc-estilo-nombre' }, nombre(n)), marcaFoto(n));
     })));
     if (S.foto && conFotoConocidos.length && S.familia && !conFotoConocidos.includes(S.familia)) {
-      C.appendChild(el('p', { clase: 'ce-pista malo gc-sin-hueco' }, 'Con el estilo elegido tu foto sale pequeña o no sale. Elige uno marcado «📷 con foto».'));
+      C.appendChild(el('p', { clase: 'ce-pista gc-sin-hueco' }, 'Con este estilo tu foto va tenue, de fondo. Los marcados «📷 foto grande» la ponen grande.'));
     }
   }
 
@@ -4186,6 +4326,13 @@
     if (S.escribiendo) return 'Esperando a la IA…';
     if (S.subiendo) return 'Subiendo la foto…';
     if (!S.familia) return 'Elige un estilo.';
+    if (S.pid) {
+      if (!S.planosVideo) return 'Mirando el vídeo…';
+      if (!S.videoVale) return 'Elige un vídeo con imágenes con voz (o «No: lo escribo yo»).';
+      if (!S.piezas) return 'Pulsa «Escríbelo por mí desde el vídeo».';
+      if (S.que !== 'carrusel' && !S.titulo.trim()) return 'Escribe el titular.';
+      return '';
+    }
     if (S.que !== 'carrusel') return S.titulo.trim() ? '' : 'Escribe el titular (o el tema y «Escríbelo por mí»).';
     if (S.modo === 'tema') return S.piezas ? '' : 'Escribe el tema y pulsa «Escríbelo por mí» (o «Ya tengo el texto»).';
     return S.texto.trim() ? '' : 'Pega o escribe tu texto.';
@@ -4210,7 +4357,11 @@
     S.creando = true;
     revisarCrear(S);
     const cuerpo = { que: S.que, familia: S.familia, formato: S.formato, foto: S.foto };
-    if (S.que !== 'carrusel') cuerpo.piezas = [['portada', { titulo: S.titulo.trim(), apoyo: S.apoyo.trim() }]];
+    if (S.pid) {
+      cuerpo.pid = S.pid;
+      cuerpo.piezas = S.que === 'carrusel' ? S.piezas
+        : [['portada', Object.assign({}, S.piezas[0][1], { titulo: S.titulo.trim(), apoyo: S.apoyo.trim() })]];
+    } else if (S.que !== 'carrusel') cuerpo.piezas = [['portada', { titulo: S.titulo.trim(), apoyo: S.apoyo.trim() }]];
     else if (S.modo === 'tema') cuerpo.piezas = S.piezas;
     else cuerpo.texto = S.texto;
     let r;
@@ -4226,7 +4377,7 @@
     // lo elegido, para «← Cambiar tema, foto o estilo»
     const desdeCrear = {};
     for (const k of ['que', 'formato', 'titulo', 'apoyo', 'tema', 'texto', 'modo', 'cuantas', 'piezas', 'piezasDe', 'avisosIA',
-      'foto', 'fotoUrl', 'familia', 'elegidaAMano', 'sobre', 'video']) desdeCrear[k] = S[k];
+      'foto', 'fotoUrl', 'familia', 'elegidaAMano', 'sobre', 'video', 'pid', 'planosVideo', 'videoVale', 'videoTitulo']) desdeCrear[k] = S[k];
     S.cerrar();
     await abrir(Object.assign({}, S.opc, {
       pieza: null, duplicar: false, docInicial: r.doc, sencillo: true, nueva: true, que: S.que, retomar: null, desdeCrear,

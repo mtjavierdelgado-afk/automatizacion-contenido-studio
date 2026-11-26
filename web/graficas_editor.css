@@ -455,3 +455,14 @@ body.ce-abierto { overflow: hidden; }
 .gc-estilo-marca:empty { display: none; }
 .gc-con-foto { font-size: 11px; color: var(--tenue); }
 @media (min-width: 821px) and (max-width: 1100px) { .ce-sencillo .ce-zona { grid-template-columns: minmax(0, 1fr) 300px; } }
+
+/* «Crear desde un vídeo» (graficas-desde-video) */
+.gc-desde-video { padding: 10px 12px; border-radius: 10px; border: 1px dashed var(--acento-borde); background: var(--panel); display: flex; flex-direction: column; gap: 6px; }
+.gc-lista-video { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-direction: column; gap: 6px; }
+.gc-lista-video li { display: flex; align-items: center; gap: 10px; }
+.gc-cambiar-plano { flex: none; width: 72px; height: 48px; padding: 0; border: 2px solid var(--linea); border-radius: 6px; overflow: hidden; background: var(--hueco); color: var(--tenue); cursor: pointer; font: inherit; font-size: 11px; }
+.gc-cambiar-plano:hover, .gc-cambiar-plano:focus-visible { border-color: var(--acento); }
+.gc-cambiar-plano img, .gc-plano-video img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gc-plano-vacio { display: grid; place-items: center; width: 100%; height: 100%; }
+.gc-sin-foto { color: var(--tenue); font: inherit; }
+.gc-plano-video:disabled { opacity: .35; cursor: not-allowed; }

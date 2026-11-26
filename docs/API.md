@@ -390,6 +390,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/graficas/tipografia/{fichero}` | Una letra de la lista, para que el editor escriba con la misma que el PNG. |
 | `POST` | `/api/graficas/{cid}/capas` | Una pieza nueva que nace en capas (un carrusel, como trabajo: 202). |
 | `POST` | `/api/graficas/{cid}/capas/crear` | La pieza del «+ Crear», sin guardar (el editor la abre en el modo |
+| `POST` | `/api/graficas/{cid}/capas/foto-fondo` | La foto de fondo de una imagen del carrusel (graficas-desde-video): `src` |
 | `POST` | `/api/graficas/{cid}/capas/historias` | «Hacer también las historias»: el mismo carrusel en 9:16 (no se guarda: |
 | `POST` | `/api/graficas/{cid}/capas/lamina` | Una lámina de un carrusel: `donde` (posición) añade una nueva del `tipo` |
 | `POST` | `/api/graficas/{cid}/capas/lote` | Carruseles en lote (graficas-3c-extras): una lista (separada por ---) o |
@@ -401,6 +402,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/graficas/{cid}/capas/trabajo/{tid}` | Cómo va el guardado de un carrusel: láminas hechas, y al acabar lo que |
 | `POST` | `/api/graficas/{cid}/capas/vista` | La vista de una pieza en capas tal como saldría. No guarda nada. |
 | `POST` | `/api/graficas/{cid}/escribir` | «Escríbelo por mí»: Claude (cupo de la membresía, sin dinero) escribe los |
+| `DELETE` | `/api/graficas/{cid}/escribir/{tid}` | Cerrar «+ Crear» mientras Claude escribe: se corta el CLI y el proyecto |
 | `POST` | `/api/graficas/{cid}/imagen` | — |
 | `POST` | `/api/graficas/{cid}/imagen/de-plano` | Copia la imagen ya hecha de un plano de un vídeo DE ESTE proyecto. Gratis. |
 | `GET` | `/api/graficas/{cid}/imagen/{nombre}` | — |
@@ -420,6 +422,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/graficas/{cid}/piezas/{pieza_id}/laminas.zip` | Todas las láminas en un ZIP (JPG o PNG), con sus textos alternativos. |
 | `POST` | `/api/graficas/{cid}/piezas/{pieza_id}/laminas/preparar` | «Preparar las láminas»: vuelve a guardar lo último guardado, como trabajo |
 | `POST` | `/api/graficas/{cid}/qr` | Un QR con tu WhatsApp o tu web (graficas-3c-extras), hecho aquí con |
+| `GET` | `/api/graficas/{cid}/videos/{pid}/planos` | Lo que «Crear desde un vídeo» puede usar de ese vídeo: sus planos con |
 | `POST` | `/api/graficas/{cid}/vista` | Las miniaturas de los diseños con estos datos. No guarda nada. |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
@@ -608,4 +611,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**494 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**497 endpoints.** Escrito por `generar_api.py` desde `app.py`.

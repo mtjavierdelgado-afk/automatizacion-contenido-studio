@@ -203,12 +203,12 @@ def graficas_facil(navegador, datos):
         ok(_esperar_js(pg, "() => EditorCapas._estado().doc.laminas[0].familia === 15", 5), "y vuelve al de antes")
         ok(pg.p.locator("#editor-capas .ce-s-volver-estilo").count() == 0, "el botón se va al volver")
 
-        # en una imagen de dentro, la foto: dice dónde va, sin mandar a otro estilo
+        # en una imagen de dentro, la foto (graficas-desde-video): se puede poner, tenue detrás de los textos
         pg.js("document.querySelectorAll('#editor-capas .ce-tira-lamina')[1].click();")
-        ok(pg.esperar("#editor-capas .ce-s-foto-dentro", "la foto va en la portada", 5)
-           and pg.p.locator("#editor-capas .ce-s-estilos-foto").count() == 0, "en la imagen 2, la foto se explica (sin callejón)")
-        pg.pulsar("#editor-capas .ce-s-ir-portada", "Ir a la portada")
-        ok(_ed(pg, "E.lamina") == 0, "«Ir a la portada» lleva a la 1")
+        ok(pg.esperar("#editor-capas .ce-s-foto-tenue", "tenue", 5) and pg.esperar("#editor-capas .ce-s-cambiar-foto", "Poner una foto", 2),
+           "en la imagen 2, «Poner una foto» (tenue, detrás de los textos)")
+        pg.js("document.querySelectorAll('#editor-capas .ce-tira-lamina')[0].click();")
+        ok(_esperar_js(pg, "() => EditorCapas._estado().lamina === 0", 5), "y se vuelve a la portada")
         # añadir una imagen
         n = _ed(pg, "E.doc.laminas.length")
         pg.p.select_option("#editor-capas .ce-s-tipo", "pregunta")

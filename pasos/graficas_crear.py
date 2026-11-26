@@ -123,6 +123,6 @@ def crear(pincel, que, n, formato, piezas, foto="", kit=None, logo=None, logo_os
         doc["laminas"][0]["capas"] = [c for c in doc["laminas"][0]["capas"] if not c.get("enlace")]
     if foto and not _poner_foto(doc, foto, kit, avisos, imagen_de):
         avisos.append("Con este estilo y estos colores tu foto no se notaría: elige un estilo marcado "
-                      "«📷 con foto» con «Otro estilo».")
+                      "«📷 foto grande» con «Otro estilo».")
     doc["nombre"] = (nombre or titulo)[:80]
     return C.limpiar_doc(doc), avisos

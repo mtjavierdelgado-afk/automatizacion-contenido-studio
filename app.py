@@ -27082,12 +27082,17 @@ def graficas_crear(cid: str, peticion: Request, cuerpo: dict = Body(default=None
     elif any(planos):
         planos = [""] * len(planos)                         # sin vídeo, un «plano» no vale nada
     imagen_de = _imagen_de_graficas(cid)
+    import graficas_capas as _CAPAS  # noqa: PLC0415
+    alt_de_textos = _CAPAS.alt_de_textos
 
     def hacer(p):
         doc, avisos = CREAR_GRAF.crear(p, que, n, formato, piezas, foto, kit, logo, oscuro, marca, "", imagen_de)
         for i, lam in enumerate(doc["laminas"]):
             if i < len(alts) and alts[i]:
                 lam["alt"] = alts[i]
+            elif pid and not lam.get("alt"):
+                # desde un vídeo, ninguna imagen sin su texto alternativo: el de sus textos
+                lam["alt"] = alt_de_textos(doc, i)
             if i > 0 and i < len(planos) and planos[i] in copias:
                 doc, mas = K.poner_foto_fondo(doc, i, copias[planos[i]], kit, imagen_de)
                 avisos += mas

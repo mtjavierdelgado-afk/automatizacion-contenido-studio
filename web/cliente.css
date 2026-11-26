@@ -1,0 +1,66 @@
+/* La página que ve el CLIENTE para aprobar un vídeo (publicar-redes-3).
+   Va aparte del Studio a propósito: no carga app.js ni estilo.css, solo esto.
+   Los colores, solo en las variables de :root (claro y oscuro). */
+:root {
+  --cl-fondo: #f6f5f2; --cl-tarjeta: #ffffff; --cl-texto: #1d1d1f; --cl-suave: #5f6368;
+  --cl-borde: #e2e0db; --cl-acento: #2f6fdf; --cl-acento-texto: #ffffff;
+  --cl-bien: #1e7a43; --cl-bien-fondo: #e6f4ea; --cl-aviso: #8a5a00; --cl-aviso-fondo: #fff4d6;
+  --cl-mal: #b3261e; --cl-mal-fondo: #fdecea; --cl-sombra: 0 1px 3px rgba(0, 0, 0, .08); --cl-negro: #000;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cl-fondo: #141416; --cl-tarjeta: #1f1f23; --cl-texto: #ececee; --cl-suave: #a6a6ad;
+    --cl-borde: #34343a; --cl-acento: #6c9cff; --cl-acento-texto: #0d1530;
+    --cl-bien: #7fd49b; --cl-bien-fondo: #17311f; --cl-aviso: #f0c46a; --cl-aviso-fondo: #34290f;
+    --cl-mal: #f2a59f; --cl-mal-fondo: #3a1b19; --cl-sombra: none;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--cl-fondo); color: var(--cl-texto);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.cl-pagina { max-width: 640px; margin: 0 auto; padding: 20px 16px 48px; }
+.cl-cargando, .cl-suave { color: var(--cl-suave); }
+.cl-cabecera { margin-bottom: 16px; }
+.cl-cabecera .cl-proyecto { margin: 0; color: var(--cl-suave); font-size: 14px; }
+.cl-cabecera h1 { margin: 2px 0 0; font-size: 22px; line-height: 1.25; overflow-wrap: anywhere; }
+.cl-tarjeta {
+  background: var(--cl-tarjeta); border: 1px solid var(--cl-borde); border-radius: 12px;
+  padding: 16px; margin-bottom: 14px; box-shadow: var(--cl-sombra);
+}
+.cl-tarjeta h2 { margin: 0 0 8px; font-size: 16px; }
+.cl-video {
+  display: block; width: 100%; max-height: 72vh; background: var(--cl-negro); border-radius: 10px;
+}
+.cl-video.cl-vertical { width: auto; max-width: 100%; margin: 0 auto; }
+.cl-fecha { margin: 10px 0 0; font-size: 15px; }
+.cl-red { border-top: 1px solid var(--cl-borde); padding-top: 12px; margin-top: 12px; }
+.cl-red:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+.cl-red h3 { margin: 0 0 4px; font-size: 14px; color: var(--cl-suave); font-weight: 600; }
+.cl-red .cl-titulo { margin: 0 0 4px; font-weight: 600; overflow-wrap: anywhere; }
+.cl-red .cl-texto { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cl-red .cl-comentario-red { margin: 6px 0 0; overflow-wrap: anywhere; }
+.cl-botones { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.cl-boton {
+  flex: 1 1 160px; min-height: 48px; padding: 10px 16px; border-radius: 10px; cursor: pointer;
+  font: inherit; font-weight: 600; border: 1px solid var(--cl-borde);
+  background: var(--cl-tarjeta); color: var(--cl-texto);
+}
+.cl-boton.cl-principal { background: var(--cl-acento); border-color: var(--cl-acento); color: var(--cl-acento-texto); }
+.cl-boton.cl-elegido { outline: 3px solid var(--cl-acento); outline-offset: 1px; }
+.cl-boton:disabled { opacity: .6; cursor: default; }
+.cl-boton.cl-enlace { flex: 0 0 auto; min-height: 40px; background: transparent; border-color: transparent;
+  color: var(--cl-acento); padding: 8px 0; }
+.cl-comentario {
+  display: block; width: 100%; min-height: 110px; margin-top: 10px; padding: 10px;
+  border-radius: 10px; border: 1px solid var(--cl-borde); background: var(--cl-fondo);
+  color: var(--cl-texto); font: inherit; resize: vertical;
+}
+.cl-etiqueta { display: block; margin-top: 12px; font-weight: 600; }
+.cl-nota { padding: 12px 14px; border-radius: 10px; margin: 0 0 14px; }
+.cl-nota.cl-bien { background: var(--cl-bien-fondo); color: var(--cl-bien); }
+.cl-nota.cl-aviso { background: var(--cl-aviso-fondo); color: var(--cl-aviso); }
+.cl-nota.cl-mal { background: var(--cl-mal-fondo); color: var(--cl-mal); }
+.cl-pie { margin-top: 24px; font-size: 13px; color: var(--cl-suave); text-align: center; }
+.cl-oculto { display: none; }

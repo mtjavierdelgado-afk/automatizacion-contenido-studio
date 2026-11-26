@@ -64,6 +64,7 @@ suites=(
   pasos/prueba_png_seguro.py
   pasos/prueba_diagramas.py
   pasos/prueba_otro_idioma.py
+  pasos/prueba_aprobacion.py
   pasos/prueba_diagnostico_velocidad.py
   pasos/prueba_traducciones.py
   pasos/prueba_recibidos.py

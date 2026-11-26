@@ -225,6 +225,124 @@ _devolver() {
   done < <(tac "$copias/lista")
 }
 
+# _bloque_cliente <puerto>: la `location ^~ /cliente/` tal como debe estar
+# (la misma que trae nginx-sitio.conf para las instalaciones nuevas)
+_bloque_cliente() {
+  cat <<BLOQUE
+    location ^~ /cliente/ {
+        # solo las direcciones de la pagina del cliente, escritas tal cual
+        # (un «/a/../cliente/x» lo resuelve nginx, pero el estudio no)
+        if (\$request_uri !~ "^/cliente/(_/cliente\.(js|css)|[A-Za-z0-9_-]{40,64}(/(datos|video\.mp4|respuesta))?)(\?.*)?\$") {
+            return 404;
+        }
+        limit_req zone=asvs_cliente burst=40 nodelay;
+        limit_req_status 429;
+        client_max_body_size 16k;
+        # el token va en la direccion: que no quede en los registros (ni en el
+        # de accesos ni en el de errores, donde un 429 o el estudio caido
+        # escribirian la direccion entera; solo lo critico)
+        access_log off;
+        error_log /var/log/nginx/as-video-studio.error.log crit;
+        proxy_pass http://127.0.0.1:$1;
+        include /etc/nginx/snippets/asvs-proxy-largo.conf;
+        # el estudio sabe asi que esto llego por la puerta publica
+        proxy_set_header X-Asvs-Publico 1;
+    }
+BLOQUE
+}
+
+# _sitio_activo: el fichero del sitio que nginx usa DE VERDAD. En un servidor
+# sites-enabled/as-video-studio no era un enlace sino una COPIA (la que edito
+# certbot; prueba del servidor, 25-11): editar sites-available no servia de
+# nada. Enlace -> su destino; fichero -> ese fichero; nada -> sites-available.
+_sitio_activo() {
+  local en="$NGINX/sites-enabled/as-video-studio"
+  if [ -L "$en" ]; then readlink -f "$en"
+  elif [ -f "$en" ]; then printf '%s\n' "$en"
+  else printf '%s\n' "$NGINX/sites-available/as-video-studio"; fi
+}
+
+# _sitio_cliente <copias> <tmp>: la `location ^~ /cliente/` en el sitio de
+# nginx de un servidor ya instalado (ver _configurar). Si ya esta, se deja
+# IGUAL que la de ahora (una de una prueba anterior se renueva entera); si no
+# cambia nada, no se toca.
+_sitio_cliente() {
+  local copias="$1" tmp="$2" sitio puerto hallado linea bloque antes despues
+  # la location del cliente, SIN comentar (una comentada a mano no cuenta)
+  local LOC='^[[:space:]]*location[[:space:]]+\^~[[:space:]]+/cliente/'
+  sitio="$(_sitio_activo)"
+  if [ ! -f "$sitio" ]; then
+    no "no encuentro el sitio de nginx ($sitio): la pagina del cliente (/cliente/) no se abre"
+    echo "    (añadela a mano: ver despliegue/nginx-sitio.conf)"
+    return 0
+  fi
+  # EL `location / {` QUE LLEVA AL ESTUDIO (no el de un bloque del 80 que solo
+  # redirige): el primero con un proxy_pass a 127.0.0.1 antes de cerrarse.
+  hallado="$(awk '
+    /^[[:space:]]*location[[:space:]]+\/[[:space:]]*\{/ { dentro = NR; next }
+    dentro && /^[[:space:]]*}/ { dentro = 0 }
+    dentro && /proxy_pass http:\/\/127\.0\.0\.1:[0-9]+/ {
+      match($0, /127\.0\.0\.1:[0-9]+/); print dentro, substr($0, RSTART + 10, RLENGTH - 10); exit }' "$sitio")"
+  linea="${hallado%% *}"; puerto="${hallado##* }"
+  if [ -z "$puerto" ]; then
+    no "no encuentro «location / {» con su proxy_pass en el sitio de nginx: la pagina del cliente (/cliente/) no se abre"
+    echo "    (añadela a mano: ver despliegue/nginx-sitio.conf)"
+    return 0
+  fi
+  bloque="$(mktemp)"
+  _bloque_cliente "$puerto" > "$bloque"
+  if grep -Eq "$LOC" "$sitio"; then
+    # YA ESTA: se renueva entera (con el puerto del estudio de AHORA). Su
+    # final se busca CONTANDO LLAVES, no por la sangria
+    # el patron va por el ENTORNO: `-v` interpreta las barras (gawk deja
+    # `\^` como `^`, un ancla, y no casaba nada; mawk no)
+    LOC="$LOC" awk -v f="$bloque" 'BEGIN { loc = ENVIRON["LOC"] }
+      salta { n += gsub(/\{/, "{"); n -= gsub(/\}/, "}"); if (n <= 0) salta = 0; next }
+      $0 ~ loc { while ((getline l < f) > 0) print l; close(f)
+                 n = gsub(/\{/, "{") - gsub(/\}/, "}"); salta = (n > 0); next }
+      { print }' "$sitio" > "$tmp"
+  else
+    awk -v f="$bloque" -v linea="$linea" '
+      NR == linea {
+        print "    # ---- La pagina del cliente: sin login, solo /cliente/ (asvs actualizar) ----"
+        while ((getline l < f) > 0) print l; close(f)
+        print ""
+      }
+      { print }' "$sitio" > "$tmp"
+  fi
+  rm -f "$bloque"
+  if ! grep -q 'zone=asvs_cliente:' "$tmp"; then
+    awk '!z && /^[[:space:]]*server[[:space:]]*\{/ {
+           print "# La pagina del CLIENTE (publicar-redes-3): sin login, la protege el token del enlace."
+           print "limit_req_zone $binary_remote_addr zone=asvs_cliente:10m rate=60r/m;"; print ""; z = 1 }
+         { print }' "$tmp" > "$tmp.2" && mv "$tmp.2" "$tmp"
+  fi
+  # NADA MAS PUEDE CAMBIAR: el estudio sigue con su `location / {` y su
+  # proxy_pass, y no se pierde ninguna otra location. Si no, no se toca.
+  antes="$(grep -Ev "$LOC" "$sitio" | grep -Ec '^[[:space:]]*location[[:space:]]' || true)"
+  despues="$(grep -Ev "$LOC" "$tmp" | grep -Ec '^[[:space:]]*location[[:space:]]' || true)"
+  if [ "$antes" != "$despues" ] || ! grep -q "proxy_pass http://127.0.0.1:$puerto;" "$tmp"; then
+    no "la pagina del cliente: el sitio de nginx tiene una forma que no espero; no lo toco"
+    echo "    (añadela a mano: ver despliegue/nginx-sitio.conf)"
+    return 0
+  fi
+  _poner "$tmp" "$sitio" 644 "$copias" || return 0
+  if nginx -t >/dev/null 2>&1; then
+    systemctl reload nginx || no "nginx no se ha podido recargar: mira  systemctl status nginx"
+    # ¿LA USA DE VERDAD? (el 25-11 se edito un fichero que nginx no leia)
+    if nginx -T 2>/dev/null | grep -Eq "$LOC"; then
+      si "nginx: la pagina del cliente (/cliente/) abierta sin login"
+    else
+      no "he puesto /cliente/ en $sitio, pero nginx no lo esta usando: mira  nginx -T | grep configuration"
+    fi
+  else
+    _devolver "$copias" "$sitio"
+    no "nginx NO acepta la pagina del cliente: he dejado el sitio como estaba (sin /cliente/)"
+    echo "    (para ver por que:  nginx -t)"
+  fi
+  return 0
+}
+
 # LA CONFIGURACION DEL SERVIDOR, AL DIA (revision 16-10-2026). Antes
 # `actualizar` solo traia el codigo: una unidad de systemd, un snippet de
 # nginx o el lanzador del navegador nuevos no llegaban nunca a un servidor ya
@@ -271,6 +389,14 @@ _configurar() {
       echo "    (sin recargar; para ver por que:  nginx -t)"
     fi
   fi
+
+  # LA PAGINA DEL CLIENTE (publicar-redes-3, 25-11-2026): `/cliente/` es lo
+  # unico del estudio que se abre SIN login (el cliente aprueba un video con
+  # un enlace privado). El sitio no se regenera (lo edito certbot): solo se le
+  # AÑADEN dos piezas, una vez, y con copia: la zona del limite de peticiones
+  # arriba del todo y la `location` justo antes de `location / {`. Si nginx no
+  # las acepta, el sitio vuelve a como estaba y el resto sigue.
+  _sitio_cliente "$copias" "$tmp"
 
   # El lanzador del navegador, con el MISMO navegador que ya tiene puesto.
   binario="$(sed -n 's/^exec \([^ ]*\) .*/\1/p' "$BIN/estudio-edge" 2>/dev/null | head -1 || true)"
@@ -429,7 +555,17 @@ actualizar() {
   # LAS TARIFAS, AL DIA (medidor-claude-2): nunca falla ni deshace nada
   _tarifas_al_dia "$RAIZ/app/tarifas.json" "$RAIZ/datos" || true
   # systemd, nginx, el navegador y el entorno, con copia en anterior/config
-  _configurar "$RAIZ/app/despliegue" "$anterior/config"
+  # CON EL asvs NUEVO (prueba del servidor, 25-11): este script es el que
+  # estaba instalado, y lo nuevo de la configuracion (la pagina del cliente en
+  # nginx) solo lo sabe el que trae el codigo. Si lo trae, configura el.
+  if [ "${ASVS_CONFIG_NUEVO:-}" != 1 ] && grep -q '__configurar)' "$RAIZ/app/despliegue/asvs" 2>/dev/null \
+      && { bash -n "$RAIZ/app/despliegue/asvs" 2>/dev/null \
+           || { no "el asvs nuevo tiene un error de escritura: configuro con el de antes"; false; }; }; then
+    echo "  (la configuracion, con el asvs nuevo)"
+    ASVS_CONFIG_NUEVO=1 bash "$RAIZ/app/despliegue/asvs" __configurar "$RAIZ/app/despliegue" "$anterior/config"
+  else
+    _configurar "$RAIZ/app/despliegue" "$anterior/config"
+  fi
   chown "$USUARIO:$USUARIO" "$RAIZ/datos/entorno"
   systemctl restart as-video-login as-video-studio
   trap - ERR
@@ -766,6 +902,8 @@ case "${1:-estado}" in
   probar)      shift; probar "$@" ;;
   revisar)     shift; revisar "$@" ;;
   comparar-guion) shift; comparar_guion "$@" ;;
+  # solo lo llama `actualizar` del asvs de antes, con el codigo nuevo ya copiado
+  __configurar) _configurar "$2" "$3" ;;
   -h|--help|ayuda) sed -n '5,25p' "$0" | sed 's/^#  \{0,1\}//' ;;
   *) echo "No entiendo «$1». Prueba:  asvs ayuda"; exit 1 ;;
 esac

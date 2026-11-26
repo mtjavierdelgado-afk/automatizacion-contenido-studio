@@ -61,6 +61,16 @@ def _capa(pg, cid):
       const c = E.doc.laminas[E.lamina].capas.find(x => x.id === id); return c ? { x: c.x, y: c.y, txt: c.txt } : null; }""", cid)
 
 
+def _se_lee(pg, selector):
+    """El texto y su fondo no son del mismo color (sirve en los dos temas)."""
+    return pg.p.evaluate("""sel => { const n = document.querySelector(sel); if (!n) return false;
+      const c = getComputedStyle(n).color; let f = n, fondo = 'rgba(0, 0, 0, 0)';
+      while (f && (fondo === 'rgba(0, 0, 0, 0)' || fondo === 'transparent')) { fondo = getComputedStyle(f).backgroundColor; f = f.parentElement; }
+      const rgb = x => (x.match(/[\\d.]+/g) || []).slice(0, 3).map(Number);
+      const [a, b] = [rgb(c), rgb(fondo)];
+      return a.length === 3 && b.length === 3 && Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) > 200; }""", selector)
+
+
 def _abrir_crear(pg, que):
     pg.pulsar(".seccion-graficas .crear-en-graficas", "+ Crear")
     ok(pg.esperar(f"#crear-grafica .gc-que-{que}", segundos=20), f"«+ Crear» pregunta qué crear ({que})")
@@ -121,6 +131,7 @@ def graficas_facil(navegador, datos):
         ok(pg.p.evaluate("() => EditorCapas._asistente().familia") == 15, "se elige el estilo en su miniatura")
         pg.js("document.documentElement.dataset.tema = 'oscuro';")
         pg.captura("facil-2-tema-oscuro")
+        ok(_se_lee(pg, "#crear-grafica .gc-pregunta") and _se_lee(pg, "#crear-grafica .gc-estilo-nombre"), "en el tema oscuro, los textos se leen")
         ok(not pg.p.locator("#crear-grafica .gc-crear").is_disabled(), "«Crear» ya se puede pulsar")
         pg.pulsar("#crear-grafica .gc-crear", "Crear")
         ok(pg.esperar("#editor-capas.ce-sencillo .ce-lienzo [data-c]", segundos=60), "paso 3: el editor, en modo sencillo")
@@ -151,6 +162,20 @@ def graficas_facil(navegador, datos):
         ok(_esperar_js(pg, "() => !EditorCapas._estado().editando", 5), "tocar fuera termina")
         c = _capa(pg, t["id"])
         ok(c["txt"].endswith("YA") and abs(c["x"] - t["cx"]) < 1e-6, f"el texto cambió y sigue en su sitio ({c})")
+        # el teclado tampoco mueve ni borra lo de la plantilla
+        pg.p.keyboard.press("ArrowRight")
+        pg.p.keyboard.press("ArrowDown")
+        pg.p.wait_for_timeout(500)
+        c = _capa(pg, t["id"])
+        ok(abs(c["x"] - t["cx"]) < 1e-6 and abs(c["y"] - t["cy"]) < 1e-6, "las flechas no mueven el titular en el modo sencillo")
+        foto = pg.p.evaluate("""() => { const E = EditorCapas._estado();
+          const c = E.doc.laminas[0].capas.find(x => x.tipo === 'imagen' && x.rol);
+          if (!c) return null; E.sel = [c.id]; return c.id; }""")
+        if foto:
+            pg.p.keyboard.press("Delete")
+            pg.p.wait_for_timeout(300)
+            ok(_capa(pg, foto) is not None, "Supr no borra la foto del diseño en el modo sencillo")
+            pg.js("EditorCapas._estado().sel = [];")
         # el panel, con el texto elegido
         pg.p.mouse.click(t["x"], t["y"])
         pg.p.keyboard.press("Escape")
@@ -223,6 +248,7 @@ def graficas_facil(navegador, datos):
         pg.pulsar("#crear-grafica .gc-escribir", "Escríbelo por mí")
         ok(_esperar_js(pg, "() => { const S = EditorCapas._asistente(); return S && !S.escribiendo; }", 60), "escribe el titular")
         ok(pg.p.locator("#crear-grafica .gc-titular").input_value().strip() != "", "el titular queda escrito y se puede cambiar")
+        ok(_se_lee(pg, "#crear-grafica .gc-pregunta") and _se_lee(pg, "#crear-grafica .gc-escribir"), "en el tema claro, los textos se leen")
         ok(_esperar_miniaturas(pg, 4, 60), "las miniaturas en vertical")
         pg.captura("facil-4-historia-claro")
         pg.pulsar("#crear-grafica .gc-crear", "Crear")
@@ -239,6 +265,24 @@ def graficas_facil(navegador, datos):
         pg.pulsar("#crear-grafica .gc-avanzado .lote-en-capas")
         ok(pg.esperar(".dialogo h3", "Carruseles en lote", 5), "«Hacer varios a la vez» abre el lote de siempre")
         pg.p.keyboard.press("Escape")
+        pg.p.wait_for_timeout(400)
+        # «Otro estilo» en una pieza sin estilo (empezada en blanco): cambia de verdad, y se puede volver
+        pg.js(f"localStorage.setItem({json.dumps(CLAVE_MODO)}, 'sencillo');")
+        pg.pulsar(".seccion-graficas .crear-en-graficas", "+ Crear")
+        pg.pulsar("#crear-grafica .gc-avanzado .nueva-en-capas", "Empezar en blanco")
+        ok(_esperar_js(pg, "() => { const E = EditorCapas._estado(); return E && E.sencillo && E.lienzo.querySelector('[data-c]'); }", 40),
+           "«Empezar en blanco», en el modo recordado (sencillo)")
+        ok(_ed(pg, "E.doc.laminas.every(l => !l.familia)"), "una pieza sin estilo")
+        antes = _ed(pg, "JSON.stringify(E.doc)")
+        pg.pulsar("#editor-capas .ce-s-otro-estilo", "Otro estilo")
+        ok(_esperar_js(pg, "() => document.querySelectorAll('.ce-modal-estilos .gc-estilo img').length >= 4", 60), "también ofrece los estilos")
+        pg.pulsar('.ce-modal-estilos .gc-estilo[data-n="10"]')
+        ok(_esperar_js(pg, f"() => JSON.stringify(EditorCapas._estado().doc) !== {json.dumps(antes)}", 30), "y el estilo cambia la pieza de verdad")
+        ok(pg.esperar("#editor-capas .ce-s-volver-estilo", segundos=5), "con «Volver al estilo de antes»")
+        pg.pulsar("#editor-capas .ce-s-volver-estilo")
+        ok(_esperar_js(pg, f"() => JSON.stringify(EditorCapas._estado().doc) === {json.dumps(antes)}", 5), "que la deja como estaba")
+        pg.pulsar("#editor-capas .ce-volver")
+        ok(_esperar_js(pg, "() => !document.getElementById('editor-capas')", 5), "se cierra")
         pg.sin_errores("«+ Crear» una historia")
         pg.js(f"try {{ localStorage.removeItem({json.dumps(CLAVE_MODO)}); }} catch (_) {{}}")
     finally:

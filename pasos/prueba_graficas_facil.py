@@ -227,6 +227,14 @@ def por_la_api():
         ok(r.status_code == 200 and r.json()["doc"]["formato"] == "h916", "con texto escrito a mano también (historia en 9:16)")
         ok(requests.post(base + f"/api/graficas/{cid}/capas/crear", json={"que": "carrusel", "familia": 3}, timeout=30).status_code == 400,
            "sin texto ni piezas: 400")
+        for malo in (["v45"], {"a": 1}, 7, "zz"):
+            r1 = requests.post(base + f"/api/graficas/{cid}/capas/miniaturas", json={"que": "carrusel", "formato": malo, "familias": [1]}, timeout=30)
+            r2 = requests.post(base + f"/api/graficas/{cid}/capas/crear", json={"que": "carrusel", "familia": 3, "formato": malo, "texto": "Hola"}, timeout=30)
+            ok(r1.status_code == 400 and r2.status_code == 400, f"un tamaño raro ({malo!r}): 400, no 500 ({r1.status_code}, {r2.status_code})")
+        r = requests.post(base + f"/api/graficas/{cid}/escribir", json={"que": "publicacion", "tema": TEMA, "sobre": "Alquiler a S/ 190 la noche"}, timeout=30)
+        ok(r.status_code in (202, 409), "«Sobre tu negocio» se acepta al escribir")
+        app = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app.py"), encoding="utf-8").read()
+        ok("Lo que cuenta el dueño" in app and 'cuerpo.get("sobre")' in app, "y cuenta como la ficha del negocio (fuente de cifras)")
     finally:
         proceso.terminate()
         try:

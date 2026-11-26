@@ -180,7 +180,7 @@
       vista: { turno: 0, temporizador: null, pidiendo: false, otra: false, img: '', avisos: [], lineas: {}, de: '' },
       editando: null, arrastre: null, avisos: [], cerrado: false, guardando: false, ultimoToque: { id: '', t: 0 },
       // graficas-facil: el modo sencillo (lo recordado en el navegador manda; si no, lo que pida quien abre)
-      sencillo: (modoRecordado() || (opc.sencillo ? 'sencillo' : 'avanzado')) === 'sencillo', deshacerEstilo: -1, sBotones: [],
+      sencillo: (modoRecordado() || (opc.sencillo ? 'sencillo' : 'avanzado')) === 'sencillo', estiloAntes: '', estiloDespues: '', sBotones: [],
       cambio: habiaCambio,
     };
     raiz.classList.toggle('ce-sencillo', ED.sencillo);
@@ -1936,7 +1936,7 @@
       const deMuestra = capas().filter(c => c.tipo === 'texto' && G_CAMPO(c.rol) && !tenia.has(c.rol) && String(c.txt || '').trim());
       avisoPantalla(deMuestra.length
         ? `Recolocado. Ojo: ${deMuestra.map(c => `«${String(c.txt).trim()}»`).join(', ')} ${deMuestra.length === 1 ? 'es un texto' : 'son textos'} de muestra: cámbialos o bórralos. Ctrl+Z vuelve a lo de antes.`
-        : 'Recolocado con la plantilla: tus textos y lo añadido se conservan. Ctrl+Z vuelve a lo de antes.', deMuestra.length > 0);
+        : (ED.sencillo ? 'Estilo puesto: tus textos y lo añadido se conservan.' : 'Recolocado con la plantilla: tus textos y lo añadido se conservan. Ctrl+Z vuelve a lo de antes.'), deMuestra.length > 0);
     } catch (e) {
       if (ED === yo) avisoPantalla(`No se ha podido montar: ${e.message}`, true);
     } finally {
@@ -2660,7 +2660,7 @@
     try {
       const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/capas/historias'), { method: 'POST', cuerpo: { doc: docParaEnviar() } });
       if (ED !== yo) return;
-      await abrir(Object.assign({}, yo.opc, { pieza: null, duplicar: false, docInicial: r.doc }));
+      await abrir(Object.assign({}, yo.opc, { pieza: null, duplicar: false, docInicial: r.doc, avisoInicial: '', que: '' }));
       // es nueva y no está guardada: al cerrar sin guardar, que lo pregunte
       if (ED && ED !== yo) { ED.guardado = ''; pintarEstado(); }
       if (ED && ED !== yo) avisoPantalla('Estas son las historias (9:16), aún sin guardar: revísalas y pulsa «Guardar». El carrusel de antes sigue igual.');
@@ -3221,10 +3221,12 @@
     if (escribiendoEnCampo(ev)) return;
     if (ctrl && !ev.shiftKey && (tecla === 'z' || tecla === 'Z')) { ev.preventDefault(); irAHistoria(-1); return; }
     if (ctrl && (tecla === 'y' || tecla === 'Y' || (ev.shiftKey && (tecla === 'z' || tecla === 'Z')))) { ev.preventDefault(); irAHistoria(1); return; }
-    if (ctrl && (tecla === 'd' || tecla === 'D')) { ev.preventDefault(); duplicar(); return; }
+    // modo sencillo: el teclado tampoco mueve, duplica ni borra lo de la plantilla (salvo un texto)
+    const fijaEnSencillo = c => ED.sencillo && !movibleSencillo(c);
+    if (ctrl && (tecla === 'd' || tecla === 'D')) { ev.preventDefault(); if (!seleccion().some(fijaEnSencillo)) duplicar(); return; }
     if (ctrl && (tecla === 'a' || tecla === 'A')) {
       ev.preventDefault();
-      ED.sel = capas().filter(c => !c.oculto && !c.bloqueado).map(c => c.id);
+      ED.sel = capas().filter(c => !c.oculto && !c.bloqueado && !fijaEnSencillo(c)).map(c => c.id);
       pintarMarcas(); pintarPaneles();
       return;
     }
@@ -3248,7 +3250,12 @@
       if (ED.sel.length) { ED.sel = []; pintarMarcas(); pintarPaneles(); }
       return;
     }
-    if ((tecla === 'Delete' || tecla === 'Backspace') && ED.sel.length) { ev.preventDefault(); borrar(); return; }
+    if ((tecla === 'Delete' || tecla === 'Backspace') && ED.sel.length) {
+      ev.preventDefault();
+      if (seleccion().some(c => fijaEnSencillo(c) && c.tipo !== 'texto')) { avisoPantalla('La foto se cambia con «Cambiar foto»; para quitar partes del diseño, «Edición avanzada».'); return; }
+      borrar();
+      return;
+    }
     if (tecla === 'Enter' && ED.sel.length === 1 && seleccion()[0].tipo === 'texto') { ev.preventDefault(); empezarEdicionTexto(ED.sel[0], true); return; }
     if (ev.altKey && (tecla === 'ArrowLeft' || tecla === 'ArrowRight')) {
       // Alt+flechas: la lámina, antes o después
@@ -3261,7 +3268,7 @@
     if (flechas[tecla] && ED.sel.length) {
       ev.preventDefault();
       const paso = (ev.shiftKey ? 10 : 1) * ED.escala;     // 1 px de la pieza de verdad (10 con Mayús)
-      for (const c of seleccion()) if (!c.bloqueado) { moverPx(c, flechas[tecla][0] * paso, flechas[tecla][1] * paso); pintarCapa(c.id); }
+      for (const c of seleccion()) if (!c.bloqueado && !fijaEnSencillo(c)) { moverPx(c, flechas[tecla][0] * paso, flechas[tecla][1] * paso); pintarCapa(c.id); }
       pintarMarcas();
       clearTimeout(ED.flechas);
       // una ráfaga de flechas cuenta como UN cambio
@@ -3468,15 +3475,11 @@
     const cat = ED.carCat;
     const n = familiaActual();
     const nombre = cat ? ((cat.familias.find(f => f.n === n) || {}).nombre || `Estilo ${n}`) : '';
-    const puedeVolver = ED.deshacerEstilo >= 0 && ED.deshacerEstilo === ED.pos;
+    const puedeVolver = !!ED.estiloDespues && firmaDoc() === ED.estiloDespues;
     return grupo('Estilo',
       nombre ? el('p', { clase: 'ce-s-estilo' }, 'Ahora: ', el('b', {}, nombre)) : null,
       boton('Otro estilo…', { clase: 'ce-btn ce-ancho ce-s-otro-estilo', title: 'Cambia la colocación, la letra y los adornos; tus textos y tu foto se quedan' }, abrirEstilos),
-      puedeVolver ? boton('↶ Volver al estilo de antes', { clase: 'ce-btn ce-ancho ce-s-volver-estilo' }, () => {
-        ED.deshacerEstilo = -1;
-        irAHistoria(-1);
-        avisoPantalla('Vuelve a estar como antes.');
-      }) : null);
+      puedeVolver ? boton('↶ Volver al estilo de antes', { clase: 'ce-btn ce-ancho ce-s-volver-estilo' }, volverAlEstiloDeAntes) : null);
   }
 
   function grupoAnadirImagen() {
@@ -3566,7 +3569,7 @@
     const celda = (n, nombre) => {
       if (celdas[n]) return celdas[n];
       const b = el('button', { type: 'button', clase: 'gc-estilo', 'data-n': String(n), 'aria-pressed': String(n === actual),
-        onclick: () => { cerrarModal(); if (n !== familiaActual() || ED.doc.laminas.length > 1) ponerEstilo(n, nombre); } },
+        onclick: () => { cerrarModal(); ponerEstilo(n, nombre); } },
       el('span', { clase: 'gc-estilo-img' }, el('span', { clase: 'gc-estilo-espera' }, '…')), el('span', { clase: 'gc-estilo-nombre' }, nombre));
       celdas[n] = b;
       return b;
@@ -3599,14 +3602,47 @@
   }
 
   async function ponerEstilo(n, nombre) {
-    const antes = ED.pos;
-    const r = await docDelServidor('/capas/montar-todas', { familia: n }, `Poniendo el estilo «${nombre}»…`);
-    if (!r) return;
-    repintarTodoElCarrusel();
-    // «Volver al estilo de antes» solo mientras no se toque nada más
-    ED.deshacerEstilo = ED.pos > antes ? ED.pos : -1;
+    terminarEdicionTexto(true);
+    const yo = ED;
+    const antes = firmaDoc();
+    if (ED.doc.laminas.some(l => l.familia)) {
+      const r = await docDelServidor('/capas/montar-todas', { familia: n }, `Poniendo el estilo «${nombre}»…`);
+      if (!r || ED !== yo) return;
+      repintarTodoElCarrusel();
+    } else {
+      // una pieza sin estilo (de antes, o empezada en blanco): esta imagen con la plantilla de ese estilo
+      await volverAMontar(n);
+      if (ED !== yo) return;
+    }
+    const despues = firmaDoc();
+    if (despues === antes) {
+      avisoPantalla('Esta pieza no ha cambiado con ese estilo. Prueba otro, o «Edición avanzada».', true);
+      return;
+    }
+    // «Volver al estilo de antes» solo mientras no se toque nada más (por la
+    // firma del documento: la posición del historial deja de crecer en su tope)
+    ED.estiloAntes = antes;
+    ED.estiloDespues = despues;
     pintarDerecha();
     avisoPantalla(`Estilo «${nombre}». ¿No te gusta? «Volver al estilo de antes», a la derecha.`);
+  }
+
+  function volverAlEstiloDeAntes() {
+    terminarEdicionTexto(true);
+    if (!ED.estiloDespues || firmaDoc() !== ED.estiloDespues) {
+      ED.estiloDespues = '';
+      pintarDerecha();
+      avisoPantalla('Ya cambiaste algo después del estilo: usa «↶» (arriba) para deshacer paso a paso.', true);
+      return;
+    }
+    ED.doc = JSON.parse(ED.estiloAntes);
+    ED.estiloAntes = ED.estiloDespues = '';
+    ED.lamina = Math.min(ED.lamina, ED.doc.laminas.length - 1);
+    ED.sel = [];
+    cargarFotosDelDoc();
+    cargarLetrasDelDoc();
+    pintarTodo(); commit(); pintarPaneles(); pintarTira();
+    avisoPantalla('Vuelve a estar como antes.');
   }
 
   /* ================================================================ «+ Crear» (graficas-facil)
@@ -3736,6 +3772,7 @@
     S.cajaTextos = el('div', { clase: 'gc-textos' });
     izq.appendChild(S.cajaTextos);
     pintarTextos(S);
+    izq.appendChild(campoNegocio(S));
     izq.appendChild(el('label', { clase: 'ce-campo gc-campo-tamano' }, el('span', {}, 'Tamaño'), tam));
     S.cajaFoto = el('section', { clase: 'gc-foto' });
     izq.appendChild(S.cajaFoto);
@@ -3744,13 +3781,38 @@
     der.appendChild(S.cajaEstilos);
     S.bCrear = el('button', { type: 'button', clase: 'ce-btn ce-primario gc-crear', onclick: () => crearYa(S) }, 'Crear');
     S.pistaCrear = el('span', { clase: 'ce-pista gc-pista-crear', role: 'status' });
+    S.bAtras = el('button', { type: 'button', clase: 'ce-btn gc-atras', disabled: S.escribiendo, onclick: () => { S.paso = 1; S.turno += 1; clearTimeout(S.espera); if (S.parar) S.parar.abort(); pintarAsistente(S); } }, '← Atrás');
     caja.appendChild(el('footer', { clase: 'gc-pie' },
-      el('button', { type: 'button', clase: 'ce-btn gc-atras', onclick: () => { S.paso = 1; S.turno += 1; clearTimeout(S.espera); if (S.parar) S.parar.abort(); pintarAsistente(S); } }, '← Atrás'),
+      S.bAtras,
       el('span', { clase: 'ce-crece' }), S.pistaCrear, S.bCrear));
     pedirEstilos(S, true);
     revisarCrear(S);
     const primero = S.cajaTextos.querySelector('input, textarea');
     if (primero) primero.focus();
+  }
+
+  /* «Sobre tu negocio»: qué vendes y cómo hablas, para «Escríbelo por mí».
+   * La ficha del proyecto solo trae su nombre y las reglas de imagen; esto se
+   * recuerda en el navegador por proyecto (no toca ningún vídeo ni param). */
+  const claveNegocio = cid => `crearia.graficas.negocio.${cid}`;
+
+  function negocioRecordado(cid) {
+    try { return localStorage.getItem(claveNegocio(cid)) || ''; } catch (_) { return ''; }
+  }
+
+  function campoNegocio(S) {
+    if (S.sobre === undefined) S.sobre = negocioRecordado(S.cid);
+    const area = el('textarea', { rows: '3', maxlength: '600', clase: 'gc-sobre', 'aria-label': 'Sobre tu negocio',
+      placeholder: 'Ej.: alquilamos consolas con juegos para fiestas y eventos en Lima; te la llevamos e instalamos. Hablamos cercano y con humor.' });
+    area.value = S.sobre;
+    area.addEventListener('input', () => {
+      S.sobre = area.value.slice(0, 600);
+      try { localStorage.setItem(claveNegocio(S.cid), S.sobre); } catch (_) { /* vale para esta vez */ }
+    });
+    return el('details', { clase: 'gc-negocio', open: !S.sobre },
+      el('summary', {}, S.sobre ? 'Sobre tu negocio ✓ (para la IA)' : 'Sobre tu negocio (para que la IA escriba mejor)'),
+      area,
+      el('small', { clase: 'ce-pista' }, 'Qué vendes, dónde y cómo hablas. Los precios o cifras que pongas aquí la IA los puede usar; los que no, nunca. Se recuerda en este navegador.'));
   }
 
   /** El titular con el que se pintan las miniaturas. */
@@ -3836,15 +3898,17 @@
       return;
     }
     if (S.que !== 'carrusel' && (S.apoyo.trim()) && !window.confirm('La IA va a cambiar el titular y la frase que has escrito. ¿Seguir?')) return;
+    const pedido = S.que;
     S.escribiendo = true;
     S.avisosIA = [];
     pintarTextos(S);
     revisarCrear(S);
     const o = S.opc;
     try {
-      const inicio = await o.pedir(o.api(S.cid, '/escribir'), { method: 'POST', cuerpo: { que: S.que, tema, cuantas: S.cuantas, formato: S.formato } });
+      const inicio = await o.pedir(o.api(S.cid, '/escribir'), { method: 'POST', cuerpo: { que: S.que, tema, cuantas: S.cuantas, formato: S.formato, sobre: S.sobre || '' } });
       let r = null;
-      for (let i = 0; i < 300 && !S.cerrado; i++) {
+      // el servidor da hasta 2 intentos de 4 minutos: se espera un poco más
+      for (let i = 0; i < 450 && !S.cerrado; i++) {
         await new Promise(ok => setTimeout(ok, 1200));
         let t;
         try {
@@ -3858,6 +3922,7 @@
       }
       if (S.cerrado) return;
       if (!r) throw new Error('tarda demasiado. Vuelve a probar en un rato o escríbelo tú');
+      if (S.que !== pedido) throw new Error('cambiaste lo que vas a crear mientras escribía. Vuelve a pulsar «Escríbelo por mí»');
       const piezas = (r.piezas || []).filter(p => Array.isArray(p) && p.length === 2);
       if (!piezas.length) throw new Error('no ha devuelto textos');
       S.avisosIA = r.avisos || [];
@@ -4049,6 +4114,7 @@
     if (!S.bCrear) return;
     const falta = faltaParaCrear(S);
     S.bCrear.disabled = !!falta || S.creando;
+    if (S.bAtras) S.bAtras.disabled = S.escribiendo || S.creando;
     S.pistaCrear.textContent = S.creando ? 'Creando…' : (S.mensaje || falta);
   }
 

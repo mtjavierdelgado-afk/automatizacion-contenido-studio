@@ -26771,6 +26771,16 @@ _MINIATURAS_GRAF_TOPE = 400
 _CERROJO_MINIATURAS_GRAF = threading.Lock()
 
 
+def _formato_de_crear(valor):
+    """El tamaño de «+ Crear»: None (el de cada tipo) o uno del catálogo; otra cosa, 400."""
+    if valor in (None, ""):
+        return None
+    if not isinstance(valor, str):
+        raise ErrorApi(400, "ese tamaño no existe")
+    _por_graficas(_graficas().formato, valor)
+    return valor
+
+
 def _negocio_para_escribir(cid):
     """La ficha del negocio en texto (nombre y reglas) para «Escríbelo por mí», o ""."""
     try:
@@ -26800,6 +26810,10 @@ def graficas_escribir(cid: str, peticion: Request, cuerpo: dict = Body(default=N
     if len(" ".join(tema.split())) < 3:
         raise ErrorApi(400, "escribe de qué trata (una frase basta)")
     negocio = _negocio_para_escribir(cid)
+    # lo que el dueño cuenta en «Sobre tu negocio» (qué vende y cómo habla): fuente como la ficha
+    sobre = " ".join(str(cuerpo.get("sobre") or "").split())[:600]
+    if sobre:
+        negocio = f"{negocio}\nLo que cuenta el dueño: {sobre}".strip()
     ahora = time.time()
     with _CERROJO_TRABAJOS_CAPAS:
         for viejo in [t for t, v in _TRABAJOS_CAPAS.items() if v["fin"] and ahora - v["fin"] > _VIDA_TRABAJO_CAPAS]:
@@ -26848,7 +26862,7 @@ def graficas_miniaturas(cid: str, peticion: Request, cuerpo: dict = Body(default
     import base64  # noqa: PLC0415
     import graficas_crear as CREAR_GRAF  # noqa: E402,PLC0415
     cuerpo = cuerpo or {}
-    que, formato = str(cuerpo.get("que") or ""), cuerpo.get("formato") or None
+    que, formato = str(cuerpo.get("que") or ""), _formato_de_crear(cuerpo.get("formato"))
     titulo = " ".join(str(cuerpo.get("titulo") or "").split())[:90]
     apoyo = " ".join(str(cuerpo.get("apoyo") or "").split())[:140]
     foto = str(cuerpo.get("foto") or "")
@@ -26910,7 +26924,7 @@ def graficas_crear(cid: str, peticion: Request, cuerpo: dict = Body(default=None
         piezas = [(str(p[0]), p[1]) for p in piezas if isinstance(p, list) and len(p) == 2 and isinstance(p[1], dict)]
     foto = str(cuerpo.get("foto") or "")
     doc, avisos = _por_capas(G._con_turno, lambda p: CREAR_GRAF.crear(
-        p, que, n, cuerpo.get("formato") or None, piezas, foto, kit, logo, oscuro, marca))
+        p, que, n, _formato_de_crear(cuerpo.get("formato")), piezas, foto, kit, logo, oscuro, marca))
     return {"doc": doc, "avisos": avisos}
 
 

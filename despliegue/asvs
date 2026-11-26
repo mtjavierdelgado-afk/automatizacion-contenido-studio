@@ -294,7 +294,9 @@ _sitio_cliente() {
   if grep -Eq "$LOC" "$sitio"; then
     # YA ESTA: se renueva entera (con el puerto del estudio de AHORA). Su
     # final se busca CONTANDO LLAVES, no por la sangria
-    awk -v f="$bloque" -v loc="$LOC" '
+    # el patron va por el ENTORNO: `-v` interpreta las barras (gawk deja
+    # `\^` como `^`, un ancla, y no casaba nada; mawk no)
+    LOC="$LOC" awk -v f="$bloque" 'BEGIN { loc = ENVIRON["LOC"] }
       salta { n += gsub(/\{/, "{"); n -= gsub(/\}/, "}"); if (n <= 0) salta = 0; next }
       $0 ~ loc { while ((getline l < f) > 0) print l; close(f)
                  n = gsub(/\{/, "{") - gsub(/\}/, "}"); salta = (n > 0); next }

@@ -934,7 +934,9 @@ def textos_de_portada(n, t, piezas=(), marca=""):
     suyos (la de Testimonio, una cita; la de Pasos, tres pasos), y ninguno se
     queda vacío ni con un texto de muestra que no se pidió."""
     titulo, apoyo = t.get("titulo", ""), t.get("apoyo", "")
-    textos = {"titulo": titulo, "apoyo": apoyo, "marca": marca or "Tu marca", "cta": "Desliza →", "kicker": "",
+    # el botón: «Desliza →» en un carrusel; una pieza de una sola imagen trae el suyo (graficas-facil)
+    cta = str(t["cta"]) if isinstance(t.get("cta"), str) and t["cta"].strip() else "Desliza →"
+    textos = {"titulo": titulo, "apoyo": apoyo, "marca": marca or "Tu marca", "cta": cta, "kicker": "",
               "tipo": "", "oferta": "", "oferta_txt": "", "dia": "", "mes": "", "lugar": "", "i1": "", "i2": "", "i3": "",
               "cita": "", "autor": "", "usuario": ""}
     if n == 15:

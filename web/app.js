@@ -36942,9 +36942,29 @@ async function descargarLaminas(cid, pieza, que) {
   } catch (e) { toast(`No se ha podido descargar: ${e.message}`, true); }
 }
 
+/* «+ Crear» (rama graficas-facil, 26-11-2026): la única puerta para una pieza
+   nueva —publicación, carrusel o historia— en 3 pasos (EditorCapas.crear, en
+   web/graficas_editor.js). El lote, el diseño en blanco y el editor clásico
+   siguen, como enlaces «Avanzado» de su primer paso. */
 function botonNuevaGrafica(cid) {
-  return h('button', { clase: 'nueva-grafica', title: 'Una pieza para redes con el kit de este proyecto',
-    onclick: () => abrirEditorGrafica(cid, null) }, '+ Nueva gráfica');
+  return h('button', { clase: 'crear-grafica', title: 'Una publicación, un carrusel o una historia con el Kit de este proyecto',
+    onclick: () => crearGrafica(cid) }, '+ Crear gráfica');
+}
+
+let ABRIENDO_CREAR = false;
+
+async function crearGrafica(cid) {
+  if (ABRIENDO_CREAR) return;
+  ABRIENDO_CREAR = true;
+  try {
+    const [cat, editor] = await Promise.all([catalogoGraficas(), cargarEditorCapas()]);
+    if (GRAF.kits[cid] === undefined) GRAF.kits[cid] = (await pedir(apiGraficas(cid, '/kit'))).kit || null;
+    await editor.crear(Object.assign(opcionesEditorCapas(cid, cat), {
+      lote: () => carruselesEnLoteGraficas(cid),
+      enBlanco: () => abrirEditorCapas(cid, null),
+      clasico: () => abrirEditorGrafica(cid, null),
+    }));
+  } catch (e) { toast(e.message, true); } finally { ABRIENDO_CREAR = false; }
 }
 
 /* EL EDITOR CON CAPAS (rama graficas-2-editor, 12-11-2026): su propia página y
@@ -36980,31 +37000,55 @@ async function abrirEditorCapas(cid, pieza, extra) {
   try { await abrirEditorCapasYa(cid, pieza, extra); } finally { ABRIENDO_CAPAS = false; }
 }
 
+/* La comparación de una pieza de antes con su versión en capas se recuerda en
+   el navegador por pieza y sello (graficas-facil): nunca en el documento, que
+   cambiaría su huella. */
+function comparacionRecordada(cid, pieza) {
+  try { return localStorage.getItem(`crearia.graficas.comparada.${cid}.${pieza.id}.${pieza.sello || ''}`) || ''; } catch (_) { return ''; }
+}
+
+function recordarComparacion(cid, pieza, igual) {
+  try { localStorage.setItem(`crearia.graficas.comparada.${cid}.${pieza.id}.${pieza.sello || ''}`, igual ? 'si' : 'no'); } catch (_) { /* vale para esta vez */ }
+}
+
 async function abrirEditorCapasYa(cid, pieza, extra) {
   let cat, editor;
   try {
     [cat, editor] = await Promise.all([catalogoGraficas(), cargarEditorCapas()]);
     if (GRAF.kits[cid] === undefined) GRAF.kits[cid] = (await pedir(apiGraficas(cid, '/kit'))).kit || null;
     if (pieza && pieza.id && !pieza.en_capas && !pieza.nacida_en_capas) {
-      toast('Comprobando que la pieza sale igual en capas…');
-      const r = await pedir(apiGraficas(cid, `/piezas/${pieza.id}/comparar`), { method: 'POST' });
-      if (!r.igual) {
-        toast(`Esta pieza no sale idéntica en capas (cambia un ${(r.visible * 100).toFixed(2)} % de lo que se ve), así que sigue con el editor de siempre. No se ha tocado nada.`, true);
-        return;
+      const antes = comparacionRecordada(cid, pieza);
+      let igual = antes === 'si';
+      if (!antes) {
+        toast('Comprobando que la pieza sale igual en el editor nuevo…');
+        const r = await pedir(apiGraficas(cid, `/piezas/${pieza.id}/comparar`), { method: 'POST' });
+        igual = !!r.igual;
+        recordarComparacion(cid, pieza, igual);
+        if (!igual) toast(`Esta pieza no sale idéntica en el editor nuevo (cambia un ${(r.visible * 100).toFixed(2)} % de lo que se ve): se abre con el de siempre. No se ha tocado nada.`, true);
+      } else if (!igual) {
+        toast('Esta pieza no sale idéntica en el editor nuevo: se abre con el de siempre.', true);
       }
+      if (!igual) { abrirEditorGrafica(cid, pieza); return; }
     }
   } catch (e) { toast(e.message, true); return; }
+  editor.abrir(Object.assign(opcionesEditorCapas(cid, cat, pieza), extra || {}));
+}
+
+/** Lo que el editor con capas y «+ Crear» necesitan del Studio. */
+function opcionesEditorCapas(cid, cat, pieza) {
   const ficha = fichaCliente(cid);
-  editor.abrir(Object.assign({
-    cid, pieza, catalogo: cat, kit: GRAF.kits[cid] || {}, nombreCliente: ficha ? ficha.nombre : '',
+  return {
+    cid, pieza: pieza || null, catalogo: cat, kit: GRAF.kits[cid] || {}, nombreCliente: ficha ? ficha.nombre : '',
     base: BASE, api: apiGraficas, pedir, toast,
     // «Foto de un vídeo» (graficas-3c-extras): las imágenes ya pagadas de los vídeos del proyecto
     videos: () => videosDeCliente(cid).map(v => ({ id: v.id, nombre: v.nombre || v.id })),
     planos: async pid => ((await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/diseno`))).planos || []),
     miniatura: (img, pid, sid) => ponerImagenPublicar(img, rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/planos/${encodeURIComponent(sid)}.jpg`)),
     pases: () => (typeof cabeceraDePases === 'function' ? cabeceraDePases() : ''),
+    // «Descargar» del modo sencillo (graficas-facil): lo guardado, como en la lista
+    descargar: (p, como) => (como === 'png' || como === 'jpg' ? descargarGrafica(cid, p.id, como) : descargarLaminas(cid, p, como)),
     alCerrar: cambio => { if (cambio) { GRAF.piezas[cid] = undefined; pintarLight(); } },
-  }, extra || {}));
+  };
 }
 
 /* «Carruseles en lote» (graficas-3c-extras): una lista separada por --- o un
@@ -37085,10 +37129,8 @@ function seccionGraficasDelProyecto(cid) {
     h('span', { clase: 'meta' }, lista ? plural(lista.length, 'pieza', 'piezas') : ''),
     h('span', { clase: 'crece' }),
     GRAF.lotes && GRAF.lotes[cid] ? h('span', { clase: 'meta lote-graficas', role: 'status' }, GRAF.lotes[cid]) : null,
-    h('button', { clase: 'mini lote-en-capas', title: 'Muchos carruseles de una vez desde una lista o un CSV (sin IA, gratis)',
-      disabled: !!(GRAF.lotes && GRAF.lotes[cid]), onclick: () => carruselesEnLoteGraficas(cid) }, '+ Carruseles en lote'),
-    h('button', { clase: 'mini nueva-en-capas', title: 'Un diseño libre: añade textos, fotos, logo y formas donde quieras',
-      onclick: () => abrirEditorCapas(cid, null) }, '+ Diseño en capas')));
+    h('button', { clase: 'primario crear-en-graficas', title: 'Una publicación, un carrusel o una historia (gratis)',
+      onclick: () => crearGrafica(cid) }, '+ Crear')));
   if (lista === undefined) {
     if (!GRAF.pidiendo[cid]) {
       GRAF.pidiendo[cid] = true;
@@ -37106,7 +37148,7 @@ function seccionGraficasDelProyecto(cid) {
     return caja;
   }
   if (!lista.length) {
-    caja.appendChild(h('div', { clase: 'pista' }, 'Todavía no hay gráficas: pulsa «+ Nueva gráfica».'));
+    caja.appendChild(h('div', { clase: 'pista' }, 'Todavía no hay gráficas: pulsa «+ Crear» para hacer una publicación, un carrusel o una historia.'));
     return caja;
   }
   caja.appendChild(h('div', { clase: 'rejilla-piezas' }, ...lista.map(p => {
@@ -37130,7 +37172,7 @@ function seccionGraficasDelProyecto(cid) {
         h('button', { clase: 'mini', title: p.laminas > 1 ? 'La lámina 1' : '', onclick: () => descargarGrafica(cid, p.id, 'png') }, p.laminas > 1 ? 'PNG (1.ª)' : 'PNG'),
         h('button', { clase: 'mini', title: p.laminas > 1 ? 'La lámina 1' : '', onclick: () => descargarGrafica(cid, p.id, 'jpg') }, p.laminas > 1 ? 'JPG (1.ª)' : 'JPG'),
         enCapas ? null : h('button', { clase: 'mini abrir-en-capas', title: 'Moverla, añadir textos, fotos y formas donde quieras. La versión de antes se queda guardada.',
-          onclick: () => abrirEditorCapas(cid, p) }, 'Abrir en capas'),
+          onclick: () => abrirEditorCapas(cid, p) }, 'Abrir en el editor nuevo'),
         h('button', { clase: 'mini', onclick: () => (enCapas ? abrirEditorCapas(cid, p, { duplicar: true })
           : abrirEditorGrafica(cid, Object.assign({}, p, { id: '' }))) }, 'Duplicar'),
         h('button', { clase: 'mini fantasma', onclick: async () => {

@@ -389,15 +389,18 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/graficas/iconos` | Los iconos que se pueden poner en una lámina (graficas-3c-extras): id, |
 | `GET` | `/api/graficas/tipografia/{fichero}` | Una letra de la lista, para que el editor escriba con la misma que el PNG. |
 | `POST` | `/api/graficas/{cid}/capas` | Una pieza nueva que nace en capas (un carrusel, como trabajo: 202). |
+| `POST` | `/api/graficas/{cid}/capas/crear` | La pieza del «+ Crear», sin guardar (el editor la abre en el modo |
 | `POST` | `/api/graficas/{cid}/capas/historias` | «Hacer también las historias»: el mismo carrusel en 9:16 (no se guarda: |
 | `POST` | `/api/graficas/{cid}/capas/lamina` | Una lámina de un carrusel: `donde` (posición) añade una nueva del `tipo` |
 | `POST` | `/api/graficas/{cid}/capas/lote` | Carruseles en lote (graficas-3c-extras): una lista (separada por ---) o |
+| `POST` | `/api/graficas/{cid}/capas/miniaturas` | Las miniaturas de «Estilo» del «+ Crear»: la portada de hasta 4 familias |
 | `POST` | `/api/graficas/{cid}/capas/montar` | «Volver a montar» y «Empezar de»: la plantilla en el tamaño pedido, en |
 | `POST` | `/api/graficas/{cid}/capas/montar-todas` | «Volver a montar a todas» con una familia (las «En blanco» no se tocan). |
 | `POST` | `/api/graficas/{cid}/capas/nota` | La nota del carrusel (sin IA): portada, segunda portada, una idea por |
 | `POST` | `/api/graficas/{cid}/capas/partir` | «Partir un texto en láminas», sin IA: cada párrafo, una lámina. |
 | `GET` | `/api/graficas/{cid}/capas/trabajo/{tid}` | Cómo va el guardado de un carrusel: láminas hechas, y al acabar lo que |
 | `POST` | `/api/graficas/{cid}/capas/vista` | La vista de una pieza en capas tal como saldría. No guarda nada. |
+| `POST` | `/api/graficas/{cid}/escribir` | «Escríbelo por mí»: Claude (cupo de la membresía, sin dinero) escribe los |
 | `POST` | `/api/graficas/{cid}/imagen` | — |
 | `POST` | `/api/graficas/{cid}/imagen/de-plano` | Copia la imagen ya hecha de un plano de un vídeo DE ESTE proyecto. Gratis. |
 | `GET` | `/api/graficas/{cid}/imagen/{nombre}` | — |
@@ -605,4 +608,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**491 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**494 endpoints.** Escrito por `generar_api.py` desde `app.py`.

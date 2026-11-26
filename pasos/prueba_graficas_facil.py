@@ -160,6 +160,8 @@ def montaje(pincel):
             ok(all(lam.get("familia") == n for lam in doc["laminas"]), f"{que} {n}: con su familia")
             if que != "carrusel":
                 ok(not any(c.get("enlace") for c in doc["laminas"][0]["capas"]), f"{que} {n}: sin marca/número/«Desliza» de carrusel")
+                ok(not any(c["tipo"] == "texto" and "Desliza" in c.get("txt", "") for c in doc["laminas"][0]["capas"]),
+                   f"{que} {n}: una sola imagen no dice «Desliza»")
             for i in ((0, len(doc["laminas"]) - 1) if que == "carrusel" else (0,)):
                 _png, _av, medida = C.pintar(pincel, doc, None, lambda _n: None, None, None, i)
                 ok(not medida["fuera"] and not medida["choca"], f"{que} {n} imagen {i + 1}: nada tapado ni encimado {medida}")

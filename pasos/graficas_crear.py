@@ -24,6 +24,8 @@ from graficas import ErrorGraficas
 
 QUE = ("publicacion", "carrusel", "historia")
 #: El tamaño de partida de cada cosa (se puede cambiar en el paso 1).
+#: El botón de una publicación o una historia (en un carrusel es «Desliza →»).
+CTA_UNA_IMAGEN = "Escríbenos"
 FORMATO_DE = {"publicacion": "v45", "carrusel": "v45", "historia": "h916"}
 MAX_POR_TANDA = 4
 ANCHO_MINIATURA = 270
@@ -98,6 +100,8 @@ def crear(pincel, que, n, formato, piezas, foto="", kit=None, logo=None, logo_os
         raise ErrorGraficas("falta la portada: escribe de qué trata")
     if que != "carrusel":
         piezas = piezas[:1]
+        # una sola imagen no se desliza: su botón invita a escribir (se cambia tocándolo)
+        piezas[0][1].setdefault("cta", CTA_UNA_IMAGEN)
     titulo = piezas[0][1].get("titulo") or "Tu titular aquí"
     base = {"version": 2, "formato": fid, "nombre": (nombre or titulo)[:80], "laminas": [{"capas": []}]}
     doc, avisos = K.carrusel_desde_texto(pincel, base, n, "", "sustituir", kit, logo, logo_oscuro, marca, piezas=piezas)

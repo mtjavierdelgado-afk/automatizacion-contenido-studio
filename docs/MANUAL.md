@@ -1130,22 +1130,21 @@ Claude la usa en todo lo que escribe para él.
 
 ## Gráficas
 
-1. Abre un proyecto y entra en **⚙ Ajustes del proyecto → Kit de marca**. Elige los colores y las letras y pulsa **Guardar el kit**. El logo es el de la sección «Logo»; si quieres, sube otro para fondos oscuros.
-2. En el proyecto, pulsa **+ Nueva gráfica**.
-3. Elige **Red y tamaño**, escribe los textos y añade una imagen: subida o de un vídeo de ese proyecto.
-4. A la derecha elige uno de los 16 diseños. La vista se actualiza sola.
-5. Si quieres, ajusta esa pieza: arrastra los textos sobre la vista, cambia su estilo en **Estilo del texto**, elige la parte de la foto en **Qué parte de la foto se ve**, y cambia colores o letra. Pulsa **Aplicar cambios** para verlo. Lo arrastrado y el tamaño de los textos valen para ese diseño y tamaño: al cambiarlos, cada texto vuelve a como viene.
-6. Pulsa **Guardar** y descárgala en PNG o JPG. Para TikTok, usa el JPG.
+1. (Una vez) Abre un proyecto y entra en **⚙ Ajustes del proyecto → Kit de marca**. Elige los colores y las letras y pulsa **Guardar el kit**. El logo es el de la sección «Logo»; si quieres, sube otro para fondos oscuros.
+2. En la sección **Gráficas** del proyecto, pulsa **+ Crear** (o **+ Crear gráfica** arriba).
+3. **¿Qué quieres crear?** Publicación (una imagen), Carrusel (varias) o Historia (vertical).
+4. **¿De qué trata?** Escribe el titular o el tema. **✍️ Escríbelo por mí** hace que Claude escriba los textos con la ficha de tu negocio (usa el cupo de tu membresía, no cuesta dinero; no inventa precios, cifras ni opiniones de clientes). En un carrusel también puedes elegir **Ya tengo el texto** y pegarlo (cada párrafo, una imagen).
+5. **La imagen** (si quieres): **Subir una foto** o una de tus vídeos (ya pagada, gratis).
+6. **El estilo**: toca la miniatura que más te guste (salen con tu titular, tu foto y tus colores) y pulsa **Crear**.
+7. Se abre la pieza en **modo sencillo**: **toca un texto** para escribirlo; a la derecha (debajo en el móvil) están **Cambiar foto**, **Adornos**, **Otro estilo** (con **Volver al estilo de antes**) y, en un carrusel, **Añadir una imagen**.
+8. Pulsa **Guardar** y luego **Descargar** (PNG o JPG; en un carrusel, el ZIP o el PDF para LinkedIn). **Hacer también la historia** crea la misma pieza en 9:16, aparte.
 
-Las piezas quedan en la sección **Gráficas** del proyecto, donde se pueden abrir, duplicar o borrar.
+Las piezas quedan en la sección **Gráficas** del proyecto, donde se pueden abrir, duplicar o borrar. Las hechas con el editor de antes ofrecen **Abrir en el editor nuevo** (solo si salen idénticas; si no, se abren con el de siempre).
 
-### Carruseles (editor con capas)
+### Edición avanzada
 
-- **+ Diseño en capas** abre el editor. **Partir un texto en láminas** hace el carrusel (un párrafo, una lámina) y **＋ Lámina** añade una del tipo que quieras: punto, lista, dato, antes / después, pasos, cita, mito / realidad, pregunta, ranking, checklist, comparativa, precio / oferta o cierre.
-- **Familia de carrusel**: cada diseño (de los 16) es una familia con su letra, su adorno y sus colores del Kit.
-- En **Añadir**: **＋ Icono** (iconos con tus colores), **＋ Pegatina** («Nuevo», «Guárdalo», globo, flecha), **＋ QR** (tu WhatsApp o tu web) y **＋ De un vídeo** (una imagen ya pagada de un vídeo del proyecto, gratis).
-- **Hacer también las historias (9:16)**, con el carrusel guardado: abre la misma pieza en 9:16 como pieza aparte; revísala y guárdala.
-- **+ Carruseles en lote**, en la sección Gráficas del proyecto: pega varios carruseles separados por una línea con `---` (o un CSV de Excel o Sheets con las columnas familia, titular y una por lámina). Hasta 20 por tanda; luego ábrelos para cambiar los textos de muestra.
+- **Edición avanzada** (arriba en el editor) enseña todo: mover, girar y cambiar el tamaño de cada cosa, las capas, **＋ QR**, **Partir un texto en láminas**, **＋ Lámina** con todos sus tipos (punto, lista, dato, antes / después, pasos, cita, mito / realidad, pregunta, ranking, checklist, comparativa, precio / oferta o cierre), la familia de cada lámina y sus colores. **Modo sencillo** vuelve. El navegador recuerda el que usaste por última vez.
+- En el primer paso de **+ Crear**, **Avanzado**: **Hacer varios carruseles a la vez** (pega varios separados por una línea con `---`, o un CSV de Excel o Sheets con las columnas familia, titular y una por lámina; hasta 20 por tanda), **Empezar en blanco** (un diseño libre) y **Editor clásico de una imagen** (el de siempre, con sus 16 plantillas).
 
 ## Configuración (⚙)
 

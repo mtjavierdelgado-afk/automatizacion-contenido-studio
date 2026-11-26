@@ -53,8 +53,7 @@ def graficas_3c_extras(navegador, datos):
     pg = Pagina(navegador, datos, ancho=1600, alto=1100, nombre="extras")
     try:
         pg.js(f"elegirCliente({json.dumps(cid)});")
-        ok(pg.esperar(".seccion-graficas .nueva-en-capas", segundos=20), "el proyecto ofrece «+ Diseño en capas»")
-        ok(pg.esperar(".seccion-graficas .lote-en-capas", "Carruseles en lote", 3), "y «+ Carruseles en lote»")
+        ok(pg.esperar(".seccion-graficas .crear-en-graficas", segundos=20), "el proyecto ofrece «+ Crear»")
         # el editor, con un vídeo del proyecto simulado (sus planos) para «Foto de un vídeo»
         pg.p.route("**/imagen/de-plano", lambda ruta: ruta.fulfill(status=201, content_type="application/json",
                                                                     body=json.dumps({"nombre": imagen})))
@@ -166,10 +165,11 @@ def graficas_3c_extras(navegador, datos):
     pg = Pagina(navegador, datos, ancho=1400, alto=1000, nombre="extras_lote")
     try:
         pg.js(f"elegirCliente({json.dumps(cid)});")
-        ok(pg.esperar(".seccion-graficas .lote-en-capas", segundos=20), "«+ Carruseles en lote» en el proyecto")
+        ok(pg.esperar(".seccion-graficas .crear-en-graficas", segundos=20), "«+ Crear» en el proyecto (el lote, en su «Avanzado»)")
         _r, lista = api.get(f"/api/graficas/{cid}/piezas")
         antes = len(lista.get("piezas", []))
-        pg.pulsar(".seccion-graficas .lote-en-capas", "Carruseles en lote")
+        pg.pulsar(".seccion-graficas .crear-en-graficas", "+ Crear")
+        pg.pulsar("#crear-grafica .gc-avanzado .lote-en-capas", "varios carruseles")
         ok(pg.esperar(".dialogo h3", "Carruseles en lote", 5), "pregunta los carruseles")
         pg.p.locator(".dialogo textarea").fill("Familia: Gamer\nTorneo de fin de mes\n\nInscríbete\nCupos limitados.\n---\n"
                                                "Tres juegos para fiestas\n\n- Uno\n- Dos\n- Tres")

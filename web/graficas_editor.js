@@ -166,6 +166,9 @@
    *        alCerrar(cambio) }
    */
   async function abrir(opc) {
+    // abrir otra encima («Hacer también las historias»): lo guardado en la de
+    // antes sigue contando para refrescar la lista al cerrar
+    const habiaCambio = !!(ED && ED.cambio);
     if (ED) cerrarYa(false);
     const raiz = el('div', { clase: 'ce', id: 'editor-capas', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Editor de gráficas con capas' });
     ED = {
@@ -176,7 +179,11 @@
       iman: true, tapa: false, fotos: {}, logos: { normal: null, oscuro: null }, letras: {},
       vista: { turno: 0, temporizador: null, pidiendo: false, otra: false, img: '', avisos: [], lineas: {}, de: '' },
       editando: null, arrastre: null, avisos: [], cerrado: false, guardando: false, ultimoToque: { id: '', t: 0 },
+      // graficas-facil: el modo sencillo (lo recordado en el navegador manda; si no, lo que pida quien abre)
+      sencillo: (modoRecordado() || (opc.sencillo ? 'sencillo' : 'avanzado')) === 'sencillo', deshacerEstilo: -1, sBotones: [],
+      cambio: habiaCambio,
     };
+    raiz.classList.toggle('ce-sencillo', ED.sencillo);
     document.body.appendChild(raiz);
     document.body.classList.add('ce-abierto');
     raiz.appendChild(el('div', { clase: 'ce-cargando' }, 'Abriendo el editor con capas…'));
@@ -198,8 +205,11 @@
     pintarTodo();
     commit(true);
     ED.guardado = firmaDoc();
+    // una pieza recién creada con «+ Crear»: aún no está guardada
+    if (opc.nueva) ED.guardado = '';
     pintarEstado();
     pedirVista();
+    if (opc.avisoInicial) avisoPantalla(opc.avisoInicial, true);
   }
 
   /** Prepara el documento de ESTE editor (`E`): tras cada espera se escribe en
@@ -662,11 +672,12 @@
     if (elegidas.length === 1 && !ED.editando) {
       const c = elegidas[0];
       const k = caja(c);
-      const marco = el('div', { clase: 'ce-elegida' + (c.bloqueado ? ' bloqueada' : '') });
+      const fija = c.bloqueado || (ED.sencillo && !movibleSencillo(c));
+      const marco = el('div', { clase: 'ce-elegida' + (fija ? ' bloqueada' : '') });
       Object.assign(marco.style, { left: `${k.x}px`, top: `${k.y}px`, width: `${k.w}px`, height: `${k.h}px`,
         transformOrigin: `${k.ox}px ${k.oy}px`, transform: `rotate(${k.giro}deg)` });
       marco.dataset.mover = c.id;
-      if (!c.bloqueado) {
+      if (!fija) {
         const asas = c.tipo === 'texto' ? ['nw', 'ne', 'se', 'sw', 'e', 'w'] : ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
         for (const a of asas) marco.appendChild(el('div', { clase: `ce-asa ce-asa-${a}`, 'data-asa': a, title: c.tipo === 'texto' && a.length === 2 ? 'Cambia el tamaño de la letra' : 'Cambia el tamaño' }));
         marco.appendChild(el('div', { clase: 'ce-girar', 'data-girar': '1', title: 'Girar (Mayús: de 15 en 15°)' }, '⟳'));
@@ -782,12 +793,14 @@
     ED.bDeshacer = boton('↶', { title: 'Deshacer (Ctrl+Z)', 'aria-label': 'Deshacer' }, () => irAHistoria(-1));
     ED.bRehacer = boton('↷', { title: 'Rehacer (Ctrl+Y)', 'aria-label': 'Rehacer' }, () => irAHistoria(1));
     B.append(ED.bDeshacer, ED.bRehacer);
-    B.appendChild(el('span', { clase: 'ce-sep' }));
-    B.appendChild(boton('−', { title: 'Alejar', 'aria-label': 'Alejar' }, () => cambiarZoom(-1)));
+    const avanzada = el('span', { clase: 'ce-solo-avanzado' });
+    avanzada.appendChild(el('span', { clase: 'ce-sep' }));
+    avanzada.appendChild(boton('−', { title: 'Alejar', 'aria-label': 'Alejar' }, () => cambiarZoom(-1)));
     ED.bZoom = boton('Ajustar', { title: 'Que quepa entero' }, () => cambiarZoom(0));
-    B.appendChild(ED.bZoom);
-    B.appendChild(boton('+', { title: 'Acercar', 'aria-label': 'Acercar' }, () => cambiarZoom(1)));
-    B.appendChild(el('span', { clase: 'ce-sep' }));
+    avanzada.appendChild(ED.bZoom);
+    avanzada.appendChild(boton('+', { title: 'Acercar', 'aria-label': 'Acercar' }, () => cambiarZoom(1)));
+    avanzada.appendChild(el('span', { clase: 'ce-sep' }));
+    B.appendChild(avanzada);
     const tapa = boton('Ver lo que tapa la red', { 'aria-pressed': String(ED.tapa) }, ev => {
       ED.tapa = !ED.tapa;
       ev.currentTarget.setAttribute('aria-pressed', String(ED.tapa));
@@ -797,7 +810,11 @@
       ED.iman = !ED.iman;
       ev.currentTarget.setAttribute('aria-pressed', String(ED.iman));
     });
-    B.append(tapa, iman);
+    avanzada.append(tapa, iman);
+    B.appendChild(boton(ED.sencillo ? 'Edición avanzada' : 'Modo sencillo', {
+      clase: 'ce-btn ce-cambiar-modo',
+      title: ED.sencillo ? 'Mover cada cosa a mano, las capas, el QR y el resto de opciones' : 'Solo lo de siempre: tocar para escribir, cambiar la foto y el estilo',
+    }, cambiarModo));
     if (ED.piezaId && !ED.nacida) {
       B.appendChild(boton('Ver la versión anterior', { title: 'La pieza tal como estaba antes de pasarla a capas' }, verVersionAnterior));
     }
@@ -828,6 +845,10 @@
     ED.bDeshacer.disabled = ED.pos <= 0;
     ED.bRehacer.disabled = ED.pos >= ED.hist.length - 1;
     ED.bGuardar.disabled = ED.guardando || (!!ED.piezaId && !sinGuardar());
+    // modo sencillo: descargar y la historia salen de lo guardado
+    const listo = !!ED.piezaId && !sinGuardar() && !ED.guardando;
+    for (const b of ED.sBotones || []) if (b.isConnected) b.disabled = !listo;
+    if (ED.sPista && ED.sPista.isConnected) ED.sPista.hidden = listo;
   }
 
   function avisoPantalla(texto, malo) {
@@ -1025,6 +1046,13 @@
     const P = ED.der;
     if (!P) return;
     const scroll = P.scrollTop;
+    if (ED.sencillo) {
+      // sin vaciar el panel: el botón que se está pulsando (Guardar, al tocarlo
+      // mientras se escribe un texto) no puede desaparecer bajo el dedo
+      panelSencillo(P);
+      P.scrollTop = scroll;
+      return;
+    }
     P.textContent = '';
     const elegidas = seleccion();
     if (!elegidas.length) panelPieza(P);
@@ -2430,7 +2458,7 @@
     ED.lamina = Math.min(i, ED.doc.laminas.length - 1);
     ED.sel = [];
     pintarTodo(); commit(); pintarPaneles(); pintarTira();
-    avisoPantalla('Lámina borrada. Ctrl+Z la recupera.');
+    avisoPantalla(ED.sencillo ? 'Imagen quitada. «↶» (arriba) la recupera.' : 'Lámina borrada. Ctrl+Z la recupera.');
   }
 
   function moverLamina(de, a) {
@@ -2478,13 +2506,16 @@
     const scroll = T.querySelector('.ce-tira-lista') ? T.querySelector('.ce-tira-lista').scrollLeft : 0;
     T.textContent = '';
     const L = ED.doc.laminas;
-    const lista = el('ol', { clase: 'ce-tira-lista', 'aria-label': `Láminas (${L.length})` });
+    const S = ED.sencillo;
+    const nombreL = S ? 'Imagen' : 'Lámina';
+    T.classList.toggle('ce-tira-una', S && L.length < 2);
+    const lista = el('ol', { clase: 'ce-tira-lista', 'aria-label': `${S ? 'Imágenes' : 'Láminas'} (${L.length})` });
     L.forEach((lam, i) => {
       const tipo = NOMBRE_TIPO[lam.tipo] || '';
       const b = el('button', { type: 'button', clase: 'ce-tira-lamina' + (i === ED.lamina ? ' actual' : ''), 'data-i': String(i),
         'aria-current': i === ED.lamina ? 'true' : 'false', draggable: 'true',
-        'aria-label': `Lámina ${i + 1} de ${L.length}${tipo ? `, ${tipo}` : ''}`,
-        title: `Lámina ${i + 1}${tipo ? ` · ${tipo}` : ''} (arrástrala para cambiar el orden)`,
+        'aria-label': `${nombreL} ${i + 1} de ${L.length}${tipo ? `, ${tipo}` : ''}`,
+        title: `${nombreL} ${i + 1}${tipo ? ` · ${tipo}` : ''} (arrástrala para cambiar el orden)`,
         onclick: () => irALamina(i) },
       miniLienzo(i), el('span', { clase: 'ce-tira-num' }, String(i + 1)));
       b.addEventListener('dragstart', ev => { ev.dataTransfer.setData('text/plain', String(i)); ev.dataTransfer.effectAllowed = 'move'; b.classList.add('arrastrando'); });
@@ -2510,14 +2541,14 @@
       tipos.length ? el('hr', {}) : null,
       boton('En blanco', { role: 'menuitem' }, () => { menu.hidden = true; anadirLamina(laminaEnBlanco()); }),
       boton('Copia de esta', { role: 'menuitem' }, () => { menu.hidden = true; duplicarLamina(); }));
-    const mas = boton('＋ Lámina', { disabled: lleno, 'aria-haspopup': 'menu', title: lleno ? `Como mucho ${MAX_LAMINAS} láminas` : 'Añadir una lámina después de esta' },
+    const mas = boton('＋ Lámina', { clase: 'ce-btn ce-solo-avanzado', disabled: lleno, 'aria-haspopup': 'menu', title: lleno ? `Como mucho ${MAX_LAMINAS} láminas` : 'Añadir una lámina después de esta' },
       () => { menu.hidden = !menu.hidden; });
     const acciones = el('div', { clase: 'ce-tira-acciones' },
-      el('span', { clase: 'ce-tira-cuenta' }, L.length > 1 ? `Lámina ${ED.lamina + 1} de ${L.length}` : 'Una lámina'),
+      el('span', { clase: 'ce-tira-cuenta' }, L.length > 1 ? `${nombreL} ${ED.lamina + 1} de ${L.length}` : (S ? 'Una imagen' : 'Una lámina')),
       el('span', { clase: 'ce-tira-mas' }, mas, menu),
       boton('← Mover', { disabled: ED.lamina === 0, title: 'Antes (Alt+←)' }, () => moverLamina(ED.lamina, ED.lamina - 1)),
       boton('Mover →', { disabled: ED.lamina >= L.length - 1, title: 'Después (Alt+→)' }, () => moverLamina(ED.lamina, ED.lamina + 1)),
-      boton('Borrar lámina', { disabled: L.length < 2, clase: 'ce-btn ce-peligro' }, borrarLamina),
+      boton(S ? 'Quitar esta imagen' : 'Borrar lámina', { disabled: L.length < 2, clase: 'ce-btn ce-peligro' }, borrarLamina),
       boton('Ver como en el móvil', { disabled: L.length < 1 }, verEnElMovil));
     T.append(lista, acciones);
     const nueva = T.querySelector('.ce-tira-lista');
@@ -2702,7 +2733,8 @@
     if (!r) return;
     ED.lamina = donde;
     repintarTodoElCarrusel();
-    avisoPantalla(`Lámina «${NOMBRE_TIPO[tipo]}» añadida con el estilo de la familia. Cambia sus textos con doble clic.`);
+    avisoPantalla(ED.sencillo ? `Imagen «${NOMBRE_TIPO[tipo]}» añadida con el mismo estilo. Toca sus textos para escribirlos.`
+      : `Lámina «${NOMBRE_TIPO[tipo]}» añadida con el estilo de la familia. Cambia sus textos con doble clic.`);
   }
 
   async function montarEstaLamina(n, tipo) {
@@ -2827,6 +2859,12 @@
     if (ED.editando) {
       if (ev.target.closest && ev.target.closest(`[data-c="${ED.editando}"]`)) return;   // dentro del texto que se escribe
       terminarEdicionTexto(true);
+    }
+    if (ED.sencillo && !(ev.target.dataset && (ev.target.dataset.asa || ev.target.dataset.girar))) {
+      // modo sencillo: un toque escribe el texto o elige la foto; solo lo
+      // añadido a mano (adornos) se arrastra
+      const tocada = capaParaTocar(ev);
+      if (!tocada || !movibleSencillo(tocada)) { tocarSencillo(ev, tocada); return; }
     }
     const [px, py] = puntoEnLienzo(ev);
     const asa = ev.target.dataset && ev.target.dataset.asa;
@@ -3119,6 +3157,7 @@
     n.addEventListener('input', () => {
       const txt = (n.innerText || '').replace(/\r\n/g, '\n').slice(0, LIMITES.texto);
       c.txt = txt;
+      if (ED.sTextoArea && ED.sTextoArea.isConnected) ED.sTextoArea.value = txt;
       pintarMarcas();
     });
     n.addEventListener('blur', () => { if (ED && ED.editando === id && n.isConnected) terminarEdicionTexto(true); });
@@ -3230,8 +3269,818 @@
     }
   }
 
+  /* ================================================================ modo sencillo (graficas-facil, 26-11-2026)
+   * El mismo editor con menos a la vista: tocar un texto lo escribe, tocar la
+   * foto la elige, y a la derecha solo Cambiar foto, Adornos, Otro estilo,
+   * Añadir imagen, Guardar, Descargar y la historia. Lo de la plantilla no se
+   * arrastra (mover cosas es de «Edición avanzada»); lo añadido a mano sí.
+   * El modo se recuerda SOLO en el navegador: en el documento cambiaría su
+   * huella. Vocabulario: «estilo» (familia) e «imagen» (lámina). */
+
+  const CLAVE_MODO = 'crearia.graficas.modo';
+
+  function modoRecordado() {
+    try { return localStorage.getItem(CLAVE_MODO) || ''; } catch (_) { return ''; }
+  }
+
+  function recordarModo(modo) {
+    try { localStorage.setItem(CLAVE_MODO, modo); } catch (_) { /* sin almacenamiento: vale para esta vez */ }
+  }
+
+  function cambiarModo() {
+    terminarEdicionTexto(true);
+    ED.sencillo = !ED.sencillo;
+    recordarModo(ED.sencillo ? 'sencillo' : 'avanzado');
+    ED.raiz.classList.toggle('ce-sencillo', ED.sencillo);
+    ED.sel = [];
+    pintarBarra();
+    pintarPaneles();
+    pintarTira();
+    medirLienzo();
+    pintarTodo();
+    // el lienzo cambia de sitio al quitar o poner el panel de la izquierda
+    requestAnimationFrame(() => { if (ED) { medirLienzo(); pintarTodo(); } });
+    avisoPantalla(ED.sencillo ? 'Modo sencillo: toca un texto para escribirlo.' : 'Edición avanzada: arrastra, cambia el tamaño y gira cada cosa.');
+  }
+
+  /** En el modo sencillo solo se arrastra lo añadido a mano (sin papel en la plantilla). */
+  function movibleSencillo(c) {
+    return !!c && !c.bloqueado && !c.rol;
+  }
+
+  const esQr = c => c.tipo === 'imagen' && (c.rol === 'qr' || c.nombre === 'QR');
+
+  /** La capa que se toca: la primera de texto, foto, icono o logo bajo el dedo
+   * (una forma de la plantilla encima de un texto no lo tapa). */
+  function capaParaTocar(ev) {
+    let forma = null;
+    for (const n of document.elementsFromPoint(ev.clientX, ev.clientY)) {
+      let c = null;
+      if (n.dataset && n.dataset.mover) c = capa(n.dataset.mover);
+      else {
+        const capaN = n.closest && n.closest('[data-c]');
+        if (capaN && ED.lienzo.contains(capaN)) c = capa(capaN.dataset.c);
+      }
+      if (!c || c.oculto) continue;
+      if (c.tipo !== 'forma' || !c.rol) return c;
+      forma = forma || c;
+    }
+    return forma && !forma.rol ? forma : null;
+  }
+
+  function tocarSencillo(ev, c) {
+    if (!ED.marco.contains(ev.target) && ev.target !== ED.escenario) return;
+    ev.preventDefault();
+    const x0 = ev.clientX, y0 = ev.clientY;
+    const yo = ED;
+    const alSoltarToque = e2 => {
+      window.removeEventListener('pointerup', alSoltarToque, true);
+      window.removeEventListener('pointercancel', alSoltarToque, true);
+      if (ED !== yo || e2.type === 'pointercancel' || Math.hypot(e2.clientX - x0, e2.clientY - y0) > 10) return;
+      if (!c) {
+        if (ED.sel.length) { ED.sel = []; pintarMarcas(); pintarPaneles(); }
+        return;
+      }
+      if (c.tipo === 'texto') {
+        empezarEdicionTexto(c.id, false);
+        cursorDondeSeToca(c.id, e2.clientX, e2.clientY);
+        return;
+      }
+      ED.sel = [c.id];
+      pintarMarcas();
+      pintarPaneles();
+      if (c.tipo === 'imagen' && !esQr(c)) avisoPantalla('Foto elegida: «Cambiar foto», a la derecha (o debajo en el móvil).');
+    };
+    window.addEventListener('pointerup', alSoltarToque, true);
+    window.addEventListener('pointercancel', alSoltarToque, true);
+  }
+
+  /** El cursor donde se tocó el texto (si el navegador sabe decirlo), o al final. */
+  function cursorDondeSeToca(id, x, y) {
+    const n = nodoDe(id);
+    if (!n || ED.editando !== id) return;
+    const s = window.getSelection();
+    let r = null;
+    try {
+      if (document.caretRangeFromPoint) r = document.caretRangeFromPoint(x, y);
+      else if (document.caretPositionFromPoint) {
+        const pos = document.caretPositionFromPoint(x, y);
+        if (pos) { r = document.createRange(); r.setStart(pos.offsetNode, pos.offset); r.collapse(true); }
+      }
+    } catch (_) { r = null; }
+    if (!r || !n.contains(r.startContainer)) {
+      r = document.createRange();
+      r.selectNodeContents(n);
+      r.collapse(false);
+    }
+    s.removeAllRanges();
+    s.addRange(r);
+  }
+
+  /** ¿Qué es esta pieza? (para los nombres del panel) */
+  function queEs() {
+    const f = formato();
+    if (ED.doc.laminas.length > 1 || ED.opc.que === 'carrusel') return 'carrusel';
+    return f.H / f.W > 1.7 ? 'historia' : 'publicacion';
+  }
+
+  /** La foto de la plantilla en esta imagen (no un QR ni una foto añadida a mano). */
+  function fotoDeLaImagen() {
+    const lista = capas().filter(c => c.tipo === 'imagen' && !esQr(c));
+    return lista.find(c => c.rol) || lista[0] || null;
+  }
+
+  function panelSencillo(Panel) {
+    if (!ED.sArriba || ED.sArriba.parentElement !== Panel) {
+      Panel.textContent = '';
+      ED.sArriba = el('div', { clase: 'ce-s-arriba' });
+      ED.sAbajo = el('div', { clase: 'ce-s-abajo' });
+      ED.sClave = '';
+      Panel.append(ED.sArriba, ED.sAbajo);
+    }
+    const P = ED.sArriba;
+    P.textContent = '';
+    const que = queEs();
+    P.appendChild(el('h2', {}, { publicacion: 'Tu publicación', carrusel: 'Tu carrusel', historia: 'Tu historia' }[que]));
+    P.appendChild(el('p', { clase: 'ce-pista ce-s-ayuda' }, 'Toca un texto de la imagen para escribirlo. ',
+      'Para mover cada cosa a mano, «Edición avanzada» (arriba).'));
+    const c = seleccion()[0] || null;
+    if (c && c.tipo === 'texto') P.appendChild(grupoTextoSencillo(c));
+    else if (c && c.tipo !== 'imagen') {
+      P.appendChild(grupo(nombreDe(c),
+        el('small', { clase: 'ce-pista' }, movibleSencillo(c) ? 'Arrástralo para moverlo.' : ''),
+        boton('Quitar', { clase: 'ce-btn ce-peligro ce-ancho' }, borrar)));
+    }
+    P.appendChild(grupoFotoSencillo(c && c.tipo === 'imagen' && !esQr(c) ? c : null));
+    P.appendChild(grupo('Adornos (gratis)',
+      el('div', { clase: 'ce-anadir' },
+        boton('＋ Icono', { title: 'Iconos sencillos con los colores de tu Kit' }, () => elegirIcono(null)),
+        boton('＋ Pegatina', { title: '«Nuevo», «Guárdalo», un globo o una flecha' }, ev => abrirPegatinas(ev.currentTarget))),
+      el('small', { clase: 'ce-pista' }, 'Salen en el centro: arrástralos a su sitio.')));
+    P.appendChild(grupoEstiloSencillo());
+    if (que === 'carrusel') P.appendChild(grupoAnadirImagen());
+    // «Terminar» solo se rehace si cambia lo que ofrece (una o varias imágenes…)
+    const f = formato();
+    const clave = [que, ED.doc.laminas.length < 2, f.H / f.W > 1.7, ED.doc.laminas.some(l => l.familia)].join('|');
+    if (clave !== ED.sClave) {
+      ED.sAbajo.replaceChildren(grupoTerminar(que));
+      ED.sClave = clave;
+    }
+    pintarEstado();
+  }
+
+  function grupoTextoSencillo(c) {
+    // el mismo alto escribiendo en la imagen o no: que nada salte bajo el dedo
+    const escribiendo = ED.editando === c.id;
+    const area = el('textarea', { rows: '3', maxlength: String(LIMITES.texto), 'aria-label': 'Este texto', clase: 'ce-s-texto', readonly: escribiendo });
+    area.value = String(c.txt || '').trim();
+    ED.sTextoArea = escribiendo ? area : null;
+    area.addEventListener('input', () => { c.txt = area.value.slice(0, LIMITES.texto); pintarCapa(c.id); pintarMarcas(); });
+    area.addEventListener('change', () => { commit(); pintarTira(); });
+    return grupo('Este texto', area,
+      el('small', { clase: 'ce-pista' }, escribiendo ? 'Escribiendo en la imagen: toca fuera para terminar.' : 'Escríbelo aquí o tocándolo en la imagen.'),
+      c.enlace ? el('small', { clase: 'ce-pista' }, 'Sale igual en todas las imágenes del carrusel.') : null,
+      boton('Quitar este texto', { clase: 'ce-btn ce-peligro' }, borrar));
+  }
+
+  function grupoFotoSencillo(elegida) {
+    const destino = elegida || fotoDeLaImagen();
+    const sube = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'ce-oculto', id: 'ce-s-foto',
+      onchange: ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f && destino) subirFoto(f, destino.id); } });
+    if (!destino) {
+      return grupo('Foto',
+        el('small', { clase: 'ce-pista' }, 'Este estilo no lleva foto. Si quieres una, elige un estilo con foto en «Otro estilo».'),
+        el('small', { clase: 'ce-pista' }, 'Pronto: crear la imagen con IA.'));
+    }
+    const foto = destino.src && ED.fotos[destino.src];
+    return grupo('Foto',
+      sube, el('label', { clase: 'ce-btn ce-ancho ce-s-cambiar-foto', for: 'ce-s-foto', tabindex: '0',
+        onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sube.click(); } } }, destino.src ? 'Cambiar foto' : 'Poner una foto'),
+      hayVideos() ? boton('Una foto de mis vídeos', { clase: 'ce-btn ce-ancho', title: 'Una imagen que ya pagaste en un vídeo de este proyecto (gratis)' }, () => elegirFotoDeVideo(destino.id)) : null,
+      foto && foto.falta ? el('small', { clase: 'ce-pista malo' }, 'Esa foto ya no está en el proyecto: pon otra.') : null,
+      destino.src ? campoDeslizador('Acercar la foto', (destino.encuadre || {}).zoom || 1, v => {
+        destino.encuadre = Object.assign({ x: 50, y: 50, zoom: 1 }, destino.encuadre, { zoom: v });
+      }, 1, 4, 0.05, v => `${redondo(v, 2)}×`) : null,
+      el('small', { clase: 'ce-pista' }, 'Pronto: crear la imagen con IA.'));
+  }
+
+  function grupoEstiloSencillo() {
+    const cat = ED.carCat;
+    const n = familiaActual();
+    const nombre = cat ? ((cat.familias.find(f => f.n === n) || {}).nombre || `Estilo ${n}`) : '';
+    const puedeVolver = ED.deshacerEstilo >= 0 && ED.deshacerEstilo === ED.pos;
+    return grupo('Estilo',
+      nombre ? el('p', { clase: 'ce-s-estilo' }, 'Ahora: ', el('b', {}, nombre)) : null,
+      boton('Otro estilo…', { clase: 'ce-btn ce-ancho ce-s-otro-estilo', title: 'Cambia la colocación, la letra y los adornos; tus textos y tu foto se quedan' }, abrirEstilos),
+      puedeVolver ? boton('↶ Volver al estilo de antes', { clase: 'ce-btn ce-ancho ce-s-volver-estilo' }, () => {
+        ED.deshacerEstilo = -1;
+        irAHistoria(-1);
+        avisoPantalla('Vuelve a estar como antes.');
+      }) : null);
+  }
+
+  function grupoAnadirImagen() {
+    const cat = ED.carCat;
+    const lleno = ED.doc.laminas.length >= MAX_LAMINAS;
+    if (!cat) return grupo('Añadir una imagen', el('small', { clase: 'ce-pista' }, 'Cargando…'));
+    const f = formato();
+    const horiz = f.W / f.H > 1.3;
+    // la Cita no: sería la opinión de un cliente que nadie ha dicho
+    const tipos = cat.tipos.filter(t => t.id !== 'portada' && t.id !== 'cita' && (!horiz || t.horizontal));
+    const sel = el('select', { 'aria-label': 'Qué imagen añadir', clase: 'ce-s-tipo' },
+      ...tipos.map(t => el('option', { value: t.id }, t.nombre)));
+    sel.value = 'punto';
+    return grupo('Añadir una imagen al carrusel',
+      el('label', { clase: 'ce-campo' }, el('span', {}, 'Qué imagen'), sel),
+      boton(lleno ? `Ya tiene ${MAX_LAMINAS} imágenes` : '＋ Añadir después de esta', { clase: 'ce-btn ce-ancho ce-s-anadir', disabled: lleno },
+        () => anadirLaminaDeTipo(sel.value)));
+  }
+
+  function grupoTerminar(que) {
+    const vertical = formato().H / formato().W > 1.7;
+    const una = ED.doc.laminas.length < 2;
+    ED.sBotones = [];
+    const pide = b => { ED.sBotones.push(b); return b; };
+    const bajar = como => {
+      if (typeof ED.opc.descargar !== 'function') return;
+      ED.opc.descargar({ id: ED.piezaId, laminas: ED.doc.laminas.length, nombre: ED.doc.nombre || '' }, como);
+    };
+    ED.sPista = el('small', { clase: 'ce-pista ce-s-guarda-antes' }, 'Guarda primero para descargarla.');
+    const g = grupo('Terminar',
+      boton('Guardar', { clase: 'ce-btn ce-primario ce-ancho ce-s-guardar' }, () => guardar()),
+      ED.sPista,
+      el('div', { clase: 'ce-botonera ce-s-descargas' },
+        una ? pide(boton('Descargar PNG', { clase: 'ce-btn ce-s-png' }, () => bajar('png'))) : pide(boton('Descargar las imágenes (ZIP)', { clase: 'ce-btn ce-s-zip' }, () => bajar('zip'))),
+        una ? pide(boton('JPG', { clase: 'ce-btn ce-s-jpg', title: 'Pesa menos' }, () => bajar('jpg'))) : pide(boton('PDF para LinkedIn', { clase: 'ce-btn ce-s-pdf' }, () => bajar('pdf')))),
+      !vertical && ED.doc.laminas.some(l => l.familia)
+        ? pide(boton(que === 'carrusel' ? 'Hacer también las historias' : 'Hacer también la historia', {
+          clase: 'ce-btn ce-ancho ce-s-historia', title: 'La misma pieza en 9:16; se crea aparte y esta no cambia (gratis)' }, () => historias()))
+        : null);
+    return g;
+  }
+
+  /* ---------------------------------------------------------------- «Otro estilo»
+   * Las portadas de los 16 estilos pintadas pequeñas con TUS textos, tu foto y
+   * tu Kit (POST /capas/miniaturas, de 4 en 4); elegir una vuelve a montar todo
+   * con ese estilo (como «… y todas con esta familia») y deja «Volver al estilo
+   * de antes» a la vista. */
+
+  function datosDeLaPortada(doc) {
+    const portada = doc.laminas[0].capas;
+    const texto = rol => {
+      const c = portada.find(x => x.tipo === 'texto' && x.rol === rol && !x.oculto && String(x.txt || '').trim());
+      return c ? String(c.txt).trim() : '';
+    };
+    const foto = portada.find(x => x.tipo === 'imagen' && !esQr(x) && x.src);
+    return { titulo: (texto('titulo') || texto('cita')).slice(0, 90), apoyo: texto('apoyo').slice(0, 140), foto: foto ? foto.src : '' };
+  }
+
+  /** Pinta las miniaturas en una rejilla: `turno()` dice si siguen valiendo. */
+  async function pedirMiniaturas(opc, cid, cuerpo, todas, alLlegar, sigue, senal) {
+    let orden = todas.slice();
+    const hechas = new Set();
+    for (let vuelta = 0; vuelta < 8; vuelta++) {
+      const tanda = orden.filter(n => !hechas.has(n)).slice(0, 4);
+      if (!tanda.length) return orden;
+      const r = await opc.pedir(opc.api(cid, '/capas/miniaturas'), { method: 'POST', cuerpo: Object.assign({}, cuerpo, { familias: tanda }), signal: senal });
+      if (!sigue()) return orden;
+      if (vuelta === 0 && Array.isArray(r.orden) && r.orden.length) orden = r.orden.filter(n => todas.includes(n));
+      for (const m of r.miniaturas || []) { hechas.add(m.n); alLlegar(m, orden); }
+    }
+    return orden;
+  }
+
+  async function abrirEstilos() {
+    const yo = ED;
+    let cat;
+    try { cat = await catalogoCarrusel(); } catch (e) { avisoPantalla(`No se han podido leer los estilos: ${e.message}`, true); return; }
+    if (ED !== yo) return;
+    terminarEdicionTexto(true);
+    const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Otro estilo' });
+    const parar = new AbortController();
+    const cerrarModal = () => { parar.abort(); capaVista.remove(); };
+    const rejilla = el('div', { clase: 'gc-estilos', 'aria-live': 'polite' });
+    const estado = el('p', { clase: 'ce-pista' }, 'Pintando los estilos con tus textos…');
+    const actual = familiaActual();
+    const celdas = {};
+    const celda = (n, nombre) => {
+      if (celdas[n]) return celdas[n];
+      const b = el('button', { type: 'button', clase: 'gc-estilo', 'data-n': String(n), 'aria-pressed': String(n === actual),
+        onclick: () => { cerrarModal(); if (n !== familiaActual() || ED.doc.laminas.length > 1) ponerEstilo(n, nombre); } },
+      el('span', { clase: 'gc-estilo-img' }, el('span', { clase: 'gc-estilo-espera' }, '…')), el('span', { clase: 'gc-estilo-nombre' }, nombre));
+      celdas[n] = b;
+      return b;
+    };
+    for (const f of cat.familias) rejilla.appendChild(celda(f.n, f.nombre));
+    capaVista.appendChild(el('div', { clase: 'ce-modal-cuerpo ce-modal-estilos' },
+      el('h2', {}, 'Elige otro estilo'),
+      el('p', { clase: 'ce-pista' }, 'Cambia la colocación, la letra y los adornos de todas las imágenes. Tus textos y tu foto se quedan. Si no te gusta, «Volver al estilo de antes».'),
+      estado, rejilla,
+      el('div', { clase: 'ce-botonera' }, boton('Cancelar', {}, cerrarModal))));
+    capaVista.addEventListener('pointerdown', ev => { if (ev.target === capaVista) cerrarModal(); });
+    capaVista.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.preventDefault(); cerrarModal(); } });
+    ED.raiz.appendChild(capaVista);
+    const p = datosDeLaPortada(ED.doc);
+    const cuerpo = { que: queEs(), formato: ED.doc.formato, titulo: p.titulo, apoyo: p.apoyo, foto: p.foto };
+    let cuantas = 0;
+    try {
+      await pedirMiniaturas(yo.opc, yo.cid, cuerpo, cat.familias.map(f => f.n), (m, orden) => {
+        const b = celdas[m.n];
+        if (!b) return;
+        b.firstChild.replaceChildren(el('img', { src: m.jpg, alt: `Estilo ${m.nombre}` }));
+        cuantas += 1;
+        estado.textContent = cuantas < cat.familias.length ? `Pintando los estilos (${cuantas} de ${cat.familias.length})…` : 'Toca el que más te guste.';
+        // los primeros, los que mejor van con lo que llevas (con foto, los de foto)
+        orden.forEach(n => celdas[n] && rejilla.appendChild(celdas[n]));
+      }, () => ED === yo && capaVista.isConnected, parar.signal);
+    } catch (e) {
+      if (capaVista.isConnected && e.name !== 'AbortError') estado.textContent = `No se han podido pintar: ${e.message}. Puedes elegir por el nombre.`;
+    }
+  }
+
+  async function ponerEstilo(n, nombre) {
+    const antes = ED.pos;
+    const r = await docDelServidor('/capas/montar-todas', { familia: n }, `Poniendo el estilo «${nombre}»…`);
+    if (!r) return;
+    repintarTodoElCarrusel();
+    // «Volver al estilo de antes» solo mientras no se toque nada más
+    ED.deshacerEstilo = ED.pos > antes ? ED.pos : -1;
+    pintarDerecha();
+    avisoPantalla(`Estilo «${nombre}». ¿No te gusta? «Volver al estilo de antes», a la derecha.`);
+  }
+
+  /* ================================================================ «+ Crear» (graficas-facil)
+   * Tres pasos: qué (publicación, carrusel o historia), de qué trata (el
+   * texto, «Escríbelo por mí», la foto y el estilo con miniaturas) y el
+   * resultado, que es este editor en el modo sencillo. Nada se guarda hasta
+   * pulsar «Guardar» en el editor. Gratis: los textos van por el cupo de
+   * Claude y lo demás solo pinta. */
+
+  const QUE_CREAR = [
+    { id: 'publicacion', nombre: 'Publicación', detalle: 'Una imagen para el feed', formato: 'v45', icono: '▢' },
+    { id: 'carrusel', nombre: 'Carrusel', detalle: 'Varias imágenes que se deslizan', formato: 'v45', icono: '▤' },
+    { id: 'historia', nombre: 'Historia', detalle: 'Vertical, a pantalla completa', formato: 'h916', icono: '▯' },
+  ];
+  const EJEMPLO_TEMA = '5 errores al alquilar una consola para tu fiesta';
+  let ASISTENTE = null;
+
+  /**
+   * Abre «+ Crear». opc: lo mismo que `abrir`, y además
+   * lote(), enBlanco() y clasico(): las puertas avanzadas de siempre.
+   */
+  async function crear(opc) {
+    if (ASISTENTE) ASISTENTE.cerrar();
+    if (ED) return;                                   // con el editor abierto, primero se cierra
+    const raiz = el('div', { clase: 'gc', id: 'crear-grafica', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Crear una gráfica' });
+    const S = {
+      opc, cid: opc.cid, raiz, paso: 1, que: '', formato: '', titulo: '', apoyo: '', tema: '', texto: '', modo: 'tema',
+      cuantas: 7, piezas: null, piezasDe: '', avisosIA: [], escribiendo: false, creando: false, foto: '', fotoUrl: '', subiendo: false,
+      familia: 0, elegidaAMano: false, minis: {}, orden: [], turno: 0, parar: null, espera: null, familias: [], cerrado: false,
+    };
+    ASISTENTE = S;
+    S.cerrar = () => {
+      S.cerrado = true;
+      if (S.parar) S.parar.abort();
+      clearTimeout(S.espera);
+      document.removeEventListener('keydown', S.teclas, true);
+      raiz.remove();
+      document.body.classList.remove('ce-abierto');
+      if (ASISTENTE === S) ASISTENTE = null;
+    };
+    S.salir = () => {
+      const escrito = S.titulo || S.tema || S.texto || S.piezas;
+      if (escrito && !window.confirm('¿Salir sin crear? Se pierde lo que has escrito.')) return;
+      S.cerrar();
+    };
+    // Esc, esté donde esté el foco; y las teclas no llegan a los atajos del Studio
+    S.teclas = ev => {
+      if (ev.key === 'Escape' && !raiz.querySelector('.ce-modal')) { ev.preventDefault(); ev.stopPropagation(); S.salir(); }
+    };
+    document.addEventListener('keydown', S.teclas, true);
+    for (const tipo of ['keydown', 'keyup', 'keypress']) raiz.addEventListener(tipo, ev => ev.stopPropagation());
+    document.body.appendChild(raiz);
+    document.body.classList.add('ce-abierto');
+    try {
+      const r = await opc.pedir(`${opc.base}/api/graficas/carrusel/catalogo`);
+      S.familias = r.familias || [];
+      S.tipos = r.tipos || [];
+    } catch (e) {
+      S.cerrar();
+      opc.toast(`No se ha podido abrir «Crear»: ${e.message}`, true);
+      return;
+    }
+    if (S.cerrado) return;
+    pintarAsistente(S);
+  }
+
+  function cabeceraAsistente(S) {
+    const pasos = ['Qué', 'De qué trata', 'Ajusta y guarda'];
+    return el('header', { clase: 'gc-cab' },
+      el('h2', {}, 'Crear'),
+      el('ol', { clase: 'gc-pasos', 'aria-label': 'Pasos' }, ...pasos.map((p, i) =>
+        el('li', { clase: i + 1 === S.paso ? 'actual' : (i + 1 < S.paso ? 'hecho' : ''), 'aria-current': i + 1 === S.paso ? 'step' : null },
+          el('b', {}, String(i + 1)), ' ', p))),
+      el('span', { clase: 'ce-crece' }),
+      el('button', { type: 'button', clase: 'ce-btn gc-cerrar', 'aria-label': 'Cerrar', title: 'Cerrar (Esc)', onclick: () => S.salir() }, '✕'));
+  }
+
+  function pintarAsistente(S) {
+    const R = S.raiz;
+    R.textContent = '';
+    const caja = el('div', { clase: 'gc-caja' }, cabeceraAsistente(S));
+    R.appendChild(caja);
+    if (S.paso === 1) pasoQue(S, caja); else pasoTema(S, caja);
+  }
+
+  /* ---------------------------------------------------------------- paso 1 */
+
+  function pasoQue(S, caja) {
+    const elegir = q => {
+      S.que = q.id;
+      S.formato = q.formato;
+      S.paso = 2;
+      pintarAsistente(S);
+    };
+    const avanzado = (que, clase, texto, ayuda) => (typeof S.opc[que] === 'function'
+      ? el('button', { type: 'button', clase: `gc-enlace ${clase}`, title: ayuda, onclick: () => { S.cerrar(); S.opc[que](); } }, texto) : null);
+    caja.appendChild(el('div', { clase: 'gc-cuerpo' },
+      el('h3', { clase: 'gc-pregunta' }, '¿Qué quieres crear?'),
+      el('div', { clase: 'gc-ques' }, ...QUE_CREAR.map(q =>
+        el('button', { type: 'button', clase: `gc-que gc-que-${q.id}`, 'data-que': q.id, onclick: () => elegir(q) },
+          el('span', { clase: `gc-que-dibujo gc-dibujo-${q.id}`, 'aria-hidden': 'true' }),
+          el('b', {}, q.nombre), el('span', {}, q.detalle)))),
+      el('p', { clase: 'ce-pista gc-que-pista' }, 'Con los colores, la letra y el logo del Kit de este proyecto. Gratis.'),
+      el('div', { clase: 'gc-avanzado' }, el('span', { clase: 'ce-pista' }, 'Avanzado:'),
+        avanzado('lote', 'lote-en-capas', 'Hacer varios carruseles a la vez', 'Desde una lista o un CSV (sin IA, gratis)'),
+        avanzado('enBlanco', 'nueva-en-capas', 'Empezar en blanco', 'Un diseño libre: textos, fotos, logo y formas donde quieras'),
+        avanzado('clasico', 'nueva-grafica', 'Editor clásico de una imagen', 'El editor de siempre, con sus 16 plantillas'))));
+    const primera = caja.querySelector('.gc-que');
+    if (primera) primera.focus();
+  }
+
+  /* ---------------------------------------------------------------- paso 2 */
+
+  function pasoTema(S, caja) {
+    const q = QUE_CREAR.find(x => x.id === S.que);
+    const cuerpo = el('div', { clase: 'gc-cuerpo gc-dos' });
+    const izq = el('div', { clase: 'gc-col' });
+    const der = el('div', { clase: 'gc-col' });
+    cuerpo.append(izq, der);
+    caja.appendChild(cuerpo);
+    // el tamaño, en pequeño y se puede cambiar
+    const tam = el('select', { 'aria-label': 'Tamaño', clase: 'gc-tamano' },
+      ...S.opc.catalogo.formatos.map(f => el('option', { value: f.id }, `${f.nombre} · ${f.W}×${f.H}`)));
+    tam.value = S.formato;
+    tam.addEventListener('change', () => { S.formato = tam.value; pedirEstilos(S, true); });
+    izq.appendChild(el('h3', { clase: 'gc-pregunta' }, `${q.nombre}: ¿de qué trata?`));
+    S.cajaTextos = el('div', { clase: 'gc-textos' });
+    izq.appendChild(S.cajaTextos);
+    pintarTextos(S);
+    izq.appendChild(el('label', { clase: 'ce-campo gc-campo-tamano' }, el('span', {}, 'Tamaño'), tam));
+    S.cajaFoto = el('section', { clase: 'gc-foto' });
+    izq.appendChild(S.cajaFoto);
+    pintarFoto(S);
+    S.cajaEstilos = el('section', { clase: 'gc-estilos-caja' });
+    der.appendChild(S.cajaEstilos);
+    S.bCrear = el('button', { type: 'button', clase: 'ce-btn ce-primario gc-crear', onclick: () => crearYa(S) }, 'Crear');
+    S.pistaCrear = el('span', { clase: 'ce-pista gc-pista-crear', role: 'status' });
+    caja.appendChild(el('footer', { clase: 'gc-pie' },
+      el('button', { type: 'button', clase: 'ce-btn gc-atras', onclick: () => { S.paso = 1; S.turno += 1; clearTimeout(S.espera); if (S.parar) S.parar.abort(); pintarAsistente(S); } }, '← Atrás'),
+      el('span', { clase: 'ce-crece' }), S.pistaCrear, S.bCrear));
+    pedirEstilos(S, true);
+    revisarCrear(S);
+    const primero = S.cajaTextos.querySelector('input, textarea');
+    if (primero) primero.focus();
+  }
+
+  /** El titular con el que se pintan las miniaturas. */
+  function tituloDeMuestra(S) {
+    if (S.que !== 'carrusel') return S.titulo;
+    if (S.modo === 'tema') return S.piezas ? String((S.piezas[0][1] || {}).titulo || '') : S.tema;
+    return (S.texto.trim().split('\n')[0] || '').slice(0, 90);
+  }
+
+  function apoyoDeMuestra(S) {
+    if (S.que !== 'carrusel') return S.apoyo;
+    return S.modo === 'tema' && S.piezas ? String((S.piezas[0][1] || {}).apoyo || '') : '';
+  }
+
+  function campoTexto(etiqueta, valor, props, alCambiar) {
+    const entrada = el(props.filas ? 'textarea' : 'input', Object.assign({ type: props.filas ? null : 'text', 'aria-label': etiqueta }, props.attrs));
+    if (props.filas) entrada.rows = props.filas;
+    entrada.value = valor;
+    entrada.addEventListener('input', () => alCambiar(entrada.value));
+    return el('label', { clase: 'ce-campo gc-campo' }, el('span', {}, etiqueta), entrada);
+  }
+
+  function pintarTextos(S) {
+    const C = S.cajaTextos;
+    C.textContent = '';
+    const cambioTitular = () => { S.mensaje = ''; revisarCrear(S); programarEstilos(S); };
+    if (S.que !== 'carrusel') {
+      C.appendChild(campoTexto('El titular', S.titulo, { attrs: { maxlength: '90', placeholder: EJEMPLO_TEMA, clase: 'gc-titular' } },
+        v => { S.titulo = v; cambioTitular(); }));
+      C.appendChild(campoTexto('Una frase de apoyo (si quieres)', S.apoyo, { attrs: { maxlength: '140', placeholder: 'Te contamos cómo evitarlos', clase: 'gc-apoyo' } },
+        v => { S.apoyo = v; cambioTitular(); }));
+      C.appendChild(botonEscribir(S, 'Escribe el tema arriba y la IA te propone el titular y la frase.'));
+      return;
+    }
+    C.appendChild(el('div', { clase: 'ce-botonera gc-modo', role: 'group', 'aria-label': '¿Cómo quieres escribirlo?' },
+      el('button', { type: 'button', clase: 'ce-mini gc-modo-tema', 'aria-pressed': String(S.modo === 'tema'),
+        onclick: () => { S.modo = 'tema'; pintarTextos(S); revisarCrear(S); programarEstilos(S, true); } }, 'Te lo escribo desde un tema'),
+      el('button', { type: 'button', clase: 'ce-mini gc-modo-texto', 'aria-pressed': String(S.modo === 'texto'),
+        onclick: () => { S.modo = 'texto'; pintarTextos(S); revisarCrear(S); programarEstilos(S, true); } }, 'Ya tengo el texto')));
+    if (S.modo === 'texto') {
+      C.appendChild(campoTexto('Tu texto', S.texto, { filas: 9, attrs: { maxlength: '12000', clase: 'gc-texto',
+        placeholder: `${EJEMPLO_TEMA}\n\nNo probar los mandos\nPruébalos todos antes de la fiesta.\n\nPedirla tarde\nReserva con una semana.` } },
+      v => { S.texto = v; cambioTitular(); }));
+      C.appendChild(el('small', { clase: 'ce-pista' }, 'Cada párrafo (separado por una línea en blanco) es una imagen; el primero es la portada y al final va el cierre. Sin IA.'));
+      return;
+    }
+    C.appendChild(campoTexto('El tema, en una frase', S.tema, { attrs: { maxlength: '200', placeholder: EJEMPLO_TEMA, clase: 'gc-tema' } },
+      v => { S.tema = v; S.mensaje = ''; revisarCrear(S); if (!S.piezas) programarEstilos(S); }));
+    const cuantas = el('select', { 'aria-label': '¿Cuántas imágenes?', clase: 'gc-cuantas' },
+      ...[3, 4, 5, 6, 7, 8, 9, 10].map(n => el('option', { value: String(n) }, `${n} imágenes`)));
+    cuantas.value = String(S.cuantas);
+    cuantas.addEventListener('change', () => { S.cuantas = parseInt(cuantas.value, 10); });
+    C.appendChild(el('label', { clase: 'ce-campo gc-campo' }, el('span', {}, '¿Cuántas imágenes?'), cuantas));
+    C.appendChild(botonEscribir(S, ''));
+    if (S.piezas) {
+      const nombres = {};
+      for (const t of S.tipos || []) nombres[t.id] = t.nombre;
+      C.appendChild(el('div', { clase: 'gc-propuesta' },
+        el('b', {}, `Textos listos: ${S.piezas.length} imágenes`),
+        S.piezasDe !== S.tema.trim() ? el('small', { clase: 'ce-pista' }, `Escritos para «${S.piezasDe}». Pulsa «Escríbelo por mí» otra vez si cambiaste el tema.`) : null,
+        el('ol', {}, ...S.piezas.map(([tipo, t]) => el('li', {}, el('i', {}, nombres[tipo] || tipo), ' · ',
+          String(t.titulo || t.pregunta || t.mito || t.cifra || '').slice(0, 70)))),
+        el('small', { clase: 'ce-pista' }, 'Los cambias en el paso siguiente, tocando cada texto.')));
+    }
+  }
+
+  function botonEscribir(S, pista) {
+    const b = el('button', { type: 'button', clase: 'ce-btn gc-escribir', disabled: S.escribiendo,
+      title: 'Claude escribe los textos con la ficha de tu negocio (usa el cupo de tu membresía, no cuesta dinero)',
+      onclick: () => escribirPorMi(S) }, S.escribiendo ? 'Escribiendo…' : '✍️ Escríbelo por mí');
+    const avisos = S.avisosIA.length ? el('ul', { clase: 'gc-avisos' }, ...S.avisosIA.map(a => el('li', {}, a))) : null;
+    return el('div', { clase: 'gc-escribir-fila' }, b,
+      el('small', { clase: 'ce-pista' }, S.escribiendo ? 'Tarda entre 20 segundos y un minuto. Puedes ir eligiendo la foto.' : (pista || 'Sin dinero: usa el cupo de Claude de tu membresía.')),
+      avisos);
+  }
+
+  async function escribirPorMi(S) {
+    const tema = (S.que === 'carrusel' ? S.tema : S.titulo).trim();
+    if (tema.length < 3) {
+      const campo = S.cajaTextos.querySelector(S.que === 'carrusel' ? '.gc-tema' : '.gc-titular');
+      decir(S, 'Escribe de qué trata (una frase basta) y vuelve a pulsar.');
+      if (campo) campo.focus();
+      return;
+    }
+    if (S.que !== 'carrusel' && (S.apoyo.trim()) && !window.confirm('La IA va a cambiar el titular y la frase que has escrito. ¿Seguir?')) return;
+    S.escribiendo = true;
+    S.avisosIA = [];
+    pintarTextos(S);
+    revisarCrear(S);
+    const o = S.opc;
+    try {
+      const inicio = await o.pedir(o.api(S.cid, '/escribir'), { method: 'POST', cuerpo: { que: S.que, tema, cuantas: S.cuantas, formato: S.formato } });
+      let r = null;
+      for (let i = 0; i < 300 && !S.cerrado; i++) {
+        await new Promise(ok => setTimeout(ok, 1200));
+        let t;
+        try {
+          t = await o.pedir(o.api(S.cid, `/capas/trabajo/${inicio.trabajo}`));
+        } catch (e) {
+          if (e.status === 404) throw new Error('se ha perdido (¿se reinició el servicio?). Vuelve a pulsar «Escríbelo por mí»');
+          continue;                                       // un corte de red: se vuelve a preguntar
+        }
+        if (t.estado === 'listo') { r = t.resultado; break; }
+        if (t.estado === 'error') throw new Error(t.error || 'no se ha podido escribir');
+      }
+      if (S.cerrado) return;
+      if (!r) throw new Error('tarda demasiado. Vuelve a probar en un rato o escríbelo tú');
+      const piezas = (r.piezas || []).filter(p => Array.isArray(p) && p.length === 2);
+      if (!piezas.length) throw new Error('no ha devuelto textos');
+      S.avisosIA = r.avisos || [];
+      if (S.que === 'carrusel') {
+        S.piezas = piezas;
+        S.piezasDe = tema;
+      } else {
+        S.titulo = String(piezas[0][1].titulo || S.titulo).slice(0, 90);
+        S.apoyo = String(piezas[0][1].apoyo || '').slice(0, 140);
+      }
+      decir(S, 'Textos escritos: revísalos antes de publicar.');
+    } catch (e) {
+      if (!S.cerrado) decir(S, `No se ha podido escribir: ${e.message}. Lo que escribiste sigue aquí.`);
+    } finally {
+      S.escribiendo = false;
+      if (!S.cerrado) { pintarTextos(S); revisarCrear(S); programarEstilos(S, true); }
+    }
+  }
+
+  /* la foto: subir o una de mis vídeos */
+
+  async function fotoComoDataUrl(S, nombre) {
+    const pases = S.opc.pases ? S.opc.pases() : '';
+    const r = await fetch(S.opc.api(S.cid, `/imagen/${encodeURIComponent(nombre)}`), { headers: pases ? { 'X-Estudio-Abiertos': pases } : {} });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    return new Promise((ok, mal) => { const l = new FileReader(); l.onload = () => ok(l.result); l.onerror = () => mal(l.error); l.readAsDataURL(blob); });
+  }
+
+  async function ponerFotoAsistente(S, nombre) {
+    S.foto = nombre;
+    S.fotoUrl = '';
+    pintarFoto(S);
+    try { S.fotoUrl = await fotoComoDataUrl(S, nombre); } catch (_) { S.fotoUrl = ''; }
+    if (S.cerrado || S.foto !== nombre) return;
+    pintarFoto(S);
+    pedirEstilos(S, true);
+  }
+
+  function pintarFoto(S) {
+    const C = S.cajaFoto;
+    if (!C) return;
+    C.textContent = '';
+    const o = S.opc;
+    C.appendChild(el('h3', {}, 'La imagen (si quieres)'));
+    if (S.foto) {
+      C.appendChild(el('div', { clase: 'gc-foto-elegida' },
+        S.fotoUrl ? el('img', { src: S.fotoUrl, alt: 'Tu foto' }) : el('span', { clase: 'ce-pista' }, 'Cargando la foto…'),
+        el('button', { type: 'button', clase: 'ce-btn gc-quitar-foto', onclick: () => { S.foto = ''; S.fotoUrl = ''; pintarFoto(S); pedirEstilos(S, true); } }, 'Quitar la foto')));
+    }
+    const sube = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'ce-oculto', id: 'gc-subir-foto',
+      onchange: async ev => {
+        const f = ev.target.files[0];
+        ev.target.value = '';
+        if (!f) return;
+        S.subiendo = true;
+        decir(S, 'Subiendo la foto…');
+        try {
+          const cuerpo = new FormData();
+          cuerpo.append('imagen', f);
+          const r = await o.pedir(o.api(S.cid, '/imagen'), { method: 'POST', cuerpo });
+          if (S.cerrado) return;
+          decir(S, '');
+          await ponerFotoAsistente(S, r.nombre);
+        } catch (e) {
+          if (!S.cerrado) decir(S, `No se ha podido subir la foto: ${e.message}`);
+        } finally { S.subiendo = false; if (!S.cerrado) revisarCrear(S); }
+      } });
+    C.appendChild(el('div', { clase: 'ce-botonera' }, sube,
+      el('label', { clase: 'ce-btn gc-subir', for: 'gc-subir-foto', tabindex: '0',
+        onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sube.click(); } } }, S.foto ? 'Subir otra foto' : 'Subir una foto')));
+    const videos = typeof o.videos === 'function' ? o.videos() : [];
+    if (videos.length) {
+      const rejilla = el('div', { clase: 'ce-planos gc-planos', 'aria-live': 'polite' });
+      const sel = el('select', { 'aria-label': 'De qué vídeo', clase: 'gc-video' }, ...videos.map(v => el('option', { value: v.id }, v.nombre || v.id)));
+      sel.value = S.video || videos[0].id;
+      const verPlanos = async (todos) => {
+        const pid = sel.value;
+        S.video = pid;
+        rejilla.replaceChildren(el('span', { clase: 'ce-pista' }, 'Buscando sus imágenes…'));
+        let planos;
+        try { planos = await o.planos(pid); } catch (e) { rejilla.replaceChildren(el('span', { clase: 'ce-pista malo' }, `No se han podido leer: ${e.message}`)); return; }
+        if (S.cerrado || sel.value !== pid) return;
+        rejilla.textContent = '';
+        if (!planos.length) { rejilla.appendChild(el('span', { clase: 'ce-pista' }, 'Este vídeo aún no tiene imágenes.')); return; }
+        for (const pl of (todos ? planos : planos.slice(0, 8))) {
+          const img = el('img', { alt: pl.texto || 'Plano' });
+          o.miniatura(img, pid, pl.sid);
+          rejilla.appendChild(el('button', { type: 'button', clase: 'ce-plano gc-plano', title: pl.texto || '', onclick: async () => {
+            decir(S, 'Copiando la imagen del vídeo…');
+            try {
+              const r = await o.pedir(o.api(S.cid, '/imagen/de-plano'), { method: 'POST', cuerpo: { pid, sid: pl.sid } });
+              if (S.cerrado) return;
+              decir(S, '');
+              await ponerFotoAsistente(S, r.nombre);
+            } catch (e) { if (!S.cerrado) decir(S, `No se ha podido usar esa imagen: ${e.message}`); }
+          } }, img));
+        }
+        if (!todos && planos.length > 8) {
+          rejilla.appendChild(el('button', { type: 'button', clase: 'ce-btn gc-ver-mas', onclick: () => verPlanos(true) }, `Ver las ${planos.length}`));
+        }
+      };
+      sel.addEventListener('change', () => verPlanos(false));
+      C.appendChild(el('div', { clase: 'gc-de-videos' },
+        el('b', {}, 'O una de tus vídeos'), el('small', { clase: 'ce-pista' }, ' (ya pagada: gratis)'),
+        videos.length > 1 ? sel : null, rejilla));
+      verPlanos(false);
+    }
+    C.appendChild(el('small', { clase: 'ce-pista gc-pronto' }, 'Pronto: crear la imagen con IA.'));
+  }
+
+  /* el estilo, con miniaturas reales */
+
+  /** Repinta las miniaturas tras 1,5 s sin escribir (o al momento con `ya`). */
+  function programarEstilos(S, ya) {
+    clearTimeout(S.espera);
+    if (ya) { pedirEstilos(S, true); return; }
+    if (S.cajaEstilos) {
+      const ver = S.cajaEstilos.querySelector('.gc-ver-titular');
+      if (ver) ver.hidden = false;
+    }
+    S.espera = setTimeout(() => pedirEstilos(S, true), 1500);
+  }
+
+  function pintarEstilos(S) {
+    const C = S.cajaEstilos;
+    if (!C) return;
+    C.textContent = '';
+    const hechas = Object.keys(S.minis).length;
+    const orden = S.orden.length ? S.orden : S.familias.map(f => f.n);
+    const nombre = n => (S.familias.find(f => f.n === n) || {}).nombre || `Estilo ${n}`;
+    C.appendChild(el('div', { clase: 'gc-estilos-cab' },
+      el('h3', {}, 'El estilo'),
+      el('span', { clase: 'ce-pista', role: 'status' }, S.falloMinis ? `No se han podido pintar: ${S.falloMinis}` : (hechas < orden.length ? `Pintando con tu titular (${hechas} de ${orden.length})…` : 'Con tu titular, tu foto y tus colores.')),
+      el('button', { type: 'button', clase: 'ce-mini gc-ver-titular', hidden: true, onclick: () => programarEstilos(S, true) }, 'Ver con mi titular')));
+    C.appendChild(el('div', { clase: 'gc-estilos' }, ...orden.map(n => {
+      const m = S.minis[n];
+      return el('button', { type: 'button', clase: 'gc-estilo', 'data-n': String(n), 'aria-pressed': String(n === S.familia),
+        onclick: () => { S.familia = n; S.elegidaAMano = true; pintarEstilos(S); revisarCrear(S); } },
+      el('span', { clase: 'gc-estilo-img' }, m ? el('img', { src: m.jpg, alt: `Estilo ${nombre(n)}` }) : el('span', { clase: 'gc-estilo-espera' }, '…')),
+      el('span', { clase: 'gc-estilo-nombre' }, nombre(n)));
+    })));
+  }
+
+  async function pedirEstilos(S) {
+    if (S.cerrado || !S.cajaEstilos) return;
+    clearTimeout(S.espera);
+    if (S.parar) S.parar.abort();
+    const parar = new AbortController();
+    S.parar = parar;
+    const turno = ++S.turno;
+    S.minis = {};
+    S.falloMinis = '';
+    pintarEstilos(S);
+    const cuerpo = { que: S.que, formato: S.formato, titulo: tituloDeMuestra(S).trim(), apoyo: apoyoDeMuestra(S).trim(), foto: S.foto };
+    const sigue = () => !S.cerrado && turno === S.turno;
+    try {
+      await pedirMiniaturas(S.opc, S.cid, cuerpo, S.familias.map(f => f.n), (m, orden) => {
+        S.minis[m.n] = m;
+        S.orden = orden;
+        // sin elegir a mano, el primero del orden (con foto, uno que la lleva)
+        if (!S.elegidaAMano || !orden.includes(S.familia)) S.familia = orden[0];
+        pintarEstilos(S);
+        revisarCrear(S);
+      }, sigue, parar.signal);
+    } catch (e) {
+      if (sigue() && e.name !== 'AbortError') { S.falloMinis = e.message; pintarEstilos(S); }
+    }
+  }
+
+  /* crear */
+
+  function faltaParaCrear(S) {
+    if (S.escribiendo) return 'Esperando a la IA…';
+    if (S.subiendo) return 'Subiendo la foto…';
+    if (!S.familia) return 'Elige un estilo.';
+    if (S.que !== 'carrusel') return S.titulo.trim() ? '' : 'Escribe el titular (o el tema y «Escríbelo por mí»).';
+    if (S.modo === 'tema') return S.piezas ? '' : 'Escribe el tema y pulsa «Escríbelo por mí» (o «Ya tengo el texto»).';
+    return S.texto.trim() ? '' : 'Pega o escribe tu texto.';
+  }
+
+  /** Un mensaje junto a «Crear» (un fallo, «textos escritos»…); se va al escribir. */
+  function decir(S, texto) {
+    S.mensaje = texto || '';
+    revisarCrear(S);
+  }
+
+  function revisarCrear(S) {
+    if (!S.bCrear) return;
+    const falta = faltaParaCrear(S);
+    S.bCrear.disabled = !!falta || S.creando;
+    S.pistaCrear.textContent = S.creando ? 'Creando…' : (S.mensaje || falta);
+  }
+
+  async function crearYa(S) {
+    if (faltaParaCrear(S) || S.creando) return;
+    S.creando = true;
+    revisarCrear(S);
+    const cuerpo = { que: S.que, familia: S.familia, formato: S.formato, foto: S.foto };
+    if (S.que !== 'carrusel') cuerpo.piezas = [['portada', { titulo: S.titulo.trim(), apoyo: S.apoyo.trim() }]];
+    else if (S.modo === 'tema') cuerpo.piezas = S.piezas;
+    else cuerpo.texto = S.texto;
+    let r;
+    try {
+      r = await S.opc.pedir(S.opc.api(S.cid, '/capas/crear'), { method: 'POST', cuerpo });
+    } catch (e) {
+      S.creando = false;
+      if (!S.cerrado) { revisarCrear(S); decir(S, `No se ha podido crear: ${e.message}`); }
+      return;
+    }
+    if (S.cerrado) return;
+    const avisos = (r.avisos || []).concat(S.avisosIA || []);
+    S.cerrar();
+    await abrir(Object.assign({}, S.opc, {
+      pieza: null, duplicar: false, docInicial: r.doc, sencillo: true, nueva: true, que: S.que,
+      avisoInicial: avisos.length ? avisos.join(' ') : '',
+    }));
+    if (ED && !avisos.length) avisoPantalla('¡Listo! Toca un texto para cambiarlo y pulsa «Guardar».');
+  }
+
+
   window.EditorCapas = {
-    abrir, version: 1, _estado: () => ED,
+    abrir, crear, version: 1, _estado: () => ED, _asistente: () => ASISTENTE,
     // para pasos/prueba_graficas_editor.py: que la pantalla haga las mismas cuentas que el servidor
     _cuentas: { fueraDeLamina, textoDeLamina, fondoTapado, avisoFondoATodas, nombrarLaminas, f6, luz, tintaPara, coloresFinales, resolver, cssColor, cssRelleno, cssBorde, cssRadio, cssSombras, cssCaja,
       LIMITES, CAMPOS_DE_MUESTRA },

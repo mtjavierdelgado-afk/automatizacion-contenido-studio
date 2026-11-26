@@ -497,8 +497,8 @@ def lote(pincel):
     js = open(os.path.join(AQUI, "..", "web", "app.js"), encoding="utf-8").read()
     ok("p.avisos.join" in js, "al acabar la tanda se dicen los avisos de cada carrusel (CIS 1b)")
     ok("import graficas_iconos as I " not in app and "import graficas_qr as Q " not in app, "sin alias de una letra que pisen a otros en app.py (CIS 1b)")
-    ok('@app.post("/api/graficas/{cid}/capas/lote"' in app and "'/capas/lote'" in js and "+ Carruseles en lote" in js,
-       "la ruta y el botón «+ Carruseles en lote»")
+    ok('@app.post("/api/graficas/{cid}/capas/lote"' in app and "'/capas/lote'" in js and "carruselesEnLoteGraficas(cid)" in js,
+       "la ruta y la puerta del lote (desde graficas-facil, «Hacer varios carruseles a la vez» en «+ Crear»)")
 
 
 def main():

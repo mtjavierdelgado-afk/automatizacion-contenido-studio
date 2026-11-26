@@ -51,8 +51,9 @@ def graficas_3_carrusel(navegador, datos):
 
     pg = Pagina(navegador, datos, ancho=1600, alto=1100, nombre="carrusel")
     pg.js(f"elegirCliente({json.dumps(cid)});")
-    ok(pg.esperar(".seccion-graficas .nueva-en-capas", segundos=20), "el proyecto ofrece «+ Diseño en capas»")
-    pg.pulsar(".seccion-graficas .nueva-en-capas", "Diseño en capas")
+    ok(pg.esperar(".seccion-graficas .crear-en-graficas", segundos=20), "el proyecto ofrece «+ Crear»")
+    pg.pulsar(".seccion-graficas .crear-en-graficas", "+ Crear")
+    pg.pulsar("#crear-grafica .gc-avanzado .nueva-en-capas", "Empezar en blanco")
     ok(pg.esperar("#editor-capas .ce-lienzo [data-c]", segundos=40), "se abre el editor")
     ok(pg.esperar(".ce-tira .ce-tira-lamina", segundos=5) and _tira(pg) == 1, "debajo del lienzo, la tira con una lámina")
     ok(pg.esperar(".ce-tira-cuenta", "Una lámina", 3), "y dice que es una lámina")
@@ -194,8 +195,9 @@ def graficas_3_carrusel(navegador, datos):
     # 10. LAS FAMILIAS: partir un texto, añadir por tipo, montar todas y la nota
     pg = Pagina(navegador, datos, ancho=1600, alto=1100, nombre="carrusel_familias")
     pg.js(f"elegirCliente({json.dumps(cid)});")
-    ok(pg.esperar(".seccion-graficas .nueva-en-capas", segundos=20), "otra pieza para las familias")
-    pg.pulsar(".seccion-graficas .nueva-en-capas", "Diseño en capas")
+    ok(pg.esperar(".seccion-graficas .crear-en-graficas", segundos=20), "otra pieza para las familias")
+    pg.pulsar(".seccion-graficas .crear-en-graficas", "+ Crear")
+    pg.pulsar("#crear-grafica .gc-avanzado .nueva-en-capas", "Empezar en blanco")
     ok(pg.esperar("#editor-capas .ce-lienzo [data-c]", segundos=40), "se abre el editor")
     ok(pg.esperar(".ce-der h3", "Familia de carrusel", 10), "el panel de la pieza ofrece la familia de carrusel")
     pg.pulsar(".ce-der button", "Partir un texto en láminas")

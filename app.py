@@ -26650,6 +26650,12 @@ def _contexto_carrusel(cid, peticion):
     return G, GRAFICAS_CARRUSEL, kit, logo, oscuro, marca
 
 
+def _imagen_de_graficas(cid):
+    """src -> ruta de una imagen de Gráficas de este proyecto (para medir la foto de fondo)."""
+    G = _graficas()
+    return lambda nombre: G.ruta_imagen(raiz_proyectos(), cid, nombre)
+
+
 def _entero(valor, que):
     if type(valor) is not int:
         raise ErrorApi(400, f"{que} no vale")
@@ -26676,8 +26682,10 @@ def graficas_lamina_carrusel(cid: str, peticion: Request, cuerpo: dict = Body(de
         doc = _por_capas(G._con_turno, lambda p: K.nueva_lamina(p, cuerpo.get("doc"), donde, n, tipo, kit, logo, oscuro, marca))
     else:
         i = _entero(cuerpo.get("lamina", 0), "esa lámina")
+        avisos = []
         doc = _por_capas(G._con_turno, lambda p: K.montar_lamina(p, cuerpo.get("doc"), i, n, tipo, kit, logo, oscuro,
-                                                                 cuerpo.get("textos"), marca))
+                                                                 cuerpo.get("textos"), marca, avisos, _imagen_de_graficas(cid)))
+        return {"doc": doc, "avisos": avisos}
     return {"doc": doc}
 
 
@@ -26687,7 +26695,10 @@ def graficas_montar_todas(cid: str, peticion: Request, cuerpo: dict = Body(defau
     G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
     cuerpo = cuerpo or {}
     n = _entero(cuerpo.get("familia"), "esa familia")
-    return {"doc": _por_capas(G._con_turno, lambda p: K.montar_todas(p, cuerpo.get("doc"), n, kit, logo, oscuro, marca))}
+    avisos = []
+    doc = _por_capas(G._con_turno, lambda p: K.montar_todas(p, cuerpo.get("doc"), n, kit, logo, oscuro, marca, avisos,
+                                                            _imagen_de_graficas(cid)))
+    return {"doc": doc, "avisos": avisos}
 
 
 @app.post("/api/graficas/{cid}/capas/partir")
@@ -26745,20 +26756,40 @@ def graficas_lote(cid: str, peticion: Request, cuerpo: dict = Body(default=None)
     return JSONResponse({"trabajo": tid, "total": len(entradas)}, status_code=202)
 
 
+@app.post("/api/graficas/{cid}/capas/foto-fondo")
+def graficas_foto_fondo(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """La foto de fondo de una imagen del carrusel (graficas-desde-video): `src`
+    pone o cambia la foto (tenue, con la opacidad que deja leer los textos);
+    sin `src`, la quita. No guarda nada. -> {doc, avisos}"""
+    G, K, kit, _logo, _oscuro, _marca = _contexto_carrusel(cid, peticion)
+    cuerpo = cuerpo or {}
+    i = _entero(cuerpo.get("lamina", 0), "esa lámina")
+    src = str(cuerpo.get("src") or "")
+    if not src:
+        return {"doc": _por_graficas(K.quitar_foto_fondo, cuerpo.get("doc"), i), "avisos": []}
+    if not G.ruta_imagen(raiz_proyectos(), cid, src):
+        raise ErrorApi(404, "esa foto no está en este proyecto")
+    doc, avisos = _por_graficas(K.poner_foto_fondo, cuerpo.get("doc"), i, src, kit, _imagen_de_graficas(cid))
+    return {"doc": doc, "avisos": avisos}
+
+
 @app.post("/api/graficas/{cid}/capas/historias")
 def graficas_historias(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """«Hacer también las historias»: el mismo carrusel en 9:16 (no se guarda:
     la pantalla lo abre como pieza nueva). Gratis, sin IA."""
     G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
-    return {"doc": _por_capas(G._con_turno, lambda p: K.historias(p, (cuerpo or {}).get("doc"), kit, logo, oscuro, marca))}
+    avisos = []
+    doc = _por_capas(G._con_turno, lambda p: K.historias(p, (cuerpo or {}).get("doc"), kit, logo, oscuro, marca, avisos,
+                                                         _imagen_de_graficas(cid)))
+    return {"doc": doc, "avisos": avisos}
 
 
 @app.post("/api/graficas/{cid}/capas/nota")
 def graficas_nota_carrusel(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """La nota del carrusel (sin IA): portada, segunda portada, una idea por
     lámina, número, cierre, textos alternativos y textos de muestra."""
-    _G, K, _kit, _logo, _oscuro, _marca = _contexto_carrusel(cid, peticion)
-    return {"nota": _por_capas(K.avisos_del_carrusel, (cuerpo or {}).get("doc"))}
+    _G, K, kit, _logo, _oscuro, _marca = _contexto_carrusel(cid, peticion)
+    return {"nota": _por_capas(K.avisos_del_carrusel, (cuerpo or {}).get("doc"), kit, _imagen_de_graficas(cid))}
 
 
 # --- «+ Crear» y «Escríbelo por mí» (rama graficas-facil, 26-11-2026;
@@ -26925,7 +26956,8 @@ def graficas_crear(cid: str, peticion: Request, cuerpo: dict = Body(default=None
         piezas = [(str(p[0]), p[1]) for p in piezas if isinstance(p, list) and len(p) == 2 and isinstance(p[1], dict)]
     foto = str(cuerpo.get("foto") or "")
     doc, avisos = _por_capas(G._con_turno, lambda p: CREAR_GRAF.crear(
-        p, que, n, _formato_de_crear(cuerpo.get("formato")), piezas, foto, kit, logo, oscuro, marca))
+        p, que, n, _formato_de_crear(cuerpo.get("formato")), piezas, foto, kit, logo, oscuro, marca, "",
+        _imagen_de_graficas(cid)))
     return {"doc": doc, "avisos": avisos}
 
 

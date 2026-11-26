@@ -167,7 +167,9 @@ def montaje(pincel):
                 ok(not medida["fuera"] and not medida["choca"], f"{que} {n} imagen {i + 1}: nada tapado ni encimado {medida}")
     for n in CR.CON_FOTO:
         d, _a = CR.crear(pincel, "publicacion", n, None, [("portada", {"titulo": "Hola"})], "img_0123456789abcdef.jpg")
-        area = max([c["w"] * c["h"] / 100 for c in d["laminas"][0]["capas"] if c["tipo"] == "imagen"] or [0])
+        # el hueco de la plantilla (la foto de fondo tenue de graficas-desde-video no cuenta)
+        d0, _a = CR.crear(pincel, "publicacion", n, None, [("portada", {"titulo": "Hola"})])
+        area = max([c["w"] * c["h"] / 100 for c in d0["laminas"][0]["capas"] if c["tipo"] == "imagen" and c.get("rol") == "foto"] or [0])
         ok((area >= 25) == (n in CR.CON_FOTO_GRANDE), f"estilo {n}: «📷 con foto» solo si la foto es grande ({area:.1f} % de la portada)")
     ok(CR.orden_de_familias(True)[0] in CR.CON_FOTO_GRANDE and CR.orden_de_familias(True)[0] in CR.CON_FOTO and CR.orden_de_familias(False) == sorted(K.FAMILIAS),
        "con foto, primero los estilos que la usan")
@@ -176,7 +178,8 @@ def montaje(pincel):
            for c in doc["laminas"][0]["capas"]) and not any("foto" in a for a in avisos), "la foto elegida va en la foto de la portada")
     ok(any("frase de apoyo" in a and "lámina" not in a for a in avisos), "y el aviso del apoyo se dice sin hablar de láminas")
     doc, avisos = CR.crear(pincel, "publicacion", 1, None, piezas, "img_0123456789abcdef.jpg")
-    ok(avisos and "no lleva foto" in avisos[0], "un estilo sin foto lo dice")
+    ok(any(c.get("rol") == "foto_fondo" and c["src"] == "img_0123456789abcdef.jpg" for c in doc["laminas"][0]["capas"]),
+       "un estilo sin hueco pone la foto tenue de fondo (graficas-desde-video)")
     ok("esa foto" in falla(CR.crear, pincel, "publicacion", 2, None, piezas, "../x.jpg"), "una foto con ruta rara se rechaza")
     ok("portada" in falla(CR.crear, pincel, "carrusel", 2, None, [("punto", {"titulo": "x"})]), "sin portada, error claro")
     ok(CR.miniatura(pincel, 10, "carrusel", None, "Hola")[:3] == b"\xff\xd8\xff", "una miniatura es un JPG")

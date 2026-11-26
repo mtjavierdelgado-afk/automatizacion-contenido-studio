@@ -1651,7 +1651,8 @@
             try {
               const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/imagen/de-plano'), { method: 'POST', cuerpo: { pid, sid: pl.sid } });
               if (ED !== yo) return;
-              await ponerFoto(r.nombre, paraId, { lamina: laminaDeAntes });
+              if (paraId === FONDO_TENUE) await ponerFotoFondo(r.nombre);
+              else await ponerFoto(r.nombre, paraId, { lamina: laminaDeAntes });
             } catch (e) {
               if (ED === yo) avisoPantalla(`No se ha podido usar esa imagen: ${e.message}`, true);
             }
@@ -2671,7 +2672,8 @@
       await abrir(Object.assign({}, yo.opc, { pieza: null, duplicar: false, docInicial: r.doc, avisoInicial: '', que: '', desdeCrear: null }));
       // es nueva y no está guardada: al cerrar sin guardar, que lo pregunte
       if (ED && ED !== yo) { ED.guardado = ''; pintarEstado(); }
-      if (ED && ED !== yo) avisoPantalla('Estas son las historias (9:16), aún sin guardar: revísalas y pulsa «Guardar». El carrusel de antes sigue igual.');
+      if (ED && ED !== yo) avisoPantalla('Estas son las historias (9:16), aún sin guardar: revísalas y pulsa «Guardar». El carrusel de antes sigue igual.'
+        + ((r.avisos || []).length ? ` Ojo: ${r.avisos.join(' ')}` : ''), (r.avisos || []).length > 0);
     } catch (e) {
       if (ED === yo) avisoPantalla(`No se han podido hacer las historias: ${e.message}`, true);
     }
@@ -3347,7 +3349,7 @@
         const capaN = n.closest && n.closest('[data-c]');
         if (capaN && ED.lienzo.contains(capaN)) c = capa(capaN.dataset.c);
       }
-      if (!c || c.oculto) continue;
+      if (!c || c.oculto || c.rol === FONDO_ROL) continue;
       if (c.tipo !== 'forma' || !c.rol) return c;
       forma = forma || c;
     }
@@ -3470,33 +3472,74 @@
   }
 
   function grupoFotoSencillo(elegida) {
-    const destino = elegida || fotoDeLaImagen();
-    const sube = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'ce-oculto', id: 'ce-s-foto',
-      onchange: ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f && destino) subirFoto(f, destino.id); } });
-    if (!destino) {
-      const conEstilos = ED.doc.laminas.some(l => l.familia);
-      if (ED.lamina > 0) {
-        // las imágenes de dentro aún no llevan foto en ningún estilo: se dice, sin mandar a un callejón
-        return grupo('Foto',
-          el('small', { clase: 'ce-pista ce-s-foto-dentro' }, 'En las imágenes de dentro aún no va foto: la foto va en la portada (la 1).'),
-          boton('Ir a la portada', { clase: 'ce-btn ce-ancho ce-s-ir-portada' }, () => irALamina(0)));
-      }
+    // la foto del hueco de la plantilla (la portada de un estilo «📷 con foto»)
+    const hueco = (elegida && elegida.rol !== FONDO_ROL ? elegida : null)
+      || capas().find(c => c.tipo === 'imagen' && c.rol === 'foto' && !c.oculto) || null;
+    if (hueco) {
+      const sube = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'ce-oculto', id: 'ce-s-foto',
+        onchange: ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f) subirFoto(f, hueco.id); } });
+      const foto = hueco.src && ED.fotos[hueco.src];
       return grupo('Foto',
-        el('small', { clase: 'ce-pista' }, conEstilos ? 'Este estilo no lleva foto. Elige uno marcado «📷 con foto» y luego pon la tuya (o una de tus vídeos).'
-          : 'Esta pieza no tiene un hueco para foto.'),
-        conEstilos ? boton('Ver los estilos con foto', { clase: 'ce-btn ce-ancho ce-s-estilos-foto' }, () => abrirEstilos(true)) : null,
+        sube, el('label', { clase: 'ce-btn ce-ancho ce-s-cambiar-foto', for: 'ce-s-foto', tabindex: '0',
+          onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sube.click(); } } }, hueco.src ? 'Cambiar foto' : 'Poner una foto'),
+        hayVideos() ? boton('Una foto de mis vídeos', { clase: 'ce-btn ce-ancho', title: 'Una imagen que ya pagaste en un vídeo de este proyecto (gratis)' }, () => elegirFotoDeVideo(hueco.id)) : null,
+        foto && foto.falta ? el('small', { clase: 'ce-pista malo' }, 'Esa foto ya no está en el proyecto: pon otra.') : null,
+        hueco.src ? campoDeslizador('Acercar la foto', (hueco.encuadre || {}).zoom || 1, v => {
+          hueco.encuadre = Object.assign({ x: 50, y: 50, zoom: 1 }, hueco.encuadre, { zoom: v });
+        }, 1, 4, 0.05, v => `${redondo(v, 2)}×`) : null,
         el('small', { clase: 'ce-pista' }, 'Pronto: crear la imagen con IA.'));
     }
-    const foto = destino.src && ED.fotos[destino.src];
+    // sin hueco: una foto tenue de fondo (graficas-desde-video), en cualquier imagen
+    const fondo = capas().find(c => c.rol === FONDO_ROL) || null;
+    const sube = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'ce-oculto', id: 'ce-s-foto',
+      onchange: ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f) subirFotoFondo(f); } });
+    const foto = fondo && fondo.src && ED.fotos[fondo.src];
     return grupo('Foto',
+      el('small', { clase: 'ce-pista ce-s-foto-tenue' }, fondo
+        ? 'Va tenue, detrás de esta imagen: se calcula para que los textos se sigan leyendo.'
+        : 'Pon una foto tenue detrás de esta imagen; los textos se seguirán leyendo.'),
       sube, el('label', { clase: 'ce-btn ce-ancho ce-s-cambiar-foto', for: 'ce-s-foto', tabindex: '0',
-        onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sube.click(); } } }, destino.src ? 'Cambiar foto' : 'Poner una foto'),
-      hayVideos() ? boton('Una foto de mis vídeos', { clase: 'ce-btn ce-ancho', title: 'Una imagen que ya pagaste en un vídeo de este proyecto (gratis)' }, () => elegirFotoDeVideo(destino.id)) : null,
+        onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sube.click(); } } }, fondo ? 'Cambiar foto' : 'Poner una foto'),
+      hayVideos() ? boton('Una foto de mis vídeos', { clase: 'ce-btn ce-ancho ce-s-foto-video', title: 'Una imagen que ya pagaste en un vídeo de este proyecto (gratis)' }, () => elegirFotoDeVideo(FONDO_TENUE)) : null,
       foto && foto.falta ? el('small', { clase: 'ce-pista malo' }, 'Esa foto ya no está en el proyecto: pon otra.') : null,
-      destino.src ? campoDeslizador('Acercar la foto', (destino.encuadre || {}).zoom || 1, v => {
-        destino.encuadre = Object.assign({ x: 50, y: 50, zoom: 1 }, destino.encuadre, { zoom: v });
-      }, 1, 4, 0.05, v => `${redondo(v, 2)}×`) : null,
+      fondo ? boton('Quitar la foto', { clase: 'ce-btn ce-ancho ce-s-quitar-foto' }, quitarFotoFondo) : null,
       el('small', { clase: 'ce-pista' }, 'Pronto: crear la imagen con IA.'));
+  }
+
+  /* ---------------------------------------------------------------- la foto de fondo (graficas-desde-video)
+   * Una capa «foto_fondo» con su opacidad calculada en el servidor
+   * (POST /capas/foto-fondo): la pantalla nunca la inventa. */
+
+  const FONDO_ROL = 'foto_fondo';
+  const FONDO_TENUE = '__fondo__';
+
+  async function ponerFotoFondo(nombre) {
+    const yo = ED;
+    const r = await docDelServidor('/capas/foto-fondo', { lamina: ED.lamina, src: nombre }, 'Poniendo la foto…');
+    if (!r || ED !== yo) return;
+    repintarTodoElCarrusel();
+    const avisos = r.avisos || [];
+    avisoPantalla(avisos.length ? avisos.join(' ') : 'Foto puesta: va tenue para que los textos se sigan leyendo.', avisos.length > 0);
+  }
+
+  async function subirFotoFondo(fichero) {
+    avisoPantalla('Subiendo la foto…');
+    try {
+      const cuerpo = new FormData();
+      cuerpo.append('imagen', fichero);
+      const r = await ED.opc.pedir(ED.opc.api(ED.cid, '/imagen'), { method: 'POST', cuerpo });
+      await ponerFotoFondo(r.nombre);
+    } catch (e) {
+      avisoPantalla(`No se ha podido subir la foto: ${e.message}`, true);
+    }
+  }
+
+  function quitarFotoFondo() {
+    const lam = ED.doc.laminas[ED.lamina];
+    lam.capas = lam.capas.filter(c => c.rol !== FONDO_ROL);
+    ED.sel = [];
+    pintarTodo(); commit(); pintarPaneles(); pintarTira();
+    avisoPantalla('Foto quitada. «↶» (arriba) la recupera.');
   }
 
   function grupoEstiloSencillo() {
@@ -3662,7 +3705,8 @@
     ED.estiloAntes = antes;
     ED.estiloDespues = despues;
     pintarDerecha();
-    avisoPantalla(`Estilo «${nombre}». ¿No te gusta? «Volver al estilo de antes», a la derecha.`);
+    const avisos = r.avisos || [];
+    avisoPantalla(`Estilo «${nombre}». ¿No te gusta? «Volver al estilo de antes», a la derecha.${avisos.length ? ` Ojo: ${avisos.join(' ')}` : ''}`, avisos.length > 0);
   }
 
   function volverAlEstiloDeAntes() {

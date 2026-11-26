@@ -25,6 +25,8 @@ su fondo (`tinta:`); el de acento, el primero que llega al contraste (4,5:1 en
 lo pequeño, 3:1 en lo grande) o, si ninguno, el que se lee. Nada de esto llama
 a una IA ni escribe nada: solo compone.
 """
+import json
+import os
 import re
 import secrets
 import unicodedata
@@ -741,9 +743,24 @@ def _restilar_en_todas(L, capa):
     return nueva
 
 
-def montar_lamina(pincel, doc, indice, n, tipo, kit=None, logo=None, logo_oscuro=None, textos=None, marca=""):
+def montar_lamina(pincel, doc, indice, n, tipo, kit=None, logo=None, logo_oscuro=None, textos=None, marca="", avisos=None,
+                  imagen_de=None):
     """«Volver a montar» una lámina de un carrusel con la familia `n` y el tipo
-    `tipo` (la portada, con su plantilla). -> el documento entero, limpio."""
+    `tipo` (la portada, con su plantilla). La foto de fondo (graficas-desde-video)
+    vuelve justo encima del Fondo nuevo con su opacidad recalculada; en la
+    portada, la foto va al hueco grande o de fondo. -> el documento entero,
+    limpio; lo que haya que decir, en `avisos` (una lista)."""
+    avisos = avisos if avisos is not None else []
+    doc = _montar_lamina(pincel, doc, indice, n, tipo, kit, logo, logo_oscuro, textos, marca)
+    colores = G.colores_finales(kit, doc)
+    if tipo == "portada":
+        _foto_de_portada(doc, indice, n, colores, avisos, imagen_de)
+    else:
+        _colocar_foto_fondo(doc, indice, colores, avisos, imagen_de)
+    return C.limpiar_doc(doc)
+
+
+def _montar_lamina(pincel, doc, indice, n, tipo, kit=None, logo=None, logo_oscuro=None, textos=None, marca=""):
     textos = textos if isinstance(textos, dict) else {}
     doc = C.limpiar_doc(doc)
     if type(indice) is not int or not 0 <= indice < len(doc["laminas"]):
@@ -806,7 +823,7 @@ def _textos_que_faltan(doc, indice, n):
     return salida
 
 
-def montar_todas(pincel, doc, n, kit=None, logo=None, logo_oscuro=None, marca=""):
+def montar_todas(pincel, doc, n, kit=None, logo=None, logo_oscuro=None, marca="", avisos=None, imagen_de=None):
     """«Volver a montar a todas»: cada lámina con familia (o tipo) vuelve a
     montarse con la familia `n`; las «En blanco» se quedan como están."""
     doc = C.limpiar_doc(doc)
@@ -815,7 +832,7 @@ def montar_todas(pincel, doc, n, kit=None, logo=None, logo_oscuro=None, marca=""
         tipo = lam.get("tipo")
         if tipo not in TIPOS:
             continue
-        doc = montar_lamina(pincel, doc, i, n, tipo, kit, logo, logo_oscuro, None, marca)
+        doc = montar_lamina(pincel, doc, i, n, tipo, kit, logo, logo_oscuro, None, marca, avisos, imagen_de)
     return doc
 
 
@@ -823,7 +840,7 @@ def montar_todas(pincel, doc, n, kit=None, logo=None, logo_oscuro=None, marca=""
 FORMATO_HISTORIAS = "h916"
 
 
-def historias(pincel, doc, kit=None, logo=None, logo_oscuro=None, marca=""):
+def historias(pincel, doc, kit=None, logo=None, logo_oscuro=None, marca="", avisos=None, imagen_de=None):
     """«Hacer también las historias» (graficas-3c-extras, B3): el mismo
     carrusel en 9:16, como pieza aparte (la pantalla la abre sin guardar).
     Cada lámina con familia se vuelve a montar con su familia y su tipo, así
@@ -851,7 +868,8 @@ def historias(pincel, doc, kit=None, logo=None, logo_oscuro=None, marca=""):
             # lo que estaba vacío sigue vacío: sin esto, volvía el texto de muestra
             vacios = {c["rol"]: "" for c in lam["capas"]
                       if c["tipo"] == "texto" and c.get("rol") in ROLES and not c["txt"].strip()}
-            doc = montar_lamina(pincel, doc, i, n, tipo, kit, logo, logo_oscuro, vacios if tipo != "portada" else None, marca)
+            doc = montar_lamina(pincel, doc, i, n, tipo, kit, logo, logo_oscuro, vacios if tipo != "portada" else None, marca,
+                                avisos, imagen_de)
     doc["nombre"] = f"{doc.get('nombre') or 'Carrusel'} (historias)"[:80]
     return C.limpiar_doc(doc)
 
@@ -1068,7 +1086,26 @@ def nueva_lamina(pincel, doc, donde, n, tipo, kit=None, logo=None, logo_oscuro=N
     return C.limpiar_doc(doc)
 
 
-def avisos_del_carrusel(doc):
+def fotos_que_estorban(doc, kit=None, imagen_de=None):
+    """Las imágenes (1, 2…) cuya foto de fondo tiene más opacidad de la que deja
+    leer sus textos (el Kit cambió, o se subió a mano en «Edición avanzada»).
+    Solo se mira: nada se cambia en silencio (plan v3, punto 3)."""
+    doc = C.limpiar_doc(doc)
+    f = G.formato(doc["formato"])
+    colores = G.colores_finales(kit, doc)
+    salida = []
+    for i, _lam in enumerate(doc["laminas"]):
+        vista = {"capas": C.capas_de_lamina(doc, i, f)}
+        foto = next((c for c in vista["capas"] if c.get("rol") == FOTO_FONDO and not c.get("oculto")), None)
+        if foto is None:
+            continue
+        p = opacidad_foto(vista, colores, f, imagen_de)
+        if p is None or foto.get("opac", 1) > p + 0.005:
+            salida.append(i + 1)
+    return salida
+
+
+def avisos_del_carrusel(doc, kit=None, imagen_de=None):
     """La nota del carrusel, sin IA (A3, A4, A6): -> [{nivel, texto}] con
     nivel «bien», «aviso» o «mal». Lo que se mira:
     - la portada: 10 palabras o menos en su titular;
@@ -1093,8 +1130,12 @@ def avisos_del_carrusel(doc):
             if c["tipo"] == "texto" and not c.get("oculto") and c["rol"] in ("titulo", "cita", "cifra") and c["txt"].strip():
                 return c["txt"].strip()
         return ""
+    estorban = fotos_que_estorban(doc, kit, imagen_de)
+    if estorban:
+        nota("mal", f"La foto de fondo de la imagen {', '.join(map(str, estorban))} deja algún texto difícil de leer: "
+                    "vuelve a ponerla con «Cambiar foto» (se ajusta sola) o bájale la opacidad.")
     if len(L) < 2:
-        return [{"nivel": "aviso", "texto": "Es una sola lámina: la nota es para carruseles."}]
+        return salida + [{"nivel": "aviso", "texto": "Es una sola lámina: la nota es para carruseles."}]
     # lo oculto que no se ve en ninguna lámina (los pasos de la 12 son los
     # titulares de las siguientes: esos no cuentan), cada texto una vez
     a_la_vista = {" ".join(c["txt"].split()) for lam in L for c in lam["capas"]
@@ -1158,3 +1199,289 @@ def avisos_del_carrusel(doc):
     if not 7 <= len(L) <= 10:
         nota("aviso", f"{len(L)} láminas. Hay datos (sin verificar) de que entre 7 y 10 funcionan bien; no es una regla.")
     return salida
+
+
+# ====================================================================== la foto de fondo (graficas-desde-video, 26-11-2026)
+# Una foto tenue detrás de cualquier imagen del carrusel: UNA capa `imagen` con
+# el papel «foto_fondo», a sangre, justo encima del «Fondo» de la lámina y con su
+# propia opacidad (sobre un Fondo opaco, eso es lo mismo que un velo del color
+# del fondo; plan v3 aprobado por el árbitro, B3). La opacidad se CALCULA por
+# lámina con los colores reales: la más alta (hasta OPAC_FOTO_MAX) con la que
+# cada texto sigue leyéndose con la foto más desfavorable (blanco o negro puro).
+# Por debajo de OPAC_FOTO_MIN no se pone: la foto no se notaría.
+# Con la foto a mano (`imagen_de`), el peor caso es el de ESA foto en la zona de
+# cada texto: su mínimo y su máximo por canal (ninguna mezcla de sus píxeles
+# puede quedar más oscura ni más clara), con su encuadre. Sin ella, blanco y
+# negro puros.
+
+FOTO_FONDO = "foto_fondo"
+OPAC_FOTO_MAX = 0.35
+OPAC_FOTO_MIN = 0.10
+_PASO_OPAC = 0.01
+#: Los estilos cuya portada pinta la foto GRANDE en su hueco (≥ 25 % de la
+#: portada, medido el 26-11): en los demás, la foto de la portada va de fondo.
+CON_FOTO_GRANDE = (2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 16)
+
+
+def _rgb(color):
+    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _hex(rgb):
+    return "#{:02X}{:02X}{:02X}".format(*rgb)
+
+
+def _mezcla(arriba, abajo, alfa):
+    """`arriba` con opacidad `alfa` sobre `abajo`, en sRGB de 8 bits (como Chromium)."""
+    if alfa >= 1:
+        return arriba
+    if alfa <= 0:
+        return abajo
+    a, b = _rgb(arriba), _rgb(abajo)
+    return _hex(tuple(int(round(x * alfa + y * (1 - alfa))) for x, y in zip(a, b)))
+
+
+def _colores_de_relleno(relleno, colores):
+    """[(#hex, alfa)] de un relleno: el color, o cada parada de un degradado (se mira la peor)."""
+    if not relleno:
+        return []
+    if "degradado" in relleno:
+        return [(C.resolver_color(p["color"], colores), p["alfa"]) for p in relleno["degradado"]["paradas"]]
+    return [(C.resolver_color(relleno["color"], colores), relleno["alfa"])]
+
+
+def _cubre(capa, x, y):
+    return capa["x"] <= x <= capa["x"] + capa["w"] and capa["y"] <= y <= capa["y"] + capa["h"]
+
+
+def _es_grande(capa, f):
+    """Texto grande para el contraste (3:1): a partir de ~24 px en una pieza de
+    1080 (o ~19 px en negrita), con el tamaño en % del lado menor."""
+    tam = capa.get("tam", 4)
+    return tam >= 5.5 or (capa.get("peso", 400) >= 700 and tam >= 4.4)
+
+
+def _puntos(capa):
+    """Dónde se mira el fondo de un texto: el centro y cuatro puntos de su caja."""
+    x, y, w, h = capa["x"], capa["y"], capa["w"], max(capa["h"], 0.1)
+    return [(x + w * a, y + h * b) for a, b in ((0.5, 0.5), (0.25, 0.3), (0.75, 0.3), (0.25, 0.7), (0.75, 0.7))]
+
+
+def _fondos_bajo(capas, hasta, x, y, colores, foto, extremo, p):
+    """Los colores posibles detrás del punto (x, y) justo debajo de la capa
+    `hasta`, con la foto de fondo `foto` en el color `extremo` y opacidad `p`.
+    -> lista de #hex, o None si debajo hay algo que no depende de la foto (una
+    imagen o un fondo opaco encima de ella)."""
+    fondos = ["#FFFFFF"]
+    for i in range(hasta):
+        c = capas[i]
+        if c.get("oculto") or not _cubre(c, x, y):
+            continue
+        opac = c.get("opac", 1)
+        if c is foto:
+            if p > 0:
+                fondos = [_mezcla(extremo, fo, p) for fo in fondos]
+            continue
+        if c["tipo"] == "imagen":
+            if opac >= 0.99:
+                return None                 # una foto opaca encima: la de fondo no se ve aquí
+            continue
+        if c["tipo"] == "forma":
+            capas_color = _colores_de_relleno(c.get("relleno"), colores)
+        elif c["tipo"] == "texto":
+            capas_color = _colores_de_relleno(c.get("fondo"), colores)
+        else:
+            continue
+        if not capas_color:
+            continue
+        if all(a * opac >= 0.99 for _c, a in capas_color) and foto is not None and capas.index(foto) < i:
+            return None                     # un fondo opaco encima de la foto: no le afecta
+        fondos = [_mezcla(col, fo, a * opac) for fo in fondos for col, a in capas_color]
+    return fondos
+
+
+def _textos_que_cuentan(capas):
+    return [i for i, c in enumerate(capas)
+            if c["tipo"] == "texto" and not c.get("oculto") and c.get("txt", "").strip() and c.get("opac", 1) > 0]
+
+
+_MEMO_EXTREMOS = {}
+
+
+def _extremos_de_foto(ruta, foto, f):
+    """-> funcion(capa) -> (oscuro, claro) de los píxeles de la foto bajo la caja
+    de esa capa (la foto a sangre, «cover», con su encuadre); o None."""
+    try:
+        clave = (ruta, os.path.getmtime(ruta), json.dumps(foto.get("encuadre"), sort_keys=True), f["W"], f["H"])
+    except OSError:
+        return None
+    datos = _MEMO_EXTREMOS.get(clave)
+    if datos is None:
+        try:
+            from PIL import Image                           # noqa: PLC0415
+            with Image.open(ruta) as im:
+                im = im.convert("RGB")
+                iw, ih = im.size
+                im.thumbnail((240, 240))
+                pequena = im.copy()
+        except Exception:                                   # noqa: BLE001
+            return None
+        enc = foto.get("encuadre") or {}
+        W, H = f["W"], f["H"]
+        escala = max(W / iw, H / ih) * float(enc.get("zoom", 1) or 1)
+        dw, dh = iw * escala, ih * escala
+        datos = (pequena, (W - dw) * float(enc.get("x", 50)) / 100, (H - dh) * float(enc.get("y", 50)) / 100,
+                 escala * iw / pequena.size[0], W, H)
+        if len(_MEMO_EXTREMOS) > 200:
+            _MEMO_EXTREMOS.clear()
+        _MEMO_EXTREMOS[clave] = datos
+    pequena, ox, oy, k, W, H = datos
+    pw, ph = pequena.size
+
+    def bajo(capa):
+        x0 = int(max(0, min(pw - 1, (capa["x"] / 100 * W - ox) / k)))
+        x1 = int(max(x0 + 1, min(pw, (( capa["x"] + capa["w"]) / 100 * W - ox) / k + 1)))
+        y0 = int(max(0, min(ph - 1, (capa["y"] / 100 * H - oy) / k)))
+        y1 = int(max(y0 + 1, min(ph, ((capa["y"] + max(capa["h"], 0.1)) / 100 * H - oy) / k + 1)))
+        trozo = pequena.crop((x0, y0, x1, y1))
+        bandas = trozo.getextrema()
+        return _hex(tuple(b[0] for b in bandas)), _hex(tuple(b[1] for b in bandas))
+    return bajo
+
+
+def _lee_con(capas, foto, colores, f, p, extremos=None):
+    """¿Todos los textos se leen con la foto a opacidad `p`? Cada texto necesita
+    4,5:1 (3:1 si es grande), o lo que ya tenía sin foto si no llegaba.
+    `extremos(capa) -> (oscuro, claro)`: el peor caso de la foto bajo ese texto."""
+    for i in _textos_que_cuentan(capas):
+        t = capas[i]
+        minimo = 3 if _es_grande(t, f) else 4.5
+        propio = [(col, a) for col, a in _colores_de_relleno(t.get("fondo"), colores)]
+        tinta = C.resolver_color(t["color"], colores)
+        alfa_t = t.get("alfa", 1) * t.get("opac", 1)
+        peores = extremos(t) if extremos else ("#000000", "#FFFFFF")
+        for x, y in _puntos(t):
+            for extremo in peores:
+                sin = _fondos_bajo(capas, i, x, y, colores, foto, extremo, 0)
+                con = _fondos_bajo(capas, i, x, y, colores, foto, extremo, p)
+                if sin is None or con is None:
+                    continue
+                for fo_sin, fo_con in zip(sin, con):
+                    # el fondo propio del texto (una caja) va entre la foto y la letra
+                    for col, a in propio or [(None, 0)]:
+                        if col is not None:
+                            fo_sin, fo_con = _mezcla(col, fo_sin, a), _mezcla(col, fo_con, a)
+                        antes = G.contraste(_mezcla(tinta, fo_sin, alfa_t), fo_sin)
+                        ahora = G.contraste(_mezcla(tinta, fo_con, alfa_t), fo_con)
+                        if ahora < min(minimo, antes) - 1e-9:
+                            return False
+    return True
+
+
+def opacidad_foto(lamina, colores, f, imagen_de=None):
+    """La opacidad de la foto de fondo de esta lámina (con sus capas tal como se
+    pintan): la más alta hasta OPAC_FOTO_MAX que deja todos los textos
+    legibles, o None si no llega a OPAC_FOTO_MIN. `imagen_de(src) -> ruta`."""
+    capas = lamina["capas"]
+    foto = next((c for c in capas if c.get("rol") == FOTO_FONDO), None)
+    if foto is None:
+        return None
+    ruta = imagen_de(foto["src"]) if imagen_de and foto.get("src") else None
+    extremos = _extremos_de_foto(ruta, foto, f) if ruta else None
+    mejor = 0.0
+    p = _PASO_OPAC
+    while p <= OPAC_FOTO_MAX + 1e-9:
+        if not _lee_con(capas, foto, colores, f, round(p, 2), extremos):
+            break
+        mejor = round(p, 2)
+        p += _PASO_OPAC
+    return mejor if mejor >= OPAC_FOTO_MIN - 1e-9 else None
+
+
+def _indice_tras_fondo(capas):
+    """Justo encima de la capa «Fondo» de la lámina (o abajo del todo si no hay)."""
+    for i, c in enumerate(capas):
+        if c.get("rol") == "fondo":
+            return i + 1
+    return 0
+
+
+def capa_foto_fondo(src, ident=None):
+    return {"id": ident or "c" + secrets.token_hex(4), "tipo": "imagen", "rol": FOTO_FONDO, "nombre": "Foto de fondo",
+            "x": 0, "y": 0, "w": 100, "h": 100, "giro": 0, "opac": OPAC_FOTO_MAX, "origen": [50, 50], "recorte": None,
+            "oculto": False, "bloqueado": True, "src": src, "encuadre": {"x": 50, "y": 50, "zoom": 1},
+            "radio": 0, "borde": None, "sombra": []}
+
+
+def _colocar_foto_fondo(doc, i, colores, avisos, imagen_de=None):
+    """La foto de fondo de la lámina `i`, justo encima de su Fondo y con su
+    opacidad calculada; si no se leería, se quita y se dice."""
+    lam = doc["laminas"][i]
+    fotos = [c for c in lam["capas"] if c.get("rol") == FOTO_FONDO]
+    if not fotos:
+        return
+    foto = fotos[0]
+    resto = [c for c in lam["capas"] if c.get("rol") != FOTO_FONDO]
+    donde = _indice_tras_fondo(resto)
+    lam["capas"] = resto[:donde] + [foto] + resto[donde:]
+    f = G.formato(doc["formato"])
+    vista = {"capas": C.capas_de_lamina(doc, i, f)}
+    p = opacidad_foto(vista, colores, f, imagen_de)
+    if p is None:
+        lam["capas"] = resto
+        avisos.append(f"En la imagen {i + 1}, con estos colores la foto de fondo no se notaría sin estorbar a los "
+                      "textos: se ha quitado.")
+        return
+    foto["opac"] = p
+
+
+def poner_foto_fondo(doc, i, src, kit=None, imagen_de=None):
+    """Pone (o cambia) la foto de fondo de la lámina `i`. -> (doc, avisos)"""
+    if not G._RE_IMAGEN.fullmatch(str(src or "")):
+        raise ErrorGraficas("esa foto no está")
+    doc = C.limpiar_doc(doc)
+    if type(i) is not int or not 0 <= i < len(doc["laminas"]):
+        raise ErrorGraficas("esa lámina no está")
+    lam = doc["laminas"][i]
+    vieja = next((c for c in lam["capas"] if c.get("rol") == FOTO_FONDO), None)
+    lam["capas"] = [c for c in lam["capas"] if c.get("rol") != FOTO_FONDO] + [capa_foto_fondo(src, vieja and vieja["id"])]
+    if len(lam["capas"]) > C.MAX_CAPAS:
+        raise ErrorGraficas(f"esta imagen ya tiene {C.MAX_CAPAS} capas: quita alguna para poner la foto")
+    avisos = []
+    _colocar_foto_fondo(doc, i, G.colores_finales(kit, doc), avisos, imagen_de)
+    return C.limpiar_doc(doc), avisos
+
+
+def quitar_foto_fondo(doc, i):
+    doc = C.limpiar_doc(doc)
+    if type(i) is not int or not 0 <= i < len(doc["laminas"]):
+        raise ErrorGraficas("esa lámina no está")
+    doc["laminas"][i]["capas"] = [c for c in doc["laminas"][i]["capas"] if c.get("rol") != FOTO_FONDO]
+    return doc
+
+
+def _foto_de_portada(doc, i, n, colores, avisos, imagen_de=None):
+    """La portada al cambiar de estilo (plan v3, punto 2): su foto es UNA y va
+    al hueco grande del estilo, o de fondo tenue si el estilo no lo tiene. Nunca
+    dos copias ni una oculta abajo."""
+    lam = doc["laminas"][i]
+    capas = lam["capas"]
+    hueco = next((c for c in capas if c["tipo"] == "imagen" and c.get("rol") == "foto" and not c.get("oculto")), None)
+    ocultas = [c for c in capas if c["tipo"] == "imagen" and c.get("rol") == "foto" and c.get("oculto") and c.get("src")]
+    fondo = next((c for c in capas if c.get("rol") == FOTO_FONDO), None)
+    src = (hueco and hueco.get("src")) or (fondo and fondo.get("src")) or (ocultas[0]["src"] if ocultas else "")
+    if not src:
+        return
+    if n in CON_FOTO_GRANDE and hueco is not None:
+        hueco["src"] = src
+        if fondo is not None and hueco.get("encuadre") is None:
+            hueco["encuadre"] = {"x": 50, "y": 50, "zoom": 1}
+        lam["capas"] = [c for c in capas if c.get("rol") != FOTO_FONDO and c not in ocultas]
+        return
+    # sin hueco grande: la foto, de fondo; el hueco pequeño (un avatar) se queda vacío y oculto
+    if hueco is not None:
+        hueco["src"] = ""
+        hueco["oculto"] = True
+    lam["capas"] = [c for c in capas if c not in ocultas and c.get("rol") != FOTO_FONDO]
+    lam["capas"].append(capa_foto_fondo(src, fondo and fondo["id"]))
+    _colocar_foto_fondo(doc, i, colores, avisos, imagen_de)

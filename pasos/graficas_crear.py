@@ -34,7 +34,7 @@ CON_FOTO = tuple(n for n in sorted(K.FAMILIAS) if "«img»" in G._PL.PLANTILLAS[
 #: Las que la pintan GRANDE (al menos un cuarto de la portada; medido el 26-11 y
 #: comprobado en prueba_graficas_facil): en 8, 9, 14 y 15 es un avatar o una
 #: miniatura, y una imagen de un vídeo ahí apenas se ve.
-CON_FOTO_GRANDE = (2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 16)
+CON_FOTO_GRANDE = K.CON_FOTO_GRANDE
 
 
 def _formato(que, formato):
@@ -45,28 +45,34 @@ def _formato(que, formato):
     return fid
 
 
-def _poner_foto(doc, foto):
-    """La foto elegida, en la foto de la plantilla de la portada (si la tiene). -> ¿se puso?"""
+def _poner_foto(doc, foto, kit=None, avisos=None, imagen_de=None):
+    """La foto elegida en la portada: en el hueco de la plantilla si es grande;
+    si no (o no lo tiene), de fondo tenue (graficas-desde-video). -> ¿se puso?"""
     if not foto:
         return False
     if not G._RE_IMAGEN.fullmatch(str(foto)):
         raise ErrorGraficas("esa foto no está")
-    for c in doc["laminas"][0]["capas"]:
-        if c["tipo"] == "imagen" and c.get("rol") == "foto":
-            c["src"] = foto
-            c["encuadre"] = {"x": 50, "y": 50, "zoom": 1}
-            c["oculto"] = False
-            return True
-    return False
+    lam = doc["laminas"][0]
+    if lam.get("familia") in K.CON_FOTO_GRANDE:
+        for c in lam["capas"]:
+            if c["tipo"] == "imagen" and c.get("rol") == "foto":
+                c["src"] = foto
+                c["encuadre"] = {"x": 50, "y": 50, "zoom": 1}
+                c["oculto"] = False
+                return True
+    avisos = avisos if avisos is not None else []
+    lam["capas"].append(K.capa_foto_fondo(foto))
+    K._foto_de_portada(doc, 0, lam.get("familia") or 1, G.colores_finales(kit, doc), avisos, imagen_de)
+    return any(c.get("rol") == K.FOTO_FONDO for c in lam["capas"])
 
 
-def _portada(pincel, n, formato, titulo, apoyo, foto, kit, logo, logo_oscuro, marca):
+def _portada(pincel, n, formato, titulo, apoyo, foto, kit, logo, logo_oscuro, marca, imagen_de=None):
     familia = K.familia(n)
     base = C.limpiar_doc({"version": 2, "formato": formato, "laminas": [{"capas": []}]})
     textos = K.textos_de_portada(n, {"titulo": titulo, "apoyo": apoyo}, (), marca)
     doc = C.montar(pincel, n, formato, base, textos, kit, logo, logo_oscuro, 0)
     doc["laminas"][0].update(tipo="portada", familia=familia["n"])
-    _poner_foto(doc, foto)
+    _poner_foto(doc, foto, kit, None, imagen_de)
     return doc
 
 
@@ -77,7 +83,7 @@ def miniatura(pincel, n, que, formato, titulo, apoyo="", foto="", kit=None, logo
     fid = _formato(que, formato)
     titulo = " ".join(str(titulo or "").split())[:90] or "Tu titular aquí"
     apoyo = " ".join(str(apoyo or "").split())[:140]
-    doc = _portada(pincel, n, fid, titulo, apoyo, foto, kit, logo, logo_oscuro, marca)
+    doc = _portada(pincel, n, fid, titulo, apoyo, foto, kit, logo, logo_oscuro, marca, imagen_de)
     png, _avisos, _m = C.pintar(pincel, doc, kit, imagen_de or (lambda _n: None), logo, logo_oscuro, 0)
     im = Image.open(io.BytesIO(png)).convert("RGB")
     im.thumbnail((ANCHO_MINIATURA, ANCHO_MINIATURA * 2))
@@ -94,7 +100,7 @@ def orden_de_familias(con_foto):
     return list(CON_FOTO_GRANDE) + [n for n in todas if n not in CON_FOTO_GRANDE]
 
 
-def crear(pincel, que, n, formato, piezas, foto="", kit=None, logo=None, logo_oscuro=None, marca="", nombre=""):
+def crear(pincel, que, n, formato, piezas, foto="", kit=None, logo=None, logo_oscuro=None, marca="", nombre="", imagen_de=None):
     """La pieza nueva, sin guardar. `piezas`: [(tipo, {campo: texto})] (la 1.ª,
     la portada). -> (doc, avisos)"""
     fid = _formato(que, formato)
@@ -115,8 +121,8 @@ def crear(pincel, que, n, formato, piezas, foto="", kit=None, logo=None, logo_os
     if len(doc["laminas"]) == 1:
         # una sola imagen: sin la marca, el número ni el «Desliza» de un carrusel
         doc["laminas"][0]["capas"] = [c for c in doc["laminas"][0]["capas"] if not c.get("enlace")]
-    if foto and not _poner_foto(doc, foto):
-        avisos.append("Este estilo no lleva foto en la portada: tu foto no sale. Elige un estilo marcado "
+    if foto and not _poner_foto(doc, foto, kit, avisos, imagen_de):
+        avisos.append("Con este estilo y estos colores tu foto no se notaría: elige un estilo marcado "
                       "«📷 con foto» con «Otro estilo».")
     doc["nombre"] = (nombre or titulo)[:80]
     return C.limpiar_doc(doc), avisos

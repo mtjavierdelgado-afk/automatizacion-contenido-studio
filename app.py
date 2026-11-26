@@ -26761,6 +26761,159 @@ def graficas_nota_carrusel(cid: str, peticion: Request, cuerpo: dict = Body(defa
     return {"nota": _por_capas(K.avisos_del_carrusel, (cuerpo or {}).get("doc"))}
 
 
+# --- «+ Crear» y «Escríbelo por mí» (rama graficas-facil, 26-11-2026;
+# pasos/graficas_crear.py y pasos/graficas_escribir.py). Nada gasta dinero:
+# los textos van por el cupo de Claude (CLI) y lo demás solo pinta.
+
+#: Miniaturas de estilo ya pintadas: (cid, que, formato, titulo, apoyo, foto, kit, n) -> JPG.
+_MINIATURAS_GRAF = {}
+_MINIATURAS_GRAF_TOPE = 400
+_CERROJO_MINIATURAS_GRAF = threading.Lock()
+
+
+def _negocio_para_escribir(cid):
+    """La ficha del negocio en texto (nombre y reglas) para «Escríbelo por mí», o ""."""
+    try:
+        crudo = PASOS_MODULOS.dominios.de_cliente(cid) if PASOS_MODULOS is not None else None
+    except Exception:                                       # noqa: BLE001
+        crudo = None
+    if not crudo:
+        return ""
+    reglas = [str(r.get("texto") or r.get("regla") or "") for r in crudo.get("reglas") or [] if isinstance(r, dict)]
+    return "\n".join([f"Negocio: {crudo.get('nombre') or ''}"] + [f"- {r}" for r in reglas if r.strip()])[:2500]
+
+
+@app.post("/api/graficas/{cid}/escribir", status_code=202)
+def graficas_escribir(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Escríbelo por mí»: Claude (cupo de la membresía, sin dinero) escribe los
+    textos de una publicación, historia o carrusel desde un tema y la ficha del
+    negocio; el servidor aplica sus reglas (tipos, cifras, precios). Siempre
+    como trabajo con barra (`.../capas/trabajo/{id}`): el CLI puede pasar de
+    los 60 s del proxy. Uno a la vez por proyecto."""
+    _ficha_de_graficas(cid, peticion)
+    import graficas_escribir as ESCRIBIR_GRAF  # noqa: E402,PLC0415
+    cuerpo = cuerpo or {}
+    que, tema, cuantas = str(cuerpo.get("que") or ""), str(cuerpo.get("tema") or ""), cuerpo.get("cuantas")
+    # lo que se puede comprobar ya, sin esperar a Claude
+    if que not in ESCRIBIR_GRAF.QUE:
+        raise ErrorApi(400, "¿una publicación, un carrusel o una historia?")
+    if len(" ".join(tema.split())) < 3:
+        raise ErrorApi(400, "escribe de qué trata (una frase basta)")
+    negocio = _negocio_para_escribir(cid)
+    ahora = time.time()
+    with _CERROJO_TRABAJOS_CAPAS:
+        for viejo in [t for t, v in _TRABAJOS_CAPAS.items() if v["fin"] and ahora - v["fin"] > _VIDA_TRABAJO_CAPAS]:
+            del _TRABAJOS_CAPAS[viejo]
+        if any(v["cid"] == cid and v.get("escribir") and not v["fin"] for v in _TRABAJOS_CAPAS.values()):
+            raise ErrorApi(409, "ya se están escribiendo unos textos en este proyecto: espera a que terminen")
+        tid = secrets.token_hex(8)
+        trabajo = {"id": tid, "cid": cid, "pieza": "", "escribir": True, "estado": "pintando", "hechas": 0,
+                   "total": 1, "resultado": None, "error": "", "codigo": 0, "fin": 0}
+        _TRABAJOS_CAPAS[tid] = trabajo
+
+    def llamar(instruccion):
+        if str(os.environ.get("ESTUDIO_SIMULAR", "")).strip().lower() in ("1", "si", "true"):
+            return ESCRIBIR_GRAF.simulado(instruccion)
+        import cli_claude  # noqa: PLC0415
+        respuesta, _sobre = cli_claude.ejecutar(
+            instruccion, modelo=os.environ.get("ESTUDIO_GRAFICAS_MODELO") or "sonnet",
+            esfuerzo=os.environ.get("ESTUDIO_GRAFICAS_ESFUERZO") or "low", cwd=str(raiz_proyectos()),
+            base_tiempo_s=120, tiempo_max_s=240, extra=["--no-session-persistence"], para="Gráficas: escribir",
+            sistema="Eres un redactor de redes sociales de un negocio peruano. Escribes claro y corto, "
+                    "y nunca inventas datos, cifras, precios ni opiniones de clientes.")
+        return respuesta
+
+    def correr():
+        try:
+            piezas, avisos = ESCRIBIR_GRAF.escribir(que, tema, negocio, cuantas, llamar)
+            trabajo.update(estado="listo", hechas=1, resultado={"piezas": [[t, x] for t, x in piezas], "avisos": avisos})
+        except Exception as fallo:                          # noqa: BLE001
+            texto = str(fallo)
+            if "limit" in texto.lower() or "cupo" in texto.lower():
+                texto = f"Se ha agotado el cupo de Claude: escribe los textos tú o prueba más tarde ({texto[:160]})"
+            trabajo.update(estado="error", error=texto[:400], codigo=400)
+        finally:
+            trabajo["fin"] = time.time()
+    threading.Thread(target=correr, name=f"escribir-{tid}", daemon=True).start()
+    return JSONResponse({"trabajo": tid, "total": 1}, status_code=202)
+
+
+@app.post("/api/graficas/{cid}/capas/miniaturas")
+def graficas_miniaturas(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Las miniaturas de «Estilo» del «+ Crear»: la portada de hasta 4 familias
+    pintada pequeña con tu titular, tu foto y tu Kit (un turno del navegador
+    por tanda, y en cache). {que, formato?, titulo, apoyo?, foto?, familias}"""
+    G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
+    _G, _C, raiz, _kit, _logo, _oscuro = _contexto_capas(cid, peticion)
+    import base64  # noqa: PLC0415
+    import graficas_crear as CREAR_GRAF  # noqa: E402,PLC0415
+    cuerpo = cuerpo or {}
+    que, formato = str(cuerpo.get("que") or ""), cuerpo.get("formato") or None
+    titulo = " ".join(str(cuerpo.get("titulo") or "").split())[:90]
+    apoyo = " ".join(str(cuerpo.get("apoyo") or "").split())[:140]
+    foto = str(cuerpo.get("foto") or "")
+    familias = cuerpo.get("familias")
+    if not isinstance(familias, list) or not familias or len(familias) > CREAR_GRAF.MAX_POR_TANDA:
+        raise ErrorApi(400, f"pide de 1 a {CREAR_GRAF.MAX_POR_TANDA} estilos por tanda")
+    for n in familias:
+        _por_graficas(K.familia, n if type(n) is int else -1)
+    if foto and not G._RE_IMAGEN.fullmatch(foto):
+        raise ErrorApi(400, "esa foto no está")
+    clave_kit = json.dumps(kit or {}, sort_keys=True, ensure_ascii=False)
+    salida, faltan = [], []
+    for n in familias:
+        clave = (cid, que, formato, titulo, apoyo, foto, clave_kit, marca, n)
+        with _CERROJO_MINIATURAS_GRAF:
+            jpg = _MINIATURAS_GRAF.get(clave)
+        if jpg is None:
+            faltan.append((n, clave))
+        salida.append([n, clave, jpg])
+
+    def pintar(p):
+        hechas = {}
+        for n, clave in faltan:
+            hechas[clave] = CREAR_GRAF.miniatura(p, n, que, formato, titulo, apoyo, foto, kit, logo, oscuro, marca,
+                                                 lambda nombre: G.ruta_imagen(raiz, cid, nombre))
+        return hechas
+    if faltan:
+        hechas = _por_graficas(G._con_turno, pintar)
+        with _CERROJO_MINIATURAS_GRAF:
+            for clave, jpg in hechas.items():
+                _MINIATURAS_GRAF[clave] = jpg
+            while len(_MINIATURAS_GRAF) > _MINIATURAS_GRAF_TOPE:
+                _MINIATURAS_GRAF.pop(next(iter(_MINIATURAS_GRAF)))
+        salida = [[n, clave, jpg or hechas.get(clave)] for n, clave, jpg in salida]
+    nombres = {f["n"]: f["nombre"] for f in K.catalogo()["familias"]}
+    return {"miniaturas": [{"n": n, "nombre": nombres.get(n, f"Estilo {n}"),
+                            "jpg": "data:image/jpeg;base64," + base64.b64encode(jpg).decode("ascii")}
+                           for n, _clave, jpg in salida],
+            "orden": CREAR_GRAF.orden_de_familias(bool(foto))}
+
+
+@app.post("/api/graficas/{cid}/capas/crear")
+def graficas_crear(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """La pieza del «+ Crear», sin guardar (el editor la abre en el modo
+    sencillo): {que, familia, formato?, piezas? | texto?, foto?}. Con `piezas`,
+    las de «Escríbelo por mí»; con `texto`, como «Partir un texto»."""
+    G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
+    import graficas_crear as CREAR_GRAF  # noqa: E402,PLC0415
+    cuerpo = cuerpo or {}
+    que = str(cuerpo.get("que") or "")
+    n = _entero(cuerpo.get("familia"), "esa familia")
+    piezas = cuerpo.get("piezas")
+    if not isinstance(piezas, list) or not piezas:
+        texto = str(cuerpo.get("texto") or "")
+        if not texto.strip():
+            raise ErrorApi(400, "escribe de qué trata (o pulsa «Escríbelo por mí»)")
+        piezas, _avisos = _por_graficas(K.partir, texto)
+    else:
+        piezas = [(str(p[0]), p[1]) for p in piezas if isinstance(p, list) and len(p) == 2 and isinstance(p[1], dict)]
+    foto = str(cuerpo.get("foto") or "")
+    doc, avisos = _por_capas(G._con_turno, lambda p: CREAR_GRAF.crear(
+        p, que, n, cuerpo.get("formato") or None, piezas, foto, kit, logo, oscuro, marca))
+    return {"doc": doc, "avisos": avisos}
+
+
 @app.get("/api/graficas/iconos")
 def graficas_iconos():
     """Los iconos que se pueden poner en una lámina (graficas-3c-extras): id,

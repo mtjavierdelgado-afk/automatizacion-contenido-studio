@@ -955,14 +955,16 @@ def textos_de_portada(n, t, piezas=(), marca=""):
     return textos
 
 
-def carrusel_desde_texto(pincel, doc, n, texto, modo="sustituir", kit=None, logo=None, logo_oscuro=None, marca=""):
+def carrusel_desde_texto(pincel, doc, n, texto, modo="sustituir", kit=None, logo=None, logo_oscuro=None, marca="",
+                         piezas=None):
     """«Partir un texto en láminas». `modo`: «sustituir» (todas las láminas
     nuevas) o «anadir» (antes del cierre, si lo hay). -> (doc, avisos)"""
     doc = C.limpiar_doc(doc)
     familia(n)
     if modo not in ("sustituir", "anadir"):
         raise ErrorGraficas("¿sustituir las láminas o añadirlas?")
-    piezas, avisos = partir(texto)
+    # `piezas` (graficas-facil): las ya hechas por «Escríbelo por mí», con la forma de `partir`
+    piezas, avisos = partir(texto) if piezas is None else ([(t, dict(x)) for t, x in piezas], [])
     colores = G.colores_finales(kit, doc)
     L = _Lienzo(familia(n), doc["formato"], colores, marca)
     ya_enlazadas = [c for lam in doc["laminas"] for c in lam["capas"] if c.get("enlace")]

@@ -60,6 +60,16 @@ def _editorial(entrada):
 
 
 def responder(entrada):
+    if "<tema>" in entrada and '"laminas"' in entrada:
+        # «Escríbelo por mí» de Gráficas (graficas-facil): un carrusel corto con el tema de titular
+        tema = _entre(entrada, "tema") or "Tu tema"
+        return {"laminas": [
+            {"tipo": "portada", "titulo": tema[:70], "apoyo": "Lo que nadie te cuenta"},
+            {"tipo": "punto", "titulo": "Prueba todo antes", "texto": "Revisa cada mando y cada cable el día anterior."},
+            {"tipo": "lista", "titulo": "Lo que no puede faltar", "v1": "Pantalla grande", "v2": "4 mandos", "v3": "Juegos para varios"},
+            {"tipo": "pregunta", "pregunta": "¿Cuántos mandos necesitas?", "texto": "La respuesta, en la siguiente"},
+            {"tipo": "cita", "cita": "«Inventada»", "autor": "Nadie"},
+            {"tipo": "cierre", "titulo": "¿Te sirvió?", "texto": "Guárdalo para tu próxima fiesta.", "cta": "Escríbenos"}]}
     if "<texto_para_emojis>" in entrada:
         # «✨ Más emojis» de Publicar: el mismo texto, con un emoji delante
         # (las palabras no se tocan: si se tocaran, el Studio lo rechaza)

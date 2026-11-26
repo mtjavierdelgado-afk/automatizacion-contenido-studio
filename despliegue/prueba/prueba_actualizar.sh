@@ -97,6 +97,8 @@ cat > "$T/bin/nginx" <<'EOF'
 #!/bin/sh
 echo "nginx $*" >> "$PRUEBA/llamadas"
 [ -f "$PRUEBA/nginx_roto" ] && { echo "nginx: [emerg] falso" >&2; exit 1; }
+# -T: lo que nginx carga DE VERDAD (como en Debian, solo sites-enabled/*)
+[ "$1" = "-T" ] && cat "$PRUEBA"/etc/nginx/sites-enabled/* 2>/dev/null
 exit 0
 EOF
 printf '#!/bin/sh\nexit 0\n' > "$T/bin/chown"
@@ -169,6 +171,8 @@ server {
 }
 EOF
   cp "$T/etc/nginx/sites-available/as-video-studio" "$T/viejo/sitio"
+  # como en una instalacion de Debian: sites-enabled enlaza a sites-available
+  ln -s ../sites-available/as-video-studio "$T/etc/nginx/sites-enabled/as-video-studio"
   # el lanzador del navegador, de una version anterior
   printf '#!/bin/sh\nexec /usr/bin/navegador-falso --no-sandbox "$@"\n' > "$T/binarios/estudio-edge"
   cp "$T/binarios/estudio-edge" "$T/viejo/edge"
@@ -263,7 +267,7 @@ ok 'awk "/location \\^~ \\/cliente\\//,/^    }/" "$T/etc/nginx/sites-available/a
    "con el MISMO puerto que usa el estudio en ese sitio (8111)"
 ok 'awk "/location \\^~ \\/cliente\\//,/^    }/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q "limit_req zone=asvs_cliente" && ! awk "/location \\^~ \\/cliente\\//,/^    }/" "$T/etc/nginx/sites-available/as-video-studio" | grep -q auth_request' \
    "con su limite y SIN pasar por el login"
-ok 'grep -q "pagina del cliente" "$T/salida"' "y lo dice"
+ok 'grep -q "abierta sin login" "$T/salida"' "y lo dice (comprobado con nginx -T)"
 ok 'grep -q "X-Asvs-Publico 1" "$T/etc/nginx/sites-available/as-video-studio" && grep -q "access_log off" "$T/etc/nginx/sites-available/as-video-studio" && grep -q "error_log .* crit" "$T/etc/nginx/sites-available/as-video-studio" && grep -q "request_uri !~" "$T/etc/nginx/sites-available/as-video-studio"' \
    "marca lo publico, no deja el token en el registro y solo acepta las direcciones del cliente"
 ok 'diff <(awk "/location \\^~ \\/cliente\\//,/^    }/" "$T/etc/nginx/sites-available/as-video-studio" | sed "s/127.0.0.1:8111/127.0.0.1:8110/") <(awk "/location \\^~ \\/cliente\\//,/^    }/" "$DESPL/nginx-sitio.conf") >/dev/null' \
@@ -318,12 +322,12 @@ ok '[ "$(diff "$T/viejo/sin_error_log" "$T/etc/nginx/sites-available/as-video-st
    "y no cambia nada más"
 
 echo "[E6] sites-enabled es una COPIA (como en el servidor): se edita la copia, que es la que vale"
-montar; cp "$T/etc/nginx/sites-available/as-video-studio" "$T/etc/nginx/sites-enabled/as-video-studio"; cp "$T/etc/nginx/sites-available/as-video-studio" "$T/viejo/disponible"; correr; codigo=$?
+montar; rm -f "$T/etc/nginx/sites-enabled/as-video-studio"; cp "$T/etc/nginx/sites-available/as-video-studio" "$T/etc/nginx/sites-enabled/as-video-studio"; cp "$T/etc/nginx/sites-available/as-video-studio" "$T/viejo/disponible"; correr; codigo=$?
 ok '[ $codigo -eq 0 ] && [ "$(grep -c "location ^~ /cliente/" "$T/etc/nginx/sites-enabled/as-video-studio")" = 1 ]' "la location va en el fichero que nginx usa"
 ok 'cmp -s "$T/etc/nginx/sites-available/as-video-studio" "$T/viejo/disponible"' "y sites-available no se toca"
 
 echo "[E7] sites-enabled es un ENLACE: se edita su destino y el enlace sigue"
-montar; ln -s "$T/etc/nginx/sites-available/as-video-studio" "$T/etc/nginx/sites-enabled/as-video-studio"; correr; codigo=$?
+montar; rm -f "$T/etc/nginx/sites-enabled/as-video-studio"; ln -s "$T/etc/nginx/sites-available/as-video-studio" "$T/etc/nginx/sites-enabled/as-video-studio"; correr; codigo=$?
 ok '[ $codigo -eq 0 ] && [ -L "$T/etc/nginx/sites-enabled/as-video-studio" ] && [ "$(grep -c "location ^~ /cliente/" "$T/etc/nginx/sites-available/as-video-studio")" = 1 ]' \
    "la location va en el destino y el enlace sigue siendo un enlace"
 
@@ -353,6 +357,23 @@ printf '#!/bin/sh\necho asvs v2\n' > "$T/fuente/repo-main/despliegue/asvs"
 tar -czf "$T/nuevo.tgz" -C "$T/fuente" repo-main
 ok '[ $codigo -eq 0 ] && grep -q "con el asvs nuevo" "$T/salida" && [ "$(grep -c "location ^~ /cliente/" "$T/etc/nginx/sites-available/as-video-studio")" = 1 ]' \
    "sale bien y la pagina del cliente queda puesta en la PRIMERA actualizacion"
+
+echo "[E10] una location del cliente COMENTADA a mano: no se toma por buena ni se rompe el estudio"
+montar
+python3 - "$T/etc/nginx/sites-available/as-video-studio" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+s = s.replace("    location / {", "#    location ^~ /cliente/ {\n#        proxy_pass http://127.0.0.1:8111;\n#    }\n    location / {", 1)
+open(p, "w").write(s)
+PY
+correr; codigo=$?
+ok '[ $codigo -eq 0 ] && grep -q "^    location / {" "$T/etc/nginx/sites-available/as-video-studio" && grep -q "^#    location ^~ /cliente/" "$T/etc/nginx/sites-available/as-video-studio"' \
+   "el «location /» del estudio sigue y lo comentado se queda comentado"
+ok '[ "$(grep -Ec "^[[:space:]]*location[[:space:]]+\^~[[:space:]]+/cliente/" "$T/etc/nginx/sites-available/as-video-studio")" = 1 ]' "y se pone la de verdad, una vez"
+
+echo "[E11] nginx no carga el fichero editado: se dice"
+montar; rm -f "$T/etc/nginx/sites-enabled/as-video-studio"; correr; codigo=$?
+ok '[ $codigo -eq 0 ] && grep -q "nginx no lo esta usando" "$T/salida"' "dice que nginx no la esta usando"
 
 echo "[E4] sin el sitio de nginx: se avisa y se sigue"
 montar; rm -f "$T/etc/nginx/sites-available/as-video-studio"; correr; codigo=$?

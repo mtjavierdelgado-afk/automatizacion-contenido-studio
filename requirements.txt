@@ -16,6 +16,10 @@ pillow==12.3.0
 numpy==2.5.2
 
 requests==2.34.2
+# Solo para las pruebas de las rutas (fastapi.testclient lo pide): sin el,
+# «asvs revisar» no puede probar en el servidor las rutas de la pagina del
+# cliente, que son las de seguridad (CIS 1b, 25-11-2026).
+httpx2==2.13.1
 # Solo por el camino de la voz por websocket (pasos/p4_voz), pero sin el ese
 # camino falla en el momento de usarlo, no al arrancar: va aqui a proposito.
 websocket-client==1.9.0

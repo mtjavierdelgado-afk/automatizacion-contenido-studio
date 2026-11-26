@@ -342,11 +342,17 @@ def _video_montado(servidor, base, nombre):
 
 def prueba_rutas():
     print("\n[4] las rutas: el dueño pide el enlace y el cliente lo usa")
+    # el servidor las prueba de verdad solo si asvs le instala httpx2 (25-11)
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "requirements.txt"), encoding="utf-8") as fh:
+        ok(any(l.strip().startswith("httpx2==") for l in fh),
+           "requirements.txt trae httpx2 (sin el, el servidor no puede probar estas rutas)")
     try:
         from fastapi.testclient import TestClient  # noqa: PLC0415
         import app as servidor  # noqa: PLC0415
     except Exception as fallo:  # noqa: BLE001
-        ok(False, f"el servidor no carga: {type(fallo).__name__}: {fallo}")
+        ok(False, f"el servidor no carga: {type(fallo).__name__}: {fallo}"
+                  " (¿falta httpx2? va en requirements.txt: asvs actualizar lo instala)")
         return
     base = tempfile.mkdtemp(prefix="proyectos_", dir=CARPETA)
     antes = servidor.raiz_proyectos()

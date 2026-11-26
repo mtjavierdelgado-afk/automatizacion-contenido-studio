@@ -330,7 +330,9 @@ _sitio_cliente() {
   if nginx -t >/dev/null 2>&1; then
     systemctl reload nginx || no "nginx no se ha podido recargar: mira  systemctl status nginx"
     # ¿LA USA DE VERDAD? (el 25-11 se edito un fichero que nginx no leia)
-    if nginx -T 2>/dev/null | grep -Eq "$LOC"; then
+    # sin tuberia: con pipefail, un grep -q que corta antes deja a nginx con
+    # SIGPIPE y el aviso saldria aunque la location este (arbitro del tren)
+    if grep -Eq "$LOC" < <(nginx -T 2>/dev/null); then
       si "nginx: la pagina del cliente (/cliente/) abierta sin login"
     else
       no "he puesto /cliente/ en $sitio, pero nginx no lo esta usando: mira  nginx -T | grep configuration"

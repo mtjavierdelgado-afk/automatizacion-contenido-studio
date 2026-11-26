@@ -203,6 +203,12 @@ def graficas_facil(navegador, datos):
         ok(_esperar_js(pg, "() => EditorCapas._estado().doc.laminas[0].familia === 15", 5), "y vuelve al de antes")
         ok(pg.p.locator("#editor-capas .ce-s-volver-estilo").count() == 0, "el botón se va al volver")
 
+        # en una imagen de dentro, la foto: dice dónde va, sin mandar a otro estilo
+        pg.js("document.querySelectorAll('#editor-capas .ce-tira-lamina')[1].click();")
+        ok(pg.esperar("#editor-capas .ce-s-foto-dentro", "la foto va en la portada", 5)
+           and pg.p.locator("#editor-capas .ce-s-estilos-foto").count() == 0, "en la imagen 2, la foto se explica (sin callejón)")
+        pg.pulsar("#editor-capas .ce-s-ir-portada", "Ir a la portada")
+        ok(_ed(pg, "E.lamina") == 0, "«Ir a la portada» lleva a la 1")
         # añadir una imagen
         n = _ed(pg, "E.doc.laminas.length")
         pg.p.select_option("#editor-capas .ce-s-tipo", "pregunta")
@@ -216,6 +222,7 @@ def graficas_facil(navegador, datos):
         pg.pulsar("#editor-capas .ce-s-guardar", "Guardar")
         ok(_esperar_js(pg, "() => { const E = EditorCapas._estado(); return !!E.piezaId && !E.guardando; }", 120), "se guarda")
         ok(_esperar_js(pg, "() => !document.querySelector('#editor-capas .ce-s-zip').disabled", 5), "y ya se puede descargar")
+        ok(pg.p.locator("#editor-capas .ce-volver-crear").count() == 0, "guardada, ya no ofrece volver al paso 2")
         with pg.p.expect_download(timeout=60000) as bajada:
             pg.pulsar("#editor-capas .ce-s-zip")
         ok(bajada.value.suggested_filename.endswith(".zip"), f"el ZIP baja ({bajada.value.suggested_filename})")
@@ -318,6 +325,8 @@ def graficas_facil(navegador, datos):
         c = _capa(pg, t["id"])
         ok(abs(c["x"] - t["cx"]) < 1e-6 and abs(c["y"] - t["cy"]) < 1e-6, "y no lo mueve")
         pg.captura("facil-6-movil-editor")
+        ok(pg.p.evaluate("() => { const d = document.querySelector('#editor-capas .ce-der'); return d.scrollHeight <= d.clientHeight + 1; }"),
+           "en el móvil el panel no queda encerrado en una caja con su propio scroll (árbitro, 26-11)")
         ancho = pg.p.evaluate("() => document.getElementById('editor-capas').scrollWidth")
         ok(ancho <= 392, f"el editor sencillo cabe a lo ancho del móvil ({ancho} px)")
         pg.p.keyboard.type("!")

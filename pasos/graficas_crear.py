@@ -31,6 +31,10 @@ MAX_POR_TANDA = 4
 ANCHO_MINIATURA = 270
 #: Las familias que pintan una foto en su portada (si pusiste una, salen primero).
 CON_FOTO = tuple(n for n in sorted(K.FAMILIAS) if "«img»" in G._PL.PLANTILLAS[n])
+#: Las que la pintan GRANDE (al menos un cuarto de la portada; medido el 26-11 y
+#: comprobado en prueba_graficas_facil): en 8, 9, 14 y 15 es un avatar o una
+#: miniatura, y una imagen de un vídeo ahí apenas se ve.
+CON_FOTO_GRANDE = (2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 16)
 
 
 def _formato(que, formato):
@@ -87,7 +91,7 @@ def orden_de_familias(con_foto):
     todas = sorted(K.FAMILIAS)
     if not con_foto:
         return todas
-    return list(CON_FOTO) + [n for n in todas if n not in CON_FOTO]
+    return list(CON_FOTO_GRANDE) + [n for n in todas if n not in CON_FOTO_GRANDE]
 
 
 def crear(pincel, que, n, formato, piezas, foto="", kit=None, logo=None, logo_oscuro=None, marca="", nombre=""):
@@ -112,7 +116,7 @@ def crear(pincel, que, n, formato, piezas, foto="", kit=None, logo=None, logo_os
         # una sola imagen: sin la marca, el número ni el «Desliza» de un carrusel
         doc["laminas"][0]["capas"] = [c for c in doc["laminas"][0]["capas"] if not c.get("enlace")]
     if foto and not _poner_foto(doc, foto):
-        avisos.append("Este estilo no lleva foto en la portada: tu foto no sale. Elige un estilo con foto "
-                      "o ponla con «Cambiar foto».")
+        avisos.append("Este estilo no lleva foto en la portada: tu foto no sale. Elige un estilo marcado "
+                      "«📷 con foto» con «Otro estilo».")
     doc["nombre"] = (nombre or titulo)[:80]
     return C.limpiar_doc(doc), avisos

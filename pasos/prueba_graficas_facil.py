@@ -165,7 +165,11 @@ def montaje(pincel):
             for i in ((0, len(doc["laminas"]) - 1) if que == "carrusel" else (0,)):
                 _png, _av, medida = C.pintar(pincel, doc, None, lambda _n: None, None, None, i)
                 ok(not medida["fuera"] and not medida["choca"], f"{que} {n} imagen {i + 1}: nada tapado ni encimado {medida}")
-    ok(CR.orden_de_familias(True)[0] in CR.CON_FOTO and CR.orden_de_familias(False) == sorted(K.FAMILIAS),
+    for n in CR.CON_FOTO:
+        d, _a = CR.crear(pincel, "publicacion", n, None, [("portada", {"titulo": "Hola"})], "img_0123456789abcdef.jpg")
+        area = max([c["w"] * c["h"] / 100 for c in d["laminas"][0]["capas"] if c["tipo"] == "imagen"] or [0])
+        ok((area >= 25) == (n in CR.CON_FOTO_GRANDE), f"estilo {n}: «📷 con foto» solo si la foto es grande ({area:.1f} % de la portada)")
+    ok(CR.orden_de_familias(True)[0] in CR.CON_FOTO_GRANDE and CR.orden_de_familias(True)[0] in CR.CON_FOTO and CR.orden_de_familias(False) == sorted(K.FAMILIAS),
        "con foto, primero los estilos que la usan")
     doc, avisos = CR.crear(pincel, "publicacion", 2, None, piezas, "img_0123456789abcdef.jpg")
     ok(any(c["tipo"] == "imagen" and c.get("rol") == "foto" and c["src"] == "img_0123456789abcdef.jpg"

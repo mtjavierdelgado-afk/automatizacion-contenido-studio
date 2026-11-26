@@ -788,8 +788,9 @@
     B.textContent = '';
     B.appendChild(boton('← Volver', { title: 'Cerrar el editor', clase: 'ce-btn ce-volver' }, () => cerrar()));
     if (ED.opc.desdeCrear && !ED.piezaId) {
-      B.appendChild(boton('← Cambiar tema, foto o estilo', { clase: 'ce-btn ce-volver-crear',
-        title: 'Vuelve al paso 2 de «+ Crear» con todo lo que elegiste' }, volverACrear));
+      ED.bVolverCrear = boton('← Cambiar tema, foto o estilo', { clase: 'ce-btn ce-volver-crear',
+        title: 'Vuelve al paso 2 de «+ Crear» con todo lo que elegiste' }, volverACrear);
+      B.appendChild(ED.bVolverCrear);
     }
     ED.titulo = el('span', { clase: 'ce-titulo' });
     B.appendChild(ED.titulo);
@@ -854,6 +855,7 @@
     // modo sencillo: descargar y la historia salen de lo guardado
     const listo = !!ED.piezaId && !sinGuardar() && !ED.guardando;
     for (const b of ED.sBotones || []) if (b.isConnected) b.disabled = !listo;
+    if (ED.bVolverCrear) ED.bVolverCrear.disabled = !!ED.guardando;
     if (ED.sPista && ED.sPista.isConnected) ED.sPista.hidden = listo;
   }
 
@@ -3323,9 +3325,10 @@
 
   /** Del editor de una pieza recién creada al paso 2 de «+ Crear», con lo elegido. */
   function volverACrear() {
+    if (ED.guardando || ED.piezaId) return;            // guardándose (o ya guardada): ya no es «recién creada»
     terminarEdicionTexto(true);
     if (firmaDoc() !== ED.firmaCreada
-        && !window.confirm('Vuelves al paso 2 con tu tema, tu foto y tu estilo. Lo que has cambiado aquí (textos, adornos) se pierde. ¿Seguir?')) return;
+        && !window.confirm('Vuelves al paso 2 con tu tema, tu foto y tu estilo. Todo lo que cambiaste aquí (textos, foto, estilo, adornos, imágenes añadidas) se pierde. ¿Seguir?')) return;
     const opc = Object.assign({}, ED.opc, { retomar: ED.opc.desdeCrear });
     cerrarYa(false);
     crear(opc);
@@ -3472,6 +3475,12 @@
       onchange: ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f && destino) subirFoto(f, destino.id); } });
     if (!destino) {
       const conEstilos = ED.doc.laminas.some(l => l.familia);
+      if (ED.lamina > 0) {
+        // las imágenes de dentro aún no llevan foto en ningún estilo: se dice, sin mandar a un callejón
+        return grupo('Foto',
+          el('small', { clase: 'ce-pista ce-s-foto-dentro' }, 'En las imágenes de dentro aún no va foto: la foto va en la portada (la 1).'),
+          boton('Ir a la portada', { clase: 'ce-btn ce-ancho ce-s-ir-portada' }, () => irALamina(0)));
+      }
       return grupo('Foto',
         el('small', { clase: 'ce-pista' }, conEstilos ? 'Este estilo no lleva foto. Elige uno marcado «📷 con foto» y luego pon la tuya (o una de tus vídeos).'
           : 'Esta pieza no tiene un hueco para foto.'),
@@ -3698,7 +3707,7 @@
     if (ED) return;                                   // con el editor abierto, primero se cierra
     const raiz = el('div', { clase: 'gc', id: 'crear-grafica', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Crear una gráfica' });
     const S = {
-      opc, cid: opc.cid, raiz, paso: 1, conFoto: [], que: '', formato: '', titulo: '', apoyo: '', tema: '', texto: '', modo: 'tema',
+      opc, cid: opc.cid, raiz, paso: 1, que: '', formato: '', titulo: '', apoyo: '', tema: '', texto: '', modo: 'tema',
       cuantas: 7, piezas: null, piezasDe: '', avisosIA: [], escribiendo: false, creando: false, foto: '', fotoUrl: '', subiendo: false,
       familia: 0, elegidaAMano: false, minis: {}, orden: [], turno: 0, parar: null, espera: null, familias: [], cerrado: false,
     };
@@ -4097,7 +4106,7 @@
       el('span', { clase: 'gc-estilo-nombre' }, nombre(n)), marcaFoto(n));
     })));
     if (S.foto && conFotoConocidos.length && S.familia && !conFotoConocidos.includes(S.familia)) {
-      C.appendChild(el('p', { clase: 'ce-pista malo gc-sin-hueco' }, 'El estilo elegido no lleva foto: tu foto no saldrá. Elige uno marcado «📷 con foto».'));
+      C.appendChild(el('p', { clase: 'ce-pista malo gc-sin-hueco' }, 'Con el estilo elegido tu foto sale pequeña o no sale. Elige uno marcado «📷 con foto».'));
     }
   }
 

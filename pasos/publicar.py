@@ -3051,6 +3051,54 @@ def proxima_hora(hora):
 
 # ---------------------------------------------------------------- enviar
 
+def textos_para_el_cliente(datos, ajustes, info=None):
+    """{red: {titulo, texto, primer_comentario}} de cada red con texto: lo que
+    SALE, compuesto como al enviarlo (`componer`: la llamada a la acción, la
+    firma, los hashtags que caben, los capítulos de YouTube, #Shorts y el
+    recorte de la red), para que el cliente apruebe eso mismo
+    (publicar-redes-3)."""
+    salida = {}
+    for red in REDES:
+        t = ((datos or {}).get("textos") or {}).get(red) or {}
+        if not str(t.get("descripcion") or "").strip():
+            continue
+        if info:
+            comp = componer(red, t, ajustes or {}, info, (datos or {}).get("capitulos"), datos)
+            titulo, texto = comp.get("titulo") or "", comp.get("texto") or ""
+        else:
+            titulo, texto = str(t.get("titulo") or ""), _texto_para(t, ajustes or {}, "", red)[0]
+        salida[red] = {"titulo": titulo, "texto": texto,
+                       "primer_comentario": str(t.get("primer_comentario") or "")}
+    return salida
+
+
+def _espera_al_cliente(raiz, pid, info, ajustes, redes, datos=None):
+    """«pendiente», «cambios» o «cambiado» si el vídeo espera al cliente para
+    salir en esas redes (pasos/aprobacion.py); «ilegible» si no se pueden leer
+    las aprobaciones (FALLA CERRADO); "" si puede salir. `datos`: los textos
+    que se van a mandar (si no, los de ahora)."""
+    try:
+        from pasos import aprobacion
+    except ImportError:                                     # pragma: no cover
+        import aprobacion
+    datos = datos if datos is not None else _leer_video(raiz, pid)
+    por_red = textos_para_el_cliente(datos, ajustes, info)
+    try:
+        return aprobacion.espera_al_cliente(
+            raiz, pid, aprobacion.huellas_por_red(info.get("mp4_huella") or "", por_red),
+            [r for r in redes if r in por_red])
+    except aprobacion.ErrorAprobacion:
+        return "ilegible"
+
+
+def _por_que_espera(espera):
+    return {"cambios": "el cliente ha pedido cambios en este vídeo",
+            "cambiado": "el cliente no ha aprobado lo que saldría ahora (cambió el vídeo o el "
+                        "texto de una red, o esa red no la vio)",
+            "ilegible": "no puedo leer las aprobaciones de los clientes (el fichero está dañado)",
+            }.get(espera, "el cliente todavía no ha aprobado este vídeo")
+
+
 def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
     """Prepara un envío por red y, si está confirmado, lo sube.
 
@@ -3070,6 +3118,16 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
         raise ErrorPublicar("este vídeo todavía no está montado: móntalo antes de publicarlo", 409)
     if modo != "pendiente" and cuerpo.get("confirmado") is not True:
         raise ErrorPublicar("falta confirmar el envío: nada sale sin tu OK", 400)
+    # LA APROBACIÓN DEL CLIENTE (publicar-redes-3): con un enlace vigente que el
+    # cliente no ha aprobado, el vídeo no sale (quedar en «espera tu OK», sí).
+    # Una red SIN texto se dice más abajo como «falta el texto». Se vuelve a
+    # mirar en `_subir_lote` con los MISMOS textos que se mandan.
+    espera = (_espera_al_cliente(raiz, pid, info, ajustes, redes)
+              if modo != "pendiente" else "")
+    if espera:
+        raise ErrorPublicar(
+            _por_que_espera(espera) + ": no sale hasta que lo apruebe. Si quieres publicarlo "
+            "igualmente, anula su enlace en «Aprobación del cliente».", 409)
     cuando = None
     if modo in ("programar", "pendiente") and cuerpo.get("cuando"):
         momento = _leer_momento(cuerpo.get("cuando"))
@@ -3280,6 +3338,14 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
     if not envios:
         return
     redes = [e["red"] for e in envios]
+    # LA APROBACIÓN DEL CLIENTE, otra vez y con LOS MISMOS textos que se van a
+    # mandar (un texto cambiado entre el «Publicar» y la subida no se cuela)
+    espera = _espera_al_cliente(raiz, pid, info, ajustes, redes, datos=datos)
+    if espera:
+        motivo = _por_que_espera(espera) + ": no se ha mandado"
+        _actualizar_lote(raiz, pid, lote, lambda e: e.update(estado="fallido", error=motivo))
+        _SUBIENDO.discard(lote)          # (reintentar lo apuntó antes de llamar)
+        return
     campos = {}
     compuestos = {}
     for e in envios:
@@ -3401,6 +3467,11 @@ def reintentar(raiz, info, ajustes, eid, en_hilo=True):
                                 "(«comprobar»); lo demás se publica otra vez como envío nuevo", 409)
         if envio["lote"] in _SUBIENDO:
             raise ErrorPublicar("ese envío se está subiendo ahora mismo", 409)
+        # LA APROBACIÓN DEL CLIENTE (publicar-redes-3): reintentar también espera
+        espera = _espera_al_cliente(raiz, pid, info, ajustes, [envio.get("red")])
+        if espera:
+            raise ErrorPublicar(_por_que_espera(espera) + ": no sale hasta que lo apruebe, o "
+                                "anula su enlace", 409)
         if envio.get("modo") == "programado":
             momento = _leer_momento(envio.get("cuando"))
             if momento and momento <= ahora_lima() + dt.timedelta(minutes=2):

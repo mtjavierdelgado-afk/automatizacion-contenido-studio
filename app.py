@@ -26722,6 +26722,316 @@ def graficas_logo(cid: str, variante: str, peticion: Request):
     return servir_fichero(peticion, ruta)
 
 
+# ================================================================ APROBACIÓN
+# La aprobación del cliente por enlace (rama `publicar-redes-3`, 25-11-2026;
+# plan en `estado/plan_aprobacion_cliente_2026-11-11.md`). Lo de `pasos/
+# aprobacion.py` guarda los enlaces; aquí van las rutas.
+#
+# DOS LADOS, Y SOLO UNO ES PÚBLICO:
+# - el dueño (detrás del login, como todo /api/): crear, ver y anular el enlace
+#   de un vídeo, en `/api/publicar/videos/{pid}/aprobacion`;
+# - el cliente, SIN login: `/cliente/<token>` y lo que cuelga de ahí. nginx
+#   deja pasar SOLO `/cliente/` sin preguntar al login (`asvs actualizar` añade
+#   esa `location`, con su límite de peticiones). Cada ruta valida el token
+#   ANTES de leer nada, y con un token que no vale todas dicen lo mismo.
+# Nada de vídeos, params ni firmas (regla 1): se lee el MP4 y la ficha de
+# Publicar; lo único que se escribe es `_sistema/publicar/aprobaciones.json`.
+
+try:
+    from pasos.aprobacion import ErrorAprobacion as _ErrorAprobacion
+except ImportError:                                         # pragma: no cover
+    from aprobacion import ErrorAprobacion as _ErrorAprobacion
+
+
+@app.exception_handler(_ErrorAprobacion)
+async def _manejar_error_aprobacion(peticion, fallo):
+    """Un fallo de las aprobaciones (p. ej. el fichero dañado: 503) se dice con
+    su código, nunca como un 500 con la traza."""
+    return _respuesta_error(fallo.codigo, str(fallo))
+
+
+#: Las únicas rutas que pueden llegar por la puerta pública de nginx
+_RUTA_PUBLICA = re.compile(r"^/cliente/(_/cliente\.(js|css)|[A-Za-z0-9_-]{40,64}"
+                           r"(/(datos|video\.mp4|respuesta))?)$")
+
+
+class _SoloLoPublico:
+    """SEGUNDA BARRERA de la página del cliente, en ASGI puro (no envuelve ni
+    retrasa el vídeo con Range ni las respuestas que se van mandando poco a
+    poco, como haría un middleware «http»):
+    - nginx marca con X-Asvs-Publico lo que entra SIN login por
+      `location ^~ /cliente/`. nginx ya filtra la dirección, pero resuelve los
+      «..» y el estudio no: lo marcado que no sea EXACTAMENTE una ruta del
+      cliente, aquí no pasa (404).
+    - Un fallo imprevisto en /cliente/<token>… se apunta SIN la dirección
+      (llevaría el token al registro del servicio)."""
+
+    def __init__(self, siguiente):
+        self.siguiente = siguiente
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            return await self.siguiente(scope, receive, send)
+        cruda = scope.get("raw_path") or str(scope.get("path") or "").encode()
+        cruda = cruda.decode("latin-1") if isinstance(cruda, bytes) else str(cruda)
+        cabeceras = dict(scope.get("headers") or [])
+        if cabeceras.get(b"x-asvs-publico") and not _RUTA_PUBLICA.match(cruda):
+            return await _respuesta_error(404, "no existe")(scope, receive, send)
+        if not cruda.startswith("/cliente/"):
+            return await self.siguiente(scope, receive, send)
+        empezada = False
+
+        async def enviar(mensaje):
+            nonlocal empezada
+            if mensaje.get("type") == "http.response.start":
+                empezada = True
+            await send(mensaje)
+        try:
+            await self.siguiente(scope, receive, enviar)
+        except Exception:                                   # noqa: BLE001
+            marca = uuid.uuid4().hex[:8]
+            print(f"[500 {marca}] {scope.get('method')} /cliente/… (sin el token)\n"
+                  + traceback.format_exc(limit=8), file=sys.stderr, flush=True)
+            if not empezada:
+                await _respuesta_error(500, "Algo ha fallado: inténtalo de nuevo más tarde.",
+                                       {"marca": marca})(scope, receive, send)
+
+
+app.add_middleware(_SoloLoPublico)
+
+
+def _aprobacion():
+    try:
+        from pasos import aprobacion as modulo_aprobacion
+    except ImportError:                                     # pragma: no cover
+        import aprobacion as modulo_aprobacion
+    return modulo_aprobacion
+
+
+def _por_aprobacion(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except _aprobacion().ErrorAprobacion as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+#: Lo que se dice de un enlace que no vale, sea por lo que sea
+_ENLACE_NO_VALE = "Este enlace no existe o ya no vale: pide uno nuevo a quien te lo mandó."
+#: Cabeceras de todo lo que ve el cliente: que no se guarde ni se indexe, y que
+#: el token no viaje como «Referer» a ninguna parte
+_CABECERAS_CLIENTE = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow",
+                      "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
+                      "X-Frame-Options": "DENY"}
+
+
+def _cliente_registro(token):
+    """El enlace del token, o 404 con el mismo texto para todo lo que no vale.
+    Si las aprobaciones no se pueden leer, un 503 con un texto para el cliente
+    (nada de cómo va el Studio por dentro)."""
+    aprob = _aprobacion()
+    try:
+        registro = aprob.de_token(raiz_proyectos(), token)
+    except aprob.ErrorAprobacion:
+        raise ErrorApi(503, aprob.NO_SE_PUEDE_AHORA) from None
+    if not registro:
+        raise ErrorApi(404, _ENLACE_NO_VALE)
+    return registro
+
+
+def _cliente_contexto(registro):
+    try:
+        return contexto(registro["pid"])
+    except ErrorApi:
+        # el vídeo se borró después de mandar el enlace
+        raise ErrorApi(404, _ENLACE_NO_VALE) from None
+
+
+def _lo_que_ve_el_cliente(ctx):
+    """Lo que el cliente ve y aprueba ahora mismo: {info, por_red, redes,
+    huellas (por red), huella (de toda la página)}. Las mismas cuentas que hace
+    `publicar.enviar` al decidir si el vídeo sale."""
+    P, aprob = _publicar(), _aprobacion()
+    info = _info_para_publicar(ctx)
+    datos = P._leer_video(raiz_proyectos(), ctx.id)
+    por_red = P.textos_para_el_cliente(datos, P.ajustes_de(raiz_proyectos(), info["cliente"]), info)
+    redes = aprob.redes_que_ve(datos, por_red, P.REDES)
+    huellas = aprob.huellas_por_red(info.get("mp4_huella") or "", {r: por_red[r] for r in redes})
+    return {"info": info, "por_red": por_red, "redes": redes, "huellas": huellas,
+            "huella": aprob.huella_de_lo_que_ve(info.get("mp4_huella") or "", huellas, redes)}
+
+
+def _ficha_para_cliente(registro):
+    """SOLO lo que el cliente necesita: el nombre del vídeo, el del proyecto,
+    los textos de las redes elegidas y la fecha prevista. Nada de claves,
+    perfiles, costes, rutas ni otros vídeos."""
+    P = _publicar()
+    ctx = _cliente_contexto(registro)
+    ve = _lo_que_ve_el_cliente(ctx)
+    info, huella = ve["info"], ve["huella"]
+    datos = P._leer_video(raiz_proyectos(), ctx.id)
+    redes = [dict(ve["por_red"][r], red=r, nombre=P.NOMBRE_RED.get(r, r)) for r in ve["redes"]]
+    # la fecha prevista: el primer envío con hora que siga en pie
+    fechas = sorted(str(e.get("cuando") or "") for e in datos.get("envios") or []
+                    if e.get("estado") in ("espera_ok", "programado")
+                    and not e.get("sin_hora") and e.get("cuando"))
+    return {
+        "video": info.get("nombre") or "", "proyecto": info.get("cliente_nombre") or "",
+        "hay_video": bool(info.get("montado")), "formato": info.get("formato") or "",
+        "duracion_s": info.get("duracion_s") or 0, "redes": redes,
+        "fecha": fechas[0] if fechas else "", "caduca": registro.get("caduca") or "",
+        "estado": registro.get("estado") or "pendiente",
+        "comentario": registro.get("comentario") or "",
+        "respondido_al": registro.get("respondido_al") or "",
+        # aprobó otra cosa (otro montaje u otros textos): que lo vuelva a mirar
+        "cambiado": bool(registro.get("estado") == "aprobado"
+                         and registro.get("huella_aprobada") != huella),
+        "v": huella,
+    }
+
+
+@app.get("/cliente/_/{nombre}")
+def cliente_asset(nombre: str):
+    """El JS y el CSS de la página del cliente (pasan por la `location`
+    pública de nginx, así que van bajo /cliente/)."""
+    if nombre not in ("cliente.js", "cliente.css"):
+        raise ErrorApi(404, f"no existe: {nombre}")
+    destino = os.path.join(RAIZ_WEB, nombre)
+    return FileResponse(destino, media_type=_tipo_de(destino),
+                        headers={**_CABECERAS_CLIENTE, "Cache-Control": "no-cache"})
+
+
+@app.get("/cliente/{token}")
+def cliente_pagina(token: str):
+    """La página del cliente. Sale siempre (con un token que no vale, la propia
+    página lo dice al pedir los datos): el HTML no lleva nada del vídeo."""
+    with open(os.path.join(RAIZ_WEB, "cliente.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    for nombre in ("cliente.css", "cliente.js"):
+        html = html.replace(f'"_/{nombre}"', f'"_/{nombre}?v={_sello_asset(nombre)}"', 1)
+    return HTMLResponse(html, headers=_CABECERAS_CLIENTE)
+
+
+@app.get("/cliente/{token}/datos")
+def cliente_datos(token: str):
+    """Lo que ve el cliente: el vídeo, los textos de cada red y la fecha."""
+    registro = _cliente_registro(token)
+    ficha = _ficha_para_cliente(registro)
+    _aprobacion().marcar_visto(raiz_proyectos(), token)
+    return JSONResponse(ficha, headers=_CABECERAS_CLIENTE)
+
+
+@app.get("/cliente/{token}/video.mp4")
+def cliente_video(token: str, peticion: Request):
+    """El MP4 de ahora del vídeo (con Range, para poder saltar)."""
+    registro = _cliente_registro(token)
+    ctx = _cliente_contexto(registro)
+    mp4, _rel = _mp4_del_video(ctx.proyecto)
+    if not mp4:
+        raise ErrorApi(404, "el vídeo todavía no está montado")
+    respuesta = servir_fichero(peticion, mp4)
+    for clave, valor in _CABECERAS_CLIENTE.items():
+        respuesta.headers[clave] = valor
+    return respuesta
+
+
+@app.post("/cliente/{token}/respuesta")
+def cliente_responder(token: str, cuerpo: dict = Body(default=None)):
+    """{decision: «aprobado» o «cambios», comentario, v: el montaje que vio}"""
+    registro = _cliente_registro(token)
+    cuerpo = _cuerpo(cuerpo)
+    ctx = _cliente_contexto(registro)
+    ve = _lo_que_ve_el_cliente(ctx)
+    huella = ve["huella"]
+    decision = _aprobacion().normalizar_decision(cuerpo.get("decision"))
+    # lo que aprueba es lo que ha visto: si el vídeo o los textos cambiaron
+    # mientras tenía la página abierta, que la recargue
+    if decision == "aprobado" and str(cuerpo.get("v") or "") != huella:
+        raise ErrorApi(409, "El vídeo o sus textos acaban de cambiar: recarga la página para "
+                            "ver lo nuevo antes de aprobarlo.")
+    hecho = _por_aprobacion(_aprobacion().responder, raiz_proyectos(), token,
+                            decision, cuerpo.get("comentario"), huella, ve["huellas"])
+    ctx.bitacora.anotar("aprobacion_cliente", "render", {"estado": hecho["estado"]})
+    anotar_global("aprobacion_cliente", {"pid": ctx.id, "estado": hecho["estado"]})
+    return JSONResponse(hecho, headers=_CABECERAS_CLIENTE)
+
+
+def _aprobacion_para_dueno(ctx):
+    """Lo que ve la ficha: el último enlace (sin token), si el vídeo espera al
+    cliente y, mientras el enlace valga, lo que ya está programado o publicado
+    (eso NO espera al cliente: se dice cada vez, no solo al pedir el enlace)."""
+    P, aprob = _publicar(), _aprobacion()
+    ve = _lo_que_ve_el_cliente(ctx)
+    enlace = aprob.de_video(raiz_proyectos(), ctx.id)
+    ya = []
+    if enlace and enlace.get("vigente"):
+        datos = P._leer_video(raiz_proyectos(), ctx.id)
+        ya = sorted({P.NOMBRE_RED.get(e.get("red"), e.get("red"))
+                     for e in datos.get("envios") or [] if e.get("estado") in P.VIVOS})
+    # red a red, lo mismo que mirará `publicar.enviar`: cuáles salen ya y cuáles
+    # no (cambió su texto o el vídeo, o el cliente no la vio)
+    todas = aprob.huellas_por_red(ve["info"].get("mp4_huella") or "", ve["por_red"])
+    si = aprob.redes_aprobadas(raiz_proyectos(), ctx.id, todas)
+    return {"enlace": enlace,
+            "espera": aprob.espera_al_cliente(raiz_proyectos(), ctx.id, ve["huellas"], ve["redes"]),
+            "redes_aprobadas": [P.NOMBRE_RED.get(r, r) for r in P.REDES if r in si],
+            "redes_sin_aprobar": [P.NOMBRE_RED.get(r, r) for r in ve["redes"] if r not in si]
+            if enlace and enlace.get("estado") == "aprobado" else [],
+            "dias_defecto": aprob.DIAS_DEFECTO, "dias_maximo": aprob.DIAS_MAXIMO,
+            "aviso": ("Ojo: ya está publicado o programado en " + ", ".join(ya)
+                      + ". Eso no espera al cliente; si quieres que espere, cancélalo.") if ya else ""}
+
+
+@app.get("/api/publicar/videos/{pid}/aprobacion")
+def aprobacion_ver(pid: str, peticion: Request):
+    """El último enlace de aprobación del vídeo (sin el token: no se guarda)."""
+    ctx = _ctx_publicable(pid, peticion)
+    return _aprobacion_para_dueno(ctx)
+
+
+@app.post("/api/publicar/videos/{pid}/aprobacion")
+def aprobacion_crear(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{dias?, nota?} -> {token (SOLO ahora), enlace, …}. Anula los anteriores."""
+    ctx = _ctx_publicable(pid, peticion)
+    ve = _lo_que_ve_el_cliente(ctx)
+    info, huella = ve["info"], ve["huella"]
+    if not info.get("montado"):
+        raise ErrorApi(409, "este vídeo todavía no está montado: móntalo antes de pedir "
+                            "la aprobación del cliente")
+    cuerpo = _cuerpo(cuerpo)
+    hecho = _por_aprobacion(_aprobacion().crear, raiz_proyectos(), ctx.id,
+                            cuerpo.get("dias"), cuerpo.get("nota"), huella)
+    ctx.bitacora.anotar("aprobacion_enlace", "render", {"caduca": hecho["enlace"]["caduca"]})
+    return {"token": hecho["token"], **_aprobacion_para_dueno(ctx)}
+
+
+@app.delete("/api/publicar/videos/{pid}/aprobacion/{ident}")
+def aprobacion_anular(pid: str, ident: str, peticion: Request):
+    ctx = _ctx_publicable(pid, peticion)
+    _por_aprobacion(_aprobacion().anular, raiz_proyectos(), ctx.id, ident)
+    ctx.bitacora.anotar("aprobacion_anulada", "render", {})
+    return _aprobacion_para_dueno(ctx)
+
+
+@app.get("/api/publicar/aprobaciones")
+def aprobaciones_respondidas(peticion: Request):
+    """Las respuestas de los clientes, para la Cola (solo de los vídeos que
+    se pueden ver: los de un proyecto con clave sin abrir no salen)."""
+    pids = {v["pid"] for v in _videos_para_publicar(peticion)}
+    P = _publicar()
+    salida = []
+    for r in _aprobacion().respuestas(raiz_proyectos(), pids):
+        # un «pidió cambios» de un enlace ya cerrado deja de salir cuando el
+        # vídeo se publicó después (ya está atendido)
+        if not r.get("vigente") and r.get("estado") == "cambios":
+            envios = P._leer_video(raiz_proyectos(), r["pid"]).get("envios") or []
+            if any(e.get("estado") == "publicado"
+                   and str(e.get("creado") or "") > str(r.get("respondido_al") or "")
+                   for e in envios):
+                continue
+        salida.append(r)
+    return {"respuestas": salida}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Servicio HTTP del Estudio de Video")
     parser.add_argument("--puerto", type=int, default=8020)

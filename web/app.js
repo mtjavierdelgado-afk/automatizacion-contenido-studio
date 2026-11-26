@@ -27516,6 +27516,7 @@ function seccionPorPublicar() {
     listos.appendChild(h('button', { type: 'button', clase: 'mini', onclick: () => { PUB.verMasListos = (PUB.verMasListos || 0) + 30; pintarModulo(); } },
       `Ver ${Math.min(30, visibles.length - tope)} más`));
   }
+  caja.appendChild(bloqueRespuestasClientes() || document.createTextNode(''));
   caja.appendChild(listos);
   return caja;
 }
@@ -28628,6 +28629,7 @@ function pasoCuandoPublicar(f) {
       h('div', { clase: 'meta' }, 'Copia el texto de cada red, descarga el MP4 y súbelo tú. Después, márcalo como subido para que quede en el historial.'),
       fila));
   }
+  caja.appendChild(bloqueAprobacionCliente(f));
   return caja;
 }
 
@@ -37589,4 +37591,220 @@ function abrirPublicoBusquedas(cid) {
   PUB.ajSel = cid;
   PUB.ajTab = 'seo';
   return abrirSeoProyectoPublicar(cid, 'pais_busquedas');
+}
+
+/* ======================================================= APROBACIÓN DEL CLIENTE
+   Rama publicar-redes-3 (25-11-2026). En el paso «Cuándo» de la ficha, «Pedir
+   aprobación al cliente» da un enlace privado (/cliente/<token>) que se le
+   manda al cliente: ve el vídeo, los textos y la fecha y contesta. Mientras no
+   apruebe, el vídeo no sale (el servidor da 409 al publicar o programar).
+   El token solo llega UNA vez, al pedirlo: el servidor guarda su huella. Por
+   eso se guarda en este navegador (tokenCliente), y si se pierde se pide otro. */
+const APROB = { porVideo: {}, pidiendo: {}, respuestas: null, respuestasAl: 0 };
+/* El token, en ESTE navegador (el servidor solo guarda su huella): así el
+   enlace sigue a mano después de recargar. Si el navegador no deja guardar,
+   se queda en la página. */
+const TOKENS_CLIENTE = {};
+/* Se guarda {token, id}: el token solo se enseña si es el del enlace VIGENTE
+   (pedido otro desde otro sitio, este ya no vale y no se ofrece). */
+function tokenCliente(pid, enlace) {
+  let guardado = TOKENS_CLIENTE[pid];
+  try {
+    const crudo = localStorage.getItem(`aprobacion-cliente:${pid}`);
+    if (crudo) guardado = JSON.parse(crudo);
+  } catch (e) { /* sin almacenamiento o algo raro guardado: vale lo de la página */ }
+  if (!guardado || !enlace || guardado.id !== enlace.id) return '';
+  return String(guardado.token || '');
+}
+function guardarTokenCliente(pid, token, id) {
+  const valor = token ? { token, id } : null;
+  if (valor) TOKENS_CLIENTE[pid] = valor; else delete TOKENS_CLIENTE[pid];
+  try {
+    if (valor) localStorage.setItem(`aprobacion-cliente:${pid}`, JSON.stringify(valor));
+    else localStorage.removeItem(`aprobacion-cliente:${pid}`);
+  } catch (e) { /* sin almacenamiento: vale lo de la página */ }
+}
+const DIAS_ENLACE_CLIENTE = [3, 7, 14, 30];
+
+function enlaceDelCliente(token) {
+  return `${location.origin}${BASE}/cliente/${token}`;
+}
+
+function cargarAprobacion(pid, forzar) {
+  const ya = APROB.porVideo[pid];
+  if (!pid || APROB.pidiendo[pid] || (!forzar && ya && Date.now() - ya.al < 20000)) return;
+  APROB.pidiendo[pid] = true;
+  pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/aprobacion`))
+    .then(d => { APROB.porVideo[pid] = { datos: d, al: Date.now() }; })
+    .catch(e => { APROB.porVideo[pid] = { error: e.message, al: Date.now() }; })
+    .finally(() => { APROB.pidiendo[pid] = false; if (PUB.pid === pid) repintarPublicarSinPisar(); });
+}
+
+async function pedirEnlaceCliente(pid, dias) {
+  const previo = ((APROB.porVideo[pid] || {}).datos || {}).enlace;
+  if (previo && previo.vigente && !confirm('El enlace de antes dejará de valer y el cliente tendrá que volver a '
+    + 'contestar con el nuevo (aunque ya lo hubiera aprobado). ¿Pedir uno nuevo?')) return;
+  try {
+    const d = await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/aprobacion`),
+      { method: 'POST', cuerpo: { dias } });
+    guardarTokenCliente(pid, d.token, (d.enlace || {}).id);
+    APROB.porVideo[pid] = { datos: d, al: Date.now() };
+    toast('Enlace listo: cópialo y mándaselo al cliente');
+  } catch (e) {
+    toast(e.message, true);
+  }
+  pintarModulo();
+}
+
+async function anularEnlaceCliente(pid, ident) {
+  if (!confirm('El cliente ya no podrá abrir el enlace, y el vídeo dejará de esperarle. ¿Anularlo?')) return;
+  try {
+    const d = await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/aprobacion/${encodeURIComponent(ident)}`),
+      { method: 'DELETE' });
+    guardarTokenCliente(pid, '');
+    APROB.porVideo[pid] = { datos: d, al: Date.now() };
+    toast('Enlace anulado');
+  } catch (e) {
+    toast(e.message, true);
+  }
+  pintarModulo();
+}
+
+function copiarEnlaceCliente(url) {
+  const hecho = () => toast('Enlace copiado');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(hecho).catch(() => toast('No he podido copiarlo: selecciónalo y cópialo a mano', true));
+  } else {
+    toast('Selecciona el enlace y cópialo a mano', true);
+  }
+}
+
+function estadoEnlaceCliente(enlace, espera) {
+  if (!enlace) return null;
+  const cuando = enlace.respondido_al ? cuandoLegible(enlace.respondido_al) : '';
+  if (!enlace.vigente) {
+    const cerrado = enlace.anulado ? 'El último enlace está anulado' : 'El último enlace caducó';
+    // lo último que dijo el cliente NO se pierde al cerrarse el enlace
+    if (enlace.estado === 'cambios') {
+      return h('div', { clase: 'caja-aviso aprob-estado' },
+        `${cerrado} (el vídeo ya no le espera), pero lo último que dijo fue pedir cambios (${cuando}):`,
+        h('div', { clase: 'aprob-comentario' }, `«${enlace.comentario}»`));
+    }
+    return h('div', { clase: 'meta aprob-estado' }, `${cerrado}: el vídeo ya no espera al cliente.`
+      + (enlace.estado === 'aprobado' ? ` Lo había aprobado (${cuando}).` : ''),
+      enlace.estado === 'aprobado' && enlace.comentario ? h('div', { clase: 'aprob-comentario' }, `«${enlace.comentario}»`) : null);
+  }
+  if (espera === 'cambiado') {
+    const d = (APROB.porVideo[PUB.pid] || {}).datos || {};
+    const salen = d.redes_aprobadas || [];
+    const faltan = d.redes_sin_aprobar || [];
+    return h('div', { clase: 'caja-aviso aprob-estado' },
+      `El cliente lo aprobó (${cuando}), pero después cambiaste el vídeo o algún texto. `
+      + (salen.length ? `Ya puede salir en: ${salen.join(', ')}. ` : '')
+      + (faltan.length ? `Sin su «sí»: ${faltan.join(', ')}. ` : 'No sale hasta que apruebe lo nuevo. ')
+      + 'Pídele que abra el mismo enlace y lo vuelva a aprobar.');
+  }
+  if (enlace.estado === 'aprobado') {
+    const d = (APROB.porVideo[PUB.pid] || {}).datos || {};
+    const faltan = d.redes_sin_aprobar || [];
+    return h('div', { clase: 'aprob-estado aprob-bien' }, `✓ El cliente lo aprobó (${cuando})`
+      + ((d.redes_aprobadas || []).length ? ` para ${d.redes_aprobadas.join(', ')}.` : '.'),
+      faltan.length ? h('div', { clase: 'caja-aviso' }, `Sin su «sí» (cambió el texto o no la vio): ${faltan.join(', ')}. `
+        + 'Esas no salen hasta que lo vuelva a aprobar con el mismo enlace.') : null,
+      enlace.comentario ? h('div', { clase: 'aprob-comentario' }, `«${enlace.comentario}»`) : null);
+  }
+  if (enlace.estado === 'cambios') {
+    return h('div', { clase: 'caja-aviso aprob-estado' }, `✎ El cliente pidió cambios (${cuando}):`,
+      h('div', { clase: 'aprob-comentario' }, `«${enlace.comentario}»`),
+      h('div', { clase: 'meta' }, 'Haz los cambios, vuelve a montar y pídele que lo mire otra vez con el mismo enlace.'));
+  }
+  return h('div', { clase: 'meta aprob-estado' }, '⏳ Esperando al cliente: '
+    + (enlace.visto ? `ya lo abrió (${cuandoLegible(enlace.visto_al)}), pero aún no contesta.` : 'todavía no lo ha abierto.'));
+}
+
+/* EL BLOQUE del paso «Cuándo». */
+function bloqueAprobacionCliente(f) {
+  const pid = PUB.pid || (f || {}).pid;
+  if (!pid) return null;
+  cargarAprobacion(pid);
+  const caja = h('div', { clase: 'bloque aprob-cliente' }, h('h4', {}, 'Aprobación del cliente'));
+  const leido = APROB.porVideo[pid];
+  if (!leido) { caja.appendChild(h('div', { clase: 'meta' }, 'mirando…')); return caja; }
+  if (leido.error) { caja.appendChild(h('div', { clase: 'meta' }, `No he podido mirarlo: ${leido.error}`)); return caja; }
+  const d = leido.datos || {};
+  const enlace = d.enlace;
+  const token = tokenCliente(pid, enlace);
+  if (!enlace) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Mándale al cliente un enlace privado: verá el vídeo, los textos y la fecha, '
+      + 'y podrá aprobarlo o pedir cambios sin entrar a nada. Mientras no lo apruebe, este vídeo no sale.'));
+  } else {
+    caja.appendChild(estadoEnlaceCliente(enlace, d.espera));
+  }
+  if (token && enlace && enlace.vigente) {
+    const url = enlaceDelCliente(token);
+    caja.appendChild(h('div', { clase: 'fila aprob-enlace' },
+      h('input', { type: 'text', readonly: true, value: url, clase: 'crece', 'aria-label': 'Enlace para el cliente',
+        onfocus: ev => ev.target.select() }),
+      h('button', { type: 'button', clase: 'mini primario', onclick: () => copiarEnlaceCliente(url) }, 'Copiar'),
+      h('a', { clase: 'boton mini', href: `https://wa.me/?text=${encodeURIComponent('Mira el vídeo y dime si lo apruebo: ' + url)}`,
+        target: '_blank', rel: 'noopener noreferrer' }, 'WhatsApp'),
+      h('a', { clase: 'boton mini', href: url, target: '_blank', rel: 'noopener noreferrer' }, 'Verlo como el cliente')));
+    caja.appendChild(h('div', { clase: 'meta' }, 'El enlace solo lo guarda este navegador: cópialo y mándalo. En otro navegador, o si lo pierdes, pide otro (el de antes dejará de valer).'));
+  } else if (enlace && enlace.vigente) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'El enlace se pidió en otro navegador (o se borró de este): si necesitas mandarlo otra vez, pide otro.'));
+  }
+  if (BASE) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' }, `Ojo: este Studio va en «${BASE}/». El enlace del cliente solo se abre `
+      + 'sin contraseña en la instalación principal (la de la raíz del dominio).'));
+  }
+  if (d.aviso) caja.appendChild(h('div', { clase: 'caja-aviso' }, d.aviso));
+  if (enlace && enlace.vigente) {
+    caja.appendChild(h('div', { clase: 'meta' }, `Vale hasta el ${cuandoLegible(enlace.caduca)}.`));
+  }
+  const dias = h('select', { 'aria-label': 'Cuántos días vale el enlace' },
+    ...DIAS_ENLACE_CLIENTE.map(n => h('option', { value: String(n), selected: n === (d.dias_defecto || 7) }, `${n} días`)));
+  const fila = h('div', { clase: 'fila aprob-botones' },
+    h('label', { clase: 'etiqueta-campo' }, 'Vale', dias),
+    h('button', { type: 'button', clase: 'mini' + (enlace && enlace.vigente ? '' : ' primario'),
+      onclick: () => pedirEnlaceCliente(pid, Number(dias.value)) },
+    enlace && enlace.vigente ? 'Pedir otro enlace' : 'Pedir aprobación al cliente'));
+  if (enlace && enlace.vigente) {
+    fila.appendChild(h('button', { type: 'button', clase: 'mini', onclick: () => anularEnlaceCliente(pid, enlace.id) },
+      'Anular el enlace'));
+  }
+  caja.appendChild(fila);
+  return caja;
+}
+
+/* LA LÍNEA de «Por publicar»: las últimas respuestas de los clientes. */
+function bloqueRespuestasClientes() {
+  if (!APROB.respuestas || Date.now() - APROB.respuestasAl > 30000) {
+    if (!APROB.cargandoRespuestas) {
+      APROB.cargandoRespuestas = true;
+      pedir(rutaPublicar('/aprobaciones'))
+        .then(d => { APROB.respuestas = d.respuestas || []; APROB.errorRespuestas = ''; })
+        .catch(e => { APROB.respuestas = APROB.respuestas || []; APROB.errorRespuestas = e.message; })
+        .finally(() => { APROB.respuestasAl = Date.now(); APROB.cargandoRespuestas = false;
+          if (MODULOS.actual === 'publicar' && PUB.seccion === 'porpublicar') repintarPublicarSinPisar(); });
+    }
+  }
+  // los que piden cambios se quedan aunque el enlace se cierre: no se pierden
+  const lista = (APROB.respuestas || []).filter(r => r.vigente || r.estado === 'cambios').slice(0, 5);
+  if (!lista.length && APROB.errorRespuestas) {
+    // que no desaparezca sin decir por qué (p. ej. el fichero de aprobaciones dañado)
+    return h('section', { clase: 'bloque aprob-respuestas' }, h('h3', {}, 'Lo que han contestado tus clientes'),
+      h('div', { clase: 'caja-aviso' }, `No se han podido leer: ${APROB.errorRespuestas}`));
+  }
+  if (!lista.length) return null;
+  const nombres = {};
+  ((PUB.cola || {}).listos || []).forEach(v => { nombres[v.pid] = v.nombre || v.pid; });
+  return h('section', { clase: 'bloque aprob-respuestas' },
+    h('h3', {}, 'Lo que han contestado tus clientes'),
+    ...lista.map(r => h('div', { clase: 'fila aprob-respuesta' },
+      h('span', { clase: r.estado === 'aprobado' ? 'aprob-chip aprob-bien' : 'aprob-chip aprob-cambios' },
+        r.estado === 'aprobado' ? '✓ Aprobado' : '✎ Pide cambios'),
+      h('span', { clase: 'crece' }, h('b', {}, recortar(nombres[r.pid] || 'Vídeo', 50)),
+        r.comentario ? h('span', { clase: 'meta' }, ` · «${recortar(r.comentario, 90)}»`) : null,
+        h('span', { clase: 'meta' }, ` · ${cuandoLegible(r.respondido_al)}`)),
+      h('button', { type: 'button', clase: 'mini', onclick: () => irASeccionPublicar('ficha', r.pid) }, 'Abrir ›'))));
 }

@@ -497,6 +497,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/portadas/catalogo` | Plantillas, paletas, fuentes, elementos y formatos de las portadas. |
 | `GET` | `/api/pronunciaciones` | Las palabras que la voz dice como se escriben aqui (sobre todo en ingles). |
 | `PUT` | `/api/pronunciaciones` | {lista: [{escrito, dicho}]} -> la lista guardada. No graba nada ni paga nada. |
+| `GET` | `/api/publicar/aprobaciones` | Las respuestas de los clientes, para la Cola (solo de los vídeos que |
 | `GET` | `/api/publicar/cola` | Los videos listos para publicar y los envios de la semana (hora de Lima). |
 | `GET` | `/api/publicar/estado` | Si hay clave de Upload-Post (y de donde sale). Nunca la clave. |
 | `GET` | `/api/publicar/horarios` | El mejor día y hora de cada red con lo propio (o el punto de partida |
@@ -523,6 +524,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/publicar/videos/{pid}` | La ficha de publicar de un video: redes, textos, encaje, envios. |
 | `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?, |
 | `POST` | `/api/publicar/videos/{pid}/a-mano` | «Lo he subido yo»: {red, url?}. Queda en el historial. |
+| `GET` | `/api/publicar/videos/{pid}/aprobacion` | El último enlace de aprobación del vídeo (sin el token: no se guarda). |
+| `POST` | `/api/publicar/videos/{pid}/aprobacion` | {dias?, nota?} -> {token (SOLO ahora), enlace, …}. Anula los anteriores. |
+| `DELETE` | `/api/publicar/videos/{pid}/aprobacion/{ident}` | — |
 | `POST` | `/api/publicar/videos/{pid}/copiado` | {red}: se copiaron los textos de esa red para publicar a mano. Solo lo |
 | `POST` | `/api/publicar/videos/{pid}/emojis` | «✨ Más emojis» (rama `textos-emojis`): {red, campo: titulo|descripcion, |
 | `POST` | `/api/publicar/videos/{pid}/enviar` | {redes, modo: ahora|programar|pendiente, cuando?, confirmado, repetir?} |
@@ -597,8 +601,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/vidiq/probar` | Prueba la clave contra vidIQ (`vidiq_balance`): {estado, mensaje, saldo}. |
 | `GET` | `/api/vidiq/videos/{pid}` | El último «Mejorar con vidIQ» de un vídeo y si sigue consultando. |
 | `POST` | `/api/vidiq/videos/{pid}/titulo` | «Mejorar con vidIQ»: la palabra clave del vídeo, la nota de su título de |
+| `GET` | `/cliente/_/{nombre}` | El JS y el CSS de la página del cliente (pasan por la `location` |
+| `GET` | `/cliente/{token}` | La página del cliente. Sale siempre (con un token que no vale, la propia |
+| `GET` | `/cliente/{token}/datos` | Lo que ve el cliente: el vídeo, los textos de cada red y la fecha. |
+| `POST` | `/cliente/{token}/respuesta` | {decision: «aprobado» o «cambios», comentario, v: el montaje que vio} |
+| `GET` | `/cliente/{token}/video.mp4` | El MP4 de ahora del vídeo (con Range, para poder saltar). |
 | `GET` | `/{fichero}` | Sirve un fichero suelto de web/ (app.js, estilo.css...). |
 
 ---
 
-**487 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**496 endpoints.** Escrito por `generar_api.py` desde `app.py`.

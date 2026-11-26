@@ -689,6 +689,20 @@ botón está apagado y la barra dice por qué («Falta el texto de Instagram»,
    siempre, con botones que dicen lo que hacen: «Programar», «Enviar solo a
    TikTok», «No enviar nada»). Al programar se vuelve al **Calendario**, en la
    semana de ese día, con «Programado para … ✓» y **Volver a la ficha**.
+   Debajo, **Aprobación del cliente**: **Pedir aprobación al cliente** da un
+   enlace privado (vale 3, 7, 14 o 30 días) con **Copiar**, **WhatsApp** y
+   **Verlo como el cliente**. El cliente lo abre sin entrar a nada: ve el
+   vídeo, el texto de cada red y la fecha prevista, y pulsa **Aprobar** o
+   **Pedir cambios** (diciendo qué). Mientras no lo apruebe, el vídeo **no
+   sale**: ni «Publicar ahora» ni «Programar» (dejarlo esperando tu OK, sí).
+   La respuesta sale aquí y en **Por publicar** («Lo que han contestado tus
+   clientes»). Si vuelves a montar el vídeo, tiene que aprobarlo otra vez (con
+   el mismo enlace). El enlace se enseña una sola vez: si lo pierdes, **Pedir
+   otro enlace** (el de antes deja de valer). **Anular el enlace** lo cierra
+   y el vídeo deja de esperarle. Lo que ya estaba programado antes de pedirlo
+   no espera al cliente (se avisa). Con el piloto automático, un vídeo que
+   espera al cliente se queda en «espera tu OK»: cuando el cliente lo
+   apruebe, dale tú el OK (el piloto no lo reintenta solo).
 7. **Envíos**: cada red con su estado (subiendo, programado, publicándose,
    publicado con su enlace, falló con su motivo). Si una red falla, las demás
    siguen. Lo programado se puede **Cancelar**. **Ver lo que se mandó** enseña

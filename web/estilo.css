@@ -5949,3 +5949,23 @@ a.boton.primario { background: var(--acento-relleno); color: var(--sobre-acento)
 
 /* ---------------- PUBLICAR · retención de Instagram y Facebook (retencion-meta, 19-11) */
 .aviso-meta-envio { color: var(--aviso); }
+
+/* ============================================ APROBACIÓN DEL CLIENTE
+   (publicar-redes-3): el bloque del paso «Cuándo» y las respuestas en «Por
+   publicar». La página que ve el cliente tiene su propio CSS (cliente.css). */
+.aprob-cliente { display: flex; flex-direction: column; gap: 8px; }
+.aprob-cliente h4 { margin: 0; }
+.aprob-enlace { flex-wrap: wrap; gap: 6px; align-items: center; }
+.aprob-enlace input { min-width: 0; flex: 1 1 260px; font-family: var(--mono, monospace); font-size: 12px; }
+.aprob-botones { flex-wrap: wrap; gap: 8px; align-items: center; }
+.aprob-estado { padding: 8px 10px; border-radius: 8px; }
+.aprob-bien { color: var(--ok); }
+.aprob-comentario { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--texto); }
+.aprob-respuestas { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.aprob-respuesta { gap: 8px; align-items: center; flex-wrap: wrap; overflow-wrap: anywhere; }
+.aprob-chip { padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  border: 1px solid var(--linea); }
+.aprob-chip.aprob-bien { border-color: var(--ok-borde); }
+.aprob-chip.aprob-cambios { color: var(--aviso-texto); background: var(--aviso-fondo); border-color: transparent; }
+.aprob-botones .etiqueta-campo { flex: 0 0 auto; }
+.aprob-botones select { width: auto; }

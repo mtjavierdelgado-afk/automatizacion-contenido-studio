@@ -27075,8 +27075,12 @@ def graficas_crear(cid: str, peticion: Request, cuerpo: dict = Body(default=None
         medidas = _por_graficas(G.formato, formato or CREAR_GRAF.FORMATO_DE.get(que, "v45"))
         lado = max(medidas["W"], medidas["H"])
         for sid in {s for s in planos if s}:
-            with open(permitidos[sid], "rb") as fh:
-                copias[sid] = _por_graficas(G.guardar_imagen, raiz_proyectos(), cid, fh.read(), lado)
+            try:
+                with open(permitidos[sid], "rb") as fh:
+                    contenido = fh.read()
+            except OSError:
+                raise ErrorApi(409, "una imagen de ese vídeo ya no está (¿se rehízo?): vuelve a pulsar «Escríbelo por mí»")
+            copias[sid] = _por_graficas(G.guardar_imagen, raiz_proyectos(), cid, contenido, lado)
         if planos and planos[0]:
             foto = copias[planos[0]]
     elif any(planos):

@@ -1255,8 +1255,9 @@ def _cubre(capa, x, y):
 
 
 def _es_grande(capa, f):
-    """Texto grande para el contraste (3:1): a partir de ~24 px en una pieza de
-    1080 (o ~19 px en negrita), con el tamaño en % del lado menor."""
+    """Texto grande para el contraste (3:1). El tamaño va en % del lado menor:
+    5,5 son ~59 px en una pieza de 1080 (4,4 en negrita, ~48 px), más estricto
+    que los 24 px (18,7 en negrita) de WCAG: más textos piden 4,5:1."""
     tam = capa.get("tam", 4)
     return tam >= 5.5 or (capa.get("peso", 400) >= 700 and tam >= 4.4)
 
@@ -1283,8 +1284,10 @@ def _fondos_bajo(capas, hasta, x, y, colores, foto, extremo, p):
                 fondos = [_mezcla(extremo, fo, p) for fo in fondos]
             continue
         if c["tipo"] == "imagen":
+            if opac >= 0.99 and (foto is None or i > capas.index(foto)):
+                return None                 # una foto opaca ENCIMA de la de fondo: esta no se ve aquí
             if opac >= 0.99:
-                return None                 # una foto opaca encima: la de fondo no se ve aquí
+                fondos = ["#000000", "#FFFFFF"]  # una opaca DEBAJO: su color no se sabe, el peor caso
             continue
         if c["tipo"] == "forma":
             capas_color = _colores_de_relleno(c.get("relleno"), colores)
@@ -1323,20 +1326,20 @@ def _extremos_de_foto(ruta, foto, f):
         try:
             from PIL import Image                           # noqa: PLC0415
             with Image.open(ruta) as im:
-                im = im.convert("RGB")
-                iw, ih = im.size
-                im.thumbnail((240, 240))
-                pequena = im.copy()
+                # A RESOLUCIÓN COMPLETA (árbitro, 26-11): reducirla promedia los
+                # píxeles y borra los brillos (una raya de luz de 2 px salía gris)
+                entera = im.convert("RGB")
+                entera.load()
         except Exception:                                   # noqa: BLE001
             return None
+        iw, ih = entera.size
         enc = foto.get("encuadre") or {}
         W, H = f["W"], f["H"]
         escala = max(W / iw, H / ih) * float(enc.get("zoom", 1) or 1)
         dw, dh = iw * escala, ih * escala
-        datos = (pequena, (W - dw) * float(enc.get("x", 50)) / 100, (H - dh) * float(enc.get("y", 50)) / 100,
-                 escala * iw / pequena.size[0], W, H)
-        if len(_MEMO_EXTREMOS) > 200:
-            _MEMO_EXTREMOS.clear()
+        datos = (entera, (W - dw) * float(enc.get("x", 50)) / 100, (H - dh) * float(enc.get("y", 50)) / 100, escala, W, H)
+        if len(_MEMO_EXTREMOS) > 6:
+            _MEMO_EXTREMOS.clear()                          # fotos enteras: pocas en memoria
         _MEMO_EXTREMOS[clave] = datos
     pequena, ox, oy, k, W, H = datos
     pw, ph = pequena.size

@@ -9,6 +9,7 @@ Parte 2: «Crear desde un vídeo» (la lectura del vídeo y las reglas).
 
 Uso: python pasos/prueba_graficas_desde_video.py
 """
+import io
 import os
 import random
 import sys
@@ -69,6 +70,31 @@ def _orden_ok(doc, i):
 def _imagen(ruta, tono):
     from PIL import Image                                   # noqa: PLC0415
     Image.new("RGB", (900, 1100), tono).save(ruta)
+
+
+def _rgb_de(color):
+    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _luz(rgb):
+    """La luminancia relativa de WCAG, escrita aquí aparte (no la del módulo)."""
+    def canal(v):
+        v = v / 255
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b = rgb
+    return 0.2126 * canal(r) + 0.7152 * canal(g) + 0.0722 * canal(b)
+
+
+def _peor_contraste(imagen, caja, tinta):
+    """El contraste más bajo entre la letra y cualquier píxel del fondo de su caja."""
+    x0, y0, x1, y1 = caja
+    trozo = imagen.crop((max(0, x0), max(0, y0), max(x0 + 1, x1), max(y0 + 1, y1)))
+    lt = _luz(tinta)
+    peor = 99.0
+    for px in set(trozo.getdata()):
+        a, b = sorted((lt, _luz(px)), reverse=True)
+        peor = min(peor, (a + 0.05) / (b + 0.05))
+    return peor
 
 
 def parte_1(pincel):
@@ -175,6 +201,52 @@ def parte_1(pincel):
     d_sin, _ = K.poner_foto_fondo(base, 0, "img_1111111111111111.jpg", None, None)
     op = [next((c["opac"] for c in d["laminas"][0]["capas"] if c.get("rol") == K.FOTO_FONDO), 0) for d in (d_gris, d_sin)]
     ok(op[0] >= op[1], f"con la foto real se mide esa foto (gris {op[0]}), sin ella el peor caso ({op[1]})")
+    # el peor caso de la foto, a resolución completa: una raya de luz de 2 px cuenta
+    from PIL import Image                                   # noqa: PLC0415
+    rayas = os.path.join(carpeta, "img_2222222222222222.jpg")
+    im = Image.new("RGB", (1080, 1350), (0, 0, 0))
+    for x in range(0, 1080, 40):
+        for dx in range(2):
+            for y in range(1350):
+                im.putpixel((x + dx, y), (255, 255, 255))
+    im.save(rayas, quality=100)
+    foto_r = K.capa_foto_fondo("img_2222222222222222.jpg")
+    bajo = K._extremos_de_foto(rayas, foto_r, G.formato("v45"))({"x": 10, "y": 10, "w": 30, "h": 10})
+    ok(G.contraste(bajo[1], "#FFFFFF") < 1.2 and G.contraste(bajo[0], "#000000") < 1.2,
+       f"los extremos de la foto se miden a resolución completa ({bajo})")
+    # Y LO PINTADO DE VERDAD (Chromium): en la caja de cada texto, el peor píxel del
+    # fondo con la foto no baja de 4,5:1 (3:1 si es grande) ni de lo que tenía sin
+    # foto. Medido en el PNG, sin las cuentas del módulo.
+    rayas_de = {"img_2222222222222222.jpg": rayas}.get
+    colores = G.colores_finales(None, {"colores": {}})
+    peores = []
+    for n in (1, 2, 4, 10, 13, 16):
+        for tipo in ("punto", "dato", "lista", "cierre"):
+            lam = K.lamina(n, tipo, "v45", colores, None, "EP")
+            base = C.limpiar_doc({"version": 2, "formato": "v45", "laminas": [lam]})
+            con, _av = K.poner_foto_fondo(base, 0, "img_2222222222222222.jpg", None, rayas_de)
+            if not any(c.get("rol") == K.FOTO_FONDO for c in con["laminas"][0]["capas"]):
+                continue
+            sin_letra = C.limpiar_doc(con)
+            for c in sin_letra["laminas"][0]["capas"]:
+                if c["tipo"] == "texto":
+                    c["oculto"] = True
+            sin_nada = K.quitar_foto_fondo(sin_letra, 0)
+            fondo_con = Image.open(io.BytesIO(C.pintar(pincel, sin_letra, None, rayas_de, None, None, 0)[0])).convert("RGB")
+            fondo_sin = Image.open(io.BytesIO(C.pintar(pincel, sin_nada, None, rayas_de, None, None, 0)[0])).convert("RGB")
+            W, H = fondo_con.size
+            for c in con["laminas"][0]["capas"]:
+                if c["tipo"] != "texto" or c.get("oculto") or c.get("rol") == "deco" or not c["txt"].strip() or c.get("fondo"):
+                    continue
+                tinta = _rgb_de(C.resolver_color(c["color"], colores))
+                caja = (int(c["x"] / 100 * W), int(c["y"] / 100 * H), int((c["x"] + c["w"]) / 100 * W), int((c["y"] + max(c["h"], 1)) / 100 * H))
+                grande = c.get("tam", 4) >= 5.5 or (c.get("peso", 400) >= 700 and c.get("tam", 4) >= 4.4)
+                minimo = 3 if grande else 4.5
+                peor_con = _peor_contraste(fondo_con, caja, tinta)
+                peor_sin = _peor_contraste(fondo_sin, caja, tinta)
+                if peor_con < min(minimo, peor_sin) - 0.05:
+                    peores.append((n, tipo, c["rol"], round(peor_con, 2), round(peor_sin, 2)))
+    ok(not peores, f"pintado de verdad con una foto de rayas: ningún texto se lee peor de lo permitido {peores[:4]}")
     # se VE: con la foto, la imagen pintada cambia (no queda tapada por un fondo de la plantilla)
     gris_de = {"img_1111111111111111.jpg": gris}.get
     for n in (1, 8, 9, 14, 15):
@@ -227,6 +299,14 @@ def parte_2(pincel):
     ok(D.cifra_en_narracion("300", planos[1]["narracion"]), "un número suelto que está en la voz, sí")
     ok(D.cifra_en_narracion("S/ 250", planos[2]["narracion"]), "«S/ 250» casa con «250 soles» (voz en inglés)")
     ok(not D.cifra_en_narracion("20 %", planos[0]["narracion"]), "un % que no está, no")
+    ok(not D.cifra_en_narracion("S/ 300", "cuesta 300 dólares"), "«S/ 300» no es «300 dólares» (otra moneda)")
+    ok(not D.cifra_en_narracion("US$ 50", "son 50 soles"), "«US$ 50» no es «50 soles»")
+    ok(D.cifra_en_narracion("$ 40", "they are 40 dollars"), "«$ 40» sí es «40 dollars»")
+    r2 = {"laminas": [{"tipo": "portada", "titulo": "Hola", "plano": "p0"},
+                      {"tipo": " Precio ", "titulo": "Precio", "precio": "S/ 300", "texto": "x", "plano": "p0"},
+                      {"tipo": "punto", "titulo": "300 juegos", "plano": "p1"}, {"tipo": "cierre"}]}
+    pz, _ = D.validar(r2, "carrusel", "x", planos, "", 7)
+    ok(not any(x.get("precio") == "S/ 300" for _t, x in pz), "un tipo con espacios («␣Precio␣») no se salta la regla de cifras")
     respuesta = {"laminas": [
         {"tipo": "portada", "titulo": "Alquila tu consola", "apoyo": "Desde S/ 190 la noche", "plano": "p0", "alt": "Una sala"},
         {"tipo": "punto", "titulo": "4 mandos y 300 juegos", "texto": "Todo listo para jugar", "plano": "p1", "alt": "Mandos"},

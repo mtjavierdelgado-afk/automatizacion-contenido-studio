@@ -3996,6 +3996,7 @@
     const pedido = S.que;
     S.escribiendo = true;
     S.avisosIA = [];
+    pintarVideo(S);
     pintarTextos(S);
     revisarCrear(S);
     const o = S.opc;
@@ -4005,6 +4006,11 @@
       const pidPedido = S.pid;
       const inicio = await o.pedir(o.api(S.cid, '/escribir'), { method: 'POST', cuerpo });
       S.trabajo = inicio.trabajo;
+      if (S.cerrado) {
+        // se cerró «+ Crear» antes de saber el número del trabajo: se cancela ahora
+        o.pedir(o.api(S.cid, `/escribir/${inicio.trabajo}`), { method: 'DELETE' }).catch(() => {});
+        return;
+      }
       let r = null;
       // el servidor da hasta 2 intentos de 4 minutos: se espera un poco más
       for (let i = 0; i < 450 && !S.cerrado; i++) {
@@ -4041,7 +4047,7 @@
     } finally {
       S.escribiendo = false;
       S.trabajo = '';
-      if (!S.cerrado) { pintarTextos(S); revisarCrear(S); programarEstilos(S, true); }
+      if (!S.cerrado) { pintarVideo(S); pintarTextos(S); revisarCrear(S); programarEstilos(S, true); }
     }
   }
 
@@ -4052,7 +4058,8 @@
     if (!C) return;
     C.textContent = '';
     const videos = S.opc.videos();
-    const sel = el('select', { 'aria-label': 'Desde un vídeo', clase: 'gc-video-base' },
+    // mientras Claude escribe no se cambia de vídeo (la pantalla enseñaría uno y los textos de otro)
+    const sel = el('select', { 'aria-label': 'Desde un vídeo', clase: 'gc-video-base', disabled: S.escribiendo },
       el('option', { value: '' }, '— No: lo escribo yo (o la IA desde un tema) —'),
       ...videos.map(v => el('option', { value: v.id }, v.nombre || v.id)));
     sel.value = S.pid || '';
@@ -4104,9 +4111,11 @@
 
   async function fotoDePlano(S, sid) {
     const pid = S.pid;
+    S.fotoPedida = sid;
     try {
       const r = await S.opc.pedir(S.opc.api(S.cid, '/imagen/de-plano'), { method: 'POST', cuerpo: { pid, sid } });
-      if (S.cerrado || S.pid !== pid) return;
+      // dos toques seguidos: vale el último
+      if (S.cerrado || S.pid !== pid || S.fotoPedida !== sid) return;
       await ponerFotoAsistente(S, r.nombre);
     } catch (_) { /* la miniatura sale sin foto; al crear, el servidor la pone igual */ }
   }
@@ -4143,7 +4152,7 @@
       S.piezas[i][1].plano = sid;
       if (i === 0) {
         if (sid) fotoDePlano(S, sid);
-        else { S.foto = ''; S.fotoUrl = ''; pintarFoto(S); pedirEstilos(S, true); }
+        else { S.fotoPedida = ''; S.foto = ''; S.fotoUrl = ''; pintarFoto(S); pedirEstilos(S, true); }
       }
       pintarTextos(S);
     };

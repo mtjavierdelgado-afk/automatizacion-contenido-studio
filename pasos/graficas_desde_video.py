@@ -126,10 +126,20 @@ def instruccion(que, titulo, planos, negocio="", cuantas=E.CUANTAS_DEFECTO):
 _RE_MONEDA = re.compile(r"s/\.?|us\$|\$|€|usd|pen|soles?|d[oó]lares?|euros?|nuevos soles", re.I)
 
 
+_MONEDAS = (("PEN", re.compile(r"s/|nuevos soles|soles?\b|\bpen\b")),
+            ("EUR", re.compile(r"€|euros?\b|\beur\b")),
+            ("USD", re.compile(r"us\$|\$|\busd\b|d[oó]lares?\b|dollars?\b")))
+
+
 def _clase_de_unidad(cifra):
+    """«porcentaje», la moneda concreta (PEN, USD, EUR) o "" (árbitro, 26-11:
+    «S/ 300» no es «300 dólares»)."""
     c = E._plano(cifra)
     if "%" in c or "por ciento" in c or "percent" in c:
         return "porcentaje"
+    for moneda, patron in _MONEDAS:
+        if patron.search(c):
+            return moneda
     if _RE_MONEDA.search(c):
         return "moneda"
     return ""
@@ -168,7 +178,9 @@ def validar(datos, que, titulo, planos, negocio="", cuantas=E.CUANTAS_DEFECTO):
             continue
         item = dict(item)
         narr = por_sid.get(str(item.get("plano") or ""), {}).get("narracion", "")
-        for campo in E.CAMPOS.get(str(item.get("tipo") or "").lower(), ()):
+        # la misma forma de leer el tipo que graficas_escribir.validar (árbitro: « precio » se saltaba esto)
+        item["tipo"] = str(item.get("tipo") or "").strip().lower()
+        for campo in E.CAMPOS.get(item["tipo"], ()):
             valor = E._texto(item.get(campo), campo)
             faltan = E.cifras_que_no_estan(valor, negocio) if valor else []
             if faltan and all(cifra_en_narracion(c, narr) for c in faltan):

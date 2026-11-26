@@ -80,6 +80,8 @@ if RAIZ_ESTUDIO not in sys.path:
     sys.path.insert(0, RAIZ_ESTUDIO)
 from motores.publicar_uploadpost import cliente as UP  # noqa: E402
 from motores.publicar_uploadpost import simulado as UP_SIMULADO  # noqa: E402
+from motores.metricas_meta import cliente as MM                 # noqa: E402
+from motores.metricas_meta import simulado as MM_SIMULADO       # noqa: E402
 import publicar_seo as SEO                                     # noqa: E402
 import seo_real as SR                                          # noqa: E402
 import seo_canal as SC                                         # noqa: E402
@@ -3145,6 +3147,9 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
                 "cuando": cuando or _iso_lima(), "creado": _iso_lima(),
                 "actualizado": _iso_lima(), "url": "", "error": "",
                 "mp4_huella": info.get("mp4_huella") or "",
+                # la duracion del MP4 que sale (retencion-meta): con ella, el
+                # tiempo medio de Instagram se dice tambien en % del video
+                "duracion_s": info.get("duracion_s") or None,
                 "sin_hora": modo == "pendiente" and not cuando,
                 # cómo sale (Short o vídeo en YouTube, Reel en Instagram…): la
                 # cola lo dice y no cambia si después se elige otra cosa
@@ -3471,7 +3476,8 @@ def marcar_a_mano(raiz, info, red, url=""):
         envio = {"id": uuid.uuid4().hex[:12], "red": red, "lote": "", "perfil": "",
                  "estado": "a_mano", "modo": "manual", "cuando": _iso_lima(),
                  "creado": _iso_lima(), "actualizado": _iso_lima(), "url": url[:500],
-                 "error": "", "mp4_huella": info.get("mp4_huella") or ""}
+                 "error": "", "mp4_huella": info.get("mp4_huella") or "",
+                 "duracion_s": info.get("duracion_s") or None}
         datos["envios"].append(envio)
         _escribir(_ruta_video(raiz, pid), datos)
     return _envio_publico(envio)
@@ -3758,19 +3764,39 @@ METRICAS = ("vistas", "me_gusta", "comentarios", "compartidos", "guardados")
 #: distintas que no se mezclan (ver el cliente): `vista_entera` (TikTok: la
 #: fraccion que lo vio hasta el final), `media_vista` (YouTube: que parte se ve
 #: de media; pasa de 1 si se vuelve a ver) y `tiempo_medio_s`.
-RETENCION = ("vista_entera", "media_vista", "tiempo_medio_s")
+RETENCION = ("vista_entera", "media_vista", "tiempo_medio_s", "salto_3s")
 #: METRICAS COMPLETAS (rama `metricas-completas`, 11-11-2026): las demas cuentas
 #: que Upload-Post ya trae. Se SUMAN como las de arriba, pero van aparte para no
 #: cambiar lo que otros leen de METRICAS (el informe, la Parrilla, el piloto).
 #: Las impresiones NO son vistas (veces que se enseño, no que se reprodujo) y el
 #: alcance sumado cuenta dos veces a quien vio dos posts: la pantalla lo dice.
 EXTRAS = ("alcance", "impresiones", "nuevos_seguidores", "visitas_perfil", "vistas_facebook",
-          "tiempo_total_s")
+          "tiempo_total_s", "reposts")
 #: Lo que no es una cuenta: la curva de retencion de TikTok y los repartos (de
 #: donde vinieron las vistas, que publico). Se guarda por envio y no se suma.
 DETALLE = ("curva", "mitad_s", "fuentes", "publico")
 #: Todo lo que se apunta de un envio
 CAMPOS_ENVIO = METRICAS + EXTRAS + RETENCION + DETALLE
+#: LA RETENCION DE META (rama `retencion-meta`, 19-11-2026). De Instagram y
+#: Facebook, Upload-Post da las cuentas pero no cuanto se vio cada video: eso
+#: sale de la API de Meta (`medir_meta`). UNA FUENTE POR CIFRA: en esas redes
+#: estas claves las escribe SOLO Meta, y lo que Upload-Post traiga con ese
+#: nombre se ignora (si un dia empieza a mandarlo, no se pelean). `salto_3s`:
+#: la parte que lo salto en los 3 primeros segundos (Instagram).
+META_POR_RED = {
+    "instagram": ("media_vista", "tiempo_medio_s", "tiempo_total_s", "salto_3s", "reposts"),
+    "facebook": ("media_vista", "tiempo_medio_s", "tiempo_total_s", "nuevos_seguidores",
+                 "curva", "mitad_s"),
+}
+#: Lo que Meta deja en `metricas` ademas de sus cifras: cuando se leyo y por
+#: que no se pudo. Upload-Post no lo borra al apuntar lo suyo.
+META_RELOJ = ("meta_al", "meta_error", "meta_detalle", "meta_busqueda", "meta_busqueda_al")
+
+
+def _claves_de_upload_post(red):
+    """Las cifras de un envio que escribe Upload-Post: todas menos las de Meta."""
+    de_meta = META_POR_RED.get(red) or ()
+    return tuple(k for k in CAMPOS_ENVIO if k not in de_meta)
 #: Cifras que NO pueden ser 0 si el post tiene vistas: un post visto 200 veces
 #: llegó al menos a una persona y alguien lo vio algún segundo. Y sin vistas
 #: todavía (TikTok las completa en horas), un 0 suelto tampoco dice nada. Ese 0 es el
@@ -3923,7 +3949,8 @@ def _apuntar_metricas(raiz, envios, cifras, error=""):
                     e["metricas"] = dict(viejas, al=al,
                                          error="Upload-Post no trae cifras de esta red")
                     continue
-                nuevas = {k: propias.get(k) for k in CAMPOS_ENVIO}
+                suyas = _claves_de_upload_post(e["red"])
+                nuevas = {k: propias.get(k) for k in suyas}
                 # una consulta sin cifras (TikTok las completa en horas) no
                 # borra las que ya se sabian
                 for k in nuevas:
@@ -3932,8 +3959,12 @@ def _apuntar_metricas(raiz, envios, cifras, error=""):
                 # la curva y su «mitad» van JUNTAS (2.ª revision, 11-11): una
                 # curva nueva que no baja del 50 % trae mitad_s None, y eso es
                 # una respuesta, no un «no lo se»
-                if propias.get("curva") is not None:
+                if "curva" in suyas and propias.get("curva") is not None:
                     nuevas["mitad_s"] = propias.get("mitad_s")
+                # lo de Meta se queda tal cual (retencion-meta): no es suyo
+                for k in (META_POR_RED.get(e["red"]) or ()) + META_RELOJ:
+                    if k in viejas:
+                        nuevas[k] = viejas[k]
                 nuevas.update(al=al, error=propias.get("error") or "")
                 # el reloj de la lectura guardada es suyo: una lectura en vivo no
                 # lo borra (sin el, una guardada MAS VIEJA volvia a pisar la
@@ -4069,7 +4100,7 @@ def _apuntar_guardadas(raiz, envios, indice):
                 retencion_nueva = guardada is None or cuando >= guardada
                 nuevas = dict(viejas)
                 tocado = False
-                for k in CAMPOS_ENVIO:
+                for k in _claves_de_upload_post(e["red"]):
                     if k == "mitad_s":
                         continue        # solo se escribe junto a su curva (abajo)
                     valor = post.get(k)
@@ -4122,8 +4153,57 @@ TOPE_SEGUIDORES_S = 20
 def medir(raiz, pids, forzar=False):
     """«Actualizar» entero: la lectura en vivo (con su limite) y, despues, la
     guardada (sin limite) para la retencion de YouTube y lo leido en otro sitio.
-    -> lo de `actualizar_metricas` mas {"guardadas": n}"""
+    En paralelo, desde el principio, la retencion de Instagram y Facebook con
+    la API de Meta (no gasta del cupo de Upload-Post: `medir_meta`).
+    -> lo de `actualizar_metricas` mas {"guardadas": n, "meta": {...}}"""
     arranque = time.time()
+    meta = _HiloMeta(raiz, pids, forzar, arranque)
+    try:
+        r = _medir_upload_post(raiz, pids, forzar, arranque)
+    finally:
+        # se espera a Meta como mucho hasta el final de la franja de la peticion
+        meta.esperar(arranque + TOPE_VUELTA_S)
+    meta.mezclar_en(r)
+    _segunda_pasada_meta(raiz, pids, arranque, r)
+    return r
+
+
+def _segunda_pasada_meta(raiz, pids, arranque, r):
+    """El numero del post de Instagram o Facebook lo trae Upload-Post en su
+    primera lectura en vivo, que corre A LA VEZ que Meta: un video recien
+    publicado llega a Meta sin numero y se quedaria sin retencion hasta el
+    siguiente «Actualizar». Si queda tiempo en la peticion, una segunda vuelta
+    SOLO para los que nunca leyo Meta y ya tienen numero."""
+    if (r.get("meta") or {}).get("motivo") or (r.get("meta") or {}).get("a_medias") \
+            or (r.get("meta") or {}).get("sin_tiempo"):
+        return              # la primera vuelta ya dijo que no (caducado, cupo, red…)
+    if meta_sin_leer := _envios_meta(raiz, pids, False, solo_nunca=True):
+        # sin pasar de la franja de los seguidores (la ruta del proyecto los
+        # pide despues si da tiempo: arbitro del tren, 25-11)
+        hasta = min(time.time() + TOPE_META_S, arranque + TOPE_VUELTA_S - 1,
+                    arranque + TOPE_SEGUIDORES_S - 1)
+        if not _cabe(hasta):
+            return
+        try:
+            m = medir_meta(raiz, pids, hasta=hasta, solo={e["id"] for _p, e in meta_sin_leer})
+        except Exception as fallo:                       # noqa: BLE001
+            # como en el hilo: «Actualizar» no puede caer por esto
+            r.setdefault("errores", []).append(f"Instagram y Facebook: {str(fallo)[:150]}")
+            return
+        if m.get("ocupado"):
+            return
+        previo = dict(r.get("meta") or {})
+        for k in ("leidos", "actualizados"):
+            previo[k] = (previo.get(k) or 0) + (m.get(k) or 0)
+        if m.get("motivo"):
+            previo["motivo"] = m["motivo"]
+        r["meta"] = previo
+        if m.get("errores"):
+            vistos = set(r.get("errores") or [])
+            r["errores"] = (r.get("errores") or []) + [x for x in m["errores"] if x not in vistos]
+
+
+def _medir_upload_post(raiz, pids, forzar, arranque):
     r = actualizar_metricas(raiz, pids, forzar=forzar)
     r["guardadas"] = 0
     r["arranque"] = arranque
@@ -4138,6 +4218,528 @@ def medir(raiz, pids, forzar=False):
     r["guardadas"] = g["actualizados"]
     r["errores"] = (r.get("errores") or []) + g["errores"]
     return r
+
+
+# ------------------------------------------------- la retencion de Meta
+#
+# RAMA `retencion-meta` (19-11-2026; plan en el Proyecto,
+# `estado/plan_retencion_meta_2026-11-12.md`). Solo al pulsar «Actualizar»
+# (`medir`); las cifras automaticas (`publicar_auto`) NO la traen. Corre en
+# su propio hilo y con su propio tope, para no alargar la peticion (el proxy
+# corta a los 60 s), y aunque Upload-Post este ocupado o pida esperar.
+#
+# El token es el mismo que el Studio ya guarda para leer cuentas de Instagram
+# (Configuracion → Cuentas que te gustan), leido por contrato: el fichero
+# `<secretos>/lectura_redes.json`, como hace `cuentas_ajenas`.
+
+_LOCK_META = threading.Lock()
+#: Franja de Meta dentro de «Actualizar»: no se empieza una llamada que no
+#: quepa entera (cada una tiene `MM.PLAZO_S`).
+TOPE_META_S = float(os.environ.get("ESTUDIO_META_TOPE") or 12)
+RESPIRO_META_S = float(os.environ.get("ESTUDIO_META_RESPIRO") or RESPIRO_METRICAS_S)
+#: Como dice cada motivo a quien mira la pantalla
+AVISOS_META = {
+    "sin_token": "Instagram y Facebook: para ver cuánto se vio cada vídeo, pon el token de "
+                 "Meta en Configuración → Cuentas que te gustan",
+    "sin_permiso": "Instagram y Facebook: al token de Meta le falta un permiso (read_insights "
+                   "para Facebook, instagram_manage_insights para Instagram); genera uno nuevo",
+    "caducado": "Instagram y Facebook: el token de Meta ha caducado; genera uno nuevo y "
+                "pégalo en Configuración",
+    "cupo": "Instagram y Facebook: Meta pide esperar un rato; vuelve a pulsar «Actualizar» "
+            "más tarde",
+    "red": "Instagram y Facebook: no se ha podido hablar con Meta esta vez",
+    "tiempo": "Instagram y Facebook: no dio tiempo a todo esta vez; vuelve a pulsar «Actualizar»",
+}
+#: Lo que dice la tarjeta de cada envío cuando el problema es del TOKEN, no del
+#: vídeo (prueba del servidor, 25-11: sin instagram_manage_insights la tarjeta
+#: decía «Meta no ha devuelto las cifras de este vídeo»). Sin reloj: en cuanto
+#: se pone un token bueno, se vuelve a pedir.
+TARJETA_META = {
+    # sin token a secas no se marca ninguna tarjeta: quien no usa Meta vería el
+    # aviso en todas; basta el aviso general de «Actualizar»
+    "sin_permiso": "al token de Meta le falta un permiso (instagram_manage_insights para "
+                   "Instagram, read_insights para Facebook)",
+    "caducado": "el token de Meta ha caducado; genera uno nuevo",
+}
+
+
+def _marcar_token(resultados, envios, motivo, red=None):
+    """Los envíos (de esa red) que se quedaron sin leer por un problema del
+    token llevan en su tarjeta ese problema (y no el de una lectura anterior)."""
+    if motivo == "sin_permiso" and red in PERMISO_DE:
+        texto = f"al token de Meta le falta el permiso {PERMISO_DE[red]}"
+    else:
+        texto = TARJETA_META.get(motivo)
+    if not texto:
+        return
+    for pid, e in envios:
+        if e["id"] not in resultados and (red is None or e["red"] == red):
+            resultados[e["id"]] = (pid, {"error": texto, "sin_reloj": True}, {})
+
+
+def _token_meta():
+    carpeta = os.environ.get("ESTUDIO_SECRETOS") or CLAVES.CARPETA_SECRETOS
+    datos = leer_json(os.path.join(carpeta, "lectura_redes.json"), {}) or {}
+    return str((datos if isinstance(datos, dict) else {}).get("meta_token") or "").strip()
+
+
+def cliente_meta():
+    """El de Meta que toca: el simulado si Upload-Post tambien lo esta."""
+    if simulado():
+        return MM_SIMULADO.SimuladoMeta()
+    return MM.ClienteMeta(_token_meta(), base=os.environ.get("ESTUDIO_META_BASE") or None)
+
+
+def _envios_meta(raiz, pids, forzar, solo_nunca=False, solo=None):
+    """[(pid, envio)] de Instagram y Facebook que toca leer: lo nunca leido
+    primero, y lo leido hace menos de RESPIRO_META_S fuera (salvo `forzar`).
+    `solo_nunca`: solo los que Meta no ha leido nunca; `solo`: esos ids."""
+    ahora = ahora_lima()
+    salida = []
+    for pid in pids:
+        for e in _leer_video(raiz, pid)["envios"]:
+            if e.get("red") not in META_POR_RED or e.get("estado") not in ("publicado", "a_mano"):
+                continue
+            if not (e.get("meta_id") or e.get("post_id")):
+                continue
+            if solo is not None and e.get("id") not in solo:
+                continue
+            # Meta solo da la retención de los Reels: lo que salió como otra
+            # cosa (un carrusel, una foto) no se le pregunta
+            if e["red"] == "instagram" and e.get("tipo") \
+                    and str(e["tipo"]).strip().lower() != "reel":
+                continue
+            m_e = e.get("metricas") or {}
+            if solo_nunca and (m_e.get("meta_al") or m_e.get("meta_error")):
+                continue
+            al = _leer_momento(m_e.get("meta_al"))
+            if al and not forzar and (ahora - al).total_seconds() < RESPIRO_META_S:
+                continue
+            salida.append(((ahora - al).total_seconds() if al else float("inf"), pid, e))
+    salida.sort(key=lambda x: -x[0])
+    return [(pid, e) for _h, pid, e in salida]
+
+
+def _pagina_del_perfil(raiz, perfil):
+    """La pagina de Facebook elegida en el proyecto de ese perfil de
+    Upload-Post (el envio sabe su perfil, no su proyecto)."""
+    if not perfil:
+        return ""
+    datos = leer_json(_ruta_ajustes(raiz), {}) or {}
+    for propio in (datos.get("proyectos") or {}).values():
+        if isinstance(propio, dict) and propio.get("perfil") == perfil:
+            return str(propio.get("facebook_pagina") or "")
+    return ""
+
+
+def _pagina_de(paginas, e, ajustes_pagina):
+    """La pagina (con su token) de un envio de Facebook: la del proyecto, la
+    que nombra el post («pagina_post») o, si solo hay una, esa."""
+    ident = str(e.get("post_id") or "")
+    prefijo = ident.split("_")[0] if MM.es_pagina_post(ident) else ""
+    for buscado in (ajustes_pagina, prefijo):
+        if buscado:
+            for p in paginas:
+                if p["id"] == str(buscado) and p.get("token"):
+                    return p
+    con_token = [p for p in paginas if p.get("token")]
+    return con_token[0] if len(con_token) == 1 else None
+
+
+def medir_meta(raiz, pids, forzar=False, hasta=None, solo=None):
+    """La retencion de Instagram y Facebook de estos videos (`solo`: esos
+    envios). -> {"leidos", "actualizados", "pendientes", "errores": [...], "ocupado"?}"""
+    if not _LOCK_META.acquire(blocking=False):
+        return {"leidos": 0, "actualizados": 0, "pendientes": 0, "errores": [], "ocupado": True}
+    try:
+        return _medir_meta(raiz, pids, forzar, hasta or time.time() + TOPE_META_S, solo=solo)
+    finally:
+        _LOCK_META.release()
+
+
+def _cabe(hasta):
+    return time.time() + MM.PLAZO_S <= hasta
+
+
+def _medir_meta(raiz, pids, forzar, hasta, solo=None):
+    envios = _envios_meta(raiz, pids, forzar, solo=solo)
+    vacio = {"leidos": 0, "actualizados": 0, "pendientes": 0, "errores": []}
+    if not envios:
+        return vacio
+    cli = cliente_meta()
+    # el propio cliente no empieza una llamada que no quepa entera en la franja
+    cli.hasta = hasta
+    if not getattr(cli, "simulado", False) and not cli.token:
+        return dict(vacio, errores=[AVISOS_META["sin_token"]], motivo="sin_token")
+    resultados = {}                 # id del envio -> (pid, cifras|{"error"}, extra)
+    errores = []
+    # CADA RED POR SU LADO (arbitro del tren, 25-11): un token sin
+    # instagram_manage_insights no puede dejar sin leer Facebook, ni marcar sus
+    # tarjetas. Lo que vale para las dos (caducado, cupo, red, tiempo) si para.
+    motivos = {}
+    ig = [(pid, e) for pid, e in envios if e["red"] == "instagram"]
+    fb = [(pid, e) for pid, e in envios if e["red"] == "facebook"]
+    leidos = 0
+    sin_cifras = []
+    # FACEBOOK PRIMERO (árbitro, 25-11): son pocas llamadas, y un lote de
+    # Instagram lento (Meta tarda con 25 Reels de métricas) se comía la franja
+    # entera y Facebook no se leía nunca. Lo que vale para las dos (caducado,
+    # cupo, red, tiempo) para también Instagram.
+    if fb:
+        try:
+            leidos += _leer_fb(raiz, cli, fb, hasta, resultados)
+        except MM.ErrorMeta as fallo:
+            motivos["facebook"] = fallo.motivo
+            _avisar_meta(errores, "facebook", fallo)
+            _marcar_token(resultados, fb, fallo.motivo, "facebook")
+    global_fb = motivos.get("facebook") in MOTIVOS_DE_LAS_DOS
+    if motivos.get("facebook") == "caducado":
+        # el token entero: las tarjetas de Instagram también lo dicen
+        _marcar_token(resultados, ig, "caducado", "instagram")
+    if ig and not global_fb and _cabe(hasta) and not cli.cerca_del_cupo:
+        try:
+            leidos += _leer_ig(cli, ig, hasta, resultados, sin_cifras)
+        except MM.ErrorMeta as fallo:
+            motivos["instagram"] = fallo.motivo
+            _avisar_meta(errores, "instagram", fallo)
+            _marcar_token(resultados, ig, fallo.motivo, "instagram")
+            if fallo.motivo == "caducado":
+                _marcar_token(resultados, fb, "caducado", "facebook")
+    # los Reels que Meta no reconoce, por su enlace: DESPUÉS de Facebook, con
+    # lo que quede de franja (no puede dejar a Facebook sin leer)
+    if sin_cifras and not motivos.get("instagram") \
+            and not any(m in MOTIVOS_DE_LAS_DOS for m in motivos.values()) \
+            and _cabe(hasta) and not cli.cerca_del_cupo:
+        _ig_por_enlace(cli, sin_cifras, hasta, resultados)
+    fatal = next((m for m in motivos.values() if m in MOTIVOS_DE_LAS_DOS), "") \
+        or next((m for m in motivos.values() if m), "")
+    if getattr(cli, "retiradas", None):
+        errores.append("Instagram y Facebook: Meta ya no da " + ", ".join(sorted(set(cli.retiradas)))
+                       + "; esa cifra no se ha podido leer")
+    if cli.cerca_del_cupo and fatal != "cupo":
+        errores.append(AVISOS_META["cupo"])
+        fatal = "cupo"          # y sin segunda vuelta: no se vuelve a llamar a Meta
+    sin_tiempo = bool(getattr(cli, "sin_tiempo", False))
+    if sin_tiempo and fatal != "tiempo":
+        errores.append(AVISOS_META["tiempo"])
+    hechos = _apuntar_meta(raiz, resultados)
+    vistos, unicos = set(), []
+    for x in errores:
+        if x not in vistos:
+            vistos.add(x)
+            unicos.append(x)
+    r = {"leidos": leidos, "actualizados": hechos,
+         "pendientes": max(0, len(envios) - len(resultados)), "errores": unicos[:5]}
+    if fatal:
+        r["motivo"] = fatal
+    if sin_tiempo:
+        r["sin_tiempo"] = True      # sin segunda pasada: repetiría lo mismo
+    return r
+
+
+#: Lo que para las dos redes a la vez (el token entero, el cupo, la red, el
+#: tiempo). «sin_permiso» NO: cada red pide su permiso.
+MOTIVOS_DE_LAS_DOS = ("sin_token", "caducado", "cupo", "red", "tiempo")
+#: El permiso que pide cada red, para decirlo bien en la pantalla
+PERMISO_DE = {"instagram": "instagram_manage_insights", "facebook": "read_insights"}
+
+
+def _avisar_meta(errores, red, fallo):
+    if fallo.motivo == "sin_permiso":
+        errores.append(f"{NOMBRE_RED.get(red, red)}: al token de Meta le falta el permiso "
+                       f"{PERMISO_DE[red]}; genera uno nuevo con él")
+    elif fallo.motivo in AVISOS_META:
+        errores.append(AVISOS_META[fallo.motivo])
+    elif fallo.motivo == "paginas":
+        errores.append(f"{NOMBRE_RED.get(red, red)}: {fallo}; vuelve a pulsar «Actualizar» más tarde")
+    else:
+        # nunca el mensaje crudo de Meta (en inglés) en la pantalla
+        errores.append(f"{NOMBRE_RED.get(red, red)}: {MM.texto_para_envio(fallo)}")
+
+
+def _leer_ig(cli, ig, hasta, resultados, sin_cifras=None):
+    """Instagram: resolver y pedir las cifras en la misma llamada, en lotes.
+    Lo que Meta no contesta con el id del envío va a `sin_cifras`, para
+    buscarlo por su enlace DESPUÉS de leer Facebook (`_ig_por_enlace`)."""
+    leidos = 0
+    for i in range(0, len(ig), MM.TOPE_LOTE):
+        if not _cabe(hasta) or cli.cerca_del_cupo:
+            break
+        trozo = ig[i:i + MM.TOPE_LOTE]
+        ids = [str(e.get("meta_id") or e.get("post_id")) for _p, e in trozo]
+        try:
+            cifras = cli.instagram(ids)
+        except MM.ErrorMeta as fallo:
+            # lo leído antes del fallo (ya contado en el cupo) no se tira
+            parcial = getattr(fallo, "parcial", None) or {}
+            for (pid, e), ident in zip(trozo, ids):
+                if ident in parcial:
+                    resultados[e["id"]] = (pid, parcial[ident], {"meta_id": ident})
+            raise
+        for (pid, e), ident in zip(trozo, ids):
+            if ident in cifras:
+                leidos += 1
+                resultados[e["id"]] = (pid, cifras[ident], {"meta_id": ident})
+                if sin_cifras is not None and cifras[ident].get("error") \
+                        and not cifras[ident].get("tipo"):
+                    sin_cifras.append((pid, e, ident))
+    return leidos
+
+
+def _ig_por_enlace(cli, sin_cifras, hasta, resultados):
+    """EL ID DE VERDAD DE UN REEL (prueba del servidor, 25-11: Meta no daba
+    las cifras de ningún Reel con el id que trae Upload-Post). Con el código
+    corto de su enlace (instagram.com/reel/<código>/) se busca en los medios
+    de las cuentas de Instagram del token y, si sale otro id, se pide con ese
+    y se guarda como `meta_id`. Lo que pasó en la búsqueda va en su propia
+    clave (`meta_busqueda`), aparte de lo que dijo Meta (`meta_detalle`).
+    Una búsqueda HECHA (entera, o que Meta no dejó hacer) lleva su respiro
+    (`meta_busqueda_al`) aunque se pulse «Actualizar» seguido; una cortada
+    por tiempo o cupo se repite la próxima vez. Nunca lanza."""
+    ahora = ahora_lima()
+    buscados = {}
+    for pid, e, ident in sin_cifras:
+        antes = _leer_momento((e.get("metricas") or {}).get("meta_busqueda_al"))
+        if antes and (ahora - antes).total_seconds() < RESPIRO_META_S:
+            continue
+        codigo = MM.shortcode_ig(e.get("url")) or MM.shortcode_ig(e.get("post_id"))
+        if codigo:
+            buscados.setdefault(codigo, []).append((pid, e, ident))
+    if not buscados:
+        return
+
+    def apuntar(codigos, que, hecha):
+        for codigo in codigos:
+            for pid, e, _ident in buscados[codigo]:
+                previo = (resultados.get(e["id"]) or (pid, {}, {}))[1]
+                if previo.get("error"):
+                    resultados[e["id"]] = (pid, dict(previo, busqueda=que[:300], buscado=hecha), {})
+
+    try:
+        cuentas = [p for p in cli.paginas() if p.get("ig_id")]
+    except MM.ErrorMeta:
+        return
+    if not cuentas:
+        apuntar(list(buscados), "búsqueda por enlace: el token no ve ninguna cuenta de Instagram", True)
+        return
+    hallados, mirado, cerradas, completa = {}, [], [], True
+    sin_tiempo_antes = getattr(cli, "sin_tiempo", False)
+    for cuenta in {c["ig_id"]: c for c in cuentas}.values():
+        if not _cabe(hasta) or cli.cerca_del_cupo:
+            completa = False
+            break
+        if len(hallados) == len(buscados):
+            break
+        nombre = "@" + (cuenta.get("ig_usuario") or cuenta["ig_id"])
+        try:
+            medios, entera = cli.medios_ig(cuenta["ig_id"])
+        except MM.ErrorMeta as fallo:
+            if fallo.motivo in ("tiempo", "cupo") or fallo.motivo in MOTIVOS_DE_LAS_DOS:
+                completa = False
+                break
+            # Meta no deja leer los medios de ESA cuenta (p. ej. un #10): se
+            # dice con lo que contestó, y cuenta como mirada
+            cerradas.append(f"{nombre} no deja leer sus medios ({getattr(fallo, 'detalle', '') or fallo})"[:160])
+            continue
+        mirado.append(f"{nombre} ({len(medios)} más recientes)")
+        completa = completa and entera
+        for m in medios:
+            codigo = m.get("shortcode") or MM.shortcode_ig(m.get("permalink"))
+            if codigo in buscados and m.get("id"):
+                hallados[codigo] = m["id"]
+        if not entera:
+            break
+    # cortarse la BÚSQUEDA no es «no dio tiempo» a leer: eso ya se leyó
+    cli.sin_tiempo = sin_tiempo_antes
+    sin_hallar = [c for c in buscados if c not in hallados]
+    if sin_hallar:
+        partes = ([f"no está en {', '.join(mirado)}"] if mirado else []) + cerradas
+        apuntar(sin_hallar, ("búsqueda por enlace: " + ("; ".join(partes) or "no se miró ninguna cuenta")
+                             if completa else
+                             "búsqueda por enlace a medias (no dio tiempo): mirado "
+                             + ("; ".join(mirado + cerradas) or "nada")),
+                completa)
+    nuevos = {c: i for c, i in hallados.items()
+              if any(i != ident for _p, _e, ident in buscados[c])}
+    mismos = [c for c in hallados if c not in nuevos]
+    if mismos:
+        # está, y con el MISMO id: el fallo no es el id (permiso, cuenta…)
+        apuntar(mismos, "búsqueda por enlace: es el mismo id, el fallo no es el id", True)
+    if not nuevos or not _cabe(hasta) or cli.cerca_del_cupo:
+        return
+    try:
+        cifras = cli.instagram(list(nuevos.values()))
+    except MM.ErrorMeta:
+        return
+    for codigo, nuevo in nuevos.items():
+        for pid, e, _viejo in buscados[codigo]:
+            if nuevo in cifras:
+                que = f"búsqueda por enlace: encontrado con otro id ({nuevo})"
+                resultados[e["id"]] = (pid, dict(cifras[nuevo], busqueda=que, buscado=True),
+                                       {"meta_id": nuevo})
+
+
+def _leer_fb(raiz, cli, fb, hasta, resultados):
+    """Facebook: con el token de la pagina (me/accounts solo si hace falta).
+    Lo que falla por UN post (borrado, sin video) se apunta en ese envio, con
+    su reloj, y se sigue con los demas (arbitro del tren, 25-11)."""
+    leidos = 0
+    try:
+        paginas = cli.paginas()
+    except MM.ErrorMeta as fallo:
+        if fallo.motivo in MM.FATALES:
+            raise
+        # no es cosa de un vídeo: es la lista de páginas del token
+        raise MM.ErrorMeta("no se han podido leer las páginas a las que llega el token de Meta",
+                           "paginas") from None
+    for pid, e in fb:
+        if not _cabe(hasta) or cli.cerca_del_cupo:
+            break
+        ajustes_pagina = _pagina_del_perfil(raiz, e.get("perfil"))
+        pagina = _pagina_de(paginas, e, ajustes_pagina)
+        if not pagina:
+            resultados[e["id"]] = (pid, {"error": "el token de Meta no llega a la "
+                                                  "página de este vídeo"}, {})
+            continue
+        ident = str(e.get("meta_id") or e.get("post_id") or "")
+        if MM.es_pagina_post(ident) and not e.get("meta_id"):
+            try:
+                ident = cli.resolver_fb(pagina["token"], ident)
+            except MM.ErrorMeta as fallo:
+                if fallo.motivo in MM.FATALES:
+                    raise
+                resultados[e["id"]] = (pid, {"error": MM.texto_para_envio(fallo)}, {})
+                continue
+            if not ident:
+                resultados[e["id"]] = (pid, {"error": "ese post de Facebook no lleva "
+                                                      "vídeo"}, {})
+                continue
+            if not _cabe(hasta):
+                break
+        cifras = cli.facebook(pagina["token"], [(ident, e.get("duracion_s"))])
+        if ident in cifras:
+            leidos += 1
+            extra = {"meta_id": ident}
+            if cifras[ident].get("tipo"):
+                extra["meta_tipo"] = cifras[ident]["tipo"]
+            resultados[e["id"]] = (pid, cifras[ident], extra)
+    return leidos
+
+
+def _apuntar_meta(raiz, resultados):
+    """Guarda lo de Meta en cada envio. Se vuelve a leer el envio bajo su
+    cerrojo y solo se mezclan las claves de Meta: Upload-Post puede haber
+    escrito lo suyo mientras (corren a la vez), y nada suyo se pisa. -> cuantos"""
+    por_pid = {}
+    for id_envio, (pid, cifras, extra) in resultados.items():
+        por_pid.setdefault(pid, {})[id_envio] = (cifras, extra)
+    al = _iso_lima()
+    hechos = 0
+    for pid, suyos in por_pid.items():
+        with _lock(pid):
+            datos = _leer_video(raiz, pid)
+            cambio = False
+            for e in datos["envios"]:
+                if e.get("id") not in suyos:
+                    continue
+                cifras, extra = suyos[e["id"]]
+                m = dict(e.get("metricas") or {})
+                if cifras.get("error"):
+                    if cifras.get("sin_reloj") and m.get("meta_error") == str(cifras["error"])[:200]:
+                        continue    # ya lo dice: no se reescribe el fichero cada vez
+                    m["meta_error"] = str(cifras["error"])[:200]
+                    # lo que dijo Meta, sin tokens, para el diagnóstico del servidor
+                    # (y nada de uno viejo junto a un error nuevo)
+                    if cifras.get("detalle"):
+                        m["meta_detalle"] = str(cifras["detalle"])[:300]
+                    else:
+                        m.pop("meta_detalle", None)
+                    # lo de la búsqueda por enlace, en su clave: se SUSTITUYE
+                    if cifras.get("busqueda"):
+                        m["meta_busqueda"] = str(cifras["busqueda"])[:300]
+                    if cifras.get("buscado"):
+                        m["meta_busqueda_al"] = al
+                    # con su reloj: un envío que Meta no contesta no se vuelve a
+                    # preguntar hasta pasado el respiro (antes iba el primero de
+                    # la cola en cada «Actualizar» y rompía el lote entero)
+                    if not cifras.get("sin_reloj"):
+                        m["meta_al"] = al
+                    e["metricas"] = m
+                    cambio = True
+                    continue
+                for k in META_POR_RED[e["red"]]:
+                    if k == "mitad_s":
+                        continue
+                    valor = cifras.get(k)
+                    if valor is None:
+                        continue        # Meta aun no lo sabe: no borra lo de antes
+                    m[k] = valor
+                    if k == "curva":
+                        m["mitad_s"] = cifras.get("mitad_s")
+                # Instagram no da la duracion: el % sale de la del MP4 que se mando
+                if e["red"] == "instagram" and m.get("tiempo_medio_s") is not None:
+                    dur = e.get("duracion_s")
+                    if isinstance(dur, (int, float)) and dur > 0:
+                        parte = m["tiempo_medio_s"] / dur
+                        if 0 <= parte <= 10:
+                            m["media_vista"] = round(parte, 4)
+                m["meta_al"], m["meta_error"] = al, ""
+                m.pop("meta_detalle", None)
+                if cifras.get("busqueda"):
+                    m["meta_busqueda"] = str(cifras["busqueda"])[:300]
+                else:
+                    # leído con su id de siempre: lo de una búsqueda vieja ya no vale
+                    m.pop("meta_busqueda", None)
+                if cifras.get("buscado"):
+                    m["meta_busqueda_al"] = al
+                e["metricas"] = sin_ceros_imposibles(m)
+                for k, v in extra.items():
+                    if v and e.get(k) != v:
+                        e[k] = v
+                cambio = True
+                hechos += 1
+            if cambio:
+                _escribir(_ruta_video(raiz, pid), datos)
+    return hechos
+
+
+class _HiloMeta:
+    """`medir_meta` en un hilo aparte, con su propia franja dentro de la de
+    «Actualizar». Si no termina a tiempo, sigue y escribe cuando acabe (bajo
+    el cerrojo de cada video); la respuesta dice que quedo a medias."""
+
+    def __init__(self, raiz, pids, forzar, arranque):
+        self.resultado = None
+        hasta = min(arranque + TOPE_META_S, arranque + TOPE_VUELTA_S - 1)
+
+        def correr():
+            try:
+                self.resultado = medir_meta(raiz, pids, forzar=forzar, hasta=hasta)
+            except Exception as fallo:                       # noqa: BLE001
+                self.resultado = {"leidos": 0, "actualizados": 0, "pendientes": 0,
+                                  "errores": [f"Instagram y Facebook: {str(fallo)[:150]}"]}
+        self.hilo = threading.Thread(target=correr, daemon=True, name="metricas-meta")
+        self.hilo.start()
+
+    def esperar(self, hasta):
+        self.hilo.join(max(0.0, hasta - time.time()))
+
+    def mezclar_en(self, r):
+        m = self.resultado
+        if m is None:
+            r["meta"] = {"a_medias": True}
+            r.setdefault("errores", []).append(
+                "Instagram y Facebook: no dio tiempo esta vez; vuelve a pulsar «Actualizar»")
+            return
+        r["meta"] = {k: m.get(k) for k in ("leidos", "actualizados", "pendientes", "motivo", "ocupado",
+                                           "sin_tiempo")
+                     if m.get(k) is not None}
+        if m.get("ocupado"):
+            r.setdefault("errores", []).append(
+                "Instagram y Facebook: ya se están leyendo (hay otro «Actualizar» en marcha); "
+                "espera un momento")
+        if m.get("errores"):
+            r["errores"] = (r.get("errores") or []) + m["errores"]
 
 
 def tableros_pinterest(raiz, cid):
@@ -4197,6 +4799,10 @@ def _suma(destino, metricas):
     peso = float(vistas) if isinstance(vistas, (int, float)) and vistas > 0 else 0.0
     for k in RETENCION:
         v = (metricas or {}).get(k)
+        # el salto de los 3 primeros segundos de un Reel con pocas vistas no dice
+        # nada, y en un total juntado con TikTok no se notaría (árbitro, 24-11)
+        if k == "salto_3s" and not (isinstance(vistas, (int, float)) and vistas >= MIN_VISTAS_PROPORCION):
+            continue
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             destino[f"_n_{k}"] = (destino.get(f"_n_{k}") or 0) + 1
             destino[f"_s_{k}"] = (destino.get(f"_s_{k}") or 0) + float(v)

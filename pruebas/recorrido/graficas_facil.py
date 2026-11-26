@@ -137,6 +137,8 @@ def graficas_facil(navegador, datos):
         ok(pg.esperar("#editor-capas.ce-sencillo .ce-lienzo [data-c]", segundos=60), "paso 3: el editor, en modo sencillo")
         ok(not pg.p.locator("#editor-capas .ce-izq").is_visible(), "sin el panel de capas")
         ok(pg.esperar("#editor-capas .ce-der h2", "Tu carrusel", 5), "el panel dice «Tu carrusel»")
+        ok(pg.p.evaluate("() => { const d = document.querySelector('#editor-capas .ce-der'); return d.scrollWidth <= d.clientWidth + 1; }"),
+           "el panel de la derecha no se desplaza de lado (visto por el dueño el 26-11)")
         ok(pg.esperar("#editor-capas .ce-tira-cuenta", "Imagen 1 de", 5), "la tira habla de imágenes, no de láminas")
         ok(pg.esperar("#editor-capas .ce-estado", "Sin guardar", 5), "lo creado aún no está guardado")
         n = _ed(pg, "E.doc.laminas.length")
@@ -254,6 +256,15 @@ def graficas_facil(navegador, datos):
         pg.pulsar("#crear-grafica .gc-crear", "Crear")
         ok(_esperar_js(pg, "() => { const E = EditorCapas._estado(); return E && E.doc.formato === 'h916' && E.sencillo; }", 60), "la historia abre en el editor sencillo")
         ok(pg.esperar("#editor-capas .ce-der h2", "Tu historia", 5), "«Tu historia»")
+        # volver al paso 2 sin perder lo elegido (visto por el dueño el 26-11)
+        titular = pg.p.evaluate("() => EditorCapas._estado().opc.desdeCrear.titulo")
+        pg.pulsar("#editor-capas .ce-volver-crear", "Cambiar tema")
+        ok(pg.esperar("#crear-grafica .gc-crear", segundos=10), "«← Cambiar tema, foto o estilo» vuelve al paso 2")
+        ok(pg.p.locator("#crear-grafica .gc-titular").input_value() == titular and pg.p.evaluate("() => EditorCapas._asistente().familia") > 0,
+           "con el titular y el estilo de antes")
+        ok(_esperar_miniaturas(pg, 4, 60), "y sus miniaturas")
+        pg.pulsar("#crear-grafica .gc-crear", "Crear")
+        ok(_esperar_js(pg, "() => { const E = EditorCapas._estado(); return E && E.doc.formato === 'h916' && E.sencillo; }", 60), "y se vuelve a crear")
         ok(_ed(pg, "E.doc.laminas.length") == 1 and _ed(pg, "E.doc.laminas[0].capas.filter(c => c.enlace).length") == 0,
            "una sola imagen, sin la marca ni el «Desliza» de un carrusel")
         ok(pg.p.locator("#editor-capas .ce-tira").is_hidden(), "sin tira de imágenes")

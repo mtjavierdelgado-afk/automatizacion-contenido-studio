@@ -26901,7 +26901,8 @@ def graficas_miniaturas(cid: str, peticion: Request, cuerpo: dict = Body(default
     return {"miniaturas": [{"n": n, "nombre": nombres.get(n, f"Estilo {n}"),
                             "jpg": "data:image/jpeg;base64," + base64.b64encode(jpg).decode("ascii")}
                            for n, _clave, jpg in salida],
-            "orden": CREAR_GRAF.orden_de_familias(bool(foto))}
+            "orden": CREAR_GRAF.orden_de_familias(bool(foto) or cuerpo.get("con_foto_primero") is True),
+            "con_foto": list(CREAR_GRAF.CON_FOTO)}
 
 
 @app.post("/api/graficas/{cid}/capas/crear")

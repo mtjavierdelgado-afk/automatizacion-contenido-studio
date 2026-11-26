@@ -441,3 +441,14 @@ body.ce-abierto { overflow: hidden; }
 .gc-negocio summary { cursor: pointer; font-weight: 600; }
 .gc-negocio[open] summary { margin-bottom: 6px; }
 .gc-sobre { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; }
+
+/* ajustes tras la prueba del dueño (26-11): el panel del modo sencillo, más ancho y sin desplazarse de lado */
+.ce-sencillo .ce-zona { grid-template-columns: minmax(0, 1fr) 340px; }
+.ce-sencillo .ce-der { overflow-x: hidden; }
+.ce-sencillo .ce-der .ce-btn { white-space: normal; text-align: center; }
+.ce-s-descargas { grid-template-columns: 1fr; }
+.ce-volver-crear { font-size: 13px; }
+.gc-estilo-marca:empty { display: none; }
+.gc-con-foto { font-size: 11px; color: var(--tenue); }
+@media (max-width: 1100px) { .ce-sencillo .ce-zona { grid-template-columns: minmax(0, 1fr) 300px; } }
+@media (max-width: 820px) { .ce-sencillo .ce-zona { display: contents; } }

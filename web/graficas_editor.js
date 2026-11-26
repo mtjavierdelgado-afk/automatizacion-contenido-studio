@@ -207,6 +207,8 @@
     ED.guardado = firmaDoc();
     // una pieza recién creada con «+ Crear»: aún no está guardada
     if (opc.nueva) ED.guardado = '';
+    // y se puede volver a su paso 2 mientras no se guarde
+    ED.firmaCreada = opc.desdeCrear ? firmaDoc() : '';
     pintarEstado();
     pedirVista();
     if (opc.avisoInicial) avisoPantalla(opc.avisoInicial, true);
@@ -785,6 +787,10 @@
     const B = ED.barra;
     B.textContent = '';
     B.appendChild(boton('← Volver', { title: 'Cerrar el editor', clase: 'ce-btn ce-volver' }, () => cerrar()));
+    if (ED.opc.desdeCrear && !ED.piezaId) {
+      B.appendChild(boton('← Cambiar tema, foto o estilo', { clase: 'ce-btn ce-volver-crear',
+        title: 'Vuelve al paso 2 de «+ Crear» con todo lo que elegiste' }, volverACrear));
+    }
     ED.titulo = el('span', { clase: 'ce-titulo' });
     B.appendChild(ED.titulo);
     ED.estado = el('span', { clase: 'ce-estado', role: 'status' });
@@ -2660,7 +2666,7 @@
     try {
       const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/capas/historias'), { method: 'POST', cuerpo: { doc: docParaEnviar() } });
       if (ED !== yo) return;
-      await abrir(Object.assign({}, yo.opc, { pieza: null, duplicar: false, docInicial: r.doc, avisoInicial: '', que: '' }));
+      await abrir(Object.assign({}, yo.opc, { pieza: null, duplicar: false, docInicial: r.doc, avisoInicial: '', que: '', desdeCrear: null }));
       // es nueva y no está guardada: al cerrar sin guardar, que lo pregunte
       if (ED && ED !== yo) { ED.guardado = ''; pintarEstado(); }
       if (ED && ED !== yo) avisoPantalla('Estas son las historias (9:16), aún sin guardar: revísalas y pulsa «Guardar». El carrusel de antes sigue igual.');
@@ -3315,6 +3321,16 @@
     return !!c && !c.bloqueado && !c.rol;
   }
 
+  /** Del editor de una pieza recién creada al paso 2 de «+ Crear», con lo elegido. */
+  function volverACrear() {
+    terminarEdicionTexto(true);
+    if (firmaDoc() !== ED.firmaCreada
+        && !window.confirm('Vuelves al paso 2 con tu tema, tu foto y tu estilo. Lo que has cambiado aquí (textos, adornos) se pierde. ¿Seguir?')) return;
+    const opc = Object.assign({}, ED.opc, { retomar: ED.opc.desdeCrear });
+    cerrarYa(false);
+    crear(opc);
+  }
+
   const esQr = c => c.tipo === 'imagen' && (c.rol === 'qr' || c.nombre === 'QR');
 
   /** La capa que se toca: la primera de texto, foto, icono o logo bajo el dedo
@@ -3455,8 +3471,11 @@
     const sube = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'ce-oculto', id: 'ce-s-foto',
       onchange: ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f && destino) subirFoto(f, destino.id); } });
     if (!destino) {
+      const conEstilos = ED.doc.laminas.some(l => l.familia);
       return grupo('Foto',
-        el('small', { clase: 'ce-pista' }, 'Este estilo no lleva foto. Si quieres una, elige un estilo con foto en «Otro estilo».'),
+        el('small', { clase: 'ce-pista' }, conEstilos ? 'Este estilo no lleva foto. Elige uno marcado «📷 con foto» y luego pon la tuya (o una de tus vídeos).'
+          : 'Esta pieza no tiene un hueco para foto.'),
+        conEstilos ? boton('Ver los estilos con foto', { clase: 'ce-btn ce-ancho ce-s-estilos-foto' }, () => abrirEstilos(true)) : null,
         el('small', { clase: 'ce-pista' }, 'Pronto: crear la imagen con IA.'));
     }
     const foto = destino.src && ED.fotos[destino.src];
@@ -3486,7 +3505,7 @@
     }
     return grupo('Estilo',
       nombre ? el('p', { clase: 'ce-s-estilo' }, 'Ahora: ', el('b', {}, nombre)) : null,
-      boton('Otro estilo…', { clase: 'ce-btn ce-ancho ce-s-otro-estilo', title: 'Cambia la colocación, la letra y los adornos; tus textos y tu foto se quedan' }, abrirEstilos),
+      boton('Otro estilo…', { clase: 'ce-btn ce-ancho ce-s-otro-estilo', title: 'Cambia la colocación, la letra y los adornos; tus textos y tu foto se quedan' }, () => abrirEstilos(false)),
       puedeVolver ? boton('↶ Volver al estilo de antes', { clase: 'ce-btn ce-ancho ce-s-volver-estilo' }, volverAlEstiloDeAntes) : null);
   }
 
@@ -3546,6 +3565,10 @@
     return { titulo: (texto('titulo') || texto('cita')).slice(0, 90), apoyo: texto('apoyo').slice(0, 140), foto: foto ? foto.src : '' };
   }
 
+  /** Los estilos que llevan foto en la portada (lo dice el servidor con las miniaturas). */
+  const conFotoConocidos = [];
+  const marcaFoto = n => (conFotoConocidos.includes(n) ? el('span', { clase: 'gc-con-foto' }, '📷 con foto') : null);
+
   /** Pinta las miniaturas en una rejilla: `turno()` dice si siguen valiendo. */
   async function pedirMiniaturas(opc, cid, cuerpo, todas, alLlegar, sigue, senal) {
     let orden = todas.slice();
@@ -3556,12 +3579,13 @@
       const r = await opc.pedir(opc.api(cid, '/capas/miniaturas'), { method: 'POST', cuerpo: Object.assign({}, cuerpo, { familias: tanda }), signal: senal });
       if (!sigue()) return orden;
       if (vuelta === 0 && Array.isArray(r.orden) && r.orden.length) orden = r.orden.filter(n => todas.includes(n));
+      if (Array.isArray(r.con_foto)) conFotoConocidos.splice(0, conFotoConocidos.length, ...r.con_foto);
       for (const m of r.miniaturas || []) { hechas.add(m.n); alLlegar(m, orden); }
     }
     return orden;
   }
 
-  async function abrirEstilos() {
+  async function abrirEstilos(conFotoPrimero) {
     const yo = ED;
     let cat;
     try { cat = await catalogoCarrusel(); } catch (e) { avisoPantalla(`No se han podido leer los estilos: ${e.message}`, true); return; }
@@ -3578,7 +3602,8 @@
       if (celdas[n]) return celdas[n];
       const b = el('button', { type: 'button', clase: 'gc-estilo', 'data-n': String(n), 'aria-pressed': String(n === actual),
         onclick: () => { cerrarModal(); ponerEstilo(n, nombre); } },
-      el('span', { clase: 'gc-estilo-img' }, el('span', { clase: 'gc-estilo-espera' }, '…')), el('span', { clase: 'gc-estilo-nombre' }, nombre));
+      el('span', { clase: 'gc-estilo-img' }, el('span', { clase: 'gc-estilo-espera' }, '…')), el('span', { clase: 'gc-estilo-nombre' }, nombre),
+      el('span', { clase: 'gc-estilo-marca' }));
       celdas[n] = b;
       return b;
     };
@@ -3592,13 +3617,14 @@
     capaVista.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.preventDefault(); cerrarModal(); } });
     ED.raiz.appendChild(capaVista);
     const p = datosDeLaPortada(ED.doc);
-    const cuerpo = { que: queEs(), formato: ED.doc.formato, titulo: p.titulo, apoyo: p.apoyo, foto: p.foto };
+    const cuerpo = { que: queEs(), formato: ED.doc.formato, titulo: p.titulo, apoyo: p.apoyo, foto: p.foto, con_foto_primero: conFotoPrimero === true };
     let cuantas = 0;
     try {
       await pedirMiniaturas(yo.opc, yo.cid, cuerpo, cat.familias.map(f => f.n), (m, orden) => {
         const b = celdas[m.n];
         if (!b) return;
         b.firstChild.replaceChildren(el('img', { src: m.jpg, alt: `Estilo ${m.nombre}` }));
+        b.lastChild.replaceChildren(...[marcaFoto(m.n)].filter(Boolean));
         cuantas += 1;
         estado.textContent = cuantas < cat.familias.length ? `Pintando los estilos (${cuantas} de ${cat.familias.length})…` : 'Toca el que más te guste.';
         // los primeros, los que mejor van con lo que llevas (con foto, los de foto)
@@ -3672,7 +3698,7 @@
     if (ED) return;                                   // con el editor abierto, primero se cierra
     const raiz = el('div', { clase: 'gc', id: 'crear-grafica', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Crear una gráfica' });
     const S = {
-      opc, cid: opc.cid, raiz, paso: 1, que: '', formato: '', titulo: '', apoyo: '', tema: '', texto: '', modo: 'tema',
+      opc, cid: opc.cid, raiz, paso: 1, conFoto: [], que: '', formato: '', titulo: '', apoyo: '', tema: '', texto: '', modo: 'tema',
       cuantas: 7, piezas: null, piezasDe: '', avisosIA: [], escribiendo: false, creando: false, foto: '', fotoUrl: '', subiendo: false,
       familia: 0, elegidaAMano: false, minis: {}, orden: [], turno: 0, parar: null, espera: null, familias: [], cerrado: false,
     };
@@ -3709,6 +3735,8 @@
       return;
     }
     if (S.cerrado) return;
+    // «← Cambiar tema, foto o estilo» desde el editor: se vuelve al paso 2 con lo elegido
+    if (opc.retomar) Object.assign(S, opc.retomar, { paso: 2 });
     pintarAsistente(S);
   }
 
@@ -3750,7 +3778,7 @@
           el('b', {}, q.nombre), el('span', {}, q.detalle)))),
       el('p', { clase: 'ce-pista gc-que-pista' }, 'Con los colores, la letra y el logo del Kit de este proyecto. Gratis.'),
       el('div', { clase: 'gc-avanzado' }, el('span', { clase: 'ce-pista' }, 'Avanzado:'),
-        avanzado('lote', 'lote-en-capas', 'Hacer varios carruseles a la vez', 'Desde una lista o un CSV (sin IA, gratis)'),
+        avanzado('lote', 'lote-en-capas', 'Varios carruseles de una vez (pegando una lista)', 'Para hacer muchos a la vez: pegas sus textos separados por ---, o un CSV de Excel (sin IA, gratis)'),
         avanzado('enBlanco', 'nueva-en-capas', 'Empezar en blanco', 'Un diseño libre: textos, fotos, logo y formas donde quieras'),
         avanzado('clasico', 'nueva-grafica', 'Editor clásico de una imagen', 'El editor de siempre, con sus 16 plantillas'))));
     const primera = caja.querySelector('.gc-que');
@@ -4066,8 +4094,11 @@
       return el('button', { type: 'button', clase: 'gc-estilo', 'data-n': String(n), 'aria-pressed': String(n === S.familia),
         onclick: () => { S.familia = n; S.elegidaAMano = true; pintarEstilos(S); revisarCrear(S); } },
       el('span', { clase: 'gc-estilo-img' }, m ? el('img', { src: m.jpg, alt: `Estilo ${nombre(n)}` }) : el('span', { clase: 'gc-estilo-espera' }, '…')),
-      el('span', { clase: 'gc-estilo-nombre' }, nombre(n)));
+      el('span', { clase: 'gc-estilo-nombre' }, nombre(n)), marcaFoto(n));
     })));
+    if (S.foto && conFotoConocidos.length && S.familia && !conFotoConocidos.includes(S.familia)) {
+      C.appendChild(el('p', { clase: 'ce-pista malo gc-sin-hueco' }, 'El estilo elegido no lleva foto: tu foto no saldrá. Elige uno marcado «📷 con foto».'));
+    }
   }
 
   async function pedirEstilos(S) {
@@ -4139,9 +4170,13 @@
     }
     if (S.cerrado) return;
     const avisos = (r.avisos || []).concat(S.avisosIA || []);
+    // lo elegido, para «← Cambiar tema, foto o estilo»
+    const desdeCrear = {};
+    for (const k of ['que', 'formato', 'titulo', 'apoyo', 'tema', 'texto', 'modo', 'cuantas', 'piezas', 'piezasDe', 'avisosIA',
+      'foto', 'fotoUrl', 'familia', 'elegidaAMano', 'sobre', 'video']) desdeCrear[k] = S[k];
     S.cerrar();
     await abrir(Object.assign({}, S.opc, {
-      pieza: null, duplicar: false, docInicial: r.doc, sencillo: true, nueva: true, que: S.que,
+      pieza: null, duplicar: false, docInicial: r.doc, sencillo: true, nueva: true, que: S.que, retomar: null, desdeCrear,
       avisoInicial: avisos.length ? avisos.join(' ') : '',
     }));
     if (ED && !avisos.length) avisoPantalla('¡Listo! Toca un texto para cambiarlo y pulsa «Guardar».');

@@ -29336,6 +29336,8 @@ const NOMBRES_METRICA = {
   // metricas-completas: lo demás que da cada red (lo que no da no se escribe)
   nuevos_seguidores: 'seguidores nuevos', visitas_perfil: 'visitas al perfil',
   vistas_facebook: 'vistas en Facebook',
+  // retencion-meta: de Instagram, las veces que se compartió en el propio perfil
+  reposts: 'republicaciones',
 };
 
 /* «3 h 20 min», «12 min», «45 s»: el tiempo total visto de TikTok. */
@@ -29459,7 +29461,10 @@ function detalleMetricasEnvio(e) {
   const publicoNuevos = reparto((m.publico || []).filter(deNuevos), 'Nuevos o que vuelven');
   const publico = publicoSeguidores || publicoNuevos
     ? h('div', {}, publicoSeguidores, publicoNuevos) : null;
-  if (!aparte && !curva && !fuentes && !publico) return null;
+  // retencion-meta: lo que no se pudo leer de Meta, en una línea sin rojo
+  const avisoMeta = (e.red === 'instagram' || e.red === 'facebook') && m.meta_error
+    ? h('div', { clase: 'meta aviso-meta-envio' }, `Lo visto de media no se ha podido leer: ${String(m.meta_error).replace(/[.\s]+$/, '')}.`) : null;
+  if (!aparte && !curva && !fuentes && !publico && !avisoMeta) return null;
   // el segundo en que se va la mitad viene calculado con la curva ENTERA
   // (la guardada puede ir aligerada); en los envíos de antes, de la curva
   const mitadS = typeof m.mitad_s === 'number' ? m.mitad_s
@@ -29473,8 +29478,8 @@ function detalleMetricasEnvio(e) {
         ? `La mitad deja de verlo en el segundo ${Math.round(mitad[0])}.`
         // lo último que da TikTok, no «hasta el final»: la curva puede acabar
         // antes que el vídeo y chocar con «X % lo vio hasta el final» (12-11)
-        : `Más de la mitad sigue viéndolo en el segundo ${Math.round(((m.curva || []).slice(-1)[0] || [0])[0])}, lo último que da TikTok.`)) : null,
-    fuentes, publico);
+        : `Más de la mitad sigue viéndolo en el segundo ${Math.round(((m.curva || []).slice(-1)[0] || [0])[0])}, lo último que da ${e.red === 'facebook' ? 'Facebook' : 'TikTok'}.`)) : null,
+    fuentes, publico, avisoMeta);
 }
 
 /* La retención (publicar-redes-2): solo la dan TikTok y YouTube. Lo que no
@@ -29500,8 +29505,19 @@ function textoRetencion(m) {
   if (typeof m.tiempo_medio_s === 'number') {
     partes.push(`${String(Math.round(m.tiempo_medio_s * 10) / 10).replace('.', ',')} s de media`);
   }
+  // retencion-meta (Instagram): la parte que lo saltó en los 3 primeros
+  // segundos, lo que dice si el gancho funciona. Con pocas vistas no dice nada
+  // (el mismo mínimo que la interacción) y no se escribe
+  // el mismo criterio que la suma del servidor: con las vistas sabidas y 50 o más
+  if (typeof m.salto_3s === 'number' && typeof m.vistas === 'number' && m.vistas >= MIN_VISTAS_SALTO) {
+    partes.push(`${porcentaje(m.salto_3s)} lo saltó en los 3 primeros segundos`);
+  }
   return partes.join(' · ');
 }
+
+/* Con menos vistas, «lo saltó en los 3 primeros segundos» no se enseña
+   (pasos/publicar.py: MIN_VISTAS_PROPORCION). */
+const MIN_VISTAS_SALTO = 50;
 
 async function actualizarMetricasVideo() {
   PUB.midiendo = true;

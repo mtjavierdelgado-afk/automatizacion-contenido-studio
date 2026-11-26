@@ -266,21 +266,16 @@ def graficas_facil(navegador, datos):
         ok(pg.esperar(".dialogo h3", "Carruseles en lote", 5), "«Hacer varios a la vez» abre el lote de siempre")
         pg.p.keyboard.press("Escape")
         pg.p.wait_for_timeout(400)
-        # «Otro estilo» en una pieza sin estilo (empezada en blanco): cambia de verdad, y se puede volver
+        # una pieza sin estilo (empezada en blanco) no ofrece «Otro estilo»: rellenaría sus huecos
+        # con textos de muestra (una cita, un descuento) que nadie escribió; lo dice
         pg.js(f"localStorage.setItem({json.dumps(CLAVE_MODO)}, 'sencillo');")
         pg.pulsar(".seccion-graficas .crear-en-graficas", "+ Crear")
         pg.pulsar("#crear-grafica .gc-avanzado .nueva-en-capas", "Empezar en blanco")
         ok(_esperar_js(pg, "() => { const E = EditorCapas._estado(); return E && E.sencillo && E.lienzo.querySelector('[data-c]'); }", 40),
            "«Empezar en blanco», en el modo recordado (sencillo)")
         ok(_ed(pg, "E.doc.laminas.every(l => !l.familia)"), "una pieza sin estilo")
-        antes = _ed(pg, "JSON.stringify(E.doc)")
-        pg.pulsar("#editor-capas .ce-s-otro-estilo", "Otro estilo")
-        ok(_esperar_js(pg, "() => document.querySelectorAll('.ce-modal-estilos .gc-estilo img').length >= 4", 60), "también ofrece los estilos")
-        pg.pulsar('.ce-modal-estilos .gc-estilo[data-n="10"]')
-        ok(_esperar_js(pg, f"() => JSON.stringify(EditorCapas._estado().doc) !== {json.dumps(antes)}", 30), "y el estilo cambia la pieza de verdad")
-        ok(pg.esperar("#editor-capas .ce-s-volver-estilo", segundos=5), "con «Volver al estilo de antes»")
-        pg.pulsar("#editor-capas .ce-s-volver-estilo")
-        ok(_esperar_js(pg, f"() => JSON.stringify(EditorCapas._estado().doc) === {json.dumps(antes)}", 5), "que la deja como estaba")
+        ok(pg.esperar("#editor-capas .ce-s-sin-estilo", "Volver a montar", 5) and pg.p.locator("#editor-capas .ce-s-otro-estilo").count() == 0,
+           "no ofrece «Otro estilo» y explica dónde recolocarla")
         pg.pulsar("#editor-capas .ce-volver")
         ok(_esperar_js(pg, "() => !document.getElementById('editor-capas')", 5), "se cierra")
         pg.sin_errores("«+ Crear» una historia")

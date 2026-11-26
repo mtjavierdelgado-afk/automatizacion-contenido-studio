@@ -1936,7 +1936,7 @@
       const deMuestra = capas().filter(c => c.tipo === 'texto' && G_CAMPO(c.rol) && !tenia.has(c.rol) && String(c.txt || '').trim());
       avisoPantalla(deMuestra.length
         ? `Recolocado. Ojo: ${deMuestra.map(c => `«${String(c.txt).trim()}»`).join(', ')} ${deMuestra.length === 1 ? 'es un texto' : 'son textos'} de muestra: cámbialos o bórralos. Ctrl+Z vuelve a lo de antes.`
-        : (ED.sencillo ? 'Estilo puesto: tus textos y lo añadido se conservan.' : 'Recolocado con la plantilla: tus textos y lo añadido se conservan. Ctrl+Z vuelve a lo de antes.'), deMuestra.length > 0);
+        : 'Recolocado con la plantilla: tus textos y lo añadido se conservan. Ctrl+Z vuelve a lo de antes.', deMuestra.length > 0);
     } catch (e) {
       if (ED === yo) avisoPantalla(`No se ha podido montar: ${e.message}`, true);
     } finally {
@@ -3476,6 +3476,14 @@
     const n = familiaActual();
     const nombre = cat ? ((cat.familias.find(f => f.n === n) || {}).nombre || `Estilo ${n}`) : '';
     const puedeVolver = !!ED.estiloDespues && firmaDoc() === ED.estiloDespues;
+    if (!ED.doc.laminas.some(l => l.familia)) {
+      // una pieza de antes o empezada en blanco no tiene estilo: cambiarlo
+      // rellenaría sus huecos con textos de muestra (una cita, un descuento)
+      // que nadie ha escrito. Se dice, en vez de ofrecerlo.
+      return grupo('Estilo',
+        el('small', { clase: 'ce-pista ce-s-sin-estilo' }, 'Esta pieza no se hizo con «+ Crear», así que no tiene estilos para elegir. ',
+          'Para recolocarla, «Edición avanzada» → «Volver a montar».'));
+    }
     return grupo('Estilo',
       nombre ? el('p', { clase: 'ce-s-estilo' }, 'Ahora: ', el('b', {}, nombre)) : null,
       boton('Otro estilo…', { clase: 'ce-btn ce-ancho ce-s-otro-estilo', title: 'Cambia la colocación, la letra y los adornos; tus textos y tu foto se quedan' }, abrirEstilos),
@@ -3605,15 +3613,10 @@
     terminarEdicionTexto(true);
     const yo = ED;
     const antes = firmaDoc();
-    if (ED.doc.laminas.some(l => l.familia)) {
-      const r = await docDelServidor('/capas/montar-todas', { familia: n }, `Poniendo el estilo «${nombre}»…`);
-      if (!r || ED !== yo) return;
-      repintarTodoElCarrusel();
-    } else {
-      // una pieza sin estilo (de antes, o empezada en blanco): esta imagen con la plantilla de ese estilo
-      await volverAMontar(n);
-      if (ED !== yo) return;
-    }
+    if (!ED.doc.laminas.some(l => l.familia)) return;     // sin estilo no se ofrece (grupoEstiloSencillo)
+    const r = await docDelServidor('/capas/montar-todas', { familia: n }, `Poniendo el estilo «${nombre}»…`);
+    if (!r || ED !== yo) return;
+    repintarTodoElCarrusel();
     const despues = firmaDoc();
     if (despues === antes) {
       avisoPantalla('Esta pieza no ha cambiado con ese estilo. Prueba otro, o «Edición avanzada».', true);

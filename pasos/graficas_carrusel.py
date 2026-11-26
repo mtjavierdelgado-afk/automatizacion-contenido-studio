@@ -25,7 +25,6 @@ su fondo (`tinta:`); el de acento, el primero que llega al contraste (4,5:1 en
 lo pequeño, 3:1 en lo grande) o, si ninguno, el que se lee. Nada de esto llama
 a una IA ni escribe nada: solo compone.
 """
-import json
 import os
 import re
 import secrets
@@ -1318,11 +1317,11 @@ def _extremos_de_foto(ruta, foto, f):
     """-> funcion(capa) -> (oscuro, claro) de los píxeles de la foto bajo la caja
     de esa capa (la foto a sangre, «cover», con su encuadre); o None."""
     try:
-        clave = (ruta, os.path.getmtime(ruta), json.dumps(foto.get("encuadre"), sort_keys=True), f["W"], f["H"])
+        clave = (ruta, os.path.getmtime(ruta))
     except OSError:
         return None
-    datos = _MEMO_EXTREMOS.get(clave)
-    if datos is None:
+    entera = _MEMO_EXTREMOS.get(clave)
+    if entera is None:
         try:
             from PIL import Image                           # noqa: PLC0415
             with Image.open(ruta) as im:
@@ -1332,16 +1331,15 @@ def _extremos_de_foto(ruta, foto, f):
                 entera.load()
         except Exception:                                   # noqa: BLE001
             return None
-        iw, ih = entera.size
-        enc = foto.get("encuadre") or {}
-        W, H = f["W"], f["H"]
-        escala = max(W / iw, H / ih) * float(enc.get("zoom", 1) or 1)
-        dw, dh = iw * escala, ih * escala
-        datos = (entera, (W - dw) * float(enc.get("x", 50)) / 100, (H - dh) * float(enc.get("y", 50)) / 100, escala, W, H)
         if len(_MEMO_EXTREMOS) > 6:
-            _MEMO_EXTREMOS.clear()                          # fotos enteras: pocas en memoria
-        _MEMO_EXTREMOS[clave] = datos
-    pequena, ox, oy, k, W, H = datos
+            _MEMO_EXTREMOS.clear()                          # fotos enteras: pocas en memoria (por fichero, no por encuadre)
+        _MEMO_EXTREMOS[clave] = entera
+    iw, ih = entera.size
+    enc = foto.get("encuadre") or {}
+    W, H = f["W"], f["H"]
+    k = max(W / iw, H / ih) * float(enc.get("zoom", 1) or 1)
+    ox, oy = (W - iw * k) * float(enc.get("x", 50)) / 100, (H - ih * k) * float(enc.get("y", 50)) / 100
+    pequena = entera
     pw, ph = pequena.size
 
     def bajo(capa):

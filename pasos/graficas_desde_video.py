@@ -157,8 +157,8 @@ def cifra_en_narracion(cifra, narracion):
         digitos = {E._solo_digitos(m.group(0)) for m in re.finditer(r"\d[\d.,\s]*\d|\d", narr)}
         return all(n in digitos for n in numeros)
     # las cifras de la narración con su unidad (también «300 soles», «300 percent», «$300»)
-    patron = re.compile(r"(?:s/\.?|us\$|\$|€|usd|pen)\s*\d[\d.,\s]*\d?|\d[\d.,\s]*\s*(?:%|por\s*ciento|percent|soles?|"
-                        r"d[oó]lares?|dollars?|euros?|nuevos soles)", re.I)
+    patron = re.compile(r"(?:s/\.?|us\$|\$|€|usd|pen)\s*\d[\d.,\s]*\d?|\d[\d.,\s]*\s*(?:%|por\s*ciento|(?:percent|soles?|"
+                        r"d[oó]lares?|dollars?|euros?|nuevos soles|pen|usd|eur)\b)", re.I)
     con_unidad = {(E._solo_digitos(m.group(0)), _clase_de_unidad(m.group(0))) for m in patron.finditer(narr)}
     return all((n, clase) in con_unidad for n in numeros)
 

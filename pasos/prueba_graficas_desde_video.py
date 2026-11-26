@@ -302,6 +302,8 @@ def parte_2(pincel):
     ok(not D.cifra_en_narracion("S/ 300", "cuesta 300 dólares"), "«S/ 300» no es «300 dólares» (otra moneda)")
     ok(not D.cifra_en_narracion("US$ 50", "son 50 soles"), "«US$ 50» no es «50 soles»")
     ok(D.cifra_en_narracion("$ 40", "they are 40 dollars"), "«$ 40» sí es «40 dollars»")
+    ok(D.cifra_en_narracion("S/ 300", "cuesta 300 PEN") and D.cifra_en_narracion("20 %", "baja un 20%"),
+       "«300 PEN» detrás del número y «20%» pegado también valen")
     r2 = {"laminas": [{"tipo": "portada", "titulo": "Hola", "plano": "p0"},
                       {"tipo": " Precio ", "titulo": "Precio", "precio": "S/ 300", "texto": "x", "plano": "p0"},
                       {"tipo": "punto", "titulo": "300 juegos", "plano": "p1"}, {"tipo": "cierre"}]}

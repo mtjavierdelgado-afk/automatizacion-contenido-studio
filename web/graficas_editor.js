@@ -3481,7 +3481,7 @@
       // rellenaría sus huecos con textos de muestra (una cita, un descuento)
       // que nadie ha escrito. Se dice, en vez de ofrecerlo.
       return grupo('Estilo',
-        el('small', { clase: 'ce-pista ce-s-sin-estilo' }, 'Esta pieza no se hizo con «+ Crear», así que no tiene estilos para elegir. ',
+        el('small', { clase: 'ce-pista ce-s-sin-estilo' }, 'Esta pieza no tiene estilo (es de antes o empezada en blanco), así que no hay estilos para elegir. ',
           'Para recolocarla, «Edición avanzada» → «Volver a montar».'));
     }
     return grupo('Estilo',

@@ -107,6 +107,7 @@ $suites = @(
   'pasos\prueba_graficas_carrusel.py',
   'pasos\prueba_graficas_extras.py',
   'pasos\prueba_graficas_facil.py',
+  'pasos\prueba_graficas_desde_video.py',
   'pasos\prueba_choques_reglas.py',
   'pasos\prueba_vidiq.py',
   'pasos\prueba_ramas_sin_choques.py',

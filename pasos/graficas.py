@@ -343,8 +343,9 @@ def _fuentes_de_plantilla(cuerpo):
 
 # ------------------------------------------------------------------ imagenes
 
-def guardar_imagen(raiz, cid, contenido):
-    """Normaliza a JPG (lado maximo 2400) y la guarda por su huella."""
+def guardar_imagen(raiz, cid, contenido, lado_max=None):
+    """Normaliza a JPG (lado maximo 2400, o `lado_max`: la foto de un vídeo para
+    una pieza se reduce al lado mayor de la pieza) y la guarda por su huella."""
     from PIL import Image, ImageOps                         # noqa: PLC0415
     if not contenido or len(contenido) > MAX_BYTES_IMAGEN:
         raise ErrorGraficas("la imagen tiene que pesar menos de 15 MB")
@@ -360,7 +361,8 @@ def guardar_imagen(raiz, cid, contenido):
         imagen = fondo
     else:
         imagen = imagen.convert("RGB")
-    imagen.thumbnail((LADO_MAX_IMAGEN, LADO_MAX_IMAGEN))
+    lado = min(LADO_MAX_IMAGEN, int(lado_max)) if lado_max else LADO_MAX_IMAGEN
+    imagen.thumbnail((lado, lado))
     salida = io.BytesIO()
     imagen.save(salida, "JPEG", quality=90)
     datos = salida.getvalue()

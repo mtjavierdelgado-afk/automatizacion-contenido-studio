@@ -26838,7 +26838,12 @@ def graficas_escribir(cid: str, peticion: Request, cuerpo: dict = Body(default=N
     # lo que se puede comprobar ya, sin esperar a Claude
     if que not in ESCRIBIR_GRAF.QUE:
         raise ErrorApi(400, "¿una publicación, un carrusel o una historia?")
-    if len(" ".join(tema.split())) < 3:
+    # «Crear desde un vídeo» (graficas-desde-video): el tema es el vídeo
+    pid = str(cuerpo.get("pid") or "")
+    video = _planos_de_video_graficas(cid, pid, peticion) if pid else None
+    if video is not None and len(video["planos"]) < _desde_video().MIN_PLANOS:
+        raise ErrorApi(400, "este vídeo no tiene imágenes con narración suficientes: elige otro")
+    if video is None and len(" ".join(tema.split())) < 3:
         raise ErrorApi(400, "escribe de qué trata (una frase basta)")
     negocio = _negocio_para_escribir(cid)
     # lo que el dueño cuenta en «Sobre tu negocio» (qué vende y cómo habla): fuente como la ficha
@@ -26852,35 +26857,130 @@ def graficas_escribir(cid: str, peticion: Request, cuerpo: dict = Body(default=N
         if any(v["cid"] == cid and v.get("escribir") and not v["fin"] for v in _TRABAJOS_CAPAS.values()):
             raise ErrorApi(409, "ya se están escribiendo unos textos en este proyecto: espera a que terminen")
         tid = secrets.token_hex(8)
+        # el «avance» que el CLI mira para cancelar en el acto (cerrar «+ Crear»)
+        avance = _AvanceEscribir()
         trabajo = {"id": tid, "cid": cid, "pieza": "", "escribir": True, "estado": "pintando", "hechas": 0,
-                   "total": 1, "resultado": None, "error": "", "codigo": 0, "fin": 0}
+                   "total": 1, "resultado": None, "error": "", "codigo": 0, "fin": 0, "avance": avance}
         _TRABAJOS_CAPAS[tid] = trabajo
 
     def llamar(instruccion):
+        if avance.cancelado:
+            raise RuntimeError("cancelado")
         if str(os.environ.get("ESTUDIO_SIMULAR", "")).strip().lower() in ("1", "si", "true"):
-            return ESCRIBIR_GRAF.simulado(instruccion)
+            if os.environ.get("ESTUDIO_SIMULAR_ESPERA"):
+                # para probar «cerrar cancela» (solo en pruebas)
+                time.sleep(float(os.environ["ESTUDIO_SIMULAR_ESPERA"]))
+                if avance.cancelado:
+                    raise RuntimeError("cancelado")
+            return (_desde_video().simulado(instruccion) if video is not None else ESCRIBIR_GRAF.simulado(instruccion))
         import cli_claude  # noqa: PLC0415
         respuesta, _sobre = cli_claude.ejecutar(
             instruccion, modelo=os.environ.get("ESTUDIO_GRAFICAS_MODELO") or "sonnet",
             esfuerzo=os.environ.get("ESTUDIO_GRAFICAS_ESFUERZO") or "low", cwd=str(raiz_proyectos()),
             base_tiempo_s=120, tiempo_max_s=240, extra=["--no-session-persistence"], para="Gráficas: escribir",
+            avance=avance,
             sistema="Eres un redactor de redes sociales de un negocio peruano. Escribes claro y corto, "
                     "y nunca inventas datos, cifras, precios ni opiniones de clientes.")
         return respuesta
 
     def correr():
         try:
-            piezas, avisos = ESCRIBIR_GRAF.escribir(que, tema, negocio, cuantas, llamar)
-            trabajo.update(estado="listo", hechas=1, resultado={"piezas": [[t, x] for t, x in piezas], "avisos": avisos})
+            if video is not None:
+                piezas, avisos = _desde_video().escribir(que, video["titulo"], video["planos"], negocio, cuantas, llamar)
+                extra = {"pid": pid}
+            else:
+                piezas, avisos = ESCRIBIR_GRAF.escribir(que, tema, negocio, cuantas, llamar)
+                extra = {}
+            if not trabajo["fin"]:
+                trabajo.update(estado="listo", hechas=1,
+                               resultado=dict({"piezas": [[t, x] for t, x in piezas], "avisos": avisos}, **extra))
         except Exception as fallo:                          # noqa: BLE001
             texto = str(fallo)
             if "limit" in texto.lower() or "cupo" in texto.lower():
                 texto = f"Se ha agotado el cupo de Claude: escribe los textos tú o prueba más tarde ({texto[:160]})"
-            trabajo.update(estado="error", error=texto[:400], codigo=400)
+            if not trabajo["fin"]:
+                trabajo.update(estado="error", error=texto[:400], codigo=400)
         finally:
-            trabajo["fin"] = time.time()
+            trabajo["fin"] = trabajo["fin"] or time.time()
     threading.Thread(target=correr, name=f"escribir-{tid}", daemon=True).start()
     return JSONResponse({"trabajo": tid, "total": 1}, status_code=202)
+
+
+class _AvanceEscribir:
+    """Lo que el CLI mira para cortar en el acto (`cli_claude`: `cancelado` y `al_cancelar`)."""
+
+    def __init__(self):
+        self.cancelado = False
+        self.al_cancelar = None
+
+    def cortar(self):
+        self.cancelado = True
+        if callable(self.al_cancelar):
+            try:
+                self.al_cancelar()
+            except Exception:                               # noqa: BLE001
+                pass
+
+
+@app.delete("/api/graficas/{cid}/escribir/{tid}")
+def graficas_escribir_cancelar(cid: str, tid: str, peticion: Request):
+    """Cerrar «+ Crear» mientras Claude escribe: se corta el CLI y el proyecto
+    queda libre para otro «Escríbelo por mí»."""
+    _ficha_de_graficas(cid, peticion)
+    trabajo = _TRABAJOS_CAPAS.get(str(tid))
+    if not trabajo or trabajo["cid"] != cid or not trabajo.get("escribir"):
+        raise ErrorApi(404, "ese trabajo no está")
+    if not trabajo["fin"]:
+        trabajo.update(estado="error", error="cancelado", codigo=499, fin=time.time())
+        trabajo["avance"].cortar()
+    return {"ok": True}
+
+
+def _desde_video():
+    import graficas_desde_video as DESDE_VIDEO  # noqa: E402,PLC0415
+    return DESDE_VIDEO
+
+
+#: Los planos permitidos de cada vídeo: (pid, fecha del estado) -> {titulo, planos}.
+_PLANOS_VIDEO_GRAF = {}
+
+
+def _planos_de_video_graficas(cid, pid, peticion):
+    """Los planos de un vídeo DE ESTE proyecto que «Crear desde un vídeo» puede
+    usar (con imagen y narración; sin cartelas ni repetidas). Solo lee: nada de
+    params ni firmas (regla 1). 404 si es de un proyecto con clave cerrado; 403
+    si es de otro proyecto."""
+    _ficha_de_graficas(cid, peticion)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, "los vídeos no se pueden leer ahora")
+    ctx = _ctx_publicable(pid, peticion)
+    if _cliente_del_video(ctx.proyecto) != cid:
+        raise ErrorApi(403, "ese vídeo es de otro proyecto")
+    try:
+        sello = os.path.getmtime(os.path.join(ctx.proyecto.raiz, "estado.json"))
+    except OSError:
+        sello = 0
+    clave = (pid, sello)
+    hecho = _PLANOS_VIDEO_GRAF.get(clave)
+    if hecho is None:
+        plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+        planos = _desde_video().planos_permitidos(plan, _imagenes_de_planos(ctx, plan))
+        titulo = str((ctx.proyecto.config or {}).get("nombre") or plan.get("titulo") or pid)
+        hecho = {"titulo": " ".join(titulo.split())[:120], "planos": planos}
+        if len(_PLANOS_VIDEO_GRAF) > 60:
+            _PLANOS_VIDEO_GRAF.clear()
+        _PLANOS_VIDEO_GRAF[clave] = hecho
+    return hecho
+
+
+@app.get("/api/graficas/{cid}/videos/{pid}/planos")
+def graficas_planos_de_video(cid: str, pid: str, peticion: Request):
+    """Lo que «Crear desde un vídeo» puede usar de ese vídeo: sus planos con
+    imagen y narración (id y la frase), y si llegan al mínimo."""
+    video = _planos_de_video_graficas(cid, pid, peticion)
+    minimo = _desde_video().MIN_PLANOS
+    return {"titulo": video["titulo"], "minimo": minimo, "vale": len(video["planos"]) >= minimo,
+            "planos": [{"sid": p["sid"], "texto": p["narracion"][:140]} for p in video["planos"]]}
 
 
 @app.post("/api/graficas/{cid}/capas/miniaturas")
@@ -26953,11 +27053,46 @@ def graficas_crear(cid: str, peticion: Request, cuerpo: dict = Body(default=None
             raise ErrorApi(400, "escribe de qué trata (o pulsa «Escríbelo por mí»)")
         piezas, _avisos = _por_graficas(K.partir, texto)
     else:
-        piezas = [(str(p[0]), p[1]) for p in piezas if isinstance(p, list) and len(p) == 2 and isinstance(p[1], dict)]
+        piezas = [(str(p[0]), dict(p[1])) for p in piezas if isinstance(p, list) and len(p) == 2 and isinstance(p[1], dict)]
+    # «Crear desde un vídeo»: el plano y el texto alternativo de cada imagen
+    planos = [str(t.pop("plano", "") or "") for _tipo, t in piezas]
+    alts = [" ".join(str(t.pop("alt", "") or "").split())[:400] for _tipo, t in piezas]
+    for _tipo, t in piezas:
+        for k in [k for k in t if k.startswith("_")]:
+            t.pop(k)
     foto = str(cuerpo.get("foto") or "")
-    doc, avisos = _por_capas(G._con_turno, lambda p: CREAR_GRAF.crear(
-        p, que, n, _formato_de_crear(cuerpo.get("formato")), piezas, foto, kit, logo, oscuro, marca, "",
-        _imagen_de_graficas(cid)))
+    formato = _formato_de_crear(cuerpo.get("formato"))
+    copias = {}
+    pid = str(cuerpo.get("pid") or "")
+    if pid:
+        # las mismas comprobaciones que «imagen/de-plano»: vídeo de ESTE proyecto
+        # (y abierto), y solo planos de su lista permitida (plan v3, punto 1)
+        video = _planos_de_video_graficas(cid, pid, peticion)
+        permitidos = {p["sid"]: p["ruta"] for p in video["planos"]}
+        for sid in {s for s in planos if s}:
+            if sid not in permitidos:
+                raise ErrorApi(400, "ese plano no se puede usar (no tiene imagen, o lleva sus propias letras)")
+        medidas = _por_graficas(G.formato, formato or CREAR_GRAF.FORMATO_DE.get(que, "v45"))
+        lado = max(medidas["W"], medidas["H"])
+        for sid in {s for s in planos if s}:
+            with open(permitidos[sid], "rb") as fh:
+                copias[sid] = _por_graficas(G.guardar_imagen, raiz_proyectos(), cid, fh.read(), lado)
+        if planos and planos[0]:
+            foto = copias[planos[0]]
+    elif any(planos):
+        planos = [""] * len(planos)                         # sin vídeo, un «plano» no vale nada
+    imagen_de = _imagen_de_graficas(cid)
+
+    def hacer(p):
+        doc, avisos = CREAR_GRAF.crear(p, que, n, formato, piezas, foto, kit, logo, oscuro, marca, "", imagen_de)
+        for i, lam in enumerate(doc["laminas"]):
+            if i < len(alts) and alts[i]:
+                lam["alt"] = alts[i]
+            if i > 0 and i < len(planos) and planos[i] in copias:
+                doc, mas = K.poner_foto_fondo(doc, i, copias[planos[i]], kit, imagen_de)
+                avisos += mas
+        return doc, avisos
+    doc, avisos = _por_capas(G._con_turno, hacer)
     return {"doc": doc, "avisos": avisos}
 
 

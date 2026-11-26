@@ -220,7 +220,7 @@ def fondo_tapado(pincel):
     import graficas_carrusel as K                           # noqa: PLC0415
     texto = "Titular de prueba\nY su apoyo\n\nUn punto\nCon su texto."
     laminas, verdad = [], []
-    for n in range(1, 15):
+    for n in range(1, 17):
         base = {"version": 2, "formato": "v45", "nombre": "x", "laminas": [{"capas": []}]}
         d, _ = K.carrusel_desde_texto(pincel, base, n, texto, "sustituir", None, None, None, "Alba")
         for i in (0, 1):
@@ -270,7 +270,7 @@ def fondo_tapado(pincel):
     malos = [(i // 2 + 1, "portada" if i % 2 == 0 else "dentro") for i, (a, b) in enumerate(zip(dice, verdad)) if a != b]
     dice = dice[:28]
     ok(not malos, f"el editor sabe qué fondos tapa el diseño, igual que el PNG ({len(dice)} láminas; distintas: {malos})")
-    ok(not any(dice[1::2]), "en las láminas de dentro de las 14 familias el fondo nunca está tapado")
+    ok(not any(dice[1::2]), "en las láminas de dentro de las 16 familias el fondo nunca está tapado")
 
     # el aviso dice exactamente dónde se ve (pedido del dueño, 25-11)
     casos = [
@@ -527,10 +527,10 @@ def _contraste(a, b):
 
 
 def familias(pincel):
-    print("las 14 familias: cada tipo, en cada tamaño y con 3 Kits")
+    print("las 16 familias: cada tipo, en cada tamaño y con 3 Kits")
     import graficas_carrusel as K                           # noqa: PLC0415
     cat = K.catalogo()
-    ok(len(cat["familias"]) == 14 and [t["id"] for t in cat["tipos"]] == list(K.TIPOS), "14 familias y 8 tipos")
+    ok(len(cat["familias"]) == 16 and [t["id"] for t in cat["tipos"]] == list(K.TIPOS), "16 familias y sus tipos")
     combinaciones, malas = 0, []
     adornos_vistos = set()
     formatos = [("v45", list(KITS)), ("c11", ["de siempre"]), ("h916", ["de siempre"]), ("h19", ["de siempre"])]

@@ -104,6 +104,8 @@ CATALOGO = [
     (12, "Pasos", "Explicar cómo funciona algo.", ("titulo", "i1", "i2", "i3")),
     (13, "Evento con fecha", "Flyers, invitaciones y webinars.", ("dia", "mes", "titulo", "lugar", "marca")),
     (14, "Minimal de lujo", "Marcas premium: mucho aire y poco texto.", ("marca", "titulo", "cta")),
+    (15, "Publicación", "Como un post: tu foto, tu nombre y tu @usuario.", ("marca", "usuario", "titulo", "apoyo")),
+    (16, "Gamer", "Esquinas tipo pantalla de juego: torneos, consolas y streams.", ("kicker", "titulo", "cta", "marca")),
 ]
 #: campo -> (etiqueta, largo maximo)
 CAMPOS = {
@@ -113,6 +115,7 @@ CAMPOS = {
     "dia": ("Día", 6), "mes": ("Mes", 20), "lugar": ("Lugar", 50),
     "i1": ("Paso 1", 50), "i2": ("Paso 2", 50), "i3": ("Paso 3", 50),
     "cita": ("Testimonio", 180), "autor": ("Quién lo dice", 50),
+    "usuario": ("@usuario", 30),
 }
 #: Lo que se mueve y se retoca sin ser un campo de texto: el sello de la oferta.
 CAPAS_EXTRA = {"sello": "Sello entero"}
@@ -578,7 +581,7 @@ def _sustituir_imagen(cuerpo, uri):
 
 #: Sobre qué color cae la caja de la marca en cada diseño: decide si va el logo
 #: normal o el de fondo oscuro. La usan también las capas (graficas_capas).
-FONDO_MARCA = {1: "a", 2: "d", 5: "d", 6: "l", 7: "b", 8: "l", 9: "d", 10: "d", 13: "a", 14: "l"}
+FONDO_MARCA = {1: "a", 2: "d", 5: "d", 6: "l", 7: "b", 8: "l", 9: "d", 10: "d", 13: "a", 14: "l", 15: "l", 16: "d"}
 
 
 def html_de(pieza, kit=None, imagen=None, logo=None, logo_oscuro=None, _testigos=None):

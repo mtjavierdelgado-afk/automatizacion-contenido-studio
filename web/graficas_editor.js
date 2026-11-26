@@ -145,7 +145,7 @@
   const CAMPOS_DE_MUESTRA = {
     marca: '', tipo: 'Tu negocio', kicker: 'Novedad', titulo: 'Tu titular aquí', apoyo: 'Un texto corto que lo explica',
     cta: 'Reserva ya', oferta: '-20%', oferta_txt: 'Solo esta semana', dia: '15', mes: 'Diciembre',
-    lugar: 'Lugar del evento', i1: 'Elige', i2: 'Reserva', i3: 'Disfruta', cita: '«Volveremos seguro»', autor: 'Ana, clienta',
+    lugar: 'Lugar del evento', i1: 'Elige', i2: 'Reserva', i3: 'Disfruta', cita: '«Volveremos seguro»', autor: 'Ana, clienta', usuario: '@tumarca',
   };
   const PESOS = [300, 400, 500, 600, 700, 800, 900];
   /** Los topes de `graficas_capas.py` (MAX_CAPAS, MAX_FOTOS, MAX_LOGOS, MAX_TEXTO): lo comprueba la suite. */
@@ -156,6 +156,8 @@
   /** Las letras ya registradas en esta página: se cargan una vez, aunque el
    * editor se abra y se cierre muchas veces (fid -> promesa). */
   const LETRAS_DE_LA_PAGINA = {};
+  /** Los iconos (graficas-3c-extras): se piden una vez por página. */
+  const ICONOS = { lista: null, porId: {}, pidiendo: null };
 
   /**
    * Abre el editor.
@@ -204,7 +206,11 @@
    * él y no en `ED`, que puede ser ya otro (doble clic al abrir). */
   async function prepararDoc(E) {
     const o = E.opc;
-    if (E.piezaId) {
+    if (o.docInicial) {
+      // «Hacer también las historias»: un documento ya montado por el servidor, sin guardar
+      E.doc = JSON.parse(JSON.stringify(o.docInicial));
+      E.convertida = false;
+    } else if (E.piezaId) {
       const r = await o.pedir(o.api(E.cid, `/piezas/${E.piezaId}/capas`));
       E.doc = r.doc;
       E.convertida = r.origen === 'convertida';
@@ -219,6 +225,11 @@
     }
     E.origen = Object.assign({}, E.doc.origen || {});
     E.nacida = !!E.origen.nacida;
+    if (o.docInicial) {
+      E.piezaId = '';
+      E.origen = { plantilla: (E.doc.laminas.find(l => l.familia) || {}).familia || 1, sello: '', guardado: '', nacida: true };
+      E.nacida = true;
+    }
     if (o.duplicar) {
       // «Duplicar»: el mismo diseño, que se guarda como una pieza nueva
       E.piezaId = '';
@@ -362,6 +373,11 @@
 
   function cargarFotosDelDoc() {
     for (const c of capas()) if (c.tipo === 'imagen' && c.src) cargarFoto(c.src);
+    // y los iconos (graficas-3c-extras), si el documento lleva alguno
+    const yo = ED;
+    if (!ICONOS.lista && yo.doc.laminas.some(l => l.capas.some(c => c.tipo === 'icono'))) {
+      cargarIconos().then(() => { if (ED === yo) { pintarTodo(); pintarTira(); } }).catch(() => {});
+    }
   }
 
   function cargarLogos() {
@@ -456,6 +472,20 @@
         img.src = foto.url;
         n.appendChild(img);
       }
+    } else if (c.tipo === 'icono') {
+      // el mismo SVG que `graficas_iconos.svg` del servidor, con su color y su trazo
+      n = el('div');
+      n.style.cssText = cssCaja(c);
+      const uri = uriDeIcono(c, col);
+      if (uri) {
+        const img = el('img', { alt: '', draggable: 'false' });
+        img.style.cssText = 'display:block;width:100%;height:100%;max-width:none;max-height:none;object-fit:contain';
+        img.src = uri;
+        n.appendChild(img);
+      } else {
+        n.classList.add('ce-sin-logo');
+        n.appendChild(el('span', {}, ICONOS.lista ? 'Icono' : '…'));
+      }
     } else if (c.tipo === 'logo') {
       const logo = logoDe(c, col);
       n = el('div');
@@ -487,7 +517,9 @@
         const familia = ED.cat.familias[fid];
         s += `font-family:'ce-${familia}', '${familia}', ${c.fuente && c.fuente.serif ? 'serif' : 'sans-serif'};`;
         s += `font-size:calc(${f6(c.tam)}cqmin * var(--e, 1));font-weight:${c.peso};`;
-        s += `font-style:${c.cursiva ? 'italic' : 'normal'};text-decoration:${c.subrayado ? 'underline' : 'none'};`;
+        s += `font-style:${c.cursiva ? 'italic' : 'normal'};`;
+        s += c.tachado ? `text-decoration:${c.subrayado ? 'underline ' : ''}line-through;text-decoration-thickness:0.09em;`
+          : `text-decoration:${c.subrayado ? 'underline' : 'none'};`;
         if (c.mayus) s += 'text-transform:uppercase;';
         if (c.espaciado) s += `letter-spacing:${f6(c.espaciado)}em;`;
         s += `line-height:${c.interlineado ? f6(c.interlineado) : 'normal'};`;
@@ -828,6 +860,10 @@
       boton('＋ Botón', {}, () => anadir('boton')),
       sube, el('label', { clase: 'ce-btn', for: 'ce-subir-foto', tabindex: '0',
         onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sube.click(); } } }, '＋ Foto'),
+      boton('＋ Icono', { title: 'Iconos sencillos con los colores de tu Kit' }, () => elegirIcono(null)),
+      boton('＋ Pegatina', { title: '«Nuevo», «Guárdalo», un globo o una flecha' }, ev => abrirPegatinas(ev.currentTarget)),
+      boton('＋ QR', { title: 'Tu WhatsApp o tu web en un código QR (gratis)' }, () => abrirQR()),
+      hayVideos() ? boton('＋ De un vídeo', { title: 'Foto de un vídeo: una imagen que ya pagaste en un vídeo de este proyecto (gratis)' }, () => elegirFotoDeVideo(null)) : null,
       boton('＋ Logo del Kit', { disabled: !(ED.logos.normal || ED.logos.oscuro), title: ED.logos.normal || ED.logos.oscuro ? '' : 'Este proyecto aún no tiene logo: súbelo en «Logo»' }, () => anadir('logo')),
       boton('＋ Rectángulo', {}, () => anadir('rect')),
       boton('＋ Círculo', {}, () => anadir('circulo')),
@@ -866,12 +902,14 @@
     if (c.tipo === 'texto') return 'T';
     if (c.tipo === 'imagen') return '▣';
     if (c.tipo === 'logo') return '◆';
+    if (c.tipo === 'icono') return '★';
     return c.figura === 'elipse' ? '●' : '■';
   }
 
   function nombreDe(c) {
     if (c.nombre) return c.nombre;
     if (c.tipo === 'texto') return (String(c.txt || '').trim().split('\n')[0] || 'Texto').slice(0, 28);
+    if (c.tipo === 'icono') return (ICONOS.porId[c.icono] || {}).nombre || 'Icono';
     return { imagen: 'Foto', logo: 'Logo', forma: c.figura === 'elipse' ? 'Círculo' : 'Forma' }[c.tipo];
   }
 
@@ -1091,7 +1129,7 @@
   function panelCapa(P, c) {
     const f = formato();
     const W = f.W, H = f.H, m = minLado();
-    const tipo = { texto: 'Texto', imagen: 'Foto', logo: 'Logo', forma: c.figura === 'elipse' ? 'Círculo' : 'Forma' }[c.tipo];
+    const tipo = { texto: 'Texto', imagen: 'Foto', logo: 'Logo', icono: 'Icono', forma: c.figura === 'elipse' ? 'Círculo' : 'Forma' }[c.tipo];
     P.appendChild(el('h2', {}, `${tipo}: ${nombreDe(c)}`));
     if (c.bloqueado) {
       P.appendChild(el('div', { clase: 'ce-nota' }, 'Bloqueada: no se mueve con el ratón. ',
@@ -1101,6 +1139,12 @@
     if (c.tipo === 'texto') panelTexto(P, c);
     if (c.tipo === 'forma') panelForma(P, c);
     if (c.tipo === 'imagen') panelFoto(P, c);
+    if (c.tipo === 'icono') {
+      P.appendChild(grupo('Icono',
+        boton('Cambiar el icono', { clase: 'ce-btn ce-ancho' }, () => elegirIcono(c.id)),
+        campoColor('Color', c.color, c.alfa, (ref, alfa) => { c.color = ref; c.alfa = alfa; }),
+        campoDeslizador('Grosor del trazo', c.grosor || 2, v => { c.grosor = v; }, 0.5, 4, 0.25, v => `${redondo(v, 2)}`)));
+    }
     if (c.tipo === 'logo') {
       P.appendChild(grupo('Logo',
         campoElegir('Qué logo', c.variante, [['auto', 'Según el fondo'], ['normal', 'El normal'], ['oscuro', 'El de fondo oscuro']], v => { c.variante = v; }),
@@ -1159,6 +1203,7 @@
       el('div', { clase: 'ce-botonera', role: 'group', 'aria-label': 'Estilo de letra' },
         el('button', { type: 'button', clase: 'ce-mini', 'aria-pressed': String(!!c.cursiva), title: 'Cursiva', onclick: () => { c.cursiva = !c.cursiva; refrescarElegidas(); commit(); pintarDerecha(); } }, el('i', {}, 'I')),
         el('button', { type: 'button', clase: 'ce-mini', 'aria-pressed': String(!!c.subrayado), title: 'Subrayado', onclick: () => { c.subrayado = !c.subrayado; refrescarElegidas(); commit(); pintarDerecha(); } }, el('u', {}, 'S')),
+        el('button', { type: 'button', clase: 'ce-mini', 'aria-pressed': String(!!c.tachado), title: 'Tachado', onclick: () => { if (c.tachado) delete c.tachado; else c.tachado = true; refrescarElegidas(); commit(); pintarDerecha(); } }, el('s', {}, 'T')),
         el('button', { type: 'button', clase: 'ce-mini', 'aria-pressed': String(!!c.mayus), title: 'Todo en mayúsculas', onclick: () => { c.mayus = !c.mayus; refrescarElegidas(); commit(); pintarDerecha(); } }, 'AA')),
       botonera('Alineación', c.alin, [['izq', '⇤', 'A la izquierda'], ['centro', '↔', 'Centrado'], ['der', '⇥', 'A la derecha']], v => { c.alin = v; }),
       botonera('En vertical', c.valign, [['arriba', '⤒', 'Arriba'], ['centro', '↕', 'En medio'], ['abajo', '⤓', 'Abajo']], v => { c.valign = v; }),
@@ -1224,6 +1269,7 @@
     P.appendChild(grupo('Foto',
       sube, el('label', { clase: 'ce-btn ce-ancho', for: 'ce-cambiar-foto', tabindex: '0',
         onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sube.click(); } } }, c.src ? 'Cambiar la foto' : 'Poner una foto'),
+      hayVideos() ? boton('Usar una foto de un vídeo', { clase: 'ce-btn ce-ancho', title: 'Una imagen que ya pagaste en un vídeo de este proyecto (gratis)' }, () => elegirFotoDeVideo(c.id)) : null,
       foto && foto.falta ? el('small', { clase: 'ce-pista malo' }, 'Esa foto ya no está en el proyecto: pon otra.') : null,
       campoDeslizador('Encuadre horizontal', enc.x, v => { enc.x = v; }, 0, 100, 1, v => `${v} %`),
       campoDeslizador('Encuadre vertical', enc.y, v => { enc.y = v; }, 0, 100, 1, v => `${v} %`),
@@ -1397,6 +1443,127 @@
     pintarPaneles();
   }
 
+  /* ---------------------------------------------------------------- iconos y pegatinas (graficas-3c-extras, B4)
+   * Los iconos son de web/iconos/ (Lucide, ISC, y unos propios): el servidor da
+   * sus trazos (GET /api/graficas/iconos) y aquí se pintan con el color de la capa. */
+
+  function uriDeIcono(c, col) {
+    const ic = ICONOS.porId[c.icono];
+    if (!ic) return '';
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${resolver(c.color, col)}" `
+      + `stroke-opacity="${c.alfa === undefined ? 1 : c.alfa}" stroke-width="${c.grosor || 2}" stroke-linecap="round" stroke-linejoin="round">${ic.svg}</svg>`;
+    return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+  }
+
+  async function cargarIconos() {
+    if (ICONOS.lista) return ICONOS.lista;
+    if (!ICONOS.pidiendo) {
+      const o = ED.opc;
+      ICONOS.pidiendo = o.pedir(`${o.base}/api/graficas/iconos`).then(r => {
+        ICONOS.lista = r.iconos || [];
+        for (const ic of ICONOS.lista) ICONOS.porId[ic.id] = ic;
+        return ICONOS.lista;
+      }).catch(e => { ICONOS.pidiendo = null; throw e; });
+    }
+    return ICONOS.pidiendo;
+  }
+
+  /** «＋ Icono» (paraId null) o «Cambiar el icono» de la capa `paraId`. */
+  async function elegirIcono(paraId) {
+    if (!paraId && capas().length >= LIMITES.capas) { avisoPantalla(`Una pieza admite hasta ${LIMITES.capas} capas.`, true); return; }
+    const yo = ED;
+    let lista;
+    try { lista = await cargarIconos(); } catch (e) { avisoPantalla(`No se han podido cargar los iconos: ${e.message}`, true); return; }
+    if (ED !== yo) return;
+    const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Elegir un icono' });
+    const cerrarModal = () => capaVista.remove();
+    const col = colores();
+    // la muestra, con el color del texto del tema (las casillas van sobre el fondo del panel)
+    const tinta = (getComputedStyle(ED.raiz).getPropertyValue('--texto') || '').trim();
+    const muestra = { color: /^#[0-9a-f]{6}$/i.test(tinta) ? tinta : resolver('kit:oscuro', col), alfa: 1, grosor: 2 };
+    const rejilla = el('div', { clase: 'ce-iconos' }, ...lista.map(ic => {
+      const img = el('img', { alt: '' });
+      img.src = uriDeIcono(Object.assign({ icono: ic.id }, muestra), col);
+      return el('button', { clase: 'ce-icono', type: 'button', title: ic.nombre, 'aria-label': ic.nombre, onclick: () => {
+        cerrarModal();
+        const existente = paraId && capa(paraId);
+        if (existente) {
+          existente.icono = ic.id;
+          existente.nombre = ic.nombre;
+          ED.sel = [existente.id];
+        } else {
+          const f = formato();
+          const [cx, cy] = centroVisible();
+          const lado = 14;
+          const c = capaNueva('icono', { nombre: ic.nombre, icono: ic.id, color: 'kit:principal', alfa: 1, grosor: 2, w: lado, h: lado * f.W / f.H });
+          c.x = cx - c.w / 2;
+          c.y = cy - c.h / 2;
+          capas().push(c);
+          ED.sel = [c.id];
+        }
+        pintarTodo();
+        commit();
+        pintarPaneles();
+      } }, img, el('span', {}, ic.nombre));
+    }));
+    capaVista.appendChild(el('div', { clase: 'ce-modal-cuerpo ce-modal-iconos' },
+      el('h2', {}, paraId ? 'Cambiar el icono' : 'Poner un icono'),
+      el('p', { clase: 'ce-pista' }, 'Salen con el color que elijas de tu Kit. Iconos de Lucide (licencia ISC) y propios; ninguno de redes ni de marcas.'),
+      rejilla, el('div', { clase: 'ce-botonera' }, boton('Cancelar', {}, cerrarModal))));
+    capaVista.addEventListener('pointerdown', ev => { if (ev.target === capaVista) cerrarModal(); });
+    ED.raiz.appendChild(capaVista);
+    const primero = rejilla.querySelector('button');
+    if (primero) primero.focus();
+  }
+
+  /** Las pegatinas: capas de siempre ya montadas (un texto con su fondo, un globo, una flecha). */
+  function pegatina(cual) {
+    const f = formato();
+    const prop = f.W / f.H;
+    const [cx, cy] = centroVisible();
+    const nuevas = [];
+    if (cual === 'nuevo') {
+      nuevas.push(capaDeTexto({ nombre: 'Pegatina «Nuevo»', txt: 'NUEVO', tam: 4.2, peso: 800, w: 24, h: 8, alin: 'centro', valign: 'centro',
+        color: 'tinta:acento', fondo: { color: 'kit:acento', alfa: 1 }, relleno: [1.4, 3, 1.4, 3], radio: 99, espaciado: 0.08, giro: -8 }));
+    } else if (cual === 'guardalo') {
+      nuevas.push(capaDeTexto({ nombre: 'Pegatina «Guárdalo»', txt: 'Guárdalo para después', tam: 3.8, peso: 800, w: 44, h: 8, alin: 'centro', valign: 'centro',
+        color: 'tinta:secundario', fondo: { color: 'kit:secundario', alfa: 1 }, relleno: [1.4, 3, 1.4, 3], radio: 2 }));
+    } else if (cual === 'globo') {
+      nuevas.push(capaDeTexto({ nombre: 'Globo', txt: '¡Escríbenos!', tam: 4.2, peso: 700, w: 40, h: 12, alin: 'centro', valign: 'centro',
+        color: 'tinta:claro', fondo: { color: 'kit:claro', alfa: 1 }, relleno: [2, 3, 2, 3], radio: 4 }));
+      nuevas.push(capaNueva('forma', { nombre: 'Pico del globo', figura: 'poligono', puntos: [[0, 0], [100, 0], [20, 100]], w: 6, h: 6 * prop,
+        relleno: { color: 'kit:claro', alfa: 1 }, borde: null, radio: 0, sombra: [] }));
+    } else if (cual === 'flecha') {
+      nuevas.push(capaNueva('icono', { nombre: 'Flecha curva', icono: 'flecha-curva', color: 'kit:acento', alfa: 1, grosor: 2.5, w: 18, h: 18 * prop }));
+    }
+    if (!nuevas.length) return;
+    if (capas().length + nuevas.length > LIMITES.capas) { avisoPantalla(`Una pieza admite hasta ${LIMITES.capas} capas.`, true); return; }
+    // centradas, y el pico, pegado debajo del globo
+    const [a, b] = nuevas;
+    a.x = cx - a.w / 2;
+    a.y = cy - a.h / 2;
+    if (b) { b.x = a.x + a.w * 0.2; b.y = a.y + a.h - 0.1; }
+    for (const c of nuevas) capas().push(c);
+    if (a.tipo === 'texto') cargarLetra(familiaDe(a));
+    if (a.tipo === 'icono') cargarIconos().then(() => pintarTodo()).catch(() => {});
+    ED.sel = nuevas.map(c => c.id);
+    pintarTodo();
+    commit();
+    pintarPaneles();
+    avisoPantalla(b ? 'Globo listo: el texto y su pico van elegidos juntos para moverlos a la vez.' : 'Pegatina lista: muévela, gírala o cambia su texto.');
+  }
+
+  function abrirPegatinas(ancla) {
+    const ya = ED.raiz.querySelector('.ce-menu-pegatinas');
+    if (ya) { ya.remove(); return; }
+    const menu = el('div', { clase: 'ce-menu-pegatinas', role: 'menu' },
+      ...[['nuevo', '«Nuevo»'], ['guardalo', '«Guárdalo»'], ['globo', 'Globo de diálogo'], ['flecha', 'Flecha curva']].map(([id, texto]) =>
+        boton(texto, { role: 'menuitem' }, () => { menu.remove(); pegatina(id); })));
+    ancla.insertAdjacentElement('afterend', menu);
+    const primero = menu.querySelector('button');
+    if (primero) primero.focus();
+  }
+
   async function subirFoto(fichero, paraId) {
     if (!paraId && capas().filter(c => c.tipo === 'imagen' && c.src).length >= LIMITES.fotos) { avisoPantalla(`Una pieza admite hasta ${LIMITES.fotos} fotos.`, true); return; }
     avisoPantalla('Subiendo la foto…');
@@ -1404,30 +1571,175 @@
       const cuerpo = new FormData();
       cuerpo.append('imagen', fichero);
       const r = await ED.opc.pedir(ED.opc.api(ED.cid, '/imagen'), { method: 'POST', cuerpo });
-      const foto = await comoDataUrl(ED.opc.api(ED.cid, `/imagen/${encodeURIComponent(r.nombre)}`));
-      ED.fotos[r.nombre] = foto;
-      const f = formato();
-      const existente = paraId && capa(paraId);
-      if (existente) {
-        existente.src = r.nombre;
-        existente.encuadre = { x: 50, y: 50, zoom: 1 };
-        ED.sel = [existente.id];
-      } else {
-        const ratio = foto.iw && foto.ih ? foto.ih / foto.iw : 1;
-        const [cx, cy] = centroVisible();
-        let w = 60, h = 60 * f.W / f.H * ratio;
-        if (h > 80) { w = w * 80 / h; h = 80; }
-        const c = capaNueva('imagen', { nombre: 'Foto', src: r.nombre, encuadre: { x: 50, y: 50, zoom: 1 }, radio: 0, borde: null, sombra: [], w, h, x: cx - w / 2, y: cy - h / 2 });
-        capas().push(c);
-        ED.sel = [c.id];
-      }
-      pintarTodo();
-      commit();
-      pintarPaneles();
-      avisoPantalla('Foto lista.');
+      await ponerFoto(r.nombre, paraId);
     } catch (e) {
       avisoPantalla(`No se ha podido subir la foto: ${e.message}`, true);
     }
+  }
+
+  /** ¿Hay vídeos de este proyecto de los que sacar una foto ya pagada? */
+  function hayVideos() {
+    return typeof ED.opc.videos === 'function' && ED.opc.videos().length > 0;
+  }
+
+  /**
+   * «Foto de un vídeo» (graficas-3c-extras, B2): la imagen YA HECHA de un plano
+   * de un vídeo de este proyecto, copiada a Gráficas por
+   * POST /imagen/de-plano. Gratis: no se genera nada. `paraId`: la capa de foto
+   * que se cambia, o null para añadir una nueva a esta lámina.
+   */
+  function elegirFotoDeVideo(paraId) {
+    if (!hayVideos()) return;
+    if (!paraId && capas().filter(c => c.tipo === 'imagen' && c.src).length >= LIMITES.fotos) { avisoPantalla(`Una pieza admite hasta ${LIMITES.fotos} fotos.`, true); return; }
+    const yo = ED;
+    const laminaDeAntes = yo.doc.laminas[yo.lamina].id;
+    const videos = yo.opc.videos();
+    const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Foto de un vídeo' });
+    const cerrarModal = () => capaVista.remove();
+    const rejilla = el('div', { clase: 'ce-planos', 'aria-live': 'polite' });
+    const abrirVideo = async pid => {
+      rejilla.textContent = '';
+      if (!pid) return;
+      rejilla.appendChild(el('div', { clase: 'ce-pista' }, 'Buscando sus imágenes…'));
+      try {
+        const planos = await yo.opc.planos(pid);
+        if (ED !== yo || !capaVista.isConnected) return;
+        rejilla.textContent = '';
+        if (!planos.length) { rejilla.appendChild(el('div', { clase: 'ce-pista' }, 'Este vídeo aún no tiene imágenes.')); return; }
+        for (const pl of planos) {
+          const img = el('img', { alt: pl.texto || 'Plano' });
+          yo.opc.miniatura(img, pid, pl.sid);
+          rejilla.appendChild(el('button', { clase: 'ce-plano', type: 'button', title: pl.texto || '', onclick: async () => {
+            cerrarModal();
+            avisoPantalla('Copiando la imagen del vídeo…');
+            try {
+              const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/imagen/de-plano'), { method: 'POST', cuerpo: { pid, sid: pl.sid } });
+              if (ED !== yo) return;
+              await ponerFoto(r.nombre, paraId, { lamina: laminaDeAntes });
+            } catch (e) {
+              if (ED === yo) avisoPantalla(`No se ha podido usar esa imagen: ${e.message}`, true);
+            }
+          } }, img));
+        }
+      } catch (e) {
+        if (!capaVista.isConnected) return;
+        rejilla.textContent = '';
+        rejilla.appendChild(el('div', { clase: 'ce-pista malo' }, `No se han podido leer sus imágenes: ${e.message}`));
+      }
+    };
+    const selector = el('select', { 'aria-label': 'Vídeo', onchange: ev => abrirVideo(ev.target.value) },
+      el('option', { value: '' }, 'Elige un vídeo…'), ...videos.map(v => el('option', { value: v.id }, v.nombre || v.id)));
+    capaVista.appendChild(el('div', { clase: 'ce-modal-cuerpo ce-modal-planos' },
+      el('h2', {}, paraId ? 'Cambiar por una foto de un vídeo' : 'Foto de un vídeo'),
+      el('p', { clase: 'ce-pista' }, 'Las imágenes que ya pagaste en tus vídeos de este proyecto. Usarlas es gratis: no se genera nada.'),
+      selector, rejilla,
+      el('div', { clase: 'ce-botonera' }, boton('Cancelar', {}, cerrarModal))));
+    capaVista.addEventListener('pointerdown', ev => { if (ev.target === capaVista) cerrarModal(); });
+    ED.raiz.appendChild(capaVista);
+    if (videos.length === 1) { selector.value = videos[0].id; abrirVideo(videos[0].id); }
+    selector.focus();
+  }
+
+  /** Pone en la lámina una foto ya guardada en Gráficas (subida o sacada de un vídeo). */
+  async function ponerFoto(nombre, paraId, opciones) {
+    const o = opciones || {};
+    const yo = ED;
+    const foto = await comoDataUrl(yo.opc.api(yo.cid, `/imagen/${encodeURIComponent(nombre)}`));
+    if (ED !== yo) return;
+    ED.fotos[nombre] = foto;
+    const f = formato();
+    // la lámina en la que se pidió, por su id (si mientras tanto se pasó a otra
+    // o se reordenaron, va a la suya; si se borró, a la que está abierta)
+    const lam = (o.lamina && ED.doc.laminas.find(l => l.id === o.lamina)) || ED.doc.laminas[ED.lamina];
+    const otra = lam !== ED.doc.laminas[ED.lamina];
+    const existente = paraId && lam.capas.find(c => c.id === paraId);
+    if (!existente && lam.capas.filter(c => c.tipo === 'imagen' && c.src).length >= LIMITES.fotos) {
+      avisoPantalla(`Una lámina admite hasta ${LIMITES.fotos} fotos.`, true);
+      return;
+    }
+    if (existente) {
+      existente.src = nombre;
+      existente.encuadre = { x: 50, y: 50, zoom: 1 };
+      ED.sel = [existente.id];
+    } else {
+      const ratio = foto.iw && foto.ih ? foto.ih / foto.iw : 1;
+      const [cx, cy] = centroVisible();
+      const ancho = o.ancho || 60;
+      let w = ancho, h = ancho * f.W / f.H * ratio;
+      if (h > 80) { w = w * 80 / h; h = 80; }
+      const c = capaNueva('imagen', { nombre: o.nombre || 'Foto', rol: o.rol || '', src: nombre, encuadre: { x: 50, y: 50, zoom: 1 }, radio: 0, borde: null, sombra: [], w, h, x: cx - w / 2, y: cy - h / 2 });
+      lam.capas.push(c);
+      ED.sel = [c.id];
+    }
+    pintarTodo();
+    commit();
+    pintarPaneles();
+    if (otra) pintarTira();
+    avisoPantalla(otra ? `${o.aviso || 'Foto lista.'} Va en la lámina ${ED.doc.laminas.indexOf(lam) + 1}.` : (o.aviso || 'Foto lista.'));
+  }
+
+  /**
+   * «＋ QR» (graficas-3c-extras, B1): tu WhatsApp o tu web en un QR, hecho en el
+   * servidor sin salir a internet (POST /qr). Entra como una capa de foto
+   * cuadrada; negro sobre blanco a propósito (con colores, muchos móviles no lo leen).
+   */
+  function abrirQR() {
+    if (capas().filter(c => c.tipo === 'imagen' && c.src).length >= LIMITES.fotos) { avisoPantalla(`Una pieza admite hasta ${LIMITES.fotos} fotos.`, true); return; }
+    const yo = ED;
+    const capaVista = el('div', { clase: 'ce-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Poner un QR' });
+    const cerrarModal = () => capaVista.remove();
+    let tipo = 'whatsapp';
+    const valor = el('input', { type: 'text', clase: 'ce-qr-valor', maxlength: '300', 'aria-label': 'Número o web', autocomplete: 'off' });
+    const mensaje = el('input', { type: 'text', clase: 'ce-qr-valor', maxlength: '80', 'aria-label': 'Mensaje que ya sale escrito (opcional)',
+      placeholder: 'Mensaje que ya sale escrito (opcional)' });
+    const error = el('small', { clase: 'ce-pista malo', 'aria-live': 'polite' });
+    const pista = el('small', { clase: 'ce-pista' });
+    const pintarTipo = () => {
+      valor.placeholder = tipo === 'whatsapp' ? '999 999 999 (Perú) o con el código del país' : 'crearia.tech';
+      pista.textContent = tipo === 'whatsapp' ? 'Al escanearlo se abre un chat de WhatsApp contigo.' : 'Al escanearlo se abre tu web.';
+      mensaje.hidden = tipo !== 'whatsapp';
+      for (const b of elegirTipo.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.tipo === tipo));
+    };
+    const elegirTipo = el('div', { clase: 'ce-botonera', role: 'group', 'aria-label': 'Qué lleva el QR' },
+      ...[['whatsapp', 'WhatsApp'], ['web', 'Web']].map(([id, texto]) => boton(texto, { 'data-tipo': id },
+        () => { tipo = id; error.textContent = ''; pintarTipo(); valor.focus(); })));
+    let haciendo = false;
+    const hacer = async () => {
+      if (haciendo) return;                 // un doble clic o dos Intro: un solo QR
+      if (!valor.value.trim()) { valor.focus(); return; }
+      error.textContent = '';
+      haciendo = true;
+      botonHacer.disabled = true;
+      let r;
+      try {
+        r = await yo.opc.pedir(yo.opc.api(yo.cid, '/qr'), { method: 'POST', cuerpo: { tipo, valor: valor.value, mensaje: tipo === 'whatsapp' ? mensaje.value : '' } });
+      } catch (e) {
+        error.textContent = e.message;
+        haciendo = false;
+        botonHacer.disabled = false;
+        return;
+      }
+      // cancelado mientras se hacía, o el editor ya es otro: no se pone
+      if (ED !== yo || !capaVista.isConnected) return;
+      cerrarModal();
+      try {
+        await ponerFoto(r.nombre, null, { ancho: 26, nombre: 'QR', rol: 'qr', lamina: laminaDeAntes, aviso: `QR listo: lleva a ${r.destino}. Pruébalo con tu móvil antes de publicar.` });
+      } catch (e) {
+        if (ED === yo) avisoPantalla(`No se ha podido poner el QR: ${e.message}`, true);
+      }
+    };
+    const laminaDeAntes = yo.doc.laminas[yo.lamina].id;
+    const botonHacer = boton('Hacer el QR', { clase: 'ce-btn ce-primario' }, () => hacer());
+    valor.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); hacer(); } });
+    capaVista.appendChild(el('div', { clase: 'ce-modal-cuerpo ce-modal-qr' },
+      el('h2', {}, 'Poner un QR'),
+      el('p', { clase: 'ce-pista' }, 'Se hace aquí mismo, gratis y sin salir a internet. Va en negro sobre blanco para que lo lea cualquier móvil.'),
+      elegirTipo, valor, mensaje, pista, error,
+      el('div', { clase: 'ce-botonera' }, botonHacer, boton('Cancelar', {}, cerrarModal))));
+    capaVista.addEventListener('pointerdown', ev => { if (ev.target === capaVista) cerrarModal(); });
+    ED.raiz.appendChild(capaVista);
+    pintarTipo();
+    valor.focus();
   }
 
   function elegir(id, sumar) {
@@ -1545,7 +1857,7 @@
     const f = ED.cat.formatos.find(x => x.id === nuevo);
     if (!f || f.id === viejo.id) return;
     for (const c of ED.doc.laminas.flatMap(l => l.capas)) {
-      const redonda = (c.tipo === 'forma' && c.figura === 'elipse') || (c.tipo === 'imagen' && c.radio === 'elipse') || c.tipo === 'logo';
+      const redonda = (c.tipo === 'forma' && c.figura === 'elipse') || (c.tipo === 'imagen' && (c.radio === 'elipse' || c.rol === 'qr' || c.nombre === 'QR')) || c.tipo === 'logo' || c.tipo === 'icono';
       if (!redonda) continue;
       const wpx = c.w / 100 * viejo.W, hpx = c.h / 100 * viejo.H;
       // lo que era redondo (o un logo) conserva su forma: el alto se ajusta al ancho
@@ -1641,9 +1953,11 @@
     pintarEstado();
     const nueva = comoNueva || !ED.piezaId;
     if (!String(ED.doc.nombre || '').trim()) {
-      // sin nombre, el del titular: así se encuentra en la lista
-      const t = capas().find(c => c.tipo === 'texto' && c.rol === 'titulo' && String(c.txt || '').trim())
-        || capas().find(c => c.tipo === 'texto' && String(c.txt || '').trim());
+      // sin nombre, el del titular de la PORTADA (antes, el de la lámina que
+      // estuviera abierta: un carrusel guardado en la 3 se llamaba como la 3)
+      const portada = ED.doc.laminas[0].capas;
+      const t = portada.find(c => c.tipo === 'texto' && c.rol === 'titulo' && String(c.txt || '').trim())
+        || portada.find(c => c.tipo === 'texto' && !c.enlace && String(c.txt || '').trim());
       ED.doc.nombre = t ? String(t.txt).trim().split('\n')[0].slice(0, 80) : 'Pieza en capas';
       commit();
     }
@@ -1790,7 +2104,8 @@
 
   const MAX_LAMINAS = 20;
   const NOMBRE_TIPO = { portada: 'Portada', punto: 'Punto', lista: 'Lista', dato: 'Dato', antes_despues: 'Antes / después',
-    pasos: 'Pasos', cita: 'Cita', cierre: 'Cierre', blanco: 'En blanco' };
+    pasos: 'Pasos', cita: 'Cita', mito: 'Mito / Realidad', pregunta: 'Pregunta', ranking: 'Ranking',
+    checklist: 'Checklist', comparativa: 'Comparativa', precio: 'Precio / oferta', cierre: 'Cierre', blanco: 'En blanco' };
   const nuevoIdCorto = pre => pre + Math.random().toString(16).slice(2, 10).padEnd(8, '0');
 
   function asegurarIdsLaminas(doc) {
@@ -2287,12 +2602,40 @@
       ['Pinterest', 'de 2 a 5', L.length >= 2 && L.length <= 5],
       ['X', '4', L.length <= 4],
     ];
+    const hacerHistorias = !vertical && L.some(l => l.familia)
+      ? boton('Hacer también las historias (9:16)', { clase: 'ce-btn ce-ancho', title: 'El mismo carrusel en 9:16, como pieza aparte (gratis)' }, () => historias())
+      : null;
     P.appendChild(grupo(L.length > 1 ? `Lámina ${ED.lamina + 1} de ${L.length}` : 'Carrusel',
       L.length > 1 ? el('label', { clase: 'ce-campo' }, el('span', {}, 'Texto alternativo de esta lámina'), alt) : null,
       L.length > 1 ? null : el('small', { clase: 'ce-pista' }, 'Para hacer un carrusel, añade láminas con «＋ Lámina», debajo del lienzo.'),
       L.length > 1 ? el('div', { clase: 'ce-campo' }, el('span', {}, `¿Dónde caben ${L.length} láminas?`),
         el('ul', { clase: 'ce-donde-cabe' }, ...filas.map(([red, cuantas, cabe]) =>
-          el('li', { clase: cabe ? 'si' : 'no' }, el('b', {}, `${cabe ? '✓' : '✗'} ${red}`), ` · ${cuantas}`)))) : null));
+          el('li', { clase: cabe ? 'si' : 'no' }, el('b', {}, `${cabe ? '✓' : '✗'} ${red}`), ` · ${cuantas}`)))) : null,
+      hacerHistorias));
+  }
+
+  /**
+   * «Hacer también las historias» (graficas-3c-extras, B3): el servidor monta
+   * el mismo carrusel en 9:16 y se abre como una pieza NUEVA sin guardar
+   * (la de ahora no se toca). Antes hay que guardar: abrir otra cierra esta.
+   */
+  async function historias() {
+    const yo = ED;
+    if (!yo.piezaId || firmaDoc() !== yo.guardado) {
+      avisoPantalla('Guarda primero este carrusel: las historias salen de lo guardado y se abren aparte.', true);
+      return;
+    }
+    avisoPantalla('Montando las historias en 9:16…');
+    try {
+      const r = await yo.opc.pedir(yo.opc.api(yo.cid, '/capas/historias'), { method: 'POST', cuerpo: { doc: docParaEnviar() } });
+      if (ED !== yo) return;
+      await abrir(Object.assign({}, yo.opc, { pieza: null, duplicar: false, docInicial: r.doc }));
+      // es nueva y no está guardada: al cerrar sin guardar, que lo pregunte
+      if (ED && ED !== yo) { ED.guardado = ''; pintarEstado(); }
+      if (ED && ED !== yo) avisoPantalla('Estas son las historias (9:16), aún sin guardar: revísalas y pulsa «Guardar». El carrusel de antes sigue igual.');
+    } catch (e) {
+      if (ED === yo) avisoPantalla(`No se han podido hacer las historias: ${e.message}`, true);
+    }
   }
 
 
@@ -2667,7 +3010,7 @@
     if (asa.includes('s')) h += ly;
     if (asa.includes('n')) h -= ly;
     const minimo = 4;
-    const proporcion = (c.tipo === 'texto' && esquina) || (esquina && (mantener !== (c.tipo === 'logo' || (c.tipo === 'forma' && c.figura === 'elipse') || (c.tipo === 'imagen' && c.radio === 'elipse'))));
+    const proporcion = (c.tipo === 'texto' && esquina) || (esquina && (mantener !== (c.tipo === 'logo' || c.tipo === 'icono' || (c.tipo === 'forma' && c.figura === 'elipse') || (c.tipo === 'imagen' && c.radio === 'elipse'))));
     if (proporcion) {
       const s = Math.max(Math.abs(w) / k0.w, 0.02);
       w = k0.w * s;

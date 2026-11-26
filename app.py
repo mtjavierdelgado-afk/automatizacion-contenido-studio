@@ -26701,12 +26701,83 @@ def graficas_partir_texto(cid: str, peticion: Request, cuerpo: dict = Body(defau
     return {"doc": doc, "avisos": avisos}
 
 
+@app.post("/api/graficas/{cid}/capas/lote", status_code=202)
+def graficas_lote(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Carruseles en lote (graficas-3c-extras): una lista (separada por ---) o
+    un CSV, y cada uno se guarda como pieza nueva. Sin IA y gratis. Es un
+    trabajo con barra (se sigue en `.../capas/trabajo/{id}`, como un guardado)."""
+    G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
+    _G, _C, raiz, _kit, _logo, _oscuro = _contexto_capas(cid, peticion)
+    import graficas_lote as LOTE_GRAF  # noqa: E402,PLC0415
+    cuerpo = cuerpo or {}
+    n = _entero(cuerpo.get("familia"), "esa familia")
+    formato = str(cuerpo.get("formato") or G.FORMATO_DEFECTO)
+    entradas = _por_graficas(LOTE_GRAF.leer, cuerpo.get("texto"))
+    _por_graficas(K.familia, n)
+    _por_graficas(G.formato, formato)
+    ahora = time.time()
+    with _CERROJO_TRABAJOS_CAPAS:
+        # los trabajos acabados hace más de una hora se olvidan (como en _guardar_capas)
+        for viejo in [t for t, v in _TRABAJOS_CAPAS.items() if v["fin"] and ahora - v["fin"] > _VIDA_TRABAJO_CAPAS]:
+            del _TRABAJOS_CAPAS[viejo]
+        if any(v["cid"] == cid and v.get("lote") and not v["fin"] for v in _TRABAJOS_CAPAS.values()):
+            raise ErrorApi(409, "ya se está haciendo una tanda de carruseles en este proyecto: espera a que termine")
+        tid = secrets.token_hex(8)
+        trabajo = {"id": tid, "cid": cid, "pieza": "", "lote": True, "estado": "pintando", "hechas": 0,
+                   "total": len(entradas), "resultado": None, "error": "", "codigo": 0, "fin": 0}
+        _TRABAJOS_CAPAS[tid] = trabajo
+    hechos = []
+
+    def avisar(hechas, total):
+        trabajo.update(hechas=hechas, total=total)
+
+    def correr():
+        try:
+            LOTE_GRAF.hacer(raiz, cid, entradas, n, formato, G._con_turno, kit, logo, oscuro, marca, avisar, hechos)
+            trabajo.update(estado="listo", resultado={"piezas": hechos})
+        except Exception as fallo:                          # noqa: BLE001
+            # lo hecho se queda guardado: se dice cuántos salieron
+            trabajo.update(estado="error", resultado={"piezas": hechos}, codigo=400 if isinstance(fallo, G.ErrorGraficas) else 500,
+                           error=f"{fallo} ({len(hechos)} de {len(entradas)} carruseles ya están guardados)")
+        finally:
+            trabajo["fin"] = time.time()
+    threading.Thread(target=correr, name=f"lote-{tid}", daemon=True).start()
+    return JSONResponse({"trabajo": tid, "total": len(entradas)}, status_code=202)
+
+
+@app.post("/api/graficas/{cid}/capas/historias")
+def graficas_historias(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Hacer también las historias»: el mismo carrusel en 9:16 (no se guarda:
+    la pantalla lo abre como pieza nueva). Gratis, sin IA."""
+    G, K, kit, logo, oscuro, marca = _contexto_carrusel(cid, peticion)
+    return {"doc": _por_capas(G._con_turno, lambda p: K.historias(p, (cuerpo or {}).get("doc"), kit, logo, oscuro, marca))}
+
+
 @app.post("/api/graficas/{cid}/capas/nota")
 def graficas_nota_carrusel(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """La nota del carrusel (sin IA): portada, segunda portada, una idea por
     lámina, número, cierre, textos alternativos y textos de muestra."""
     _G, K, _kit, _logo, _oscuro, _marca = _contexto_carrusel(cid, peticion)
     return {"nota": _por_capas(K.avisos_del_carrusel, (cuerpo or {}).get("doc"))}
+
+
+@app.get("/api/graficas/iconos")
+def graficas_iconos():
+    """Los iconos que se pueden poner en una lámina (graficas-3c-extras): id,
+    nombre y sus trazos. Iconos de Lucide (ISC) y unos propios; sin marcas."""
+    import graficas_iconos as ICONOS_GRAF  # noqa: E402,PLC0415
+    return {"iconos": ICONOS_GRAF.catalogo()}
+
+
+@app.post("/api/graficas/{cid}/qr", status_code=201)
+def graficas_qr(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Un QR con tu WhatsApp o tu web (graficas-3c-extras), hecho aquí con
+    segno, sin salir a internet. Se guarda como una imagen más. Gratis."""
+    _ficha_de_graficas(cid, peticion)
+    import graficas_qr as QR_GRAF  # noqa: E402,PLC0415
+    cuerpo = cuerpo or {}
+    return _por_graficas(QR_GRAF.hacer, raiz_proyectos(), cid, str(cuerpo.get("tipo") or ""), cuerpo.get("valor"),
+                         cuerpo.get("mensaje") or "")
 
 
 @app.get("/api/graficas/{cid}/logo/{variante}")

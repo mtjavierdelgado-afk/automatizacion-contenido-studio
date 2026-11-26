@@ -27,19 +27,25 @@ a una IA ni escribe nada: solo compone.
 """
 import re
 import secrets
+import unicodedata
 
 import graficas as G
 import graficas_capas as C
 from graficas import ErrorGraficas
 
-TIPOS = ("portada", "punto", "lista", "dato", "antes_despues", "pasos", "cita", "cierre")
+TIPOS = ("portada", "punto", "lista", "dato", "antes_despues", "pasos", "cita",
+         "mito", "pregunta", "ranking", "checklist", "comparativa", "precio", "cierre")
 NOMBRES_TIPO = {"portada": "Portada", "punto": "Punto", "lista": "Lista", "dato": "Dato",
-                "antes_despues": "Antes / después", "pasos": "Pasos", "cita": "Cita", "cierre": "Cierre"}
+                "antes_despues": "Antes / después", "pasos": "Pasos", "cita": "Cita",
+                "mito": "Mito / Realidad", "pregunta": "Pregunta", "ranking": "Ranking", "checklist": "Checklist",
+                "comparativa": "Comparativa", "precio": "Precio / oferta", "cierre": "Cierre"}
 #: Los que tienen composición en horizontal (1,91:1 y 16:9). Los demás no caben bien.
 TIPOS_HORIZONTAL = ("portada", "punto", "dato", "cita", "cierre")
 #: Los campos de texto de las láminas de dentro (lo que «Volver a montar» lleva a su sitio).
 ROLES = ("numero", "titulo", "texto", "v1", "v2", "v3", "v4", "v5", "cifra", "antes", "despues",
-         "etiqueta1", "etiqueta2", "cita", "autor", "cta", "guardalo")
+         "etiqueta1", "etiqueta2", "cita", "autor", "cta", "guardalo",
+         # graficas-3c-extras: los tipos nuevos
+         "mito", "realidad", "pregunta", "precio", "precio_antes")
 #: Las capas «en todas» que pone un carrusel nuevo (un rol propio: «Volver a
 #: montar» con plantilla las deja tal cual, y al cambiar de familia toman su estilo).
 ROLES_EN_TODAS = ("en_marca", "en_numero", "en_desliza")
@@ -80,6 +86,11 @@ FAMILIAS = {
              acento="secundario", deco="banda", radio=1.5, boton="relleno"),
     14: dict(ft="playfair", fb="montserrat", mayus=False, fondo="claro", alterno="claro", acento="principal",
              deco="marco", radio=0, boton="linea", marca_espaciada=True),
+    # graficas-3c-extras: Publicación (como un post, sin nada de ninguna red) y Gamer (esquinas de pantalla de juego)
+    15: dict(ft="inter", fb="inter", peso_t=800, mayus=False, fondo="principal", alterno="principal", tarjeta="claro",
+             acento="principal", deco="tarjeta", radio=3, boton="relleno"),
+    16: dict(ft="oswald", fb="inter", peso_t=700, mayus=True, fondo="oscuro", alterno="oscuro", acento="secundario",
+             deco="hud", radio=0, boton="relleno"),
 }
 
 
@@ -257,9 +268,22 @@ def _fondo_y_adorno(L, tipo):
         lado = 26 if not L.horiz else 18
         capas.append(L.forma(-lado * 0.3, 100 - L.alto_de(lado) * 0.62, lado, L.alto_de(lado),
                              f"kit:{_rol_visible(fam, base, L.colores)}", "elipse", nombre="Sello"))
+    elif d == "hud":
+        # cuatro esquinas en L, como el marco de una pantalla de juego (familia Gamer)
+        lado, grosor = (11 if not L.horiz else 7), 1.1
+        lado_y = L.alto_de(lado)
+        color = f"kit:{_rol_visible(fam, base, L.colores)}"
+        k, ky = 2.6, L.alto_de(2.6)
+        for nombre, x, y, anchos in (("arriba izquierda", k, ky, [grosor, 0, 0, grosor]),
+                                     ("arriba derecha", 100 - k - lado, ky, [grosor, grosor, 0, 0]),
+                                     ("abajo izquierda", k, 100 - ky - lado_y, [0, 0, grosor, grosor]),
+                                     ("abajo derecha", 100 - k - lado, 100 - ky - lado_y, [0, grosor, grosor, 0])):
+            capas.append(L.forma(x, y, lado, lado_y, None, nombre=f"Esquina {nombre}",
+                                 borde={"anchos": anchos, "color": color, "alfa": 1}))
     elif d == "tarjeta" and tipo not in ("portada",):
         x0, y0, w, h = _caja_util(L)
-        capas.append(L.forma(x0 - 2.5, y0 - L.alto_de(2.5), w + 5, h + L.alto_de(5), f"kit:{fam['tarjeta']}",
+        # arriba, solo un poco de aire: más alto tapaba la marca «en todas» (visto en 9:16, 25-11)
+        capas.append(L.forma(x0 - 2.5, y0 - L.alto_de(1.2), w + 5, h + L.alto_de(3.7), f"kit:{fam['tarjeta']}",
                              radio=fam["radio"], nombre="Tarjeta"))
         sobre = fam["tarjeta"]
     elif d == "caja" and tipo not in ("portada", "cierre"):
@@ -347,6 +371,16 @@ MUESTRA = {
                       "antes": "Cómo era antes", "despues": "Cómo es ahora"},
     "pasos": {"titulo": "Así de fácil", "v1": "Primer paso", "v2": "Segundo paso", "v3": "Tercer paso"},
     "cita": {"cita": "«Lo que dice un cliente, con sus palabras»", "autor": "Nombre, quién es"},
+    # graficas-3c-extras: los 6 tipos nuevos
+    "mito": {"etiqueta1": "Mito", "mito": "Lo que mucha gente cree", "etiqueta2": "Realidad",
+             "realidad": "Lo que pasa de verdad (cámbialo por lo tuyo)"},
+    "pregunta": {"pregunta": "¿Sabes cuál es el error más común?", "texto": "La respuesta, en la siguiente"},
+    "ranking": {"titulo": "Nuestro top 3", "v1": "El primero", "v2": "El segundo", "v3": "El tercero"},
+    "checklist": {"titulo": "Antes de empezar, revisa", "v1": "Primera cosa", "v2": "Segunda cosa", "v3": "Tercera cosa"},
+    "comparativa": {"titulo": "¿Por qué nosotros?", "etiqueta1": "Nosotros", "etiqueta2": "Otros",
+                    "v1": "Primera ventaja", "v2": "Segunda ventaja", "v3": "Tercera ventaja"},
+    "precio": {"titulo": "Tu producto o servicio", "precio_antes": "S/ 120", "precio": "S/ 99",
+               "texto": "Hasta el 30 de noviembre (pon tus condiciones)", "cta": "Resérvalo"},
     "cierre": {"titulo": "¿Te sirvió?", "texto": "Guárdalo para tenerlo a mano.", "cta": "Escríbenos",
                "guardalo": "Guárdalo y compártelo"},
 }
@@ -469,6 +503,125 @@ def _componer(L, tipo, t):
                              brillo=brillo))
         y, alto = fila(0.82, 0.14)
         capas.append(L.texto(t.get("autor", ""), x0, y, w * 0.9, alto, 3.8, rol="autor", color=acento_p, peso=700, ajusta=True))
+    elif tipo == "mito":
+        rol_lleno = _acento_rol(fam, sobre, colores)
+        for i, (eti, campo, cual) in enumerate((("etiqueta1", "mito", "cruz"), ("etiqueta2", "realidad", "check"))):
+            y, alto = fila(0 if not i else 0.53, 0.47)
+            if i:
+                capas.append(L.forma(x0, y, w, alto, f"kit:{rol_lleno}", radio=fam["radio"], nombre="Caja realidad"))
+                color = _ref_legible(rol_lleno)
+            else:
+                capas.append(L.forma(x0, y, w, alto, None, radio=fam["radio"], nombre="Caja mito",
+                                     borde={"anchos": [0.35] * 4, "color": tinta, "alfa": 0.5}))
+                color = tinta
+            lado = 7 if not L.cuad else 6
+            capas.append(_simbolo(L, cual, x0 + 4, y + L.alto_de(3.5), lado, color, nombre="Cruz" if not i else "Check"))
+            capas.append(L.texto(t.get(eti, ""), x0 + 4 + lado + 3, y + L.alto_de(3.5), w - lado - 11, L.alto_de(lado), 4,
+                                 rol=eti, peso=800, mayus=True, espaciado=0.08, color=color, valign="centro", ajusta=True))
+            arriba = L.alto_de(3.5 + lado + 3)
+            capas.append(L.texto(t.get(campo, ""), x0 + 4, y + arriba, w - 8, alto - arriba - L.alto_de(3), 5.4 if i else 4.8,
+                                 rol=campo, titulo=bool(i), mayus=False, cursiva=False, peso=None if i else 600,
+                                 color=color, ajusta=True))
+    elif tipo == "pregunta":
+        y, alto = fila(0.04, 0.36)
+        signo = L.texto("?", x0, y, w * 0.5, alto, 20, rol="deco", titulo=True, color=acento_g, mayus=False,
+                        cursiva=False, brillo=brillo, nombre="Signo de pregunta", ajusta=False, interlineado=1)
+        # que el signo quepa entero en su caja: ni sube hasta la marca ni baja hasta el titular
+        signo["tam"] = round(min(40, 0.7 * alto * L.f["H"] / min(L.f["W"], L.f["H"])), 2)
+        capas.append(signo)
+        y, alto = fila(0.44, 0.38)
+        capas.append(L.texto(t.get("pregunta", ""), x0, y, w, alto, 8, rol="pregunta", titulo=True, color=tinta, brillo=brillo))
+        y, alto = fila(0.86, 0.12)
+        lado = 9
+        capas.append(L.texto(t.get("texto", ""), x0, y, w - lado - 3, alto, 4.2, rol="texto", color=acento_p, peso=700,
+                             valign="centro", ajusta=True))
+        capas.append(_simbolo(L, "flecha", x0 + w - lado, y + (alto - L.alto_de(lado * 0.6)) / 2, lado, acento_p,
+                              alto=L.alto_de(lado * 0.6), nombre="Flecha"))
+    elif tipo in ("ranking", "checklist"):
+        y, alto = fila(0, 0.2)
+        capas.append(L.texto(t.get("titulo", ""), x0, y, w, alto, 7, rol="titulo", titulo=True, color=tinta, brillo=brillo))
+        items = [x for x in (t.get(f"v{i}", "") for i in range(1, MAX_VINETAS + 1)) if x.strip()] or [""]
+        n = len(items)
+        paso = min(0.76 / n, 0.19)
+        arriba = 0.24
+        for i, item in enumerate(items):
+            y, alto = fila(arriba + i * paso, paso * 0.86)
+            if tipo == "ranking":
+                ancho_n = 18 if not L.cuad else 15
+                if i == 0:
+                    capas.append(L.forma(x0 - 1.5, y, w + 3, alto, f"kit:{_acento_rol(fam, sobre, colores)}", alfa=0.14,
+                                         radio=fam["radio"], nombre="Fondo del primero"))
+                capas.append(L.texto(f"#{i + 1}", x0, y, ancho_n, alto, 9.5 if n <= 3 else 8, rol="deco", titulo=True,
+                                     color=acento_g, mayus=False, cursiva=False, brillo=brillo, valign="centro",
+                                     nombre=f"Puesto {i + 1}", ajusta=True))
+                capas.append(L.texto(item, x0 + ancho_n + 3, y, w - ancho_n - 4, alto, 5 if n <= 3 else 4.4, rol=f"v{i + 1}",
+                                     color=tinta, peso=700, valign="centro", ajusta=True))
+            else:
+                lado = min(7, alto * L.f["H"] / L.f["W"] * 0.62)
+                cy = y + (alto - L.alto_de(lado)) / 2
+                capas.append(L.forma(x0, cy, lado, L.alto_de(lado), None, radio=1 if fam["radio"] else 0, nombre=f"Casilla {i + 1}",
+                                     borde={"anchos": [0.45] * 4, "color": tinta, "alfa": 1}))
+                capas.append(_simbolo(L, "check", x0 + lado * 0.15, cy + L.alto_de(lado * 0.1), lado * 0.85,
+                                      acento_p, nombre=f"Check {i + 1}"))
+                capas.append(L.texto(item, x0 + lado + 3.5, y, w - lado - 3.5, alto, 4.6, rol=f"v{i + 1}", color=tinta,
+                                     peso=600, valign="centro", ajusta=True))
+    elif tipo == "comparativa":
+        y, alto = fila(0, 0.16)
+        capas.append(L.texto(t.get("titulo", ""), x0, y, w, alto, 6.8, rol="titulo", titulo=True, color=tinta, brillo=brillo))
+        # «NOSOTROS» tiene que caber sin bajar de la letra mínima, también en 1:1 (sin espaciar),
+        # y a la izquierda, sitio para 5 ventajas largas
+        cols = ((x0 + w * 0.555, "etiqueta1", "check"), (x0 + w * 0.78, "etiqueta2", "cruz"))
+        ancho_c = w * 0.22
+        items = [x for x in (t.get(f"v{i}", "") for i in range(1, MAX_VINETAS + 1)) if x.strip()] or [""]
+        n = len(items)
+        paso = min(0.69 / n, 0.15)
+        y_tabla, alto_tabla = fila(0.19, 0.1 + paso * n + 0.01)
+        rol_lleno = _acento_rol(fam, sobre, colores)
+        capas.append(L.forma(cols[0][0], y_tabla, ancho_c, alto_tabla, f"kit:{rol_lleno}", alfa=0.16, radio=fam["radio"],
+                             nombre="Columna destacada"))
+        y, alto = fila(0.2, 0.08)
+        for cx, eti, _cual in cols:
+            capas.append(L.texto(t.get(eti, ""), cx, y, ancho_c, alto, 3.6, rol=eti, peso=800, mayus=False, espaciado=0,
+                                 alin="centro", valign="centro", color=tinta, ajusta=True))
+        for i, item in enumerate(items):
+            y, alto = fila(0.3 + i * paso, paso * 0.9)
+            capas.append(L.texto(item, x0, y, w * 0.53, alto, 4.4, rol=f"v{i + 1}", color=tinta, peso=600, valign="centro",
+                                 ajusta=True))
+            lado = min(5.5, alto * L.f["H"] / L.f["W"] * 0.6)
+            for k, (cx, _eti, cual) in enumerate(cols):
+                capas.append(_simbolo(L, cual, cx + (ancho_c - lado) / 2, y + (alto - L.alto_de(lado)) / 2, lado,
+                                      acento_p if not k else tinta, alfa=1 if not k else 0.6,
+                                      nombre=f"{'Sí' if not k else 'No'} {i + 1}"))
+            if i < n - 1:
+                capas.append(L.forma(x0, y + alto + (paso * 0.1 * h) / 2, w, 0.15 if not L.horiz else 0.3, tinta, alfa=0.2,
+                                     nombre=f"Raya {i + 1}"))
+    elif tipo == "precio":
+        y, alto = fila(0, 0.2)
+        capas.append(L.texto(t.get("titulo", ""), x0, y, w, alto, 6.6, rol="titulo", titulo=True, color=tinta, brillo=brillo))
+        y, alto = fila(0.24, 0.13)
+        antes = L.texto(t.get("precio_antes", ""), x0, y, w * 0.6, alto, 7, rol="precio_antes", color=tinta, peso=600,
+                        valign="abajo", ajusta=True, nombre="Precio de antes (tachado)")
+        antes["tachado"] = True
+        capas.append(antes)
+        y, alto = fila(0.37, 0.28)
+        # la letra baja antes que partir el precio en dos líneas (árbitro del 25-11: «S/ 1 299,90» en TikTok):
+        # la caja tiene el alto de UNA línea, así «ajusta» la achica hasta que quepa a lo ancho
+        # y la letra de partida, según lo largo que es el precio («ajusta» solo baja hasta el 60 %)
+        lado = min(L.f["W"], L.f["H"]) / 100
+        letras = max(len(t.get("precio", "").strip()), 1)
+        tam = max(LETRA_MINIMA, min(L.tam(22), (w * L.f["W"] / 100) / (letras * 0.62) / lado))
+        una_linea = tam * lado / L.f["H"] * 100 * 1.18
+        alto_precio = min(alto, una_linea)
+        precio = L.texto(t.get("precio", ""), x0, y + (alto - alto_precio) / 2, w, alto_precio, 22, rol="precio",
+                         titulo=True, color=acento_g, mayus=False, cursiva=False, brillo=brillo, valign="centro",
+                         nombre="Precio", ajusta=True, interlineado=1.05)
+        precio["tam"] = round(tam, 2)
+        capas.append(precio)
+        y, alto = fila(0.67, 0.13)
+        capas.append(L.texto(t.get("texto", ""), x0, y, w * 0.94, alto, 4, rol="texto", color=tinta, ajusta=True))
+        # el botón, ancho y bajo: su texto cabe en UNA línea (la letra baja antes que partirse)
+        y, alto = fila(0.83, 0.16)
+        capas += _boton(L, t, x0, y, w * 0.92, alto, sobre)
     elif tipo == "cierre":
         y, alto = fila(0.02, 0.36)
         capas.append(L.texto(t.get("titulo", ""), x0, y, w, alto, 9.5, rol="titulo", titulo=True, color=tinta, brillo=brillo))
@@ -504,6 +657,22 @@ def _boton(L, t, x, y, w, h, sobre):
     return [L.texto(t.get("cta", ""), x, y, w, h * 0.8, 4.6, rol="cta", peso=800, color=color, valign="centro",
                     ajusta=True, nombre="Botón"),
             L.forma(x, y + h * 0.82, min(w, 30), 0.3, color, nombre="Subrayado del botón")]
+
+
+#: Los símbolos, DIBUJADOS (no letras: ✓, ✗ y → no están en todas las
+#: tipografías y salían con la del sistema, distinta en el servidor y en Windows).
+#: Puntos en % de su caja.
+SIMBOLOS = {
+    "check": [[6, 52], [20, 38], [40, 58], [80, 16], [94, 30], [40, 86]],
+    "cruz": [[20, 6], [50, 36], [80, 6], [94, 20], [64, 50], [94, 80], [80, 94], [50, 64], [20, 94], [6, 80], [36, 50], [6, 20]],
+    "flecha": [[0, 38], [58, 38], [58, 10], [100, 50], [58, 90], [58, 62], [0, 62]],
+}
+
+
+def _simbolo(L, cual, x, y, lado, color, alfa=1.0, alto=None, nombre=""):
+    """Un ✓, una ✗ o una →, como forma del color `color` (una referencia de color)."""
+    return L.forma(x, y, lado, L.alto_de(lado) if alto is None else alto, color, "poligono", alfa=alfa,
+                   puntos=[list(p) for p in SIMBOLOS[cual]], nombre=nombre or cual.capitalize())
 
 
 # ====================================================================== montar
@@ -650,6 +819,43 @@ def montar_todas(pincel, doc, n, kit=None, logo=None, logo_oscuro=None, marca=""
     return doc
 
 
+#: El tamaño de las historias («Hacer también las historias»).
+FORMATO_HISTORIAS = "h916"
+
+
+def historias(pincel, doc, kit=None, logo=None, logo_oscuro=None, marca=""):
+    """«Hacer también las historias» (graficas-3c-extras, B3): el mismo
+    carrusel en 9:16, como pieza aparte (la pantalla la abre sin guardar).
+    Cada lámina con familia se vuelve a montar con su familia y su tipo, así
+    cada texto va a su sitio y lo que tapa la red de las historias queda
+    libre; lo añadido a mano conserva su sitio en %, y lo redondo, los logos
+    y los QR conservan su forma (un QR estirado no se lee). -> el documento."""
+    doc = C.limpiar_doc(doc)
+    viejo, nuevo = G.formato(doc["formato"]), G.formato(FORMATO_HISTORIAS)
+    if viejo["H"] / viejo["W"] > 1.7:
+        raise ErrorGraficas("este carrusel ya es vertical 9:16: ya vale para historias")
+    for lam in doc["laminas"]:
+        for c in lam["capas"]:
+            forma_fija = (c["tipo"] in ("logo", "icono") or (c["tipo"] == "forma" and c.get("figura") == "elipse")
+                          or (c["tipo"] == "imagen" and (c.get("radio") == "elipse" or C.es_qr(c))))
+            if not forma_fija or not c["w"]:
+                continue
+            proporcion = (c["h"] / 100 * viejo["H"]) / (c["w"] / 100 * viejo["W"])
+            centro = c["y"] + c["h"] / 2
+            c["h"] = round(proporcion * c["w"] / 100 * nuevo["W"] / nuevo["H"] * 100, 6)
+            c["y"] = round(centro - c["h"] / 2, 6)
+    doc["formato"] = FORMATO_HISTORIAS
+    for i, lam in enumerate(doc["laminas"]):
+        n, tipo = lam.get("familia"), lam.get("tipo")
+        if tipo in TIPOS and n in FAMILIAS:
+            # lo que estaba vacío sigue vacío: sin esto, volvía el texto de muestra
+            vacios = {c["rol"]: "" for c in lam["capas"]
+                      if c["tipo"] == "texto" and c.get("rol") in ROLES and not c["txt"].strip()}
+            doc = montar_lamina(pincel, doc, i, n, tipo, kit, logo, logo_oscuro, vacios if tipo != "portada" else None, marca)
+    doc["nombre"] = f"{doc.get('nombre') or 'Carrusel'} (historias)"[:80]
+    return C.limpiar_doc(doc)
+
+
 def _ids_unicos(doc, indice):
     otras = {c["id"] for i, lam in enumerate(doc["laminas"]) if i != indice for c in lam["capas"]}
     for c in doc["laminas"][indice]["capas"]:
@@ -730,7 +936,13 @@ def textos_de_portada(n, t, piezas=(), marca=""):
     titulo, apoyo = t.get("titulo", ""), t.get("apoyo", "")
     textos = {"titulo": titulo, "apoyo": apoyo, "marca": marca or "Tu marca", "cta": "Desliza →", "kicker": "",
               "tipo": "", "oferta": "", "oferta_txt": "", "dia": "", "mes": "", "lugar": "", "i1": "", "i2": "", "i3": "",
-              "cita": "", "autor": ""}
+              "cita": "", "autor": "", "usuario": ""}
+    if n == 15:
+        # la tarjeta de «Publicación»: el @usuario sale del nombre de la marca
+        sin_tildes = "".join(ch for ch in unicodedata.normalize("NFD", (marca or "").lower())
+                             if unicodedata.category(ch) != "Mn")
+        nombre = re.sub(r"[^a-z0-9_.]", "", sin_tildes.replace(" ", ""))
+        textos["usuario"] = f"@{nombre}"[:30] if nombre else "@tumarca"
     if n == 9:
         textos.update(cita=titulo, autor=apoyo or marca or "")
     if n == 12:
@@ -928,10 +1140,17 @@ def avisos_del_carrusel(doc):
     # «01» de un punto que escribiste no es un texto de muestra (prueba del 24-11)
     sirven = {"numero", "etiqueta1", "etiqueta2", "guardalo"}
     muestras = {v for t in MUESTRA.values() for k, v in t.items() if k not in sirven} | {"Tu gancho aquí", "Tu titular aquí"}
+    # «La respuesta, en la siguiente» de una Pregunta también sirve tal cual (graficas-3c-extras)
+    muestras.discard(MUESTRA["pregunta"]["texto"])
     con_muestra = sorted({i + 1 for i, lam in enumerate(L) for c in lam["capas"]
                           if c["tipo"] == "texto" and not c.get("oculto") and c["txt"].strip() in muestras})
     if con_muestra:
         nota("mal", f"Siguen textos de muestra en la lámina {', '.join(map(str, con_muestra))}: cámbialos antes de publicar.")
+    tachados = sorted({i + 1 for i, lam in enumerate(L) for c in lam["capas"]
+                       if c["tipo"] == "texto" and c.get("tachado") and not c.get("oculto") and c["txt"].strip()})
+    if tachados:
+        nota("aviso", f"Precio tachado en la lámina {', '.join(map(str, tachados))}: el precio de antes tiene que ser real "
+                      "(el que cobrabas de verdad). En Perú lo exige el Código de Protección y Defensa del Consumidor.")
     if not 7 <= len(L) <= 10:
         nota("aviso", f"{len(L)} láminas. Hay datos (sin verificar) de que entre 7 y 10 funcionan bien; no es una regla.")
     return salida

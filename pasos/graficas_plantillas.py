@@ -1,4 +1,4 @@
-"""Las 14 plantillas de Gráficas (rama graficas-1, 05-11-2026).
+"""Las 16 plantillas de Gráficas (rama graficas-1, 05-11-2026; la 15 y la 16, graficas-3c-extras).
 
 Cada una es HTML con medidas relativas al lienzo (cqmin, cqw, cqh), asi que el
 mismo diseno sirve en todos los tamanos: lo que cambia por formato llega como
@@ -187,6 +187,40 @@ PLANTILLAS = {
     <div style="flex: 0 1 34cqmin; width: 46cqmin; min-height: 8cqmin; overflow: hidden"><img src="«img»" alt="Imagen de ejemplo" style="width: 100%; height: 100%; object-fit: cover; display: block"></div>
     <div class="t" data-e="titulo" style="font-family: var(--ft, 'Playfair Display'), serif; font-weight: 700; font-size: calc(var(--s-s)*var(--esc)); line-height: 1.12">«titulo»</div>
     <div class="t" data-e="cta" style="font-size: calc(var(--s-k)*var(--esc)); letter-spacing: 0.16em; text-transform: uppercase; color: var(--a); font-weight: 700">«cta»</div>
+  </div>
+</div>
+""",
+    15: """\
+<div style="position: absolute; inset: 0; background: var(--a); color: var(--d)">
+  <div style="position: absolute; inset: 0; box-sizing: border-box; padding: var(--pad); display: flex; align-items: center; justify-content: center">
+    <div style="width: 100%; max-height: 100%; box-sizing: border-box; background: var(--l); border-radius: 3cqmin; padding: 5cqmin; display: flex; flex-direction: column; gap: 3cqmin; box-shadow: 0 2cqmin 6cqmin rgba(0,0,0,0.25)">
+      <div style="display: flex; align-items: center; gap: 2.6cqmin">
+        <div style="flex: none; width: 13cqmin; height: 13cqmin; border-radius: 50%; overflow: hidden"><img src="«img»" alt="Imagen de ejemplo" style="width: 100%; height: 100%; object-fit: cover; display: block"></div>
+        <div style="display: flex; flex-direction: column; gap: 0.4cqmin; min-width: 0">
+          <div class="t" data-e="marca" style="font-weight: 800; font-size: calc(var(--s-k)*var(--esc))">«logo»</div>
+          <div class="t" data-e="usuario" style="font-weight: 500; font-size: calc(var(--s-k)*var(--esc))">«usuario»</div>
+        </div>
+      </div>
+      <div class="t" data-e="titulo" style="font-family: var(--ft, 'Inter'), sans-serif; font-weight: 800; font-size: calc(var(--s-l)*var(--esc)); line-height: 1.12">«titulo»</div>
+      <div class="t" data-e="apoyo" style="font-weight: 500; font-size: calc(var(--s-a)*var(--esc))">«apoyo»</div>
+    </div>
+  </div>
+</div>
+""",
+    16: """\
+<div style="position: absolute; inset: 0; background: var(--d); color: var(--l)">
+  <img src="«img»" alt="Imagen de ejemplo" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.35">
+  <div style="position: absolute; left: 3cqw; top: 3cqh; width: 12cqmin; height: 12cqmin; border-top: 1.2cqmin solid var(--b); border-left: 1.2cqmin solid var(--b)"></div>
+  <div style="position: absolute; right: 3cqw; top: 3cqh; width: 12cqmin; height: 12cqmin; border-top: 1.2cqmin solid var(--b); border-right: 1.2cqmin solid var(--b)"></div>
+  <div style="position: absolute; left: 3cqw; bottom: 3cqh; width: 12cqmin; height: 12cqmin; border-bottom: 1.2cqmin solid var(--b); border-left: 1.2cqmin solid var(--b)"></div>
+  <div style="position: absolute; right: 3cqw; bottom: 3cqh; width: 12cqmin; height: 12cqmin; border-bottom: 1.2cqmin solid var(--b); border-right: 1.2cqmin solid var(--b)"></div>
+  <div style="position: absolute; inset: 6cqmin; box-sizing: border-box; padding: var(--pad); display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 2.4cqmin">
+    <div class="t" data-e="kicker" style="background: var(--b); color: var(--tb); padding: 0.8cqmin 2.4cqmin; font-weight: 800; font-size: calc(var(--s-k)*var(--esc)); text-transform: uppercase; letter-spacing: 0.12em">«kicker»</div>
+    <div class="t" data-e="titulo" style="font-family: var(--ft, 'Oswald'), sans-serif; font-weight: 700; font-size: calc(var(--s-l)*var(--esc)); line-height: 1.02; text-transform: uppercase">«titulo»</div>
+    <div style="display: flex; align-items: center; gap: 3cqmin; flex-wrap: wrap">
+      <div class="t" data-e="cta" style="background: var(--a); color: var(--ta); padding: 1.6cqmin 3.6cqmin; font-weight: 800; font-size: calc(var(--s-c)*var(--esc)); text-transform: uppercase">«cta»</div>
+      <div class="t" data-e="marca" style="font-weight: 700; font-size: calc(var(--s-k)*var(--esc))">«logo»</div>
+    </div>
   </div>
 </div>
 """,

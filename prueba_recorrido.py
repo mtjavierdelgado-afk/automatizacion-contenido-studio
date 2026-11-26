@@ -10221,7 +10221,7 @@ def portada_del_guion(navegador, datos):
 @escenario
 def graficas(navegador, datos):
     """graficas-1 (05-11-2026): el Kit de marca en los Ajustes del proyecto,
-    «+ Nueva gráfica» con las 14 plantillas, guardar, descargar, y en el móvil."""
+    «+ Nueva gráfica» con todas las plantillas, guardar, descargar, y en el móvil."""
     api = datos["api"]
     r, d = api.post("/api/clientes", {"nombre": "Cliente Gráficas"})
     ok(r.status_code in (200, 201), "un proyecto para probar")
@@ -10244,7 +10244,10 @@ def graficas(navegador, datos):
     pg.js("cerrarAjustesProyecto();")
     pg.pulsar(".nueva-grafica", "+ Nueva gráfica")
     ok(pg.esperar(".dialogo-grafica .elige-diseno", segundos=15), "se abre el editor")
-    ok(pg.p.locator(".elige-diseno").count() == 14, "con las 14 plantillas")
+    # tantas como el catálogo (eran 14; graficas-3c-extras trae la 15 y la 16)
+    _r, cat_graf = datos["api"].get("/api/graficas/catalogo")
+    n_plantillas = len(cat_graf.get("plantillas", []))
+    ok(n_plantillas >= 16 and pg.p.locator(".elige-diseno").count() == n_plantillas, f"con las {n_plantillas} plantillas")
     ok(pg.p.locator(".form-graf select[aria-label='Red y tamaño'] option").count() == 8, "y los 8 tamaños")
     ok(pg.p.input_value("[data-campo-graf=marca]") == "Cliente Gráficas", "la marca sale del proyecto")
     pg.p.wait_for_function("() => { const i = document.querySelector('.vista-graf'); return i && i.complete && i.naturalWidth > 0; }", timeout=40000)

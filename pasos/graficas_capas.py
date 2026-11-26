@@ -72,10 +72,11 @@ _TESTIGO_VAR = {"kit:principal": "a", "kit:secundario": "b", "kit:oscuro": "d", 
                 "kit:acento": "x", "tinta:principal": "ta", "tinta:secundario": "tb"}
 _DE_TESTIGO = {v: k for k, v in TESTIGOS.items()}
 
-TIPOS = ("texto", "imagen", "logo", "forma")
+TIPOS = ("texto", "imagen", "logo", "forma", "icono")
 #: Los tipos de lámina de un carrusel (graficas-3-carrusel). «blanco» es la que
 #: no sale de ninguna familia: «Volver a montar a todas» la deja como está.
-TIPOS_LAMINA = ("portada", "punto", "lista", "dato", "antes_despues", "pasos", "cita", "cierre", "blanco")
+TIPOS_LAMINA = ("portada", "punto", "lista", "dato", "antes_despues", "pasos", "cita", "mito", "pregunta", "ranking",
+                "checklist", "comparativa", "precio", "cierre", "blanco")
 #: Dónde NO sale una capa «en todas» (se calcula al pintar, por la posición).
 SALVO = ("primera", "ultima", "pdf")
 _RE_ID = re.compile(r"^[a-z0-9]{1,12}$")
@@ -230,6 +231,10 @@ def _limpiar_capa(capa, vistos):
             "sombra": _sombras(capa.get("sombra")), "sombra_texto": _sombras(capa.get("sombra_texto")),
             "ajusta": _bool(capa.get("ajusta")),
         })
+        if _bool(capa.get("tachado")):
+            # graficas-3c-extras (el precio de antes): solo se guarda si está, así
+            # una pieza de antes sale byte a byte igual (y su huella no cambia)
+            limpia["tachado"] = True
     elif tipo == "imagen":
         src = str(capa.get("src") or "")
         if src and not G._RE_IMAGEN.fullmatch(src):
@@ -241,6 +246,13 @@ def _limpiar_capa(capa, vistos):
             "radio": _radio(capa.get("radio")), "borde": _borde(capa.get("borde")),
             "sombra": _sombras(capa.get("sombra")),
         })
+    elif tipo == "icono":
+        # graficas-3c-extras: un icono de web/iconos/ (un id que ya no esté se
+        # guarda igual y no se pinta: la pieza nunca deja de abrirse)
+        icono = str(capa.get("icono") or "")
+        limpia.update({"icono": icono if re.fullmatch(r"[a-z0-9-]{1,40}", icono) else "",
+                       "color": _ref(capa.get("color"), "#000000"), "alfa": _num(capa.get("alfa", 1), 0, 1, 1),
+                       "grosor": _num(capa.get("grosor", 2), 0.5, 4, 2)})
     elif tipo == "logo":
         variante = capa.get("variante") if capa.get("variante") in ("auto", "normal", "oscuro") else "auto"
         fondo = capa.get("fondo_auto") if isinstance(capa.get("fondo_auto"), str) and capa.get("fondo_auto") in VAR_ROL else "l"
@@ -537,6 +549,13 @@ def _html_capa(capa, doc, kit, colores, f, imagen_de, logos, usadas, memo):
         return (f'<img data-c="{capa["id"]}" data-r="{capa["rol"]}" alt="" src="{_uri(ruta, memo)}" '
                 f'style="{estilo}display:block;max-width:none;object-fit:cover;'
                 f'object-position:{_f(enc["x"])}% {_f(enc["y"])}%;{recorte}">')
+    if tipo == "icono":
+        import graficas_iconos as I                         # noqa: PLC0415
+        uri = I.data_uri(capa["icono"], resolver_color(capa["color"], colores), capa["alfa"], capa["grosor"])
+        if not uri:
+            return ""
+        return (f'<img data-c="{capa["id"]}" data-r="{capa["rol"]}" alt="" src="{uri}" '
+                f'style="{_css_caja(capa, f)}display:block;max-width:none;object-fit:contain">')
     if tipo == "logo":
         normal, oscuro = logos
         ruta = normal
@@ -566,7 +585,11 @@ def _html_capa(capa, doc, kit, colores, f, imagen_de, logos, usadas, memo):
     estilo += "text-align:" + {"izq": "left", "centro": "center", "der": "right"}[capa["alin"]] + ";"
     estilo += f"font-family:{familia};font-size:calc({_f(capa['tam'])}cqmin * var(--e, 1));font-weight:{capa['peso']};"
     estilo += f"font-style:{'italic' if capa['cursiva'] else 'normal'};"
-    estilo += f"text-decoration:{'underline' if capa['subrayado'] else 'none'};"
+    if capa.get("tachado"):
+        # la raya por el medio del número, gruesa para que se vea en el móvil
+        estilo += f"text-decoration:{'underline ' if capa['subrayado'] else ''}line-through;text-decoration-thickness:0.09em;"
+    else:
+        estilo += f"text-decoration:{'underline' if capa['subrayado'] else 'none'};"
     if capa["mayus"]:
         estilo += "text-transform:uppercase;"
     if capa["espaciado"]:
@@ -1232,8 +1255,13 @@ def contar_lineas(pincel):
 _ROLES_DE_PLANTILLA = frozenset(G.CAMPOS) | {"deco", "fondo", "foto", "logo"}
 
 
+def es_qr(capa):
+    """¿Es el QR de «＋ QR»? (rol «qr»; los de antes del 25-11, por su nombre)."""
+    return capa.get("tipo") == "imagen" and (capa.get("rol") == "qr" or capa.get("nombre") == "QR")
+
+
 def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=None, logo_oscuro=None, lamina=0,
-           ocultar_sin_sitio=False):
+           ocultar_sin_sitio=False, solo_foto_de_plantilla=None):
     """«Volver a montar» y «Empezar de»: la plantilla `plantilla` en el tamaño
     `formato`, convertida en capas, con los textos y colores de `doc`.
 
@@ -1251,6 +1279,12 @@ def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=Non
       plantilla nueva no usa se quedan, pero ocultos; encima, donde estaban,
       pisaban a los de la plantilla (el texto de apoyo sobre el botón de la
       plantilla 10, prueba del 24-11). El ojo de la lista los enseña.
+    - `solo_foto_de_plantilla` (por defecto, en la portada de un carrusel con
+      familia; graficas-3c-extras):
+      solo la foto de la propia plantilla va de fondo; las fotos y los QR que
+      añadiste tú se quedan donde los pusiste (antes la primera pasaba a ser el
+      fondo y desaparecía como capa: visto por el dueño el 25-11 al hacer las
+      historias).
     Solo cambia la lámina `lamina`. No escribe nada."""
     if type(plantilla) is not int or plantilla not in G._PL.PLANTILLAS:
         raise ErrorGraficas("esa plantilla no existe")
@@ -1260,14 +1294,21 @@ def montar(pincel, plantilla, formato, doc=None, textos=None, kit=None, logo=Non
     if type(lamina) is not int or not 0 <= lamina < len(doc["laminas"]):
         raise ErrorGraficas("esa lámina no está")
     textos = textos if isinstance(textos, dict) else {}
+    if solo_foto_de_plantilla is None:
+        # la portada de un carrusel con familia (la que se vuelve a montar sola
+        # al hacer las historias o cambiar de familia); una pieza de siempre, como antes
+        lam = doc["laminas"][lamina]
+        solo_foto_de_plantilla = lam.get("tipo") == "portada" and bool(lam.get("familia"))
     capas = doc["laminas"][lamina]["capas"]
     de_la_pieza = {}
     for capa in capas:
         if capa["tipo"] == "texto" and capa["rol"] in G.CAMPOS and capa["txt"].strip():
             de_la_pieza.setdefault(capa["rol"], capa)
     # la foto de la plantilla; si no hay, la primera que añadiste tú
+    # (nunca un QR: estirado como fondo no se lee y se pierde como capa; visto por el dueño el 25-11)
     foto = (next((c for c in capas if c["tipo"] == "imagen" and c["src"] and c["rol"] == "foto"), None)
-            or next((c for c in capas if c["tipo"] == "imagen" and c["src"]), None))
+            or (None if solo_foto_de_plantilla else
+                next((c for c in capas if c["tipo"] == "imagen" and c["src"] and not es_qr(c)), None)))
     pieza_textos = {}
     for campo, (_, largo) in G.CAMPOS.items():
         crudo = de_la_pieza[campo]["txt"] if campo in de_la_pieza else str(textos.get(campo) or "")
